@@ -65,6 +65,9 @@ class ExecutionTrace:
     trace_id: str
     path: list[str]
     conditions: list[str]
+    """Control-flow guards under which the path is taken. Reserved for the
+    V1.1 CFG/DFG; V1 AST-derived CPG has no guard edges, so producers leave
+    this empty rather than filling it with traversal metadata."""
 
 
 @dataclass(frozen=True)
@@ -92,6 +95,7 @@ class CheckResult:
     explanation: str
     blocking: bool = True
     certificate: Optional[Certificate] = None
+    deterministic: bool = True  # False for LLM-opinion checks (policy ignores them)
 
 
 @dataclass(frozen=True)

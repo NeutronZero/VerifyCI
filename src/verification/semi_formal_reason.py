@@ -98,7 +98,7 @@ class SemiFormalReasoner:
                     paths.append(ExecutionTrace(
                         trace_id=str(uuid.uuid4()),
                         path=[eid, reverse.get(nidx, str(nidx))],
-                        conditions=[direction],
+                        conditions=[],
                     ))
         return paths
 
@@ -115,10 +115,12 @@ class SemiFormalReasoner:
                 continue
             line_start = getattr(entity, "line_start", 1) or 1
             line_end = getattr(entity, "line_end", line_start) or line_start
+            meta = getattr(entity, "metadata", None) or {}
+            snippet = meta.get("snippet") or str(getattr(entity, "name", ""))
             evidence.append(FileEvidence(
                 file_path=str(file_path), line_start=int(line_start),
                 line_end=int(line_end),
-                snippet=str(getattr(entity, "name", ""))[:500],
+                snippet=snippet[:500],
                 source_hash=str(source_hash),
             ))
         return evidence

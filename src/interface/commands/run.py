@@ -3,7 +3,7 @@ import asyncio
 from src.contracts.scheduler import TERMINAL_STATUSES
 from src.interface.commands import resolve_db
 from src.interface.commands.graph_loader import load_graph
-from src.interface.commands.verify import _default_invariants
+from src.verification.defaults import default_invariants as _default_invariants
 from src.memory.ledger import EventLedger
 from src.orchestration.compiler.validation import validate_task_ir
 from src.orchestration.intent import build_intent_package

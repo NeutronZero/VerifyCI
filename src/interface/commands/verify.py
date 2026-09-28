@@ -2,6 +2,7 @@ from src.contracts.verification_ir import CheckResult, VerificationPolicy
 from src.interface.commands import resolve_db
 from src.interface.commands.graph_loader import load_graph
 from src.verification.blast_radius import blast_radius_check
+from src.verification.defaults import default_invariants as _default_invariants
 from src.verification.diffmap import map_files_to_entity_ids, parse_diff_files
 from src.verification.intent_align import evaluate_invariants
 from src.verification.policy import PolicyEvaluator
@@ -39,13 +40,3 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
     return {"report_id": report.report_id, "status": decision.status,
             "rationale": decision.rationale, "revision_id": revision_id,
             "files": files, "changed_entities": changed}
-
-
-def _default_invariants():
-    from src.contracts.verification_ir import Invariant
-    return [
-        Invariant(invariant_id="secrets_scan", rule="no hardcoded secrets",
-                  compiled_query="secrets_scan", blocking=True),
-        Invariant(invariant_id="provenance_check", rule="claims traceable to files",
-                  compiled_query="provenance_check", blocking=False),
-    ]

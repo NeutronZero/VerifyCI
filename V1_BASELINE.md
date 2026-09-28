@@ -7,7 +7,7 @@ here is a target — all values are observed.
 ## Test suite
 
 ```text
-137 passed in 1.29s        (full suite)
+146 passed               (full suite)
 44 tests collected         (tests/memory: equivalence matrix + ledger + replay)
 ```
 

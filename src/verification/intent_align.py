@@ -29,30 +29,78 @@ def evaluate_invariants(
     graph: Any = None,
     evidence: list | None = None,
     node_map: dict | None = None,
+    expected_violated: list[bool] | None = None,
 ) -> tuple[list[CheckResult], InvariantMetrics]:
-    results = []
-    applicable = 0
-    detected = 0
+    """Evaluate invariants against a diff.
 
+    A check that *fails* means a violation was flagged (fail-closed checkers).
+    Recall/precision are only meaningful against labeled ground truth: pass
+    ``expected_violated`` (aligned with ``invariants``) to compute them, or
+    use :func:`score_labeled`. Without labels both are reported 0.0
+    ("unmeasured"), never a pass-rate masquerading as detection quality.
+    """
+    results = []
     for invariant in invariants:
-        applicable += 1
         passed = _check_invariant(diff, invariant, graph, evidence or [])
-        if passed:
-            detected += 1
         results.append(CheckResult(
             check_id=str(uuid.uuid4()),
             passed=passed,
             score=1.0 if passed else 0.0,
             evidence=[],
             explanation=f"invariant_{invariant.invariant_id}_{'passed' if passed else 'failed'}",
+            blocking=invariant.blocking,
         ))
 
-    coverage = 1.0 if applicable > 0 else 0.0
-    recall = detected / applicable if applicable > 0 else 0.0
-    precision = detected / len(results) if results else 0.0
+    coverage = 1.0 if results else 0.0
+    if expected_violated is None:
+        recall = precision = 0.0
+    else:
+        recall, precision = _score_against_labels(results, list(expected_violated))
 
     return results, InvariantMetrics(
         check_coverage=coverage,
+        detection_recall=recall,
+        detection_precision=precision,
+    )
+
+
+def _score_against_labels(results: list[CheckResult], expected_violated: list[bool]):
+    flagged = [not r.passed for r in results[:len(expected_violated)]]
+    expected = [bool(v) for v in expected_violated[:len(results)]]
+    tp = sum(1 for f, e in zip(flagged, expected) if f and e)
+    actual = sum(expected)
+    flagged_n = sum(flagged)
+    if actual == 0:
+        recall = 1.0 if flagged_n == 0 else 0.0
+    else:
+        recall = tp / actual
+    if flagged_n == 0:
+        precision = 1.0 if actual == 0 else 0.0
+    else:
+        precision = tp / flagged_n
+    return recall, precision
+
+
+def score_labeled(cases: list[tuple[str, Invariant, Any, list, bool]]) -> InvariantMetrics:
+    """Score (diff, invariant, graph, evidence, expected_violated) cases.
+
+    This is the only path that yields plan-meaningful detection_recall /
+    detection_precision (gates: recall >= 0.90, precision >= 0.85).
+    """
+    results = []
+    expected = []
+    for diff, invariant, graph, evidence, violated in cases:
+        passed = _check_invariant(diff, invariant, graph, evidence or [])
+        results.append(CheckResult(
+            check_id=str(uuid.uuid4()), passed=passed,
+            score=1.0 if passed else 0.0, evidence=[],
+            explanation=f"invariant_{invariant.invariant_id}",
+            blocking=invariant.blocking,
+        ))
+        expected.append(bool(violated))
+    recall, precision = _score_against_labels(results, expected)
+    return InvariantMetrics(
+        check_coverage=1.0 if results else 0.0,
         detection_recall=recall,
         detection_precision=precision,
     )

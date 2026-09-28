@@ -32,8 +32,9 @@ def test_planner_three_steps_chained():
 
 @pytest.mark.asyncio
 async def test_gated_dag_without_evidence_ends_inconclusive():
-    # Planner steps carry pre-commit hooks; with no graph there is no
-    # deterministic evidence, so the run must NOT report COMPLETED.
+    # Planner steps carry pre-commit hooks; with no graph and no diff the
+    # semi-formal checker RUNS but establishes nothing (ungrounded) and no
+    # invariant rejects → INCONCLUSIVE, never a misleading FAIL or PASS.
     scheduler = AsyncDAGScheduler()
     planner_task = Planner().plan("goal", "intent1", "pol1")
     task_id = await scheduler.submit(planner_task)

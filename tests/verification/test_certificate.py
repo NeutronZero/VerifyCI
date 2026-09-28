@@ -112,3 +112,15 @@ def test_graph_without_file_evidence_does_not_verify():
     cert = SemiFormalReasoner().verify(DIFF_APP, graph)
     assert cert.certificate_verified is False
     assert cert.evidence == []
+
+
+def test_evidence_cites_source_not_just_name():
+    payload = SimpleNamespace(
+        revision_entity_id="e1", logical_entity_id="logical:e1",
+        name="func", file_path="src/app.py", line_start=10, line_end=20,
+        source_hash="abc123",
+        metadata={"snippet": "def func():\n    return 42"},
+    )
+    cert = SemiFormalReasoner().verify(DIFF_APP, FakeGraph([payload]))
+    assert cert.certificate_verified is True
+    assert "return 42" in cert.evidence[0].snippet

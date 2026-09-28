@@ -198,10 +198,5 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
 
 
 def _mcp_invariants():
-    from src.contracts.verification_ir import Invariant
-    return [
-        Invariant(invariant_id="secrets_scan", rule="no hardcoded secrets",
-                  compiled_query="secrets_scan", blocking=True),
-        Invariant(invariant_id="provenance_check", rule="claims traceable to files",
-                  compiled_query="provenance_check", blocking=False),
-    ]
+    from src.verification.defaults import default_invariants
+    return default_invariants()

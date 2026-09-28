@@ -42,3 +42,11 @@ def test_self_recursion_uses_recursive_subtype():
     entities, edges = _parse(b"def f():\n    f()\n")
     subtypes = {e.subtype.value for e in edges if e.subtype}
     assert "calls_recursive" in subtypes
+
+
+def test_entities_carry_source_snippet():
+    from src.ingestion.extractor import extract_entities
+    from src.ingestion.parser import TreeSitterParser
+    parsed = TreeSitterParser().parse("t.py", b"def f():\n    return 42\n", "python")
+    entities = [e for e in extract_entities(parsed, "r", "rev") if e.name == "f"]
+    assert entities and "return 42" in (entities[0].metadata or {}).get("snippet", "")

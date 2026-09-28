@@ -91,6 +91,81 @@ def test_policy_evaluator_human_review():
     assert decision.status == "HUMAN_REVIEW"
 
 
+def test_policy_failed_check_is_fail_not_inconclusive():
+    # Auditor finding #1: a checker that RAN and rejected must yield FAIL,
+    # even when no certificate verified. INCONCLUSIVE is reserved for
+    # "no deterministic checker executed".
+    from src.contracts.verification_ir import Certificate
+    policy = VerificationPolicy(
+        policy_id="pol1",
+        on_failure="block",
+        on_inconclusive="human_review",
+        on_human_review="block",
+        require_deterministic_checker=True,
+    )
+    unverified = make_check(passed=True)
+    import dataclasses
+    unverified_cert = dataclasses.replace(unverified.certificate, certificate_verified=False)
+    ran_but_unverified = dataclasses.replace(unverified, certificate=unverified_cert)
+    rejected = CheckResult(
+        check_id="secrets_scan", passed=False, score=0.0, evidence=[],
+        explanation="invariant failed", blocking=True, certificate=None,
+    )
+    report = make_report([ran_but_unverified, rejected])
+    decision = PolicyEvaluator().evaluate(report, policy)
+    assert decision.status == "FAIL"
+    assert decision.rationale == "blocking_check_failed"
+
+
+def test_policy_no_checks_executed_is_inconclusive():
+    policy = VerificationPolicy(
+        policy_id="pol1",
+        on_failure="block",
+        on_inconclusive="human_review",
+        on_human_review="block",
+        require_deterministic_checker=True,
+    )
+    report = make_report([])
+    decision = PolicyEvaluator().evaluate(report, policy)
+    assert decision.status == "INCONCLUSIVE"
+    assert decision.rationale == "no_deterministic_checker_executed"
+
+
+def test_policy_inability_plus_nonblocking_is_inconclusive():
+    # Ghost-file shape: ungrounded semi check (blocking, unverified cert)
+    # plus a failing non-blocking invariant. Nothing rejected → INCONCLUSIVE.
+    import dataclasses
+    policy = VerificationPolicy(
+        policy_id="pol1",
+        on_failure="block",
+        on_inconclusive="human_review",
+        on_human_review="block",
+        require_deterministic_checker=True,
+    )
+    ran = make_check(passed=False)
+    ungrounded = dataclasses.replace(
+        ran, certificate=dataclasses.replace(ran.certificate, certificate_verified=False))
+    soft_fail = CheckResult(
+        check_id="provenance", passed=False, score=0.0, evidence=[],
+        explanation="invariant failed", blocking=False, certificate=None,
+    )
+    report = make_report([ungrounded, soft_fail])
+    decision = PolicyEvaluator().evaluate(report, policy)
+    assert decision.status == "INCONCLUSIVE"
+    assert decision.rationale == "checks_ran_but_nothing_established"
+
+
+def test_invariant_blocking_flag_reaches_policy():
+    # Non-blocking invariant failures must not FAIL the report on their own.
+    from src.verification.intent_align import evaluate_invariants
+    from src.contracts.verification_ir import Invariant
+    inv = Invariant(invariant_id="p", rule="prov", compiled_query="provenance_check",
+                    blocking=False)
+    (check,), _ = evaluate_invariants("x", [inv], graph=None, evidence=[])
+    assert check.passed is False
+    assert check.blocking is False
+
+
 def test_semi_formal_reasoner():
     reasoner = SemiFormalReasoner(model_name="test-model")
     cert = reasoner.verify(diff="test diff", graph=None)

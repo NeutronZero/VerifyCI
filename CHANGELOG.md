@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased — audit findings round 2 (7 items)
+
+Suite 137 → 146. All fixes reproduced by running code first.
+
+### Fixed
+- Policy FAIL vs INCONCLUSIVE: `require_deterministic_checker` no longer
+  tests "a certificate verified" but "a deterministic checker executed"
+  (`CheckResult.deterministic`, default True; LLM-opinion checks set False).
+  Rejection vs inability is then separated: an *unverified certificate*
+  means the checker couldn't establish anything (ungrounded diff), while a
+  failed invariant verdict means rejection. Rejections → FAIL
+  (`blocking_check_failed`); inability alone → INCONCLUSIVE
+  (`checks_ran_but_nothing_established`); nothing executed → INCONCLUSIVE
+  (`no_deterministic_checker_executed`). Ghost-file diffs stay INCONCLUSIVE;
+  secret-bearing diffs FAIL even when the certificate doesn't verify.
+- Dropped invariant `blocking` flags now propagate: `evaluate_invariants`
+  ignored `Invariant.blocking`, so every invariant failure behaved as
+  blocking (this alone turned ghost diffs into FAILs). Non-blocking
+  invariant failures route to HUMAN_REVIEW as designed.
+- Evidence cites source: entities store a `snippet` (source lines) in
+  metadata at ingest; certificates cite it (truncated to 500 chars) instead
+  of the bare symbol name. Working-tree independent by construction.
+- Metrics honesty: `detection_recall/precision` compute against labeled
+  ground truth (`score_labeled`, or `expected_violated=`); without labels
+  both report 0.0 ("unmeasured"). Labeled gate test: 6 cases, recall 1.0,
+  precision 1.0 (gates ≥ 0.90 / ≥ 0.85).
+- Ingest benchmark covers C/Markdown: `benchmarks/ingest_repo.py` ingests
+  all supported extensions; extraction ground truth gains `util.c`
+  (TP=13 FP=0 FN=0, P/R 1.00). Fixed a real C bug found while doing so:
+  return-type mistaken for function name; `typedef` now yields TYPE entities.
+- Identity `scope` documented as a V1 correction in `contracts/README.md`
+  (backward compatible; golden vectors unchanged).
+- `ExecutionTrace.conditions` reserved for V1.1 CFG/DFG guards; producers
+  leave it empty instead of storing traversal direction.
+- Docs: `benchmarks/retrieval.md` (measured numbers + gate status),
+  `extraction.md` raw outputs, top-level `README.md`, `pyproject.readme` →
+  README.
+
 ## Unreleased — V1 completion pass (second external audit)
 
 Closes the ten findings from the implementation-vs-plan audit. Suite 82 → 137.

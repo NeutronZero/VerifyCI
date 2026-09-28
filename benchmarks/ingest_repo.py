@@ -1,21 +1,25 @@
-"""Ingest a Python repo end-to-end into SQLite."""
+"""Ingest a sample repo end-to-end into SQLite (Python + C + Markdown)."""
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.ingestion.parser import TreeSitterParser, compute_source_hash
+from src.ingestion.parser import TreeSitterParser, compute_source_hash, ParsedFile
 from src.ingestion.extractor import extract_entities, extract_edges
-from src.ingestion.dependency import extract_dependencies
+from src.ingestion.language import detect_language
 from src.storage.graph_store import GraphStore
 from src.storage.revision import create_revision
+
+SOURCE_EXTS = {".py", ".c", ".cpp", ".cc", ".h", ".hpp", ".md", ".txt"}
 
 
 def ingest(repo_path: str, db_path: str):
     repo = Path(repo_path)
 
-    py_files = sorted(repo.rglob("*.py"))
-    manifest = [(str(f.relative_to(repo)), compute_source_hash(f.read_bytes())) for f in py_files]
+    files = sorted(f for f in repo.rglob("*")
+                   if f.is_file() and f.suffix in SOURCE_EXTS
+                   and ".verifyci" not in f.parts)
+    manifest = [(str(f.relative_to(repo)), compute_source_hash(f.read_bytes())) for f in files]
 
     store = GraphStore(db_path)
 
@@ -27,11 +31,17 @@ def ingest(repo_path: str, db_path: str):
     total_entities = 0
     total_edges = 0
 
-    for py_file in py_files:
-        source = py_file.read_bytes()
-        rel_path = str(py_file.relative_to(repo))
+    for path in files:
+        source = path.read_bytes()
+        rel_path = str(path.relative_to(repo))
+        language = detect_language(str(path))
 
-        parsed = parser.parse(str(py_file), source, "python")
+        try:
+            parsed = parser.parse(str(path), source, language)
+        except ValueError:
+            digest = compute_source_hash(source)
+            parsed = ParsedFile(file_path=rel_path, source=source,
+                                source_hash=digest, language=language, tree=None)
         entities = extract_entities(parsed, repo.name, revision.revision_id)
         edges = extract_edges(parsed, entities, revision.revision_id)
 

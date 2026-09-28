@@ -15,9 +15,12 @@ def _make_entity(
     repository_id: str, revision_id: str, file_path: str, name: str,
     entity_type: EntityType, language: str, source_hash: str,
     line_start: int, line_end: int, now: float, scope: str = "",
+    snippet: str = "",
 ) -> Entity:
     logical_id = compute_logical_entity_id(repository_id, file_path, name, entity_type, scope)
     metadata = {"scope": scope} if scope else {}
+    if snippet:
+        metadata["snippet"] = snippet
     return Entity(
         repository_id=repository_id,
         logical_entity_id=logical_id,
@@ -58,6 +61,17 @@ def _text(node, source: bytes) -> str:
     return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
 
 
+def _source_snippet(source: bytes, line_start: int, line_end: int, limit: int = 2000) -> str:
+    """Citeable source fragment stored at ingest time, so evidence never
+    depends on the working tree still containing the file."""
+    try:
+        lines = source.decode("utf-8", errors="replace").splitlines()
+        fragment = "\n".join(lines[max(0, line_start - 1):line_end])
+    except Exception:  # noqa: BLE001, S110
+        return ""
+    return fragment[:limit]
+
+
 def _walk(node):
     yield node
     for child in node.children:
@@ -65,15 +79,23 @@ def _walk(node):
 
 
 def _scope_name(node, source: bytes) -> Optional[str]:
-    for child in node.children:
-        if child.type in ("identifier", "type_identifier"):
-            return _text(child, source)
     if node.type in FUNC_NODES:
+        # Direct `identifier` is the name in Python; in C the direct
+        # identifier-like child is the return type, and the name lives
+        # inside the declarator — so prefer bare identifiers, then the
+        # declarator, and never a bare type_identifier for functions.
+        for child in node.children:
+            if child.type == "identifier":
+                return _text(child, source)
         for child in node.children:
             if child.type in ("function_declarator", "declarator", "method_declarator"):
                 found = _scope_name(child, source)
                 if found:
                     return found
+        return None
+    for child in node.children:
+        if child.type in ("identifier", "type_identifier"):
+            return _text(child, source)
     return None
 
 
@@ -104,6 +126,8 @@ def _classify_node(node, language: str, stack: Optional[list[tuple[str, str]]] =
             return EntityType.METHOD if stack and stack[-1][0] == "class" else EntityType.FUNCTION
         if node.type in ("class_specifier", "struct_specifier"):
             return EntityType.CLASS
+        if node.type == "type_definition":
+            return EntityType.TYPE
     return None
 
 
@@ -126,10 +150,13 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
         if not name:
             continue
         scope = ".".join(n for _, n in stack)
+        line_start = node.start_point[0] + 1
+        line_end = node.end_point[0] + 1
         entities.append(_make_entity(
             repository_id, revision_id, parsed.file_path, name, entity_type,
             parsed.language, parsed.source_hash,
-            node.start_point[0] + 1, node.end_point[0] + 1, now, scope,
+            line_start, line_end, now, scope,
+            snippet=_source_snippet(parsed.source, line_start, line_end),
         ))
         if entity_type in (EntityType.FUNCTION, EntityType.METHOD):
             param_scope = f"{scope}.{name}" if scope else name
@@ -137,7 +164,7 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
                 entities.append(_make_entity(
                     repository_id, revision_id, parsed.file_path, pname,
                     EntityType.PARAMETER, parsed.language, parsed.source_hash,
-                    node.start_point[0] + 1, node.end_point[0] + 1, now, param_scope,
+                    line_start, line_end, now, param_scope,
                 ))
 
     for node in _walk(root):

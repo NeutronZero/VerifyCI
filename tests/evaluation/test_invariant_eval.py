@@ -2,7 +2,7 @@ from src.contracts.verification_ir import Invariant
 from src.graph.builder import GraphBuilder
 from src.ingestion.extractor import extract_edges, extract_entities
 from src.ingestion.parser import TreeSitterParser
-from src.verification.intent_align import evaluate_invariants
+from src.verification.intent_align import evaluate_invariants, score_labeled
 
 SOURCE = b"""def order():
     return checkout("cart")
@@ -60,3 +60,32 @@ def test_provenance_needs_evidence():
     (ok,) = evaluate_invariants("x", [_inv("p", "provenance_check")], graph=None, evidence=ev)[0]
     assert fail.passed is False
     assert ok.passed is True
+
+
+def test_labeled_set_meets_plan_gates():
+    # PLAN.md: detection recall >= 0.90, precision >= 0.85 on a labeled set.
+    from src.contracts.verification_ir import FileEvidence
+    graph = _graph()
+    ev = [FileEvidence(file_path="shop.py", line_start=1, line_end=2,
+                       snippet="order", source_hash="h")]
+    evil = '+++ b/shop.py\n+password = "hunter2"\n'
+    clean = '+++ b/shop.py\n+x = 1\n'
+    cases = [
+        (evil, _inv("s1", "secrets_scan"), None, [], True),
+        (clean, _inv("s2", "secrets_scan"), None, [], False),
+        ("x", _inv("f1", "forbid_call:checkout"), graph, [], True),
+        ("x", _inv("f2", "forbid_call:refund"), graph, [], False),
+        ("x", _inv("p1", "provenance_check"), None, [], True),
+        ("x", _inv("p2", "provenance_check"), None, ev, False),
+    ]
+    metrics = score_labeled(cases)
+    assert metrics.check_coverage == 1.0
+    assert metrics.detection_recall >= 0.90
+    assert metrics.detection_precision >= 0.85
+
+
+def test_unlabeled_metrics_report_unmeasured():
+    _, metrics = evaluate_invariants("x", [_inv("s", "secrets_scan")], graph=None)
+    assert metrics.check_coverage == 1.0
+    assert metrics.detection_recall == 0.0
+    assert metrics.detection_precision == 0.0

@@ -28,10 +28,16 @@ GROUND_TRUTH = {
     "src/app.py": [
         ("main", EntityType.FUNCTION),
     ],
+    "src/util.c": [
+        ("check_auth", EntityType.FUNCTION),
+        ("add", EntityType.FUNCTION),
+    ],
 }
 
 
 SCORED_TYPES = {EntityType.FUNCTION, EntityType.METHOD, EntityType.CLASS}
+
+LANGUAGE_BY_EXT = {".py": "python", ".c": "c", ".cpp": "cpp"}
 
 
 def run_benchmark():
@@ -40,10 +46,13 @@ def run_benchmark():
     extracted = {}
     totals = {"entities": 0, "files": 0}
 
-    for py_file in REPO_PATH.rglob("*.py"):
-        source = py_file.read_bytes()
-        rel_path = str(py_file.relative_to(REPO_PATH)).replace("\\", "/")
-        parsed = parser.parse(str(py_file), source, "python")
+    for src_file in sorted(REPO_PATH.rglob("*")):
+        if not src_file.is_file() or src_file.suffix not in LANGUAGE_BY_EXT:
+            continue
+        language = LANGUAGE_BY_EXT[src_file.suffix]
+        source = src_file.read_bytes()
+        rel_path = str(src_file.relative_to(REPO_PATH)).replace("\\", "/")
+        parsed = parser.parse(str(src_file), source, language)
         entities = extract_entities(parsed, "test-repo", "rev1")
         totals["entities"] += len(entities)
         totals["files"] += 1
