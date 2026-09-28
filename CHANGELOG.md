@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased — struct references, module-only grounding, overload audit
+## Unreleased — C declarator requirement, verified wipes, overload collapse
+
+- tree-sitter-c parses `enum class X {}` as `function_definition` with no
+  declarator; C/C++ names now require the declarator path (Python keeps
+  direct identifiers). The enum false-PASS is now measured for real
+  against a fresh DB: INCONCLUSIVE, `module_only` in rationale.
+- Wipes verified by assert: a silently failed wipe plus deterministic
+  revision ids preserves stale rows from older extractor versions
+  indefinitely — found because the "fixed" verdict reproduced on a stale
+  DB. Same-state re-ingest is idempotent, which cuts both ways.
+- Overload fixture: two `write` defs share one logical id (first-wins
+  documented, not blessed).
 
 - Elaborated type references (`struct Foo` in type position, forward
   declarations) no longer emit CLASS entities; only bodied

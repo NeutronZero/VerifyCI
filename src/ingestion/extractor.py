@@ -81,20 +81,22 @@ def _walk(node):
         yield from _walk(child)
 
 
-def _scope_name(node, source: bytes) -> Optional[str]:
+def _scope_name(node, source: bytes, language: str = "python") -> Optional[str]:
     if node.type in FUNC_NODES:
-        # Direct `identifier` is the name in Python; in C the direct
-        # identifier-like child is the return type, and the name lives
-        # inside the declarator — so prefer bare identifiers, then the
-        # declarator, and never a bare type_identifier for functions.
-        for child in node.children:
-            if child.type == "identifier":
-                return _text(child, source)
+        # Direct `identifier` is the name in Python. In C/C++ the name lives
+        # inside the declarator, and a bare direct identifier on a C/C++
+        # function node is a grammar misparsing (e.g. `enum class X {}`
+        # parsed as a function_definition whose "name" is the enum tag) —
+        # never trust it, so it is not even a fallback there.
         for child in node.children:
             if child.type in ("function_declarator", "declarator", "method_declarator"):
-                found = _scope_name(child, source)
+                found = _scope_name(child, source, language)
                 if found:
                     return found
+        if language == "python":
+            for child in node.children:
+                if child.type == "identifier":
+                    return _text(child, source)
         return None
     for child in node.children:
         if child.type in ("identifier", "type_identifier"):
@@ -102,7 +104,8 @@ def _scope_name(node, source: bytes) -> Optional[str]:
     return None
 
 
-def _walk_scoped(node, source: bytes, stack: list[tuple[str, str]]):
+def _walk_scoped(node, source: bytes, stack: list[tuple[str, str]],
+                 language: str = "python"):
     """Yield (node, enclosing stack). Stack entries are (kind, name) with
     kind in {"class", "func"}. A def node itself reports the outer stack;
     descendants see it pushed."""
@@ -110,11 +113,11 @@ def _walk_scoped(node, source: bytes, stack: list[tuple[str, str]]):
     kind = "class" if node.type in CLASS_NODES else ("func" if node.type in FUNC_NODES else None)
     child_stack = stack
     if kind is not None:
-        name = _scope_name(node, source)
+        name = _scope_name(node, source, language)
         if name:
             child_stack = stack + [(kind, name)]
     for child in node.children:
-        yield from _walk_scoped(child, source, child_stack)
+        yield from _walk_scoped(child, source, child_stack, language)
 
 
 def _classify_node(node, language: str, stack: Optional[list[tuple[str, str]]] = None) -> Optional[EntityType]:
@@ -150,11 +153,11 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
         return entities
 
     root = parsed.tree.root_node
-    for node, stack in _walk_scoped(root, parsed.source, []):
+    for node, stack in _walk_scoped(root, parsed.source, [], parsed.language):
         entity_type = _classify_node(node, parsed.language, stack)
         if entity_type is None:
             continue
-        name = _scope_name(node, parsed.source)
+        name = _scope_name(node, parsed.source, parsed.language)
         if not name:
             continue
         scope = ".".join(n for _, n in stack)
@@ -219,10 +222,10 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
         return candidates[0]
 
     root = parsed.tree.root_node
-    for node, stack in _walk_scoped(root, parsed.source, []):
+    for node, stack in _walk_scoped(root, parsed.source, [], parsed.language):
         if node.type not in FUNC_NODES:
             continue
-        caller_name = _scope_name(node, parsed.source)
+        caller_name = _scope_name(node, parsed.source, parsed.language)
         if not caller_name:
             continue
         caller_scope = ".".join(n for _, n in stack)
@@ -301,7 +304,7 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
 
 
 def _extract_name(node, source: bytes, language: str = "python") -> Optional[str]:
-    return _scope_name(node, source)
+    return _scope_name(node, source, language)
 
 
 def _extract_params(node, source: bytes, language: str = "python") -> list[str]:

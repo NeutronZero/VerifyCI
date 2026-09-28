@@ -494,7 +494,7 @@ files=[main.cpp, uart_bridge.cpp, uart_bridge.h] changed=36
 
 First verdict carrying the scope qualifier on real work: 36 entities
 grounded, no invariant tripped, behavior explicitly not verified. No
-FAIL surfaced — nothing in this pass contradicted the gate, which is
+FAIL surfaced ï¿½ nothing in this pass contradicted the gate, which is
 itself recorded rather than celebrated.
 
 # C++ extraction (firmware, blind-annotated): TP=81 FP=0 FN=0
@@ -513,15 +513,16 @@ Precision: 1.00  Recall: 1.00
 
 The 3 initial FPs were annotation misses again (`static inline`
 functions my listing regex skipped: `prv_rx_available`, `i2c_delay`,
-`calculate_crc32`) — truth corrected, extractor right, same lesson as the
+`calculate_crc32`) ï¿½ truth corrected, extractor right, same lesson as the
 docstring round: annotation tooling is part of the measurement.
 
 Deliberately excluded and documented as a known gap: `enum class
-TripReason` (relay.h) — the extractor has no ENUM mapping. C++ grounding
+TripReason` (relay.h) ï¿½ the extractor has no ENUM mapping. C++ grounding
 therefore rests on functions/structs; enum-typed claims are invisible to
 the graph. Stated here so the firmware numbers are not over-read.
 
-# Overload/duplicate-key audit + enum-only false PASS (both fixed)
+# Overload/duplicate-key audit + enum-only false PASS (both fixed,
+then the PASS un-fixed itself once)
 
 Duplicate `(file, name)` scan across the staged copy found the collisions
 are overwhelmingly elaborated type references (`struct foo` in type
@@ -529,6 +530,20 @@ position parsed as `struct_specifier`), not overloads: 67 hits of
 `libusb_device_handle`-as-CLASS in one vendored file. Struct/class
 specifiers without a body (`field_declaration_list`) no longer emit
 entities. Separately, an enum-only diff (`TripReason` + enumerator, the
-enum unmapped) verified PASS on MODULE-existence alone — the exact false
+enum unmapped) verified PASS on MODULE-existence alone â€” the exact false
 confidence path predicted. Diffs grounding only to MODULE rows are now
 INCONCLUSIVE (`module_only` in the rationale). Both pinned by tests.
+
+Correction appended after the fact: the first INCONCLUSIVE measurement ran
+against a stale DB (wipe failed silently; deterministic revision ids
+reused the same revision, preserving a phantom row from the old
+extractor). Fixed twice: (1) tree-sitter-c parses `enum class X {}` in
+`.h` files as a `function_definition` with a bare identifier and *no
+declarator* â€” C/C++ names now require the declarator path, Python keeps
+the direct-identifier fallback; (2) wipes are verified with assert, never
+`ignore_errors`. Re-ingested fresh, re-measured for real: enum-only diff
+â†’ INCONCLUSIVE, changed=1 (the MODULE row), SEM at 6748 entities (170
+phantom CLASS rows gone). The earlier PASS-then-INCONCLUSIVE pair is kept
+in this record rather than rewritten, because the stale-DB trap is itself
+a finding: deterministic identity makes re-ingest idempotent, which also
+means it preserves whatever an older code version wrote.

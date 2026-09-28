@@ -99,6 +99,40 @@ def test_struct_reference_is_not_an_entity():
     assert classes == ["Point"]
 
 
+def test_enum_class_in_c_grammar_is_not_a_function():
+    # tree-sitter-c has no `class` keyword, so `enum class X {}` in a .h
+    # file (parsed as C) misparses as function_definition with a bare
+    # identifier name and no declarator. C/C++ names must come from the
+    # declarator, so this emits nothing instead of a phantom FUNCTION.
+    from src.contracts.entity import EntityType
+    from src.ingestion.extractor import extract_entities
+    from src.ingestion.parser import TreeSitterParser
+    src = (b"enum class TripReason {\n"
+           b"    OVERCURRENT,\n"
+           b"    NONE\n"
+           b"};\n")
+    parsed = TreeSitterParser().parse("x.h", src, "c")
+    funcs = [e for e in extract_entities(parsed, "r", "rev")
+             if e.type in (EntityType.FUNCTION, EntityType.METHOD)]
+    assert funcs == []
+
+
+def test_overload_definitions_collapse_to_one_entity():
+    # Two `write` overloads share (file, name, type, scope) and therefore
+    # one logical id; storage keeps first-wins. Documented, not blessed:
+    # overloads are invisible to identity, same as same-name redefinitions.
+    from src.contracts.entity import EntityType
+    from src.ingestion.extractor import extract_entities
+    from src.ingestion.parser import TreeSitterParser
+    src = (b"void write(uint8_t v) { (void)v; }\n"
+           b"void write(const char *s) { (void)s; }\n")
+    parsed = TreeSitterParser().parse("x.cpp", src, "cpp")
+    funcs = [e for e in extract_entities(parsed, "r", "rev")
+             if e.type == EntityType.FUNCTION and e.name == "write"]
+    assert len(funcs) == 2  # both emitted...
+    assert funcs[0].logical_entity_id == funcs[1].logical_entity_id  # ...one identity
+
+
 def test_docstring_code_examples_are_not_entities():
     # A regex ground truth would count `ghost`; the AST correctly ignores it.
     # Ground-truth annotation must be AST-aware (or human-read), not regex.
