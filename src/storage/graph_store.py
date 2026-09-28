@@ -298,6 +298,8 @@ class GraphStore:
         return self._row_to_entity(row) if row else None
 
     def get_entity_by_name(self, name: str, revision_id: Optional[str] = None) -> Optional[Entity]:
+        # Without a revision this answers "latest live" deterministically —
+        # never an arbitrary row across revisions (revision-scoping audit).
         if revision_id is not None:
             row = self.conn.execute(
                 "SELECT * FROM entities WHERE name = ? AND revision_id = ? AND (t_expired IS NULL) LIMIT 1",
@@ -305,7 +307,8 @@ class GraphStore:
             ).fetchone()
         else:
             row = self.conn.execute(
-                "SELECT * FROM entities WHERE name = ? AND (t_expired IS NULL) LIMIT 1",
+                "SELECT * FROM entities WHERE name = ? AND (t_expired IS NULL)"
+                " ORDER BY valid_from DESC NULLS LAST LIMIT 1",
                 (name,),
             ).fetchone()
         return self._row_to_entity(row) if row else None

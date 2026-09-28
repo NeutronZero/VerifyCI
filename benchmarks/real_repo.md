@@ -74,6 +74,39 @@ Reranked top-5s are topically coherent (BeamSearchResult,
 BeamSearchExperiments, test_beam_search_modes, …). Scores are real overlap
 fractions, not ties.
 
+## Reranker isolation (fused-only vs reranked)
+
+Latest-revision corpus (6677 docs). Target rank per column:
+
+```text
+Q: beam search paths        fused-only 1 | reranked 1 | moved: no
+Q: find dma blast radius    fused-only 1 | reranked 1 | moved: no
+Q: incremental index dirty  fused-only 1 | reranked 2 | moved: YES (demoted)
+```
+
+The offline overlap reranker demoted a correct fused answer on the third
+query (lexical preference overriding fusion). Implication for the Ollama
+run: always report all three columns. If dense improves but reranked stays
+flat, that is a reranker problem — the fix is disabling the offline
+reranker for that query shape, not a learned replacement. No new stage
+until the per-arm table says which arm moved.
+
+## Ollama provider-swap run: blocked in this environment
+
+No `ollama` binary and nothing on `localhost:11434` here, so the framed
+run (same three queries, per-arm table, with/without reranker, dense arm
+via `OllamaEmbeddingProvider`) is recorded but unexecuted. The question it
+must answer: does dense move from rank-7-class noise to signal, and does
+fused change — with the reranker column isolating attribution.
+
+## Scaling note
+
+Uncapped corpus loads the whole latest revision per query (6677 docs here).
+At 100k entities that stops being viable; the answer is scoped retrieval
+(path-prefix filter, or graph-first entity loading) — see the TODO in
+`commands/query.py`. Recorded now so it surfaces as design, not as a
+future "queries got slow" surprise.
+
 Framed for the Ollama run: the question is not "does retrieval improve"
 but "does the dense arm start contributing signal to RRF at all" — per-arm
 ranks above are the baseline that will show it. No new subsystem was added

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — retrieval attribution pass
+
+Suite 155 → 162. No new subsystems (Principle 6).
+
+- Corpus and graph build scoped to latest revision (superseded rows are
+  history, not answers); `get_entity_by_name` without revision answers
+  latest-live deterministically (revision-scoping audit clean).
+- Reranker isolation measured on latest-rev corpus: fused-only 1/1/1 vs
+  reranked 1/1/2 — the offline reranker demotes one correct fused answer.
+  Three-column reporting (fused / reranked / no-rerank) is now the procedure
+  for the Ollama run, so a flat result can be attributed.
+- Tokenizer edge tests (digits, acronyms, dotted paths); rerank ordering +
+  no-invention tests; scaling TODO for the uncapped corpus.
+- Ollama provider-swap run blocked here (no binary, no server); framed and
+  recorded in `benchmarks/real_repo.md`.
+
 ## Unreleased — dense-arm diagnostic (no new subsystems)
 
 Suite 148 → 155. Trigger: real-repo queries printed all-0.000 scores with a

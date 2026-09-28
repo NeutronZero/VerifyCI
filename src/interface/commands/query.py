@@ -29,6 +29,10 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
         rev = latest[0][0] if latest else ""
         # No row cap: truncating the corpus silently drops recall (measured:
         # LIMIT 5000 hid 1676 of 6676 entities on a real repo).
+        # TODO(scaling): uncapped loads the whole revision per query — fine
+        # at 10k rows, not at 100k. The answer is scoped retrieval (filter by
+        # path prefix, or traverse the graph first and load only those
+        # entity ids), not a bigger cap. Revisit before repos grow 10x.
         rows = store.conn.execute(
             "SELECT revision_entity_id, name, file_path FROM entities WHERE revision_id = ?",
             (rev,),

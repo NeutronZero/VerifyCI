@@ -27,3 +27,25 @@ def test_reranker_respects_k():
     reranker = CrossEncoderReranker()
     results = [SearchResult(id=str(i), score=float(i), metadata={"text": "x"}) for i in range(5)]
     assert len(reranker.rerank("x", results, k=2)) == 2
+
+
+def test_rerank_attaches_own_scores_in_order():
+    # Regression: rerank sorted but returned untouched inputs, so every
+    # printed score was the input score (0.0 in the query path).
+    reranker = OfflineReranker()
+    results = [
+        SearchResult(id="a", score=0.9, metadata={"text": "unrelated database sql"}),
+        SearchResult(id="b", score=0.1, metadata={"text": "authentication login flow"}),
+    ]
+    ranked = reranker.rerank("authentication login", results)
+    scores = [r.score for r in ranked]
+    assert scores == sorted(scores, reverse=True)
+    assert ranked[0].score > 0.0
+    assert ranked[0].score == reranker.score("authentication login", "b authentication login flow")
+
+
+def test_rerank_never_invents_results():
+    reranker = OfflineReranker()
+    results = [SearchResult(id=str(i), score=0.0, metadata={"text": f"doc {i}"}) for i in range(4)]
+    ranked = reranker.rerank("doc", results, k=10)
+    assert {r.id for r in ranked} <= {r.id for r in results}
