@@ -42,10 +42,13 @@ def _make_entity(
 def _make_edge(
     revision_id: str, src: str, dst: str,
     edge_type: EdgeType, subtype: CPGEdgeSubtype, now: float,
+    site: str = "",
 ) -> Edge:
-    short_rev = revision_id[:12]
+    # `site` (e.g. call-site line) keeps parallel edges distinct so call-site
+    # multiplicity survives; structural edges share one row per pair.
+    site_suffix = f"_{site}" if site else ""
     return Edge(
-        id=f"edge_{short_rev}_{src}_{dst}_{edge_type.value}_{subtype.value}",
+        id=f"edge_{revision_id[:12]}_{src}_{dst}_{edge_type.value}_{subtype.value}{site_suffix}",
         revision_id=revision_id,
         src_entity_id=src,
         dst_entity_id=dst,
@@ -167,10 +170,12 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
                     line_start, line_end, now, param_scope,
                 ))
 
+    seen_imports = set()
     for node in _walk(root):
         if node.type in ("import_statement", "import_from_statement"):
             module_name = _extract_import_module(node, parsed.source)
-            if module_name:
+            if module_name and module_name not in seen_imports:
+                seen_imports.add(module_name)
                 entities.append(_make_entity(
                     repository_id, revision_id, parsed.file_path, module_name,
                     EntityType.IMPORT, parsed.language, parsed.source_hash,
@@ -228,17 +233,18 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
             callee = resolve(callee_name, caller_scope)
             if callee is None:
                 continue
+            site = f"{child.start_point[0] + 1}:{child.start_byte}"
             if callee.revision_entity_id == caller.revision_entity_id:
                 edges.append(_make_edge(
                     revision_id, caller.revision_entity_id, callee.revision_entity_id,
-                    EdgeType.CALLS, CPGEdgeSubtype.CALLS_RECURSIVE, now))
+                    EdgeType.CALLS, CPGEdgeSubtype.CALLS_RECURSIVE, now, site))
             else:
                 edges.append(_make_edge(
                     revision_id, caller.revision_entity_id, callee.revision_entity_id,
-                    EdgeType.CALLS, CPGEdgeSubtype.CALLS_DIRECT, now))
+                    EdgeType.CALLS, CPGEdgeSubtype.CALLS_DIRECT, now, site))
                 edges.append(_make_edge(
                     revision_id, caller.revision_entity_id, callee.revision_entity_id,
-                    EdgeType.REFERENCES, CPGEdgeSubtype.REFERENCES, now))
+                    EdgeType.REFERENCES, CPGEdgeSubtype.REFERENCES, now, site))
 
     for node in _walk(root):
         if node.type in CLASS_NODES:

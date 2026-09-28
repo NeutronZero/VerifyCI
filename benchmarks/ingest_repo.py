@@ -31,28 +31,29 @@ def ingest(repo_path: str, db_path: str):
     total_entities = 0
     total_edges = 0
 
-    for path in files:
-        source = path.read_bytes()
-        rel_path = str(path.relative_to(repo))
-        language = detect_language(str(path))
+    with store.batch():
+        for path in files:
+            source = path.read_bytes()
+            rel_path = str(path.relative_to(repo))
+            language = detect_language(str(path))
 
-        try:
-            parsed = parser.parse(str(path), source, language)
-        except ValueError:
-            digest = compute_source_hash(source)
-            parsed = ParsedFile(file_path=rel_path, source=source,
-                                source_hash=digest, language=language, tree=None)
-        entities = extract_entities(parsed, repo.name, revision.revision_id)
-        edges = extract_edges(parsed, entities, revision.revision_id)
+            try:
+                parsed = parser.parse(str(path), source, language)
+            except ValueError:
+                digest = compute_source_hash(source)
+                parsed = ParsedFile(file_path=rel_path, source=source,
+                                    source_hash=digest, language=language, tree=None)
+            entities = extract_entities(parsed, repo.name, revision.revision_id)
+            edges = extract_edges(parsed, entities, revision.revision_id)
 
-        for e in entities:
-            store.insert_entity(e)
-        for edge in edges:
-            store.insert_edge(edge)
+            for e in entities:
+                store.insert_entity(e)
+            for edge in edges:
+                store.insert_edge(edge)
 
-        total_entities += len(entities)
-        total_edges += len(edges)
-        print(f"  {rel_path}: {len(entities)} entities, {len(edges)} edges")
+            total_entities += len(entities)
+            total_edges += len(edges)
+            print(f"  {rel_path}: {len(entities)} entities, {len(edges)} edges")
 
     print(f"\nTotal: {total_entities} entities, {total_edges} edges")
     print(f"DB: {db_path}")

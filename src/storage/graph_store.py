@@ -97,6 +97,25 @@ class GraphStore:
         self.conn = sqlite3.connect(db_path)
         self.conn.executescript(SCHEMA)
         self.conn.commit()
+        self._batch_depth = 0
+
+    from contextlib import contextmanager as _cm
+
+    @_cm
+    def batch(self):
+        """Defer commits until the block exits (bulk ingest path)."""
+        self._batch_depth += 1
+        try:
+            yield self
+        finally:
+            self._batch_depth -= 1
+            if self._batch_depth <= 0:
+                self._batch_depth = 0
+                self.conn.commit()
+
+    def _maybe_commit(self):
+        if self._batch_depth <= 0:
+            self.conn.commit()
 
     def insert_revision(self, revision: Revision):
         self.conn.execute(
@@ -105,7 +124,7 @@ class GraphStore:
              revision.parent_revision_id, revision.source_hash,
              revision.timestamp, revision.ingestion_config_hash),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
     def get_latest_revision(self, repository_id: str):
         from src.contracts.revision import Revision
@@ -129,7 +148,7 @@ class GraphStore:
             (anchor_id, revision_id, json.dumps(snapshot, sort_keys=True),
              _time.time()),
         )
-        self.conn.commit()
+        self._maybe_commit()
         return anchor_id
 
     def insert_delta(self, from_revision_id: str, to_revision_id: str, delta: dict) -> str:
@@ -139,7 +158,7 @@ class GraphStore:
             (delta_id, from_revision_id, to_revision_id,
              json.dumps(delta, sort_keys=True)),
         )
-        self.conn.commit()
+        self._maybe_commit()
         return delta_id
 
     def get_anchor(self, revision_id: str) -> Optional[dict]:
@@ -148,6 +167,38 @@ class GraphStore:
             (revision_id,),
         ).fetchone()
         return json.loads(row[0]) if row else None
+
+    def close_deleted_file_version(self, file_path: str, live_logical_ids: list[str],
+                                   current_revision_id: str, now: float) -> tuple[int, int]:
+        """Close live rows from older revisions for entities of file_path that
+        no longer exist, plus edges sourced from the deleted entities."""
+        prev = self.conn.execute(
+            "SELECT revision_entity_id, logical_entity_id FROM entities"
+            " WHERE file_path = ? AND revision_id != ? AND valid_until IS NULL",
+            (file_path, current_revision_id),
+        ).fetchall()
+        live = set(live_logical_ids)
+        gone = [(r[0], r[1]) for r in prev if r[1] not in live]
+        gone_ids = {r[0] for r in gone}
+        for rid in gone_ids:
+            self.conn.execute(
+                "UPDATE entities SET valid_until = ?, t_expired = ? WHERE revision_entity_id = ?",
+                (now, now, rid),
+            )
+        n_d = 0
+        if gone_ids:
+            rows = self.conn.execute(
+                "SELECT id, src_entity_id FROM edges WHERE revision_id != ? AND valid_until IS NULL",
+                (current_revision_id,),
+            ).fetchall()
+            ids = [r[0] for r in rows if r[1] in gone_ids]
+            self.conn.executemany(
+                "UPDATE edges SET valid_until = ?, t_expired = ? WHERE id = ?",
+                [(now, now, i) for i in ids],
+            )
+            n_d = len(ids)
+        self._maybe_commit()
+        return len(gone), n_d
 
     def close_superseded_entities(self, logical_ids: list[str], current_revision_id: str,
                                   now: float) -> int:
@@ -162,7 +213,7 @@ class GraphStore:
                 (now, now, logical_id, current_revision_id),
             )
             total += cur.rowcount
-        self.conn.commit()
+        self._maybe_commit()
         return total
 
     def close_superseded_edges(self, new_edges: list, current_revision_id: str,
@@ -191,7 +242,7 @@ class GraphStore:
                 "UPDATE edges SET valid_until = ?, t_expired = ? WHERE id = ?",
                 [(now, now, i) for i in ids],
             )
-            self.conn.commit()
+            self._maybe_commit()
         return len(ids)
 
     def insert_entity(self, entity: Entity):
@@ -203,7 +254,7 @@ class GraphStore:
              entity.valid_from, entity.valid_until, entity.t_created, entity.t_expired,
              json.dumps(entity.metadata), entity.properties_json),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
     def insert_edge(self, edge: Edge):
         self.conn.execute(
@@ -213,15 +264,16 @@ class GraphStore:
              edge.valid_from, edge.valid_until, edge.observed_at, edge.source_commit,
              edge.t_created, edge.t_expired, json.dumps(edge.metadata), edge.properties_json),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
     def get_entity_by_logical(self, logical_entity_id: str, asOf: Optional[float] = None) -> Optional[Entity]:
         if asOf is not None:
+            # Valid-time travel: transaction-time expiry must NOT hide
+            # history; validity is decided by [valid_from, valid_until).
             row = self.conn.execute(
                 "SELECT * FROM entities WHERE logical_entity_id = ?"
                 " AND (valid_from IS NULL OR valid_from <= ?)"
                 " AND (valid_until IS NULL OR valid_until > ?)"
-                " AND (t_expired IS NULL)"
                 " ORDER BY valid_from DESC NULLS LAST LIMIT 1",
                 (logical_entity_id, asOf, asOf),
             ).fetchone()
@@ -255,7 +307,7 @@ class GraphStore:
              event.prev_event_hash,
              _json.dumps(event.attestation) if getattr(event, "attestation", None) else None),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
     def get_events(self) -> list:
         rows = self.conn.execute("SELECT * FROM events ORDER BY timestamp ASC").fetchall()

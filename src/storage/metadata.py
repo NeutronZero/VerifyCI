@@ -4,10 +4,13 @@ from pathlib import Path
 
 
 class MetadataStore:
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, conn=None):
         self.db_path = db_path
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(db_path)
+        self._owns_conn = conn is None
+        if conn is None:
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(db_path)
+        self.conn = conn
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS file_metadata (
                 file_path TEXT PRIMARY KEY,
@@ -32,4 +35,5 @@ class MetadataStore:
         ).fetchone()
 
     def close(self):
-        self.conn.close()
+        if self._owns_conn:
+            self.conn.close()

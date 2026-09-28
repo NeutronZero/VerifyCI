@@ -50,11 +50,14 @@ def _carry_forward(store, carried_sources, carried_texts, revision_id, now) -> t
     n_e = n_d = 0
     id_map: dict[str, str] = {}
     old_edges = []
+    by_rev: dict[str, list[str]] = {}
     for rel, old_rev in carried_sources:
-        if not old_rev:
-            continue
+        if old_rev:
+            by_rev.setdefault(old_rev, []).append(rel)
+    for old_rev, rels in by_rev.items():
+        wanted = set(rels)
         for e in store.get_entities_by_revision(old_rev):
-            if e.file_path != rel:
+            if e.file_path not in wanted:
                 continue
             new_id = compute_revision_entity_id(e.logical_entity_id, revision_id)
             id_map[e.revision_entity_id] = new_id
@@ -63,11 +66,10 @@ def _carry_forward(store, carried_sources, carried_texts, revision_id, now) -> t
                 valid_from=now, valid_until=None, t_created=now, t_expired=None))
             n_e += 1
         old_edges.extend(store.get_edges_by_revision(old_rev))
-    for rel, old_rev in carried_texts:
-        if not old_rev:
-            continue
-        old_edges.extend(e for e in store.get_edges_by_revision(old_rev)
-                         if e.src_entity_id == rel)
+    text_revs = {old_rev for _, old_rev in carried_texts if old_rev}
+    for old_rev in text_revs:
+        if old_rev not in by_rev:
+            old_edges.extend(store.get_edges_by_revision(old_rev))
     seen = set()
     new_edges = []
     for e in old_edges:
@@ -104,8 +106,15 @@ def run_ingest(path: str, incremental: bool = False) -> dict:
     repo = Path(path)
     db_path = str(repo / ".verifyci" / "verifyci.db")
     store = GraphStore(db_path)
-    meta = MetadataStore(db_path)
+    meta = MetadataStore(db_path, conn=store.conn)
     try:
+      with store.batch():
+        return _run_ingest_inner(repo, db_path, store, meta, incremental)
+    finally:
+        store.close()
+
+
+def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False) -> dict:
         sources, texts, manifest = _collect(repo)
         collected = len(sources) + len(texts)
 
@@ -173,6 +182,11 @@ def run_ingest(path: str, incremental: bool = False) -> dict:
                 [e.logical_entity_id for e in entities], revision.revision_id, closed_at)
             totals["closed_edges"] += store.close_superseded_edges(
                 edges, revision.revision_id, closed_at)
+            gone_e, gone_d = store.close_deleted_file_version(
+                rel, [e.logical_entity_id for e in entities],
+                revision.revision_id, closed_at)
+            totals["closed_entities"] += gone_e
+            totals["closed_edges"] += gone_d
             meta.upsert_file(str(repo / rel), digest, language, revision.revision_id)
             totals["entities"] += len(entities)
             totals["edges"] += len(edges)
@@ -192,5 +206,3 @@ def run_ingest(path: str, incremental: bool = False) -> dict:
             totals["carried_entities"] = carried_e
             totals["carried_edges"] = carried_d
         return totals
-    finally:
-        store.close()

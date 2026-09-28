@@ -1,6 +1,22 @@
 # Changelog
 
-## Unreleased — audit findings round 2 (7 items)
+## Unreleased — first real-repository measurement (Graph-RAG)
+
+Target: Graph-RAG copy (920 files staged; 472 ingested). Full numbers in
+`benchmarks/real_repo.md`; ground truth in `benchmarks/score_real_repo.py`.
+
+- Ingest: 472 files → 6766 entities + 10026 edges in 51.1s (14.8 MB SQLite);
+  DB rows match emitted counts 1:1. Incremental (1 file changed): 471
+  skipped, 6641 carried, complete, parent linked, 5.9s.
+- Extraction: TP=149 FP=0 FN=0 (P/R 1.00) over 149 hand-annotated entities.
+- Queries: end-to-end with EvidencePack, but ranking is weak (score ties at
+  0.000; 1/3 spot-checks relevant-first, one genuine top-5 miss). Recorded
+  as the baseline to beat with real embeddings.
+- Real 166-line refactor diff → `PASS` / `COMPLETED` (69 entities grounded).
+- Measuring found and fixed same session: duplicate IMPORT collapse (~90
+  rows), call-site edge collapse (~1355 rows), per-row commit cost
+  (270s → 51s full, 454s → 5.9s incremental), deleted entities never
+  closing, asOf queries hiding valid-time history behind `t_expired`.
 
 Suite 137 → 146. All fixes reproduced by running code first.
 
