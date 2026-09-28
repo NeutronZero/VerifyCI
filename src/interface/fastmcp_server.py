@@ -64,6 +64,8 @@ def serve(db_path: str = "", transport: str = "stdio", host: str = "127.0.0.1",
           port: int = 8000) -> None:
     mcp = create_fastmcp_server(db_path or None)
     if transport == "stdio":
-        mcp.run()
+        # Banner and logs must stay off stdout: stdio is a framed JSON-RPC
+        # byte stream, and any decoration corrupts every client read.
+        mcp.run(show_banner=False)
     else:
-        mcp.run(transport="http", host=host, port=port)
+        mcp.run(transport="http", host=host, port=port, show_banner=False)
