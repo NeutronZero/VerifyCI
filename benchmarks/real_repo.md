@@ -116,26 +116,72 @@ def above and every later index shifts) — a genuine design tradeoff, not a
 missed one-liner. Recorded as known residual: duplicate module-level
 definitions collapse to first-wins.
 
-## Ollama provider-swap run: blocked in this environment
+## Learned cross-encoder run (local, no download, no daemon)
 
-No `ollama` binary and nothing on `localhost:11434` here, so the framed
-run (same three queries, per-arm table, with/without reranker, dense arm
-via `OllamaEmbeddingProvider`) is recorded but unexecuted. The question it
-must answer: does dense move from rank-7-class noise to signal, and does
-fused change — with the reranker column isolating attribution.
+`cross-encoder/ms-marco-MiniLM-L-6-v2` was already in the local HF cache
+with weights, `torch` CPU present — so the "blocked on Ollama" run had a
+local substitute after all (constraint was daemon, not disk). Zero product
+code changed: `CrossEncoderReranker(model=...)` loaded it with
+`local_files_only` (16s one-time load, ~0.1s/pair). Same five queries,
+rerank depth top-50 fused:
 
-## Scaling note
+```text
+Q: beam search paths        fused 1 | off-rerank 1 | ce-rerank 1
+Q: find dma blast radius    fused 1 | off-rerank 1 | ce-rerank 1
+Q: incremental index dirty  fused 1 | off-rerank 2 | ce-rerank 5
+Q: weighted shortest path   fused 7 | off-rerank 2 | ce-rerank 2
+Q: register a new domain    fused 2 | off-rerank 8 | ce-rerank 6
+```
+
+The learned model reproduces the offline pattern (lifts the mid-pack
+lexical match, demotes elsewhere — worse on `incremental`, 5 vs 2), not a
+different one. Swapping in a learned reranker does not fix the shape
+problem; the failure is upstream (candidate scoring), not in the rerank
+weights.
+
+## Decision (provisional): offline reranker defaults off
+
+Recorded, not yet implemented: the reranker should default off and be
+re-enable-able per shape, rather than default on. Evidence: 1 lift vs 2
+harms offline, and the learned model confirms the harms are structural.
+Implement when the next query set re-measures; until then three-column
+reporting stays mandatory so no flat result gets misattributed.
+
+## Duplicate-definition aggregation (confirmed)
+
+`rationalevault/mcp/tools.py` defines module-level `get_recommendations`
+twice (lines 371 and 815). Stored DB row holds lines 815–856 (last write
+wins on REPLACE); the edge resolver returns the first in-memory match
+(line 371). Same id both ways, so the collision is invisible: one node
+carrying the union of both definitions' edges, with evidence and stored
+row disagreeing on line numbers. Reframed from "one-row loss" to
+incorrect aggregation. Open option (not adopted): distinct
+`revision_entity_id`s (line-included) with shared `logical_entity_id`,
+resolver picks last definition per Python semantics — preserves
+edit-stability for the common case, correct for the rare one.
+
+## Ollama/dense-embedding run: refined, still open
+
+No `ollama` binary and nothing on `localhost:11434` here — but that turned
+out to understate the options: the box holds cached HF weights
+(`all-MiniLM-L6-v2` embeddings, `ms-marco-MiniLM-L-6-v2` cross-encoder)
+with CPU torch, and `sentence-transformers` is already a dependency. A
+local, daemonless dense run is possible without Ollama specifically; the
+cross-encoder half above proves the procedure works end to end. The
+constraint is someone wiring a thin `SentenceTransformerEmbeddingProvider`
+(~15 lines, lazy import) and re-running the per-arm table — recorded, not
+done. The question it must answer: does *real* dense move fused ranks
+anywhere the hash baseline doesn't, with the reranker column isolating
+attribution.
+
+## Scaling note: non-finding
 
 Uncapped corpus loads the whole latest revision per query (6677 docs here).
-At 100k entities that stops being viable; the answer is scoped retrieval
-(path-prefix filter, or graph-first entity loading) — see the TODO in
-`commands/query.py`. Recorded now so it surfaces as design, not as a
-future "queries got slow" surprise.
-
-Framed for the Ollama run: the question is not "does retrieval improve"
-but "does the dense arm start contributing signal to RRF at all" — per-arm
-ranks above are the baseline that will show it. No new subsystem was added
-for any of this (Principle 6).
+Relay at 5x the files (2120 matched, 19k entities) ingested at 0.067s/file
+vs 0.108s/file on the smaller repo — marginal cost *below* average, so
+constant costs dominate and nothing here suggests a quadratic term. Stated
+as a non-finding: no cliff observed up to 2120 files / 19k entities. The
+100k TODO in `commands/query.py` stands as design note, not as a finding.
 
 ## Verify / run on a real diff
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — learned-reranker run + doc decisions (no product-code change)
+
+- Ran `ms-marco-MiniLM-L-6-v2` locally (cached weights, CPU torch, no
+  download/daemon) over the five queries at top-50 depth: beam 1/1/1, dma
+  1/1/1, incremental 1/2/5, weighted 7/2/2, register 2/8/6
+  (fused / off-rerank / ce-rerank). The learned model reproduces the offline
+  pattern instead of a different one — swapping rerankers does not fix the
+  shape problem. Recorded decision (not yet implemented): offline reranker
+  defaults off, re-enable-able per shape.
+- Duplicate-definition finding reframed and confirmed: stored row holds
+  lines 815–856 (last write wins), resolver returns the line-371 object —
+  same id, unioned edges, disagreeing line numbers. Incorrect aggregation,
+  not loss. Open option recorded, not adopted.
+- Scaling stated as non-finding (0.067s/file at 2120 files vs 0.108s/file
+  at 472). Ollama refined: box lacks the daemon but holds the weights, so
+  a daemonless dense run via `sentence-transformers` is possible and still
+  open. Details in `benchmarks/real_repo.md`.
+
 ## Unreleased — mid-pack reranker verdict + Relay scaling run
 
 Suite 162 → 169. No new subsystems.

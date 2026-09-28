@@ -20,8 +20,7 @@ M = EntityType.METHOD
 C = EntityType.CLASS
 
 GROUND_TRUTH = {
-    "core/planner.py": [
-        ("PlanStep", C), ("to_dict", M), ("from_dict", M),
+    "core/planner.py": [        ("PlanStep", C), ("to_dict", M), ("from_dict", M),
         ("RetrievalPlan", C), ("to_dict", M), ("from_dict", M),
         ("BenchmarkIndex", C), ("__init__", M), ("_normalize_query", M),
         ("_load_index", M), ("find_match", M),
