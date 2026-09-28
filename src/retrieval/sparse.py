@@ -3,6 +3,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from src.retrieval.dense import SearchResult
+from src.retrieval.textnorm import tokenize
 
 
 @dataclass
@@ -21,7 +22,7 @@ class BM25Retriever:
         self._avgdl = 0.0
 
     def add(self, id: str, text: str):
-        tokens = text.lower().split()
+        tokens = tokenize(text)
         self._documents[id] = text
         self._tokenized[id] = tokens
         self._avgdl = (self._avgdl * (len(self._documents) - 1) + len(tokens)) / len(self._documents)
@@ -29,7 +30,7 @@ class BM25Retriever:
             self._df[token] += 1
 
     def search(self, query: str, k: int = 10) -> list[SearchResult]:
-        query_tokens = query.lower().split()
+        query_tokens = tokenize(query)
         results = []
         for id, tokens in self._tokenized.items():
             score = 0.0

@@ -268,21 +268,33 @@ class GraphStore:
 
     def get_entity_by_logical(self, logical_entity_id: str, asOf: Optional[float] = None) -> Optional[Entity]:
         if asOf is not None:
-            # Valid-time travel: transaction-time expiry must NOT hide
-            # history; validity is decided by [valid_from, valid_until).
-            row = self.conn.execute(
-                "SELECT * FROM entities WHERE logical_entity_id = ?"
-                " AND (valid_from IS NULL OR valid_from <= ?)"
-                " AND (valid_until IS NULL OR valid_until > ?)"
-                " ORDER BY valid_from DESC NULLS LAST LIMIT 1",
-                (logical_entity_id, asOf, asOf),
-            ).fetchone()
-        else:
-            row = self.conn.execute(
-                "SELECT * FROM entities WHERE logical_entity_id = ? AND (t_expired IS NULL)"
-                " ORDER BY valid_from DESC NULLS LAST LIMIT 1",
-                (logical_entity_id,),
-            ).fetchone()
+            return self.get_entity_as_of(logical_entity_id, asOf)
+        return self.get_current_entity(logical_entity_id)
+
+    def get_entity_as_of(self, logical_entity_id: str, as_of: float) -> Optional[Entity]:
+        """Valid-time travel: which version held at time ``as_of``.
+
+        Decided by [valid_from, valid_until) only. Transaction-time expiry
+        (t_expired) is deliberately NOT consulted — retraction must not hide
+        history. Separate method from latest-version lookup so the two time
+        semantics cannot re-merge into one WHERE clause.
+        """
+        row = self.conn.execute(
+            "SELECT * FROM entities WHERE logical_entity_id = ?"
+            " AND (valid_from IS NULL OR valid_from <= ?)"
+            " AND (valid_until IS NULL OR valid_until > ?)"
+            " ORDER BY valid_from DESC NULLS LAST LIMIT 1",
+            (logical_entity_id, as_of, as_of),
+        ).fetchone()
+        return self._row_to_entity(row) if row else None
+
+    def get_current_entity(self, logical_entity_id: str) -> Optional[Entity]:
+        """Latest live version: never retracted (t_expired IS NULL)."""
+        row = self.conn.execute(
+            "SELECT * FROM entities WHERE logical_entity_id = ? AND (t_expired IS NULL)"
+            " ORDER BY valid_from DESC NULLS LAST LIMIT 1",
+            (logical_entity_id,),
+        ).fetchone()
         return self._row_to_entity(row) if row else None
 
     def get_entity_by_name(self, name: str, revision_id: Optional[str] = None) -> Optional[Entity]:

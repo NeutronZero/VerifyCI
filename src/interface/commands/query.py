@@ -21,9 +21,18 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
     db = resolve_db(db_path)
     store = GraphStore(db)
     try:
-        rows = store.conn.execute(
-            "SELECT revision_entity_id, name, file_path FROM entities LIMIT 5000"
+        # Search the latest revision only: older revisions stay in the DB
+        # for history, but returning superseded rows as answers is wrong.
+        latest = store.conn.execute(
+            "SELECT revision_id FROM revisions ORDER BY timestamp DESC LIMIT 1"
         ).fetchall()
+        rev = latest[0][0] if latest else ""
+        # No row cap: truncating the corpus silently drops recall (measured:
+        # LIMIT 5000 hid 1676 of 6676 entities on a real repo).
+        rows = store.conn.execute(
+            "SELECT revision_entity_id, name, file_path FROM entities WHERE revision_id = ?",
+            (rev,),
+        ).fetchall() if rev else []
         texts = {rid: f"{name} {fpath}" for rid, name, fpath in rows}
 
         bm25 = BM25Retriever()
@@ -35,8 +44,10 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
         dense_hits = _dense_search(provider, texts, question, k)
 
         builder = GraphBuilder()
-        entities = [store._row_to_entity(r) for r in store.conn.execute("SELECT * FROM entities LIMIT 5000").fetchall()]
-        edges = [store._row_to_edge(r) for r in store.conn.execute("SELECT * FROM edges LIMIT 20000").fetchall()]
+        entities = [store._row_to_entity(r) for r in store.conn.execute(
+            "SELECT * FROM entities WHERE revision_id = ?", (rev,)).fetchall()] if rev else []
+        edges = [store._row_to_edge(r) for r in store.conn.execute(
+            "SELECT * FROM edges WHERE revision_id = ?", (rev,)).fetchall()] if rev else []
         graph = builder.build(entities, edges) if entities else None
         node_map = builder.get_node_map()
         seeds = [h.id for h in sparse_hits[:3]]

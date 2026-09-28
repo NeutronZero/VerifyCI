@@ -9,6 +9,7 @@ environment (never downloads); otherwise it delegates to
 from abc import ABC, abstractmethod
 
 from src.retrieval.dense import SearchResult
+from src.retrieval.textnorm import tokenize
 
 
 class Reranker(ABC):
@@ -30,19 +31,23 @@ class OfflineReranker(Reranker):
         self.model = model
 
     def score(self, query: str, text: str) -> float:
-        q = set(query.lower().split())
-        t = set(text.lower().split())
+        q = set(tokenize(query))
+        t = set(tokenize(text))
         if not q or not t:
             return 0.0
         return len(q & t) / len(q | t)
 
     def rerank(self, query: str, results: list[SearchResult], k: int = 10) -> list[SearchResult]:
-        ranked = sorted(
-            results,
-            key=lambda r: (self.score(query, f"{r.id} {' '.join(str(v) for v in r.metadata.values())}"), r.score),
-            reverse=True,
-        )
-        return ranked[:k]
+        # Scores are attached, not passed through: callers must see the
+        # reranker's own verdict per item (previously input scores leaked).
+        scored = [
+            SearchResult(id=r.id, score=self.score(
+                query, f"{r.id} {' '.join(str(v) for v in r.metadata.values())}"),
+                metadata=r.metadata)
+            for r in results
+        ]
+        scored.sort(key=lambda r: r.score, reverse=True)
+        return scored[:k]
 
 
 class CrossEncoderReranker(Reranker):
@@ -78,7 +83,12 @@ class CrossEncoderReranker(Reranker):
 
     def rerank(self, query: str, results: list[SearchResult], k: int = 10) -> list[SearchResult]:
         if self.backend == "cross_encoder":
-            scored = sorted(results, key=lambda r: self.score(
-                query, f"{r.id} {' '.join(str(v) for v in r.metadata.values())}"), reverse=True)
+            scored = [
+                SearchResult(id=r.id, score=self.score(
+                    query, f"{r.id} {' '.join(str(v) for v in r.metadata.values())}"),
+                    metadata=r.metadata)
+                for r in results
+            ]
+            scored.sort(key=lambda r: r.score, reverse=True)
             return scored[:k]
         return self._delegate.rerank(query, results, k=k)

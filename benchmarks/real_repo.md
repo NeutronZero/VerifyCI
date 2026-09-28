@@ -42,25 +42,42 @@ decorated, and deeply nested edge cases are underrepresented beyond the six
 nested-function cases included (`get_transitions`, `decorator`, `wrapper`,
 `run_bench`, `clean_val`, `weight_fn`).
 
-## Queries (spot-check, not a benchmark)
+## Queries (spot-check + per-arm diagnostic, not a benchmark)
+
+First run (before the diagnostic below): all scores printed 0.000, one
+genuine top-5 miss (`beam_search_paths` absent). Diagnosis, not guessing:
+
+- Raw dense arm is healthy: query/doc norms 1.0, cosine 0.36 on shared
+  trigrams. The 0.000 was the reranker's score passthrough (it sorted by
+  overlap but returned the input `score=0.0` objects) — a reporting bug,
+  now fixed (rerank attaches its own scores).
+- The miss was candidate generation, twice over: (a) `LIMIT 5000` on the
+  corpus hid 1676 of 6676 entities; (b) whitespace tokenization never
+  matches "beam search" against "beam_search_paths" in BM25 or the overlap
+  scorer. Fixed with uncapped latest-revision corpus + shared
+  identifier-aware tokenizer (`retrieval/textnorm.py`: snake/camel/dotted/
+  path splitting, used by both stages so they agree on tokens).
+- Third finding: the query searched all revisions including superseded
+  rows. Corpus and graph build are now scoped to the latest revision.
+
+Per-arm ranks after the fix (target rank per stage):
 
 ```text
-Q: find dma blast radius
-    0.000 find_dma_blast_radius @ mcp\mcp_server.py        <- exact hit first
-    0.000 firmware-embedded.md, candidate_ms, ...           <- noise
-Q: beam search paths
-    0.000 search @ evaluation/benchmark_runner.py           <- miss
-    ... beam_search_paths absent from top 5                 <- genuine miss
-Q: incremental index dirty files
-    0.000 run_incremental_index, get_transitive_dirty_files <- 2/5 relevant
+Q: beam search paths        BM25 1 / dense 7 / fused 1 / reranked 1 (0.3750)
+Q: find dma blast radius    BM25 1 / dense 1 / fused 1 / reranked 1 (0.5000)
+Q: incremental index dirty  BM25 4 / dense 1 / fused 1 / reranked 4 (0.3000)
 ```
 
-All scores tie at 0.000: hash-trigram cosine saturates on this corpus and
-BM25 carries the ranking. Retrieval works end-to-end (EvidencePack: 5
-entities / 5 chunks / 5 provenance each) but ranking quality is the weakest
-measured area — exactly the gap `OllamaEmbeddingProvider` exists to close.
-Next measurement: re-run these three queries with real embeddings and record
-the delta.
+All three exact targets rank first after fusion; every arm now contributes
+measurably (dense ranks 7/1/1, BM25 ranks 1/1/4 — neither dominates).
+Reranked top-5s are topically coherent (BeamSearchResult,
+BeamSearchExperiments, test_beam_search_modes, …). Scores are real overlap
+fractions, not ties.
+
+Framed for the Ollama run: the question is not "does retrieval improve"
+but "does the dense arm start contributing signal to RRF at all" — per-arm
+ranks above are the baseline that will show it. No new subsystem was added
+for any of this (Principle 6).
 
 ## Verify / run on a real diff
 
@@ -85,4 +102,8 @@ that garbage and returned INCONCLUSIVE. Re-ran with clean UTF-8.)
   incremental carry-forward 454.6s → 5.9s (fetch-once-per-revision).
 - Deleted entities never closed (stayed live forever) →
   `close_deleted_file_version`; asOf queries no longer filter `t_expired`,
-  so valid-time history survives transaction-time expiry (tested).
+  so valid-time history survives transaction-time expiry (tested). The two
+  time semantics now live in separate methods (`get_entity_as_of` vs
+  `get_current_entity`) with independent tests, so they cannot re-merge.
+- Frozen UTF-16 regression fixture (`tests/verification/test_diffmap.py`):
+  NUL-interleaved diff garbage yields no seeds, never throws.

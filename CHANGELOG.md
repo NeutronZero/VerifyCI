@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased — first real-repository measurement (Graph-RAG)
+## Unreleased — dense-arm diagnostic (no new subsystems)
+
+Suite 148 → 155. Trigger: real-repo queries printed all-0.000 scores with a
+genuine top-5 miss. Diagnosis first, per the review:
+
+- Dense arm healthy (norms 1.0, cosine 0.36 on shared trigrams). The 0.000
+  was the reranker's score passthrough — it sorted by overlap but returned
+  input `score=0.0` objects. Rerank now attaches its own scores (both backends).
+- Miss was candidate generation, twice: `LIMIT 5000` hid 1676/6676 entities;
+  whitespace tokenization never matches `beam search` against
+  `beam_search_paths`. Corpus uncapped + scoped to latest revision; shared
+  identifier tokenizer (`retrieval/textnorm.py`) for BM25 and overlap scorer.
+- Querying now scopes corpus and graph build to the latest revision
+  (superseded rows are history, not answers).
+- Per-arm ranks recorded in `benchmarks/real_repo.md` (dense 7/1/1, BM25
+  1/1/4 — both arms contribute; fused rank 1 on all three).
+- Regression fixture for the UTF-16 garbage diff; `get_entity_as_of` vs
+  `get_current_entity` split with independent tests.
 
 Target: Graph-RAG copy (920 files staged; 472 ingested). Full numbers in
 `benchmarks/real_repo.md`; ground truth in `benchmarks/score_real_repo.py`.
