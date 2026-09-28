@@ -11,7 +11,7 @@ here is a target — all values are observed.
 44 tests collected         (tests/memory: equivalence matrix + ledger + replay)
 ```
 
-Environment note: 12 of the 137 tests require Tree-sitter grammar packages
+Environment note: 12 of the 146 tests require Tree-sitter grammar packages
 (`tree_sitter_python`, `tree_sitter_c`). In environments without them those
 12 error at fixture setup; everything else passes dependency-free.
 

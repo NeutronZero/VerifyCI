@@ -4,6 +4,13 @@
 
 Suite 137 → 146. All fixes reproduced by running code first.
 
+```
+$ python -m pytest tests/ -q
+........................................................................ [ 98%]
+..                                                                       [100%]
+146 passed in 1.26s
+```
+
 ### Fixed
 - Policy FAIL vs INCONCLUSIVE: `require_deterministic_checker` no longer
   tests "a certificate verified" but "a deterministic checker executed"
