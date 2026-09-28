@@ -8,9 +8,9 @@ is impossible. An `allowed_root` at construction would accept absolute paths
 within a root and reject the rest.
 
 That conditional expires the moment the agent processes content the user
-didn't write (prompt injection via README/webhook/PR: hostile content
-instructing writes elsewhere, executed with the user's privileges). At that
-point revisit: path allowlists here, and real sandboxing for `shell_tool`
-(V1.1 or later decision — `run_sandboxed` currently documents that it
-performs no isolation).
+didn't author — fetched from the network, pulled from a foreign repo, or
+arriving via a PR description (including PR titles and bodies). If any
+caller matches that test, revisit: path allowlists here, and real
+sandboxing for `shell_tool` (V1.1 or later decision — `run_sandboxed`
+currently documents that it performs no isolation).
 """
