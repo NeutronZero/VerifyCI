@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased — review economics: measuring the reviewer
+
+Separate section deliberately: this measures a reviewer, not a checker
+(the `0ec7f713` round measured one checked rule against forty asserted
+ones; stacking them would flatten a useful distinction).
+
+An automated review batch produced 45 findings against this repo: 19 valid
+(12 dead imports + 7 more found by ruff, 9 units genuinely untested),
+26 rejected with evidence. The rejections break down as 9 false
+test-coverage claims (every one checkable with `pytest --collect-only -q
+| grep <name>` — tested units in unadvertised filenames, or tested via
+integration: `detect_language`, `compute_source_hash`, `check_permission`,
+`tokenize`, `evidence_verifier`, `SnapshotStore`, `BudgetManager`,
+`ToolRegistry`, plus three "no test file" claims for files with test
+files), 4 security claims mistaking tools for trust boundaries, 6 length
+complaints that would scatter decision logic, 2 already-tracked TODOs.
+
+The shared shape: filename-level review asserting what filenames can't
+establish. The two-minute fix for the reviewer class is grounding
+(`pytest --collect-only`), same failure shape as asserting without
+checking. Recorded so the next automated batch can be scored, not trusted.
+
+Trust-model conditional recorded in `src/tools/__init__.py`: the path
+rejections hold for user-privileged runs against user-authored content.
+If untrusted content ever arrives (prompt injection, webhooks, PR
+triggers), revisit allowlists here and real sandboxing for `shell_tool`
+(V1.1+ decision, named now so it's not discovered then).
+
 ## Unreleased — decided explicitly, recorded the same way
 
 Suite 173 → 183. No new subsystems.
