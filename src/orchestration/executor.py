@@ -46,14 +46,16 @@ class Executor:
             if not pre_hook:
                 return result
 
-            from src.verification.verification_ir import build_verification_report
+            from src.verification.verification_ir import (
+                build_semi_check, build_verification_report,
+            )
             from src.verification.policy import PolicyEvaluator
             from src.verification.semi_formal_reason import SemiFormalReasoner
             from src.verification.intent_align import evaluate_invariants
             from src.verification.blast_radius import blast_radius_check
             from src.verification.diffmap import map_files_to_entity_ids, parse_diff_files
             from src.contracts.verification_ir import (
-                CheckResult, VerificationPolicy,
+                VerificationPolicy,
             )
 
             graph = _get(context, "graph", None)
@@ -80,14 +82,8 @@ class Executor:
             cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map,
                                    entities=graph_entities or None)
 
-            checks = [CheckResult(
-                check_id="semi_formal",
-                passed=cert.certificate_verified,
-                score=cert.confidence,
-                evidence=[e.file_path for e in cert.evidence],
-                explanation=cert.conclusion.reasoning,
-                certificate=cert,
-            )]
+            checks = [build_semi_check(
+                cert, parse_diff_files(diff), graph_entities)]
 
             blast, blast_check = blast_radius_check(
                 graph=graph, changed_entities=changed, test_entities=tests,
@@ -121,4 +117,5 @@ class Executor:
             if decision.status in ("HUMAN_REVIEW", "INCONCLUSIVE"):
                 raise HumanReviewRequired(report, decision)
 
-            return result
+            import dataclasses
+            return dataclasses.replace(result, decision=decision)

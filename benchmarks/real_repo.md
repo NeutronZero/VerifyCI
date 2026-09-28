@@ -474,3 +474,25 @@ against the current graph. `git show` silently emitted empty output for 5
 of the 20 commits (mechanism unknown); `git diff sha^ sha` retrieved them.
 PowerShell-redirected patch files land UTF-16 and must be converted before
 parsing ï¿½ second occurrence of the encoding trap, now a checklist item.
+
+# Dogfood: SmartEnergyMeter_3ph (own real work)
+
+Staged copy excluding vendored ESP32 toolchains (9.5k SDK headers),
+`__pycache__`, caches, `.env`. 539 project files ingested:
+
+```text
+files=539 entities=8742 edges=14340 seconds=42.6 (0.079s/file)
+langs: c 4356, python 1904, cpp 1472, markdown 67, txt 34
+```
+
+A real C++ firmware feature (`70a46b9` UART bridge via DMA, 3 files):
+
+```text
+verify -> PASS | all_checks_passed_behavior_not_verified
+files=[main.cpp, uart_bridge.cpp, uart_bridge.h] changed=36
+```
+
+First verdict carrying the scope qualifier on real work: 36 entities
+grounded, no invariant tripped, behavior explicitly not verified. No
+FAIL surfaced — nothing in this pass contradicted the gate, which is
+itself recorded rather than celebrated.

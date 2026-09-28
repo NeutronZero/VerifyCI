@@ -146,11 +146,20 @@ class AsyncDAGScheduler(Scheduler):
                     ])
                     for outcome in outcomes:
                         kind, decision = outcome
+                        if kind == "ok":
+                            # Passing gates still produce decisions; the last
+                            # one labels the run so the ledger carries the
+                            # rationale even when nothing failed.
+                            if decision is not None:
+                                task["decision"] = decision
+                            continue
                         if kind == "block":
                             task["decision"] = decision
                             task["status"] = TaskStatus.FAILED
                             self._emit("TASK_FAILED", task_id, conversation_id,
-                                       {"reason": "verification_failed"})
+                                       {"reason": "verification_failed",
+                                        "decision": getattr(decision, "status", None),
+                                        "rationale": getattr(decision, "rationale", None)})
                             self._persist(task_id)
                             return
                         if kind == "review":
@@ -169,7 +178,9 @@ class AsyncDAGScheduler(Scheduler):
                     task["status"] = TaskStatus.COMPLETED
                 self._emit("TASK_COMPLETED", task_id, conversation_id,
                            {"needs_review": task["needs_review"],
-                            "status": task["status"].value})
+                            "status": task["status"].value,
+                            "decision": getattr(task.get("decision"), "status", None),
+                            "rationale": getattr(task.get("decision"), "rationale", None)})
                 self._persist(task_id)
             except Exception as e:  # noqa: BLE001
                 task["status"] = TaskStatus.FAILED
@@ -199,8 +210,8 @@ class AsyncDAGScheduler(Scheduler):
             dependency_graph=shared.get("dependency_graph"),
         )
         try:
-            await executor.execute_node(node_obj, ctx)
-            return ("ok", None)
+            result = await executor.execute_node(node_obj, ctx)
+            return ("ok", getattr(result, "decision", None))
         except HumanReviewRequired as e:
             return ("review", e.decision)
         except VerificationBlocker as e:

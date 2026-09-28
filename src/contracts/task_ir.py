@@ -34,6 +34,7 @@ class NodeResult:
     status: str
     output: Any = None
     diff: Optional[str] = None
+    decision: Optional[Any] = None  # VerificationDecision when gated, else None
 
 
 @dataclass(frozen=True)

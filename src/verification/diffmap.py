@@ -54,3 +54,26 @@ def map_files_to_entity_ids(files: list[str], entities: list) -> dict[str, list[
             if epath == f or epath.endswith("/" + f) or f.endswith("/" + epath):
                 mapping.setdefault(f, []).append(entity.revision_entity_id)
     return mapping
+
+
+def find_ambiguous_files(files: list[str], entities: list) -> dict[str, list[str]]:
+    """Diff file -> distinct stored paths it matched, when more than one.
+
+    Suffix matching lets an old-layout path ground against a moved file —
+    sometimes right, sometimes a same-named coincidence (`utils.py::load`
+    in two packages). Callers surface this so a suffix-grounded PASS is
+    visibly weaker than an exact-path one. Exact-only matches are never
+    ambiguous.
+    """
+    wanted = {normalize_path(f) for f in files}
+    hits: dict[str, set[str]] = {}
+    for entity in entities:
+        epath = normalize_path(getattr(entity, "file_path", ""))
+        if not epath:
+            continue
+        for f in wanted:
+            if epath == f:
+                hits.setdefault(f, set()).add(epath)
+            elif epath.endswith("/" + f) or f.endswith("/" + epath):
+                hits.setdefault(f, set()).add(epath)
+    return {f: sorted(paths) for f, paths in hits.items() if len(paths) > 1}

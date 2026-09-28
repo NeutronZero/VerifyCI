@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — rationale in every channel, ambiguity tripwire, dogfood
+
+- `NodeResult.decision` carries passing gate decisions so the ledger's
+  `TASK_COMPLETED`/`TASK_FAILED` events include decision + rationale;
+  pinned by one test per channel (CLI result, MCP result, HTTP response,
+  ledger event).
+- Suffix-ambiguity tripwire: `find_ambiguous_files` flags diff paths
+  matching entities under several stored paths; shared `build_semi_check`
+  constructor appends the note in executor, MCP, and CLI alike.
+- Dogfood on SmartEnergyMeter_3ph (539 files, C/Python/C++): real UART
+  firmware diff → PASS with the qualifier visible. Details in
+  `benchmarks/real_repo.md`.
+
 ## Unreleased — discrimination evidence: reverts, mutants, qualified PASS
 
 - Reverted commits (`c935eace`, `5c127217`) and the judged-bad commit they

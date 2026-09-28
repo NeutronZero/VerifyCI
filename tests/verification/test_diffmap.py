@@ -77,3 +77,33 @@ def test_mixed_prefixes():
 def test_normalize_path_separators():
     assert normalize_path("src\\app.py") == "src/app.py"
     assert normalize_path("./src/app.py") == "src/app.py"
+
+
+def test_suffix_ambiguity_flagged_not_silent():
+    from types import SimpleNamespace
+    from src.verification.diffmap import find_ambiguous_files, map_files_to_entity_ids
+    from src.verification.verification_ir import build_semi_check
+
+    def ent(eid, path):
+        return SimpleNamespace(revision_entity_id=eid, name="load",
+                               file_path=path, line_start=1, line_end=2,
+                               source_hash="h")
+
+    entities = [ent("a", "pkg_one/utils.py"), ent("b", "pkg_two/utils.py")]
+    assert find_ambiguous_files(["utils.py"], entities) == {
+        "utils.py": ["pkg_one/utils.py", "pkg_two/utils.py"]}
+    # Exact-path grounding is never ambiguous.
+    assert find_ambiguous_files(["pkg_one/utils.py"], entities) == {}
+
+    class _Cert:
+        certificate_verified = True
+        confidence = 1.0
+        evidence = []
+        conclusion = type("C", (), {"reasoning": "deterministic_checks_passed"})()
+
+    check = build_semi_check(_Cert(), ["utils.py"], entities)
+    assert "suffix-ambiguous grounding" in check.explanation
+    assert check.passed is True  # tripwire, not a veto
+
+    grounded = map_files_to_entity_ids(["pkg_one/utils.py"], entities)
+    assert sorted(grounded["pkg_one/utils.py"]) == ["a"]
