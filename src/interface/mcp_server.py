@@ -59,9 +59,10 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
         from src.interface.commands.graph_loader import payload_entities
         entities = payload_entities(graph)
 
-    async def code_search(query: str, k: int = 10, conversation_id: str = "") -> dict:
+    async def code_search(query: str, k: int = 10, conversation_id: str = "",
+                        rerank: bool = False) -> dict:
         from src.retrieval.dense import SearchResult
-        from src.retrieval.fusion import rrf_fusion
+        from src.retrieval.fusion import rrf_fusion_with_scores
         from src.retrieval.graph_retriever import GraphRetriever
         from src.retrieval.reranker import CrossEncoderReranker
 
@@ -85,12 +86,18 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                 dense_hits = dense_hits[:k]
             except Exception:  # noqa: BLE001
                 dense_hits = [SearchResult(id=h.id, score=h.score, metadata={"text": texts.get(h.id, "")}) for h in sparse_hits]
-            fused = rrf_fusion(dense_hits, sparse_hits, graph_hits)
-            reranker = CrossEncoderReranker()
-            reranked = reranker.rerank(
-                query, [SearchResult(id=i, score=0.0, metadata={"text": texts.get(i, i)}) for i in fused], k=k)
-            return {"results": [{"id": r.id, "score": r.score} for r in reranked],
-                    "query": query, "methods": ["bm25", "graph", "rrf", f"rerank:{reranker.backend}"]}
+            fused = rrf_fusion_with_scores(dense_hits, sparse_hits, graph_hits)
+            methods = ["bm25", "graph", "rrf"]
+            if rerank:
+                reranker = CrossEncoderReranker()
+                ranked = reranker.rerank(
+                    query, [SearchResult(id=i, score=s, metadata={"text": texts.get(i, i)})
+                            for i, s in fused], k=k)
+                methods = methods + [f"rerank:{reranker.backend}"]
+            else:
+                ranked = [SearchResult(id=i, score=s, metadata={}) for i, s in fused[:k]]
+            return {"results": [{"id": r.id, "score": r.score} for r in ranked],
+                    "query": query, "methods": methods}
 
     async def code_definition(symbol: str) -> dict:
         if store is None:

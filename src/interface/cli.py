@@ -29,9 +29,11 @@ def stats(db: str = ""):
 
 
 @app.command()
-def query(question: str, db: str = "", k: int = 10):
+def query(question: str, db: str = "", k: int = 10,
+          rerank: bool = typer.Option(False, "--rerank",
+            help="Opt-in overlap rerank; off by default (measured net-negative)")):
     from src.interface.commands.query import run_query
-    result = run_query(question, db or None, k=k)
+    result = run_query(question, db or None, k=k, rerank=rerank)
     for hit in result["results"]:
         typer.echo(f"{hit['score']:.3f}  {hit['id']}")
 

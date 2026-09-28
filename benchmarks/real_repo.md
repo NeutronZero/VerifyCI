@@ -316,3 +316,25 @@ fixed same session: only ingestible-but-absent files veto
 (`INGESTIBLE_EXTENSIONS` single-sourced in `ingestion/language.py`, shared
 by ingest collection and grounding). Failing to do this would have made
 every docs-touching commit unverifiable — the common case, not the edge.
+
+## A real FAIL from real history (and what it teaches)
+
+Full-history sweep: 1,011 commits touching `src/` or `tests/`, every added
+line run through `secrets_scan`. Exactly one hit — commit `025589ee`
+("Reformat with black"):
+
+```text
+verify -> FAIL | blocking_check_failed
+files=['examples/tutorial/tests/conftest.py'] changed=54
+```
+
+The line is `def login(self, username="test", password="test")` — a test
+fixture whose quotes black normalized. By human judgment this FAIL is a
+false positive; by the checker's literal rule it is correct. Both halves
+are the finding: the FAIL path now has a real (not synthetic) exercise,
+and the checker's precision boundary is fixture-blindness. No fix applied —
+the tradeoff (literal rule with fixture false positives vs. a
+fixture-aware rule risking false negatives on real secrets) is recorded
+here for the next decision, not decided here. Note the search itself is the
+method: pickaxe `-S` over full history found nothing (framework code only),
+the added-lines sweep found one.

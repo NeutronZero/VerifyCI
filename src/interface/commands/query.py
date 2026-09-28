@@ -6,7 +6,7 @@ from src.interface.commands import resolve_db
 from src.retrieval.blast_radius import compute_blast_radius
 from src.retrieval.dense import SearchResult
 from src.retrieval.evidence import build_evidence_pack
-from src.retrieval.fusion import rrf_fusion
+from src.retrieval.fusion import rrf_fusion_with_scores
 from src.retrieval.graph_retriever import GraphRetriever
 from src.retrieval.provider import HashEmbeddingProvider
 from src.retrieval.reranker import CrossEncoderReranker
@@ -15,7 +15,11 @@ from src.storage.graph_store import GraphStore
 
 
 def run_query(question: str, db_path: str | None = None, k: int = 10,
-              dense_provider=None) -> dict:
+              dense_provider=None, rerank: bool = False) -> dict:
+    """Fused-only is the default path. The offline reranker demotes correct
+    fused answers about as often as it lifts them (measured 2 lifts / 4
+    demotions across two repos), so it is opt-in per query shape, not default.
+    """
     from src.graph.builder import GraphBuilder
 
     db = resolve_db(db_path)
@@ -57,14 +61,20 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
         seeds = [h.id for h in sparse_hits[:3]]
         graph_hits = GraphRetriever(graph, node_map).retrieve(seeds) if graph is not None else []
 
-        fused = rrf_fusion(dense_hits, sparse_hits, graph_hits)
-        reranked = CrossEncoderReranker().rerank(
-            question,
-            [SearchResult(id=i, score=0.0, metadata={"text": texts.get(i, i)}) for i in fused],
-            k=k,
-        )
+        fused = rrf_fusion_with_scores(dense_hits, sparse_hits, graph_hits)
+        methods = ["dense:" + provider.model_name(), "bm25", "graph", "rrf"]
+        if rerank:
+            ranked = CrossEncoderReranker().rerank(
+                question,
+                [SearchResult(id=i, score=s, metadata={"text": texts.get(i, i)})
+                 for i, s in fused],
+                k=k,
+            )
+            methods = methods + ["rerank"]
+        else:
+            ranked = [SearchResult(id=i, score=s, metadata={}) for i, s in fused[:k]]
         by_id = {e.revision_entity_id: e for e in entities}
-        pack_entities = [by_id[i] for i in [r.id for r in reranked] if i in by_id]
+        pack_entities = [by_id[i] for i in [r.id for r in ranked] if i in by_id]
         chunks = [
             SourceChunk(
                 chunk_id=f"chunk_{e.revision_entity_id[:12]}",
@@ -75,17 +85,17 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
             for e in pack_entities if e.source_hash
         ]
         blast = compute_blast_radius(
-            graph, [r.id for r in reranked[:3]], set(), node_map=node_map or None)
+            graph, [r.id for r in ranked[:3]], set(), node_map=node_map or None)
         pack = build_evidence_pack(
             query=question, entities=pack_entities, relationships=[],
             source_chunks=chunks,
-            scores={r.id: r.score for r in reranked},
-            retrieval_methods=["dense:" + provider.model_name(), "bm25", "graph", "rrf", "rerank"],
+            scores={r.id: r.score for r in ranked},
+            retrieval_methods=methods,
             graph_revision=pack_entities[0].revision_id if pack_entities else "",
             blast_radius=blast,
         )
         return {"query": question,
-                "results": [{"id": r.id, "score": r.score} for r in reranked],
+                "results": [{"id": r.id, "score": r.score} for r in ranked],
                 "evidence": {"entities": len(pack.entities), "chunks": len(pack.source_chunks),
                              "provenance": len(pack.provenance)}}
     finally:

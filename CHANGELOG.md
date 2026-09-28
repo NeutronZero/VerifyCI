@@ -16,6 +16,10 @@ Suite 169 → 173. Measurements only, plus one same-session fix the run forced.
   class-view). Neither dense provider dominates (1 st win, 2 hash wins,
   2 ties).
 - Commits: 4 PASS / 1 INCONCLUSIVE (merge, empty diff) / 0 FAIL.
+- Full-history sweep (1011 commits, every added line through
+  `secrets_scan`): exactly one hit, `025589ee` fixture
+  `password="test"` → FAIL. Real FAIL exercise; reveals fixture-blindness
+  as the precision boundary. No fix — tradeoff recorded, not decided.
 - Found by measuring: uningestible files (CHANGES.rst) vetoed whole diffs;
   only ingestible-but-absent files veto now (`INGESTIBLE_EXTENSIONS`
   single-sourced, shared by ingest and grounding). Details + histograms in

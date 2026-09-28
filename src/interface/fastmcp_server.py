@@ -25,9 +25,11 @@ def create_fastmcp_server(db_path: str, name: str = "verifyci"):
     mcp = FastMCP(name)
 
     @mcp.tool()
-    async def code_search(query: str, k: int = 10, conversation_id: str = "") -> dict[str, Any]:
-        """Hybrid code search: BM25 + dense + graph expansion, RRF fused, reranked."""
-        return await inner.call_tool("code.search", query=query, k=k, conversation_id=conversation_id)
+    async def code_search(query: str, k: int = 10, conversation_id: str = "",
+                          rerank: bool = False) -> dict[str, Any]:
+        """Hybrid code search: BM25 + dense + graph expansion, RRF fused. Rerank opt-in."""
+        return await inner.call_tool("code.search", query=query, k=k,
+                                     conversation_id=conversation_id, rerank=rerank)
 
     @mcp.tool()
     async def code_definition(symbol: str) -> dict[str, Any]:
