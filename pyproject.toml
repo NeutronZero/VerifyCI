@@ -1,0 +1,44 @@
+[project]
+name = "verifyci"
+version = "0.1.0"
+description = "Verification-first agentic code intelligence platform"
+readme = "README.md"
+requires-python = ">=3.12"
+
+dependencies = [
+    "pydantic>=2.0",
+    "typer>=0.9",
+    "pyyaml>=6.0",
+    "tree-sitter>=0.22",
+    "tree-sitter-python>=0.21",
+    "tree-sitter-c>=0.21",
+    "tree-sitter-cpp>=0.21",
+    "rustworkx>=0.14",
+    "ollama>=0.3",
+    "sentence-transformers>=3.0",
+    "rank-bm25>=0.2",
+    "aiosqlite>=0.19",
+    "fastmcp>=0.1",
+    "uvicorn>=0.29",
+    "fastapi>=0.100",
+    "aiohttp>=3.9",
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-semantic-conventions>=0.40b0",
+]
+
+[project.optional-dependencies]
+temporal = ["temporalio>=1.0"]
+attestation = ["cryptography>=42.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0"]
+
+[project.scripts]
+aci = "src.interface.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+testpaths = ["tests"]

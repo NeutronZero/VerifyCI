@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.verifyci/
+storage/verifyci.db
+storage/vuln_cache.db
