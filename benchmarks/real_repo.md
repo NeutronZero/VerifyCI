@@ -496,3 +496,27 @@ First verdict carrying the scope qualifier on real work: 36 entities
 grounded, no invariant tripped, behavior explicitly not verified. No
 FAIL surfaced — nothing in this pass contradicted the gate, which is
 itself recorded rather than celebrated.
+
+# C++ extraction (firmware, blind-annotated): TP=81 FP=0 FN=0
+
+Ground truth in `benchmarks/score_cpp.py`, read file-by-file from the
+ra4m1 firmware by an annotator working from C++ structure (not extractor
+output): `static`/inline free functions, ISRs, header/source split
+(declarations must not emit), a function template (`find_ring_slot`),
+forward declarations, `struct`-with-body. Reproduce:
+`python benchmarks/score_cpp.py`.
+
+```text
+Results: TP=81 FP=0 FN=0
+Precision: 1.00  Recall: 1.00
+```
+
+The 3 initial FPs were annotation misses again (`static inline`
+functions my listing regex skipped: `prv_rx_available`, `i2c_delay`,
+`calculate_crc32`) — truth corrected, extractor right, same lesson as the
+docstring round: annotation tooling is part of the measurement.
+
+Deliberately excluded and documented as a known gap: `enum class
+TripReason` (relay.h) — the extractor has no ENUM mapping. C++ grounding
+therefore rests on functions/structs; enum-typed claims are invisible to
+the graph. Stated here so the firmware numbers are not over-read.

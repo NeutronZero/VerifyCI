@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased — rationale in every channel, ambiguity tripwire, dogfood
+## Unreleased — blind C++ annotation round (firmware)
+
+Suite 211, no product-code change. `benchmarks/score_cpp.py`: 81
+hand-read entities (static/inline, ISRs, header/source split, template,
+forward decls) → TP=81 FP=0 FN=0. Three initial FPs were listing-regex
+misses, truth corrected. `enum class` excluded as documented gap (no ENUM
+mapping) — firmware grounding rests on functions/structs.
 
 - `NodeResult.decision` carries passing gate decisions so the ledger's
   `TASK_COMPLETED`/`TASK_FAILED` events include decision + rationale;
