@@ -2,7 +2,7 @@ from src.contracts.verification_ir import CheckResult, VerificationPolicy
 from src.interface.commands import resolve_db
 from src.interface.commands.graph_loader import load_graph
 from src.verification.blast_radius import blast_radius_check
-from src.verification.defaults import default_invariants as _default_invariants
+from src.verification.config import load_repo_invariants
 from src.verification.diffmap import map_files_to_entity_ids, parse_diff_files
 from src.verification.intent_align import evaluate_invariants
 from src.verification.policy import PolicyEvaluator
@@ -29,7 +29,7 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
         graph=graph, changed_entities=changed, test_entities=set(), node_map=node_map or None)
     checks.append(blast_check)
     inv_checks, _metrics = evaluate_invariants(
-        diff, _default_invariants(), graph, evidence=list(cert.evidence))
+        diff, load_repo_invariants(db), graph, evidence=list(cert.evidence))
     checks.extend(inv_checks)
     report = build_verification_report(task_id=task_id, policy_id="default", checks=checks, blast_radius=blast)
     policy = VerificationPolicy(

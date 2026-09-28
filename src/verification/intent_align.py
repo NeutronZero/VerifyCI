@@ -41,13 +41,14 @@ def evaluate_invariants(
     """
     results = []
     for invariant in invariants:
-        passed = _check_invariant(diff, invariant, graph, evidence or [])
+        passed, coverage = _check_invariant(diff, invariant, graph, evidence or [])
         results.append(CheckResult(
             check_id=str(uuid.uuid4()),
             passed=passed,
             score=1.0 if passed else 0.0,
             evidence=[],
-            explanation=f"invariant_{invariant.invariant_id}_{'passed' if passed else 'failed'}",
+            explanation=f"invariant_{invariant.invariant_id}_{'passed' if passed else 'failed'}"
+                        f" ({coverage})",
             blocking=invariant.blocking,
         ))
 
@@ -90,11 +91,11 @@ def score_labeled(cases: list[tuple[str, Invariant, Any, list, bool]]) -> Invari
     results = []
     expected = []
     for diff, invariant, graph, evidence, violated in cases:
-        passed = _check_invariant(diff, invariant, graph, evidence or [])
+        passed, coverage = _check_invariant(diff, invariant, graph, evidence or [])
         results.append(CheckResult(
             check_id=str(uuid.uuid4()), passed=passed,
             score=1.0 if passed else 0.0, evidence=[],
-            explanation=f"invariant_{invariant.invariant_id}",
+            explanation=f"invariant_{invariant.invariant_id} ({coverage})",
             blocking=invariant.blocking,
         ))
         expected.append(bool(violated))
@@ -106,25 +107,46 @@ def score_labeled(cases: list[tuple[str, Invariant, Any, list, bool]]) -> Invari
     )
 
 
-def _check_invariant(diff: str, invariant: Invariant, graph: Any, evidence: list) -> bool:
+def _check_invariant(diff: str, invariant: Invariant, graph: Any, evidence: list
+                     ) -> tuple[bool, str]:
+    """Return (passed, coverage_note). The note names what was examined so a
+    vacuous pass — zero relevant edges, empty diff-side — is visible in the
+    verdict instead of confidence-shaped. Unknown or empty queries fail
+    closed (passed=False)."""
     query = (invariant.compiled_query or "").strip()
     if not query:
-        return False
+        return False, "empty query (fail-closed)"
     if query == "secrets_scan":
-        return SECRET_RE.search(diff or "") is None
+        return SECRET_RE.search(diff or "") is None, "diff text scanned"
     if query == "provenance_check":
-        return bool(evidence)
+        return bool(evidence), f"evidence items={len(evidence)}"
     if query.startswith("forbid_call:"):
-        return not _graph_calls(graph, query[len("forbid_call:"):].strip(), "CALLS")
+        name = query[len("forbid_call:"):].strip()
+        violated, examined = _graph_search(graph, name, "CALLS")
+        return not violated, _coverage_note(examined, "CALLS", name)
     if query.startswith("forbid_import:"):
-        return not _graph_calls(graph, query[len("forbid_import:"):].strip(), "IMPORTS")
-    return False
+        name = query[len("forbid_import:"):].strip()
+        violated, examined = _graph_search(graph, name, "IMPORTS")
+        return not violated, _coverage_note(examined, "IMPORTS", name)
+    return False, f"unknown query kind (fail-closed): {query[:40]}"
+
+
+def _coverage_note(examined: int, edge_type: str, name: str) -> str:
+    if examined <= 0:
+        return f"no {edge_type} edges in graph — vacuous pass for {name!r}"
+    return f"examined {examined} {edge_type} edges for {name!r}"
 
 
 def _graph_calls(graph: Any, name: str, edge_type: str) -> bool:
     """True when a live edge of edge_type targets an entity named `name`."""
+    violated, _ = _graph_search(graph, name, edge_type)
+    return violated
+
+
+def _graph_search(graph: Any, name: str, edge_type: str) -> tuple[bool, int]:
+    """Return (violation_found, edges_examined)."""
     if graph is None or not name:
-        return False
+        return False, 0
     try:
         index = {}
         nodes_fn = getattr(graph, "nodes", None)
@@ -133,13 +155,15 @@ def _graph_calls(graph: Any, name: str, edge_type: str) -> bool:
                 eid = getattr(payload, "revision_entity_id", None)
                 if eid:
                     index[eid] = getattr(payload, "name", "")
+        examined = 0
         for edge in iter_edge_payloads(graph):
             etype = getattr(getattr(edge, "type", None), "value", getattr(edge, "type", None))
             if etype != edge_type:
                 continue
+            examined += 1
             dst = getattr(edge, "dst_entity_id", None)
             if dst is not None and index.get(dst) == name:
-                return True
+                return True, examined
+        return False, examined
     except Exception:  # noqa: BLE001, S110
-        pass
-    return False
+        return False, 0

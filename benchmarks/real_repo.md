@@ -345,7 +345,33 @@ provenance. The violation is detectable only when someone wires the rule.
 Recorded, not built: the next honest feature is project invariant
 configuration, not another checker.
 
-## On the 1/1011 false-positive rate
+## Invariant config surface (built because the sweep demanded it)
+
+The layering exercise forced it open: `run_verify` returned PASS on the
+`0ec7f713` diff because project rules had nowhere to live. Now
+`<repo>/.verifyci/invariants.yaml` (flat list, same four query kinds)
+loads by default in `run_verify`, `run_task`, and both MCP paths, extending
+the built-ins — no opt-in flag, or the common path would stay hardcoded.
+Proven: a repo-local `forbid_import:typing` rule flips a clean mapped diff
+to `FAIL | blocking_check_failed` with zero flags passed.
+
+## On precision, denominators, and coverage signals
+
+- The 13-hits-in-one-commit result is precision evidence, not just a count:
+  a rule that fires on its intended target and stays quiet across the other
+  1,010 commits has demonstrated precision. Stated next to the number.
+- Denominator sharpened: the 1/1011 secrets rate reflects that Flask rarely
+  writes secrets-shaped strings into added lines. On a crypto library or
+  auth service the rate is not this rate — repo-test-density specifically,
+  not "density varies" generally.
+- Coverage signals: every `forbid_*` verdict now reports what it examined
+  (`examined N CALLS edges for 'x'`), and zero-edge graphs say
+  `no <TYPE> edges in graph — vacuous pass`. A vacuous pass is still a pass
+  (no violation exists), but it is now a *visible* one — the fourth
+  instance of "logic right, data wrong" (LIMIT corpus, CHANGES.rst veto,
+  relative-import misattribution, hardcoded defaults) gets the same
+  treatment as the metric-honesty work: technically-correct-but-empty
+  numbers are confidence-shaped, so they carry their coverage with them.
 
 Denominator warning: 1 hit in 1,011 diffs reads as "well-tuned" only if
 you miss the test-tree asymmetry. Flask's test tree is small and fixture

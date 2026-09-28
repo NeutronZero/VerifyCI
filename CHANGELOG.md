@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased — second checker fired on real history
+## Unreleased — invariant config surface + coverage-visible verdicts
+
+- Reranker default-off implemented (fused-only default in CLI/MCP/FastMCP;
+  `--rerank` / `rerank=true` opt-in; fused results carry real RRF scores).
+- Repo-local `invariants.yaml` next to the DB, loaded by default in
+  `run_verify`/`run_task`/MCP, extending built-ins. Proven: a repo
+  `forbid_import:typing` rule flips a clean diff to FAIL with no flags.
+- Every `forbid_*` verdict reports examined edge counts; zero-edge graphs
+  say vacuous explicitly. Precision note (13 hits, one commit) and
+  sharpened denominator (crypto/auth warning) recorded.
 
 - Layering sweep over 1,011 Flask commits: rule A (src→tests) 0 hits;
   rule B 13 hits, all in `0ec7f713` (sansio split carrying sync imports,

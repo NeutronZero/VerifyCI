@@ -3,7 +3,7 @@ import asyncio
 from src.contracts.scheduler import TERMINAL_STATUSES
 from src.interface.commands import resolve_db
 from src.interface.commands.graph_loader import load_graph
-from src.verification.defaults import default_invariants as _default_invariants
+from src.verification.config import load_repo_invariants
 from src.memory.ledger import EventLedger
 from src.orchestration.compiler.validation import validate_task_ir
 from src.orchestration.intent import build_intent_package
@@ -28,7 +28,7 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
             scheduler = AsyncDAGScheduler(ledger=ledger)
             context = {
                 "graph": graph, "node_map": node_map, "entities": entities,
-                "invariants": intent.invariants + _default_invariants(),
+                "invariants": intent.invariants + load_repo_invariants(db),
                 "diff": diff, "store": store,
             }
             task_id = await scheduler.submit(task_ir, context=context)

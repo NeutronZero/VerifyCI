@@ -58,6 +58,8 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
     if entities is None:
         from src.interface.commands.graph_loader import payload_entities
         entities = payload_entities(graph)
+    from src.verification.config import load_repo_invariants
+    _repo_invariants = load_repo_invariants(getattr(store, "db_path", None))
 
     async def code_search(query: str, k: int = 10, conversation_id: str = "",
                         rerank: bool = False) -> dict:
@@ -148,7 +150,7 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                 graph=graph, changed_entities=changed, test_entities=set(), node_map=node_map)
             checks.append(blast_check)
             inv_checks, _metrics = evaluate_invariants(
-                diff, _mcp_invariants(), graph, evidence=list(cert.evidence))
+                diff, _repo_invariants, graph, evidence=list(cert.evidence))
             checks.extend(inv_checks)
             report = build_verification_report(task_id="mcp_verify", policy_id="default",
                                                checks=checks, blast_radius=blast)
@@ -173,7 +175,7 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                 return {"task": task, "status": "FAILED", "error": "invalid_task_ir"}
             context = {
                 "graph": graph, "node_map": node_map, "entities": entities,
-                "invariants": intent.invariants + _mcp_invariants(),
+                "invariants": intent.invariants + _repo_invariants,
                 "diff": diff, "store": store,
             }
             task_id = await scheduler.submit(task_ir, conversation_id=conversation_id,
@@ -203,7 +205,3 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
 
     return server
 
-
-def _mcp_invariants():
-    from src.verification.defaults import default_invariants
-    return default_invariants()
