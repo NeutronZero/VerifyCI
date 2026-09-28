@@ -354,11 +354,43 @@ def _extract_callee_name(node, source: bytes) -> Optional[str]:
 
 
 def _extract_import_module(node, source: bytes) -> Optional[str]:
+    if node.type == "import_statement":
+        for child in node.children:
+            if child.type == "dotted_name":
+                return _text(child, source)
+            if child.type == "aliased_import":
+                for grandchild in child.children:
+                    if grandchild.type == "dotted_name":
+                        return _text(grandchild, source)
+        return None
+    # import_from_statement: the module precedes the `import` keyword, either
+    # as a relative_import (`from ..config import X`) or a dotted_name
+    # (`from flask import X`). Names after the keyword are imported symbols,
+    # never the module — taking them misattributes the edge.
+    seen_import_kw = False
     for child in node.children:
-        if child.type == "dotted_name":
+        if child.type == "import":
+            seen_import_kw = True
+            continue
+        if child.type == "relative_import":
+            return _relative_module(child, source)
+        if child.type == "dotted_name" and not seen_import_kw:
             return _text(child, source)
-        if child.type == "aliased_import":
+        if child.type == "aliased_import" and not seen_import_kw:
             for grandchild in child.children:
                 if grandchild.type == "dotted_name":
                     return _text(grandchild, source)
     return None
+
+
+def _relative_module(node, source: bytes) -> Optional[str]:
+    dots = 0
+    mod = None
+    for child in node.children:
+        if child.type == "import_prefix":
+            dots = _text(child, source).count(".")
+        elif child.type == "dotted_name" and mod is None:
+            mod = _text(child, source)
+    if mod:
+        return "." * dots + mod
+    return "." * dots if dots else None

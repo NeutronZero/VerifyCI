@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased — Flask real-repo run (known repo, expect drops)
+## Unreleased — second checker fired on real history
+
+- Layering sweep over 1,011 Flask commits: rule A (src→tests) 0 hits;
+  rule B 13 hits, all in `0ec7f713` (sansio split carrying sync imports,
+  later cleaned). Worktree ingest at that commit + `forbid_import:..config`
+  / `:..ctx` → both FAIL. Two checkers, two real inputs.
+- Doing that exposed relative imports recording the symbol instead of the
+  module (every `forbid_import` would miss them); fixed with pinning test.
+- Gap forced open: `run_verify` still PASSes that diff — project invariants
+  have no config surface (`_default_invariants` hardcoded). Recorded as the
+  next honest feature, not built.
+- Denominator note: the 1/1011 secrets rate is checker × repo-test-density,
+  not checker quality; fixture-blindness stays the precision boundary.
 
 Suite 169 → 173. Measurements only, plus one same-session fix the run forced.
 

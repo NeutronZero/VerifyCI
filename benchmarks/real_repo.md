@@ -317,7 +317,45 @@ fixed same session: only ingestible-but-absent files veto
 by ingest collection and grounding). Failing to do this would have made
 every docs-touching commit unverifiable — the common case, not the edge.
 
-## A real FAIL from real history (and what it teaches)
+## Second checker, second real input (forbid_import)
+
+`secrets_scan` was the only checker ever fired on real input. Flask's
+sansio split gives a real layering rule: `sansio/` must not import sync
+`flask.*`. Current tree is clean (0 violations). Full-history sweep
+(1,011 commits' added import lines): rule A (src→tests imports) 0 hits;
+rule B — 13 hits, all in commit `0ec7f713` "Split the App and Blueprint
+into Sansio and IO parts" (2023-06-11), which created
+`sansio/app.py` carrying `..config`, `..ctx`, `..helpers`,
+`..templating` imports, cleaned up later. Genuine transitional violation.
+
+Exercised end to end: worktree at `0ec7f713`, full ingest (101 files,
+3832 entities, 7246 edges), diff of `sansio/app.py` against
+`forbid_import:..config` + `forbid_import:..ctx` → both checks FAIL.
+Two checkers, two real historical inputs.
+
+Doing this exposed a real extractor bug first: relative imports recorded
+the imported *symbol* (`Config`) instead of the module (`..config`),
+which would have made every `forbid_import` rule silently miss relative
+imports. Fixed (module-position parsing) with a pinning test.
+
+And a real product gap the exercise forced into the open: `run_verify`
+still returns PASS on that diff, because project-specific invariants have
+no config surface — `_default_invariants` is hardcoded to secrets +
+provenance. The violation is detectable only when someone wires the rule.
+Recorded, not built: the next honest feature is project invariant
+configuration, not another checker.
+
+## On the 1/1011 false-positive rate
+
+Denominator warning: 1 hit in 1,011 diffs reads as "well-tuned" only if
+you miss the test-tree asymmetry. Flask's test tree is small and fixture
+literals like `password="test"` are rare there; on pytest/Django/requests,
+where every auth test carries a secret-shaped fixture, the same literal
+rule fires constantly. The rate is checker × repo-test-density, not a
+property of the checker. Fixture-blindness stays the documented precision
+boundary.
+
+## The first real FAIL (secrets_scan)
 
 Full-history sweep: 1,011 commits touching `src/` or `tests/`, every added
 line run through `secrets_scan`. Exactly one hit — commit `025589ee`

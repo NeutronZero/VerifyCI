@@ -52,6 +52,25 @@ def test_entities_carry_source_snippet():
     assert entities and "return 42" in (entities[0].metadata or {}).get("snippet", "")
 
 
+def test_relative_import_records_module_not_symbol():
+    # `from ..config import Config` must attribute the edge to the module
+    # (`..config`), never the imported symbol — otherwise forbid_import
+    # rules silently miss relative imports.
+    from src.contracts.entity import EntityType
+    from src.ingestion.extractor import extract_entities
+    from src.ingestion.parser import TreeSitterParser
+    src = (
+        "from ..config import Config\n"
+        "from .scaffold import Scaffold\n"
+        "from flask import Flask\n"
+        "import os\n"
+    )
+    parsed = TreeSitterParser().parse("x.py", src.encode(), "python")
+    imports = sorted(
+        e.name for e in extract_entities(parsed, "r", "rev") if e.type == EntityType.IMPORT)
+    assert imports == ["..config", ".scaffold", "flask", "os"]
+
+
 def test_docstring_code_examples_are_not_entities():
     # A regex ground truth would count `ghost`; the AST correctly ignores it.
     # Ground-truth annotation must be AST-aware (or human-read), not regex.
