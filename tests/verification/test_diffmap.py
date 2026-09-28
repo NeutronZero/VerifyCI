@@ -37,6 +37,43 @@ def test_dev_null_and_duplicates():
     assert parse_diff_files(diff) == ["a.py"]
 
 
+def test_truncated_diff_still_grounds():
+    diff = (
+        "diff --git a/src/app.py b/src/app.py\n"
+        "--- a/src/app.py\n"
+        "+++ b/src/app.py\n"
+        "@@ -1 +1 @@\n"
+        "-x = 1\n"
+        # hunk body cut off mid-diff
+    )
+    assert parse_diff_files(diff) == ["src/app.py"]
+
+
+def test_deletion_only_diff_names_old_file():
+    diff = (
+        "diff --git a/src/old.py b/src/old.py\n"
+        "deleted file mode 100644\n"
+        "--- a/src/old.py\n"
+        "+++ /dev/null\n"
+    )
+    assert parse_diff_files(diff) == ["src/old.py"]
+
+
+def test_git_internals_path_extracted_verbatim():
+    diff = "--- a/nothing\n+++ b/.git/hooks/pre-commit\n"
+    assert parse_diff_files(diff) == [".git/hooks/pre-commit", "nothing"]
+
+
+def test_unicode_path():
+    diff = "--- a/x.py\n+++ b/src/caf\u00e9.py\n"
+    assert parse_diff_files(diff) == ["src/caf\u00e9.py", "x.py"]
+
+
+def test_mixed_prefixes():
+    assert parse_diff_files("+++ a/x.py\n") == ["x.py"]
+    assert parse_diff_files("--- a/y.py\n+++ b/y.py\n") == ["y.py"]
+
+
 def test_normalize_path_separators():
     assert normalize_path("src\\app.py") == "src/app.py"
     assert normalize_path("./src/app.py") == "src/app.py"

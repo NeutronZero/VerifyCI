@@ -1,29 +1,36 @@
 """Map a unified diff onto graph entities.
 
-Only files listed in the diff (``+++`` side) can seed verification. A diff
+Files named on either side of the diff (``+++`` first, then ``---`` for
+pure deletions/renames, `/dev/null` excluded) can seed verification. A diff
 that names no files, or only files absent from the graph, grounds nothing
 and must yield ``inconclusive`` — never ``pass``.
 """
-import re
-
 
 def parse_diff_files(diff: str | None) -> list[str]:
     if not diff:
         return []
-    files = []
+    new_side, old_side = [], []
     for line in str(diff).splitlines():
         if line.startswith("+++ "):
-            path = line[4:].strip().split("\t")[0].strip().strip('"')
-            if path in ("-", "/dev/null"):
-                continue
-            files.append(_strip_prefix(path))
-    seen = set()
+            path = _clean(line[4:])
+            if path is not None:
+                new_side.append(path)
+        elif line.startswith("--- "):
+            path = _clean(line[4:])
+            if path is not None:
+                old_side.append(path)
     ordered = []
-    for f in files:
-        if f not in seen:
-            seen.add(f)
+    for f in new_side + [p for p in old_side if p not in new_side]:
+        if f not in ordered:
             ordered.append(f)
     return ordered
+
+
+def _clean(fragment: str) -> str | None:
+    path = fragment.strip().split("\t")[0].strip().strip('"')
+    if path in ("-", "/dev/null"):
+        return None
+    return _strip_prefix(path)
 
 
 def _strip_prefix(path: str) -> str:

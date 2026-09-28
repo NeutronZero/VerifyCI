@@ -124,3 +124,29 @@ def test_evidence_cites_source_not_just_name():
     cert = SemiFormalReasoner().verify(DIFF_APP, FakeGraph([payload]))
     assert cert.certificate_verified is True
     assert "return 42" in cert.evidence[0].snippet
+
+
+DELETION_DIFF = (
+    "diff --git a/src/app.py b/src/app.py\n"
+    "deleted file mode 100644\n"
+    "--- a/src/app.py\n"
+    "+++ /dev/null\n"
+)
+
+
+def test_deletion_only_diff_grounds_on_graphed_file():
+    graph = FakeGraph([_payload("e1")])
+    cert = SemiFormalReasoner().verify(DELETION_DIFF, graph)
+    assert [p.statement for p in cert.premises] == ["file_changed:src/app.py"]
+    assert cert.certificate_verified is True
+
+
+def test_ungraphable_paths_are_inconclusive():
+    graph = FakeGraph([_payload("e1")])
+    for diff in (
+        "--- a/nothing\n+++ b/.git/hooks/pre-commit\n",
+        "--- a/x.py\n+++ b/src/caf\u00e9.py\n",
+    ):
+        cert = SemiFormalReasoner().verify(diff, graph)
+        assert cert.certificate_verified is False
+        assert cert.conclusion.result == "inconclusive"

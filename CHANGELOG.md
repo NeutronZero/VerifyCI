@@ -1,6 +1,22 @@
 # Changelog
 
-## Unreleased — retrieval attribution pass
+## Unreleased — mid-pack reranker verdict + Relay scaling run
+
+Suite 162 → 169. No new subsystems.
+
+- Mid-pack queries (fusion rank 3–10, same repo): reranker lifts 7→2 on
+  `weighted shortest path`, demotes 2→9 and 2→off-page on two others.
+  Balanced verdict with lifts and demotions both measured; three-column
+  reporting stays mandatory. `---`-side diff files now ground verification
+  (pure deletions of graphed files verify; unknown files stay inconclusive),
+  with adversarial fixtures (truncated, deletions-only, `.git/` path,
+  unicode path, mixed prefixes).
+- Relay scaling: 2120 files → 19,263 entities + 29,760 edges in 142.4s
+  (0.067s/file vs 0.108s/file at smaller scale — no cliff; parsing
+  dominates, one bulk transaction). One row per table lost, diagnosed:
+  duplicate module-level `get_recommendations` in the target repo collapses
+  to first-wins; recorded as known residual (occurrence indexing is edit-
+  unstable — tradeoff, not oversight).
 
 Suite 155 → 162. No new subsystems (Principle 6).
 

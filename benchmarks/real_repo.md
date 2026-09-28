@@ -74,22 +74,47 @@ Reranked top-5s are topically coherent (BeamSearchResult,
 BeamSearchExperiments, test_beam_search_modes, …). Scores are real overlap
 fractions, not ties.
 
-## Reranker isolation (fused-only vs reranked)
+## Mid-pack queries: reranker shows both directions
 
-Latest-revision corpus (6677 docs). Target rank per column:
+Added queries where fusion lands the target at rank 3–10 (a ceiling-only
+test set can only show ties and demotions). Latest-rev corpus:
 
 ```text
-Q: beam search paths        fused-only 1 | reranked 1 | moved: no
-Q: find dma blast radius    fused-only 1 | reranked 1 | moved: no
-Q: incremental index dirty  fused-only 1 | reranked 2 | moved: YES (demoted)
+Q: weighted shortest path between symbols
+   fused 7 | reranked 2 | no-rerank 7   <- reranker LIFTS 7->2
+Q: register a new domain plugin
+   fused 2 | reranked 9 | no-rerank 2   <- reranker demotes
+Q: single points of failure
+   fused 2 | reranked out-of-top-10     <- reranker demotes off the page
 ```
 
-The offline overlap reranker demoted a correct fused answer on the third
-query (lexical preference overriding fusion). Implication for the Ollama
-run: always report all three columns. If dense improves but reranked stays
-flat, that is a reranker problem — the fix is disabling the offline
-reranker for that query shape, not a learned replacement. No new stage
-until the per-arm table says which arm moved.
+Balanced verdict: the overlap reranker lifts mid-pack lexical matches and
+demotes when overlap misleads (2 helps vs 2 harms on six queries). It is
+not neutral infrastructure — three-column reporting stays mandatory, and
+"disable for the shape" is now supported by lifts as well as demotions.
+
+## Scaling: Relay (2120 files matched of 4963 staged)
+
+```text
+files=2120 skipped=0 entities=19263 edges=29760 seconds=142.4
+DB: 45.4 MB SQLite
+```
+
+Profile: 0.067s/file vs 0.108s/file on the smaller repo — sublinear,
+fixed overhead amortizing. No cliff at 5x file count; the in-memory
+latest-revision corpus (~19k entities) and graph build hold without strain.
+The 100k-entity TODO in `commands/query.py` stands, but nothing measured
+here suggests a quadratic term: parsing dominates, storage is one bulk
+transaction.
+
+One row lost per table (19262/19263 entities, 29759/29760 edges), diagnosed
+rather than hand-waved: `rationalevault/mcp/tools.py` defines module-level
+`get_recommendations` twice (lines 371 and 815). Same name+scope+file+type
+→ same logical id → one row survives, plus its duplicate edge. Fixing this
+needs occurrence-indexed identity, which is unstable under edits (insert a
+def above and every later index shifts) — a genuine design tradeoff, not a
+missed one-liner. Recorded as known residual: duplicate module-level
+definitions collapse to first-wins.
 
 ## Ollama provider-swap run: blocked in this environment
 
