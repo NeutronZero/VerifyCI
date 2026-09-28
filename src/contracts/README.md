@@ -24,7 +24,9 @@ Cross-boundary types: `Constraint`, `Budget`, `SourceChunk`,
   built-in checkers are deterministic.
 - `InvariantMetrics.detection_recall/detection_precision` are only defined
   against a labeled ground-truth set (`score_labeled`); without labels both
-  report 0.0 ("unmeasured").
+  are None ("unmeasured", rendered as null — never 0.0, which would read as
+  "measured and terrible"). Labeled sets live in
+  `tests/evaluation/labels/` under the protocol in their README.
 - `verification_ir.CheckResult` gains `established: bool = True`. Unlike the
   amendments above, this one introduces a state the policy keys on: a
   blocking check that ran against nothing (zero relevant edges) routes to

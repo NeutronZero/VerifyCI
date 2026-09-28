@@ -49,6 +49,11 @@ def test_forbid_call_absent_passes():
 
 
 def test_unknown_query_fails_closed():
+    # Check-level verdict (failed) vs decision-level routing: a failed
+    # blocking check with no certificate is a *rejection* at the policy
+    # layer (FAIL), distinct from an ungrounded diff (no seeds), which is
+    # inability (INCONCLUSIVE). See test_policy_*_is_* for the routing;
+    # "unknown → INCONCLUSIVE" in the matrix refers to unknown *files*.
     checks, _ = evaluate_invariants("x", [_inv("u", "temporal_reasoning")], graph=None)
     assert checks[0].passed is False
 
@@ -87,5 +92,5 @@ def test_labeled_set_meets_plan_gates():
 def test_unlabeled_metrics_report_unmeasured():
     _, metrics = evaluate_invariants("x", [_inv("s", "secrets_scan")], graph=None)
     assert metrics.check_coverage == 1.0
-    assert metrics.detection_recall == 0.0
-    assert metrics.detection_precision == 0.0
+    assert metrics.detection_recall is None
+    assert metrics.detection_precision is None

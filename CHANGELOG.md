@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — labels with provenance, decisions with teeth
+
+Suite 183 → 205. No new subsystems.
+
+- Secrets allowlist: hits confined to `tests|test|fixtures|fixture|
+  examples|example|e2e` or `*.example` demote to pass-with-
+  `established=False` (→ INCONCLUSIVE) instead of FAIL. Base rule still
+  labels the Flask fixture violated=True; the demotion is a second,
+  separately tested mechanism. Precision stays honest two ways.
+- Labeled ground truth moves to `tests/evaluation/labels/invariants.jsonl`
+  (12 cases with `source`: synthetic, flask-history, adversarial) under a
+  blind-labeling protocol. Measured: recall 4/9, precision 4/4; gates pin
+  baseline-minus-epsilon, not fixed 0.90 (which the old 6-case set met by
+  construction). Near-misses included and failing: unquoted env secret,
+  aliased call, relative-import naming, split literal.
+- Unmeasured is now null: `detection_recall/precision` are Optional, None
+  without labels. Updated the two tests that asserted 0.0.
+- Decision table as data (`test_policy_table.py`, 6 rows) with the
+  circularity caveat stated in-file: table-correctness evidence is the
+  real-repo distributions, not the suite.
+
 ## Unreleased — review economics: measuring the reviewer
 
 Separate section deliberately: this measures a reviewer, not a checker

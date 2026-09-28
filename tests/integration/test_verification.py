@@ -227,8 +227,8 @@ def test_semi_formal_reasoner_with_opaque_graph():
 def test_evaluate_invariants():
     results, metrics = evaluate_invariants("test diff", [], None)
     assert metrics.check_coverage == 0.0
-    assert metrics.detection_recall == 0.0
-    assert metrics.detection_precision == 0.0
+    assert metrics.detection_recall is None
+    assert metrics.detection_precision is None
 
 
 def test_verify_evidence_coverage():

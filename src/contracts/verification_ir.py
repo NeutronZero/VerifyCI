@@ -135,8 +135,11 @@ class VerificationDecision:
 @dataclass(frozen=True)
 class InvariantMetrics:
     check_coverage: float
-    detection_recall: float
-    detection_precision: float
+    detection_recall: Optional[float] = None
+    detection_precision: Optional[float] = None
+    """Recall/precision are None when unmeasured (no labeled ground truth).
+    None renders as null in JSON — deliberately distinct from 0.0, which
+    would read as "measured and terrible". """
 
 
 @dataclass(frozen=True)

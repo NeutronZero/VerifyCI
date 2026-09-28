@@ -22,6 +22,13 @@ SECRET_RE = re.compile(
     r"\s*[:=]\s*['\"][^'\"]{3,}['\"]"
 )
 
+#: Path segments whose secret-shaped strings are fixtures, not findings.
+#: A secrets hit confined to these demotes to inability (INCONCLUSIVE via
+#: `established=False`) instead of FAIL — the fixture-blindness boundary,
+#: decided explicitly rather than tuned away.
+ALLOWLISTED_DIRS = frozenset({"tests", "test", "fixtures", "fixture",
+                              "examples", "example", "e2e"})
+
 
 def evaluate_invariants(
     diff: str,
@@ -55,7 +62,7 @@ def evaluate_invariants(
 
     coverage = 1.0 if results else 0.0
     if expected_violated is None:
-        recall = precision = 0.0
+        recall = precision = None
     else:
         recall, precision = _score_against_labels(results, list(expected_violated))
 
@@ -122,7 +129,7 @@ def _check_invariant(diff: str, invariant: Invariant, graph: Any, evidence: list
     if not query:
         return False, "empty query (fail-closed)", True
     if query == "secrets_scan":
-        return SECRET_RE.search(diff or "") is None, "diff text scanned", True
+        return _scan_secrets(diff)
     if query == "provenance_check":
         return bool(evidence), f"evidence items={len(evidence)}", True
     if query.startswith("forbid_call:"):
@@ -140,6 +147,41 @@ def _coverage_note(examined: int, edge_type: str, name: str) -> str:
     if examined <= 0:
         return f"no {edge_type} edges in graph — vacuous pass for {name!r}"
     return f"examined {examined} {edge_type} edges for {name!r}"
+
+
+def _is_allowlisted(path: str) -> bool:
+    parts = [p.lower() for p in path.replace("\\", "/").split("/")]
+    return any(p in ALLOWLISTED_DIRS for p in parts) or path.endswith(".example")
+
+
+def _scan_secrets(diff: str) -> tuple[bool, str, bool]:
+    """Scan added lines per file. A hit outside allowlisted paths is a
+    rejection. A hit confined to allowlisted paths (fixtures, examples)
+    is inability (`established=False` → INCONCLUSIVE), not a pass and not
+    a FAIL — the two labeled sets stay separate instead of contesting one
+    label."""
+    from src.verification.diffmap import parse_diff_files
+    if not diff:
+        return True, "empty diff, nothing to scan", True
+    sections = re.split(r"(?m)^diff --git ", diff)
+    hit_files: list[str] = []
+    if len(sections) <= 1:
+        # No file headers: scan whole text as one unscoped unit.
+        if SECRET_RE.search(diff):
+            return False, "secret-shaped string (unscoped diff)", True
+        return True, "diff text scanned", True
+    for section in sections[1:]:
+        header, _, body = section.partition("\n@@")
+        files = parse_diff_files("diff --git " + header)
+        added = "\n".join(l[1:] for l in body.splitlines() if l.startswith("+"))
+        if SECRET_RE.search(added):
+            hit_files.extend(files or ["<unknown>"])
+    if not hit_files:
+        return True, "diff text scanned", True
+    outside = [f for f in hit_files if not _is_allowlisted(f)]
+    if outside:
+        return False, f"secret-shaped string in {outside[0]}", True
+    return True, f"secret-shaped strings only in allowlisted paths {sorted(set(hit_files))}", False
 
 
 def _graph_calls(graph: Any, name: str, edge_type: str) -> bool:
