@@ -149,9 +149,16 @@ def _coverage_note(examined: int, edge_type: str, name: str) -> str:
     return f"examined {examined} {edge_type} edges for {name!r}"
 
 
-def _is_allowlisted(path: str) -> bool:
+def _is_allowlisted(path: str) -> str | None:
+    """Return the matching allowlist rule, or None. The rule name travels
+    into the verdict so a reviewer sees *why* a hit was demoted."""
     parts = [p.lower() for p in path.replace("\\", "/").split("/")]
-    return any(p in ALLOWLISTED_DIRS for p in parts) or path.endswith(".example")
+    for p in parts:
+        if p in ALLOWLISTED_DIRS:
+            return f"directory {p!r}"
+    if path.endswith(".example"):
+        return "suffix '.example'"
+    return None
 
 
 def _scan_secrets(diff: str) -> tuple[bool, str, bool]:
@@ -178,10 +185,12 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool]:
             hit_files.extend(files or ["<unknown>"])
     if not hit_files:
         return True, "diff text scanned", True
-    outside = [f for f in hit_files if not _is_allowlisted(f)]
+    outside = [f for f in hit_files if _is_allowlisted(f) is None]
     if outside:
         return False, f"secret-shaped string in {outside[0]}", True
-    return True, f"secret-shaped strings only in allowlisted paths {sorted(set(hit_files))}", False
+    rules = sorted({_is_allowlisted(f) or "?" for f in set(hit_files)})
+    return True, (f"would have FAILED, demoted because {', '.join(rules)} matched "
+                  f"{sorted(set(hit_files))}"), False
 
 
 def _graph_calls(graph: Any, name: str, edge_type: str) -> bool:

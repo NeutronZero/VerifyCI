@@ -97,15 +97,31 @@ def load_cases():
 
 def test_labeled_ground_truth_meets_baseline():
     cases = load_cases()
-    assert len(cases) == 12
-    sources = {json.loads(l)["source"] for l in
+    assert len(cases) == 17
+    by_item = {json.loads(l)["id"]: json.loads(l) for l in
                LABELS.read_text(encoding="utf-8").splitlines() if l.strip()}
+    # Every label carries provenance; the current set predates the blind
+    # protocol, so all are author-informed and the baseline inherits that.
+    assert {v.get("label_provenance") for v in by_item.values()} == {"author-informed"}
+    sources = {v["source"] for v in by_item.values()}
     assert {"synthetic", "adversarial"} <= sources
     assert any(s.startswith("flask-history:") for s in sources)
     metrics = score_labeled(cases)
     assert metrics.check_coverage == 1.0
     assert metrics.detection_recall >= BASELINE_RECALL - EPSILON
     assert metrics.detection_precision >= BASELINE_PRECISION - EPSILON
+
+
+def test_baseline_reported_by_stratum():
+    # When blind-labeled cases arrive, this is where their stratum gets its
+    # own baseline. Today the blind stratum is empty by construction.
+    by_item = [json.loads(l) for l in
+               LABELS.read_text(encoding="utf-8").splitlines() if l.strip()]
+    strata = {}
+    for item in by_item:
+        strata.setdefault(item.get("label_provenance", "unlabeled"), []).append(item["id"])
+    assert set(strata) == {"author-informed"}
+    assert len(strata["author-informed"]) == 17
 
 
 def test_fixture_demotes_instead_of_flagging():
@@ -125,4 +141,4 @@ def test_fixture_demotes_instead_of_flagging():
     (check,), _ = evaluate_invariants(diff, [inv], graph=None)
     assert check.passed is True
     assert check.established is False
-    assert "allowlisted" in check.explanation
+    assert "demoted because directory 'examples'" in check.explanation

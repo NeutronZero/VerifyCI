@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased — labels with provenance, decisions with teeth
+## Unreleased — agent-regen stability run (0/20 divergence)
+
+20 Flask commits regenerated from messages; human vs regen verdicts all
+PASS/PASS. Stability under reformulation proven (including one structural
+variant); discrimination not tested — nothing in the set is wrong. The
+`a411a243` variant (property access sets `accessed`, human helper does
+not) is behavior-different and still PASS: the documented scope boundary
+doing exactly what it says. Methodology traps recorded: silent empty
+`git show` on 5 commits, UTF-16 redirect encoding.
 
 Suite 183 → 205. No new subsystems.
 

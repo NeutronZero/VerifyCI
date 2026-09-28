@@ -402,3 +402,34 @@ fixture-aware rule risking false negatives on real secrets) is recorded
 here for the next decision, not decided here. Note the search itself is the
 method: pickaxe `-S` over full history found nothing (framework code only),
 the added-lines sweep found one.
+
+## Agent-regenerated patches: 0/20 divergence (stability, not discrimination)
+
+20 small Flask commits; each change regenerated from its message (17 admit
+essentially one edit and coincide; 3 doc rewordings plus 1 structural
+variant written fresh). Human verdict vs regen verdict per commit:
+
+```text
+20/20 PASS/PASS — divergent: 0/20
+```
+
+What this shows: the gate is stable under reformulation — same verdict on
+reworded docs and on a restructured refactor. What it does not show:
+discrimination, because nothing in the set is wrong.
+
+One case deserves precision over comfort. The `a411a243` regen inlines the
+session open via the existing `session` property instead of extracting a
+`_get_session` helper. That property access sets `accessed = True` as a
+side effect; the human version opens without marking accessed. The
+behavior differs (cookie/session bookkeeping downstream) and the gate
+says PASS on both. That is the exact population the product exists for —
+well-formed, subtly behavior-different — and structural verification
+cannot see it. Consistent with the documented scope boundary
+(provenance + impact, not semantic intent), and the reason the boundary
+is stated as a limitation rather than a detail.
+
+Methodology notes: regen patches target parent state; both sides verified
+against the current graph. `git show` silently emitted empty output for 5
+of the 20 commits (mechanism unknown); `git diff sha^ sha` retrieved them.
+PowerShell-redirected patch files land UTF-16 and must be converted before
+parsing — second occurrence of the encoding trap, now a checklist item.
