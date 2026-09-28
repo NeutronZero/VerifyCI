@@ -152,6 +152,25 @@ def test_ungraphable_paths_are_inconclusive():
         assert cert.conclusion.result == "inconclusive"
 
 
+def test_module_only_grounding_is_inconclusive():
+    # The enum gap made concrete: a diff touching only content the
+    # extractor cannot map (here simulated by a MODULE-only entity list)
+    # must not verify on file-existence alone.
+    from src.contracts.entity import Entity, EntityType
+    module = Entity(
+        repository_id="r", logical_entity_id="l",
+        revision_entity_id="m1", type=EntityType.MODULE, name="relay.h",
+        file_path="firmware/relay.h", line_start=1, line_end=1,
+        language="c", source_hash="h", revision_id="rev1",
+    )
+    diff = ("diff --git a/firmware/relay.h b/firmware/relay.h\n"
+            "--- a/firmware/relay.h\n+++ b/firmware/relay.h\n")
+    cert = SemiFormalReasoner().verify(diff, graph=None, entities=[module])
+    assert cert.certificate_verified is False
+    assert cert.conclusion.result == "inconclusive"
+    assert "module_only" in cert.conclusion.reasoning
+
+
 def test_uningestible_files_dont_veto_code():
     # CHANGES.rst is legitimately outside the graph; it must not block
     # verification of the code file in the same diff.

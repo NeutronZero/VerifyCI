@@ -128,6 +128,11 @@ def _classify_node(node, language: str, stack: Optional[list[tuple[str, str]]] =
         if node.type == "function_definition":
             return EntityType.METHOD if stack and stack[-1][0] == "class" else EntityType.FUNCTION
         if node.type in ("class_specifier", "struct_specifier"):
+            # A bare `struct Foo` in type position (elaborated type
+            # specifier, forward declaration) is a *reference*, not a
+            # definition. Only a body makes it an entity.
+            if not any(c.type == "field_declaration_list" for c in node.children):
+                return None
             return EntityType.CLASS
         if node.type == "type_definition":
             return EntityType.TYPE

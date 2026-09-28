@@ -83,6 +83,22 @@ def test_bare_relative_import_pinned():
     assert imports == ["."]
 
 
+def test_struct_reference_is_not_an_entity():
+    # `struct Point *p;` mentions the type without defining it: elaborated
+    # type specifiers and forward declarations emit nothing. Only a body
+    # (field_declaration_list) makes a CLASS.
+    from src.contracts.entity import EntityType
+    from src.ingestion.extractor import extract_entities
+    from src.ingestion.parser import TreeSitterParser
+    src = (b"struct Point { int x; };\n"
+           b"struct Point *p;\n"
+           b"struct Empty;\n")
+    parsed = TreeSitterParser().parse("x.c", src, "c")
+    classes = sorted(
+        e.name for e in extract_entities(parsed, "r", "rev") if e.type == EntityType.CLASS)
+    assert classes == ["Point"]
+
+
 def test_docstring_code_examples_are_not_entities():
     # A regex ground truth would count `ghost`; the AST correctly ignores it.
     # Ground-truth annotation must be AST-aware (or human-read), not regex.

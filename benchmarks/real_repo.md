@@ -520,3 +520,15 @@ Deliberately excluded and documented as a known gap: `enum class
 TripReason` (relay.h) — the extractor has no ENUM mapping. C++ grounding
 therefore rests on functions/structs; enum-typed claims are invisible to
 the graph. Stated here so the firmware numbers are not over-read.
+
+# Overload/duplicate-key audit + enum-only false PASS (both fixed)
+
+Duplicate `(file, name)` scan across the staged copy found the collisions
+are overwhelmingly elaborated type references (`struct foo` in type
+position parsed as `struct_specifier`), not overloads: 67 hits of
+`libusb_device_handle`-as-CLASS in one vendored file. Struct/class
+specifiers without a body (`field_declaration_list`) no longer emit
+entities. Separately, an enum-only diff (`TripReason` + enumerator, the
+enum unmapped) verified PASS on MODULE-existence alone — the exact false
+confidence path predicted. Diffs grounding only to MODULE rows are now
+INCONCLUSIVE (`module_only` in the rationale). Both pinned by tests.

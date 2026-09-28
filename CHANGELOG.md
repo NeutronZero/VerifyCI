@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — struct references, module-only grounding, overload audit
+
+- Elaborated type references (`struct Foo` in type position, forward
+  declarations) no longer emit CLASS entities; only bodied
+  struct/class-specifiers do. The duplicate-key scan that motivated this
+  found references, not overloads, as the dominant collision source.
+- Enum-only (or otherwise MODULE-only) diffs are INCONCLUSIVE, not PASS:
+  seeds exclude MODULE rows, `module_only` travels in the rationale. The
+  predicted enum false-confidence path, closed with its own test.
+
 ## Unreleased — blind C++ annotation round (firmware)
 
 Suite 211, no product-code change. `benchmarks/score_cpp.py`: 81

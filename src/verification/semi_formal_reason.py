@@ -19,6 +19,18 @@ from src.graph.traverse import CALL_FLOW_TYPES, derive_node_map, traverse
 from src.verification.diffmap import map_files_to_entity_ids, parse_diff_files
 
 
+def _is_code_entity(entity: Any) -> bool:
+    """Anything but a MODULE row. Payloads without type info (test fakes)
+    count as code so unit tests exercise the grounding logic, not the guard."""
+    t = getattr(entity, "type", None)
+    if t is None:
+        return True
+    from src.contracts.entity import EntityType
+    if isinstance(t, EntityType):
+        return t != EntityType.MODULE
+    return str(t) != "MODULE"
+
+
 @dataclass
 class DeterministicCheck:
     checker_id: str
@@ -43,12 +55,22 @@ class SemiFormalReasoner:
         if entities is None:
             entities = [d for d in node_data if hasattr(d, "file_path") and hasattr(d, "revision_entity_id")]
         mapping = map_files_to_entity_ids(files, entities)
+        by_id = {getattr(e, "revision_entity_id", None): e for e in entities}
         seeds = sorted({eid for eids in mapping.values() for eid in eids})
+        # MODULE entities prove a file exists, not that any code in it is
+        # known. A diff grounding only to MODULE rows (e.g. an enum-only
+        # change, enums being unmapped) must not verify.
+        code_seeds = sorted(eid for eid in seeds if _is_code_entity(by_id.get(eid)))
+        module_only = sorted(
+            f for f, eids in mapping.items()
+            if eids and all(not _is_code_entity(by_id.get(eid)) for eid in eids)
+        )
+        seeds = code_seeds
         if node_map is None:
             node_map = derive_node_map(graph)
         paths = self._trace_from_seeds(graph, seeds, node_map)
         evidence = self._collect_evidence(seeds, entities)
-        det_checks = self._run_deterministic_checks(files, mapping, paths, evidence)
+        det_checks = self._run_deterministic_checks(files, mapping, paths, evidence, module_only)
         conclusion = self._derive_conclusion(paths, evidence, det_checks)
         verified = (
             bool(det_checks)
@@ -127,13 +149,19 @@ class SemiFormalReasoner:
 
     def _run_deterministic_checks(self, files: list[str], mapping: dict,
                                   paths: list[ExecutionTrace],
-                                  evidence: list[FileEvidence]) -> list[DeterministicCheck]:
+                                  evidence: list[FileEvidence],
+                                  module_only: list[str] | None = None) -> list[DeterministicCheck]:
         from src.ingestion.language import is_ingestible
         grounded = [f for f, eids in mapping.items() if eids]
         # Only ingestible-but-absent files veto: docs/config outside the
         # graph are legitimately ungroundable, not verification failures.
         ungrounded = [f for f in files
                       if f not in grounded and is_ingestible(f)]
+        module_only = module_only or []
+        seeds_ok = bool(files) and not ungrounded and not module_only
+        detail = f"grounded={len(grounded)} ungrounded={ungrounded}"
+        if module_only:
+            detail += f" module_only={module_only}"
         return [
             DeterministicCheck(
                 checker_id="diff_parsed",
@@ -142,8 +170,8 @@ class SemiFormalReasoner:
             ),
             DeterministicCheck(
                 checker_id="seeds_grounded",
-                passed=bool(files) and not ungrounded,
-                detail=f"grounded={len(grounded)} ungrounded={ungrounded}",
+                passed=seeds_ok,
+                detail=detail,
             ),
             DeterministicCheck(
                 checker_id="trace_supported",
@@ -163,7 +191,12 @@ class SemiFormalReasoner:
         if det_checks and all(c.passed for c in det_checks) and paths and evidence:
             return Conclusion(result="pass", reasoning="deterministic_checks_passed")
         missing = [c.checker_id for c in det_checks if not c.passed] if det_checks else ["no_checks"]
-        return Conclusion(result="inconclusive", reasoning=f"insufficient_evidence:{','.join(missing)}")
+        reasoning = f"insufficient_evidence:{','.join(missing)}"
+        sg = next((c.detail for c in det_checks
+                   if c.checker_id == "seeds_grounded" and not c.passed), "")
+        if sg:
+            reasoning += f" ({sg})"
+        return Conclusion(result="inconclusive", reasoning=reasoning)
 
     def _compute_confidence(self, det_checks: list[DeterministicCheck]) -> float:
         if not det_checks:
