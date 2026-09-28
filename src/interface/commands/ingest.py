@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.ingestion.language import detect_language
+from src.ingestion.language import INGESTIBLE_EXTENSIONS, detect_language
 from src.ingestion.parser import TreeSitterParser, compute_source_hash
 from src.ingestion.extractor import extract_entities, extract_edges
 from src.ingestion.dependency import extract_dependencies
@@ -8,8 +8,6 @@ from src.storage.graph_store import GraphStore
 from src.storage.metadata import MetadataStore
 from src.storage.revision import create_revision
 
-SOURCE_EXTS = {".py": "python", ".c": "c", ".cpp": "cpp", ".cc": "cpp", ".h": "c", ".hpp": "cpp"}
-TEXT_DOCS = {".md": "markdown", ".txt": "txt"}
 MANIFESTS = ("package.json", "requirements.txt", "Cargo.toml", "pom.xml", "go.mod")
 
 
@@ -23,12 +21,10 @@ def _collect(repo: Path) -> tuple[list[tuple[str, str, bytes]], list[tuple[str, 
     for file in sorted(repo.rglob("*")):
         if ".verifyci" in file.parts or not file.is_file():
             continue
-        if file.suffix in SOURCE_EXTS:
-            language = SOURCE_EXTS[file.suffix]
-            sources.append((str(file.relative_to(repo)), language, file.read_bytes()))
-        elif file.suffix in TEXT_DOCS:
+        if file.suffix.lower() in INGESTIBLE_EXTENSIONS:
+            language = detect_language(str(file))
             # Docs have no AST: parsed with tree=None yields a MODULE entity.
-            sources.append((str(file.relative_to(repo)), TEXT_DOCS[file.suffix], file.read_bytes()))
+            sources.append((str(file.relative_to(repo)), language, file.read_bytes()))
         elif file.name in MANIFESTS:
             texts.append((str(file.relative_to(repo)), file.read_text(errors="replace")))
     manifest = [(rel, compute_source_hash(src)) for rel, _, src in sources]

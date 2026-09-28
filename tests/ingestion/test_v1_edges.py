@@ -50,3 +50,25 @@ def test_entities_carry_source_snippet():
     parsed = TreeSitterParser().parse("t.py", b"def f():\n    return 42\n", "python")
     entities = [e for e in extract_entities(parsed, "r", "rev") if e.name == "f"]
     assert entities and "return 42" in (entities[0].metadata or {}).get("snippet", "")
+
+
+def test_docstring_code_examples_are_not_entities():
+    # A regex ground truth would count `ghost`; the AST correctly ignores it.
+    # Ground-truth annotation must be AST-aware (or human-read), not regex.
+    from src.ingestion.extractor import extract_entities
+    from src.ingestion.parser import TreeSitterParser
+    src = (
+        "def f():\n"
+        '    """Example:\n'
+        "\n"
+        "    .. code-block:: python\n"
+        "\n"
+        "        def ghost():\n"
+        "            pass\n"
+        '    """\n'
+        "    return 1\n"
+    )
+    parsed = TreeSitterParser().parse("t.py", src.encode(), "python")
+    names = {e.name for e in extract_entities(parsed, "r", "rev")}
+    assert "f" in names
+    assert "ghost" not in names

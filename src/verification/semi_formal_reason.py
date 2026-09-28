@@ -128,8 +128,12 @@ class SemiFormalReasoner:
     def _run_deterministic_checks(self, files: list[str], mapping: dict,
                                   paths: list[ExecutionTrace],
                                   evidence: list[FileEvidence]) -> list[DeterministicCheck]:
+        from src.ingestion.language import is_ingestible
         grounded = [f for f, eids in mapping.items() if eids]
-        ungrounded = [f for f in files if f not in grounded]
+        # Only ingestible-but-absent files veto: docs/config outside the
+        # graph are legitimately ungroundable, not verification failures.
+        ungrounded = [f for f in files
+                      if f not in grounded and is_ingestible(f)]
         return [
             DeterministicCheck(
                 checker_id="diff_parsed",

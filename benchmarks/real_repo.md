@@ -224,3 +224,95 @@ that garbage and returned INCONCLUSIVE. Re-ran with clean UTF-8.)
   `get_current_entity`) with independent tests, so they cannot re-merge.
 - Frozen UTF-16 regression fixture (`tests/verification/test_diffmap.py`):
   NUL-interleaved diff garbage yields no seeds, never throws.
+
+---
+
+# Real-Repository Measurement — Flask (pallets/flask @ d73fa1c, 2026-09-08)
+
+Cloned depth-10 to temp (not `samples/`). Chosen because it is known ground:
+decorators with arguments, `@overload`s, property getter/setter pairs,
+nested decorator factories, docstring code examples — the constructs the
+extractor had never been measured against. Ground truth in
+`benchmarks/score_flask.py`, read file-by-file by a human.
+
+## Ingest
+
+```text
+files=99 entities=4119 edges=7672 seconds=4.0
+parse+extract total: 0.8s over 83 code files (DB writes dominate at this scale)
+top slowest file: tests/test_basic.py 0.190s (505 entities, 1319 edges)
+```
+
+No file dominates; no 50k-line generated file in this repo.
+
+```text
+entities: PARAMETER 1827, FUNCTION 1055, IMPORT 526, METHOD 376, CLASS 149, MODULE 99
+edges: CONTAINS 4163, HAS_NAME 1580, CALLS direct 576, REFERENCES 576,
+       IMPORTS 526, CALLS recursive 69, INHERITS 36
+```
+
+METHOD/IMPORTS/INHERITS all non-zero — class-scope walk, import extractor,
+and inheritance paths all exercised (the `aci stats` smoke check from the
+brief passes).
+
+## Extraction (142 hand-read entities, 7 files)
+
+```text
+Results: TP=142 FP=0 FN=0
+Precision: 1.00  (target > 0.85)
+Recall: 1.00     (target > 0.80)
+```
+
+With one correction that matters more than the score: the first pass read
+TP=142 FP=0 FN=8 (R=0.95), and all 8 "misses" were docstring `code-block`
+examples my regex listing had counted as code. Tree-sitter correctly
+ignores them; the ground truth was wrong, not the extractor. Corrected the
+truth (142 entries), pinned with
+`test_docstring_code_examples_are_not_entities`. Lesson recorded:
+regex-derived ground truth overcounts on doc-heavy repos; annotation must
+be AST-aware or human-read.
+
+Duplicate-identity rate at scale: 87/4103 emitted (2.1%), every case a
+same-name/same-scope redefinition (`@overload` triplicates, property
+getter/setter pairs, descriptor overloads, duplicate nested defs).
+First-wins per the recorded tradeoff; rate now measured, not guessed.
+
+## Queries (dense / fused / reranked × hash / st)
+
+```text
+Q: route decorator register url rule
+  hash  dense=22 fused=31 reranked=None    st dense=17 fused=20 reranked=None
+Q: session cookie secure flag
+  hash  dense=3 fused=4 reranked=4         st dense=3 fused=4 reranked=4
+Q: stream template generator
+  hash  dense=1 fused=1 reranked=1         st dense=1 fused=1 reranked=1
+Q: teardown request handler
+  hash  dense=10 fused=7 reranked=7        st dense=9 fused=8 reranked=8
+Q: class based view dispatch
+  hash  dense=1 fused=1 reranked=None      st dense=8 fused=4 reranked=None
+```
+
+Reranker drops fused top-1/top-2 off the top-10 twice more (route,
+class-view) — the demotion pattern replicates on a second repo. Neither
+dense provider dominates (st wins route-fused 20 vs 31; hash wins
+class-view dense 1 vs 8 and teardown-fused 7 vs 8; two ties).
+Per-arm table stands as the attribution procedure.
+
+## Commits (last 5, real diffs via `git show`)
+
+```text
+d73fa1cd | files=['src/flask/app.py']                              | PASS
+d318b683 | files=['src/flask/helpers.py']                          | PASS
+2a8a38b0 | files=['src/flask/views.py']                            | PASS
+d8eaaba8 | files=[] (merge, empty diff without -m)                 | INCONCLUSIVE
+89992954 | files=[CHANGES.rst + 2 code files]                      | PASS
+```
+
+Distribution 4 PASS / 1 INCONCLUSIVE / 0 FAIL. The merge-commit empty
+output is correct behavior on empty input (merges need `-m` handling —
+recorded limitation, not a bug). The last commit initially read
+INCONCLUSIVE because `CHANGES.rst` (uningestible) vetoed the whole diff;
+fixed same session: only ingestible-but-absent files veto
+(`INGESTIBLE_EXTENSIONS` single-sourced in `ingestion/language.py`, shared
+by ingest collection and grounding). Failing to do this would have made
+every docs-touching commit unverifiable — the common case, not the edge.

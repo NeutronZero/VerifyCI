@@ -6,11 +6,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.ingestion.parser import TreeSitterParser, compute_source_hash, ParsedFile
 from src.ingestion.extractor import extract_entities, extract_edges
-from src.ingestion.language import detect_language
+from src.ingestion.language import INGESTIBLE_EXTENSIONS, detect_language
 from src.storage.graph_store import GraphStore
 from src.storage.revision import create_revision
 
-SOURCE_EXTS = {".py", ".c", ".cpp", ".cc", ".h", ".hpp", ".md", ".txt"}
+SOURCE_EXTS = INGESTIBLE_EXTENSIONS
 
 
 def ingest(repo_path: str, db_path: str):

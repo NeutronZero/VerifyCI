@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — Flask real-repo run (known repo, expect drops)
+
+Suite 169 → 173. Measurements only, plus one same-session fix the run forced.
+
+- Flask @ d73fa1c (depth-10 clone to temp): 99 files → 4119 entities +
+  7672 edges in 4.0s (parse+extract 0.8s; DB writes dominate small-scale).
+  Type split healthy (METHOD 376, IMPORTS 526, INHERITS 36).
+- Extraction TP=142 FP=0 FN=0 over 142 hand-read entities (decorators,
+  overloads, nesting, docstring traps). First pass read 0.95 — all 8 misses
+  were docstring `code-block` examples the regex listing counted and the AST
+  correctly ignores; truth corrected, pinned by test. Duplicate-identity
+  rate at scale: 87/4103 (2.1%), all same-name redefinitions.
+- Queries: reranker demotes fused top-1/top-2 off-page twice more (route,
+  class-view). Neither dense provider dominates (1 st win, 2 hash wins,
+  2 ties).
+- Commits: 4 PASS / 1 INCONCLUSIVE (merge, empty diff) / 0 FAIL.
+- Found by measuring: uningestible files (CHANGES.rst) vetoed whole diffs;
+  only ingestible-but-absent files veto now (`INGESTIBLE_EXTENSIONS`
+  single-sourced, shared by ingest and grounding). Details + histograms in
+  `benchmarks/real_repo.md`; truth in `benchmarks/score_flask.py`.
+
 ## Unreleased — dense-embedding run executed (queue now empty)
 
 - `SentenceTransformerProvider` (lazy, local weights only) + per-arm table

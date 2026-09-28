@@ -150,3 +150,27 @@ def test_ungraphable_paths_are_inconclusive():
         cert = SemiFormalReasoner().verify(diff, graph)
         assert cert.certificate_verified is False
         assert cert.conclusion.result == "inconclusive"
+
+
+def test_uningestible_files_dont_veto_code():
+    # CHANGES.rst is legitimately outside the graph; it must not block
+    # verification of the code file in the same diff.
+    from src.verification.diffmap import parse_diff_files
+    diff = (
+        "diff --git a/CHANGES.rst b/CHANGES.rst\n"
+        "--- a/CHANGES.rst\n"
+        "+++ b/CHANGES.rst\n"
+        "diff --git a/src/app.py b/src/app.py\n"
+        "--- a/src/app.py\n"
+        "+++ b/src/app.py\n"
+    )
+    assert parse_diff_files(diff) == ["CHANGES.rst", "src/app.py"]
+    graph = FakeGraph([_payload("e1")])
+    cert = SemiFormalReasoner().verify(diff, graph)
+    assert cert.certificate_verified is True
+
+
+def test_merge_empty_diff_is_inconclusive():
+    graph = FakeGraph([_payload("e1")])
+    cert = SemiFormalReasoner().verify("", graph)
+    assert cert.certificate_verified is False
