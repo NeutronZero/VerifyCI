@@ -14,7 +14,6 @@ Cross-boundary types: `Constraint`, `Budget`, `SourceChunk`,
 `NodeResult` — defined alongside the frozen schemas above.
 
 ## V1 corrections (frozen plan amendments)
-
 - `identity.compute_logical_entity_id` takes an optional parent `scope`
   (default `""`). A method `login` on class `AuthService` must hash
   differently from a top-level function `login`; the frozen four-argument
@@ -26,6 +25,19 @@ Cross-boundary types: `Constraint`, `Budget`, `SourceChunk`,
 - `InvariantMetrics.detection_recall/detection_precision` are only defined
   against a labeled ground-truth set (`score_labeled`); without labels both
   report 0.0 ("unmeasured").
+
+## Set-membership principle
+
+Any time policy depends on "is X in set S", S must have exactly one
+definitional home, or the branches drift. Two instances so far:
+
+- Revision identity: valid-time (`get_entity_as_of`), latest-live
+  (`get_current_entity`), and by-name lookup each ask "which version" —
+  separate methods, independent tests, no shared WHERE clause.
+- Ingestible extensions: ingest collection, diff grounding, and benchmark
+  collection all read `INGESTIBLE_EXTENSIONS` from `ingestion/language.py`.
+  A file type added in one place and not another used to flip whole diffs
+  from PASS to INCONCLUSIVE silently.
 
 ## Not Frozen
 
