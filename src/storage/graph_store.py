@@ -179,11 +179,11 @@ class GraphStore:
         ).fetchall()
         live = set(live_logical_ids)
         gone = [(r[0], r[1]) for r in prev if r[1] not in live]
-        gone_ids = {r[0] for r in gone}
-        for rid in gone_ids:
-            self.conn.execute(
+        gone_ids = [r[0] for r in gone]
+        if gone_ids:
+            self.conn.executemany(
                 "UPDATE entities SET valid_until = ?, t_expired = ? WHERE revision_entity_id = ?",
-                (now, now, rid),
+                [(now, now, rid) for rid in gone_ids],
             )
         n_d = 0
         if gone_ids:
@@ -203,18 +203,19 @@ class GraphStore:
     def close_superseded_entities(self, logical_ids: list[str], current_revision_id: str,
                                   now: float) -> int:
         """Close prior live versions (valid_until/t_expired) superseded by the
-        current revision. Returns rows closed."""
-        total = 0
-        for logical_id in set(logical_ids):
-            cur = self.conn.execute(
-                "UPDATE entities SET valid_until = ?, t_expired = ?"
-                " WHERE logical_entity_id = ? AND revision_id != ?"
-                " AND valid_until IS NULL",
-                (now, now, logical_id, current_revision_id),
-            )
-            total += cur.rowcount
+        current revision. Single UPDATE, not one per id. Returns rows closed."""
+        ids = list(set(logical_ids))
+        if not ids:
+            return 0
+        placeholders = ",".join("?" for _ in ids)
+        cur = self.conn.execute(
+            "UPDATE entities SET valid_until = ?, t_expired = ?"
+            f" WHERE logical_entity_id IN ({placeholders}) AND revision_id != ?"
+            " AND valid_until IS NULL",
+            (now, now, *ids, current_revision_id),
+        )
         self._maybe_commit()
-        return total
+        return cur.rowcount
 
     def close_superseded_edges(self, new_edges: list, current_revision_id: str,
                                now: float) -> int:

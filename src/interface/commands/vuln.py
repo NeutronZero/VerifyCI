@@ -34,13 +34,16 @@ def run_vuln(db_path: str | None = None, cache_path: str = "./storage/vuln_cache
     except (sqlite3.OperationalError, OSError):
         rows = []
     import json
-    for (meta_json,) in rows:
-        try:
-            meta = json.loads(meta_json) if meta_json else {}
-        except ValueError:
-            continue
-        edge = type("Edge", (), {"metadata": meta})()
-        for vuln in cache.lookup(edge):
-            findings.append({"package": meta.get("package"), **vuln})
+    try:
+        for (meta_json,) in rows:
+            try:
+                meta = json.loads(meta_json) if meta_json else {}
+            except ValueError:
+                continue
+            edge = type("Edge", (), {"metadata": meta})()
+            for vuln in cache.lookup(edge):
+                findings.append({"package": meta.get("package"), **vuln})
+    finally:
+        cache.close()
     return {"db_path": db, "packages_checked": len(rows), "findings": findings,
             "imported": imported}

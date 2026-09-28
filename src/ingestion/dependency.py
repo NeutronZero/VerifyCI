@@ -128,12 +128,21 @@ class VulnerabilityCache:
     def __init__(self, cache_path: Path | str):
         self.cache_path = Path(cache_path)
         self._cache: dict[str, list[dict]] = {}
+        self._conn: sqlite3.Connection | None = None
 
     def _connect(self) -> sqlite3.Connection:
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(self.cache_path))
-        conn.execute(self.SCHEMA)
-        return conn
+        # One shared connection per cache instance: lookup() is called per
+        # package in a loop, and connecting per miss dominated its cost.
+        if self._conn is None:
+            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(str(self.cache_path))
+            self._conn.execute(self.SCHEMA)
+        return self._conn
+
+    def close(self):
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
 
     def lookup(self, edge: Edge) -> list[dict]:
         pkg = edge.metadata.get("package", "")
@@ -141,13 +150,10 @@ class VulnerabilityCache:
             return self._cache[pkg]
         try:
             conn = self._connect()
-            try:
-                rows = conn.execute("SELECT detail_json FROM vulns WHERE package = ?", (pkg,)).fetchall()
-                result = [json.loads(r[0]) for r in rows]
-                self._cache[pkg] = result
-                return result
-            finally:
-                conn.close()
+            rows = conn.execute("SELECT detail_json FROM vulns WHERE package = ?", (pkg,)).fetchall()
+            result = [json.loads(r[0]) for r in rows]
+            self._cache[pkg] = result
+            return result
         except OSError:
             return self._cache.get(pkg, [])
 
@@ -166,6 +172,6 @@ class VulnerabilityCache:
                     count += 1
             conn.commit()
         finally:
-            conn.close()
+            self.close()  # writes done: drop the shared handle so no stale cursor survives
         self._cache.clear()
         return count

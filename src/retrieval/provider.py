@@ -1,6 +1,16 @@
 from abc import ABC, abstractmethod
 import hashlib
 import math
+from functools import lru_cache
+
+
+@lru_cache(maxsize=32768)
+def _trigram_bucket(trigram: str, dimensions: int) -> int:
+    # Trigram hashing dominates embedding cost and repeats heavily: the same
+    # corpus is re-embedded per query, and natural text reuses trigrams.
+    # Cache is keyed (trigram, dimensions); entries are small ints.
+    digest = hashlib.sha256(trigram.encode("utf-8")).digest()
+    return int.from_bytes(digest[:2], "little") % dimensions
 
 
 class EmbeddingProvider(ABC):
@@ -29,9 +39,7 @@ class HashEmbeddingProvider(EmbeddingProvider):
         vec = [0.0] * self.dimensions
         lowered = f" {text.lower()} "
         for i in range(len(lowered) - 2):
-            trigram = lowered[i:i + 3]
-            digest = hashlib.sha256(trigram.encode("utf-8")).digest()
-            vec[int.from_bytes(digest[:2], "little") % self.dimensions] += 1.0
+            vec[_trigram_bucket(lowered[i:i + 3], self.dimensions)] += 1.0
         norm = math.sqrt(sum(v * v for v in vec))
         if norm > 0:
             vec = [v / norm for v in vec]

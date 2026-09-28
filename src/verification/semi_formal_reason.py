@@ -15,7 +15,7 @@ from typing import Any
 from src.contracts.verification_ir import (
     Certificate, Premise, FileEvidence, ExecutionTrace, Conclusion,
 )
-from src.graph.traverse import CALL_FLOW_TYPES, derive_node_map, payload_id, traverse
+from src.graph.traverse import CALL_FLOW_TYPES, derive_node_map, traverse
 from src.verification.diffmap import map_files_to_entity_ids, parse_diff_files
 
 

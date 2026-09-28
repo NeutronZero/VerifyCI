@@ -1,5 +1,4 @@
 import asyncio
-import time
 import uuid
 from types import SimpleNamespace
 from typing import Any
@@ -136,7 +135,7 @@ class AsyncDAGScheduler(Scheduler):
                     self._emit("BUDGET_BREACHED", task_id, conversation_id,
                                {"nodes": len(nodes), "budget_nano_usd": budget})
                     return
-                from src.orchestration.executor import Executor, HumanReviewRequired, VerificationBlocker
+                from src.orchestration.executor import Executor
                 executor = Executor()
                 shared = task.get("context", {}) or {}
                 review_status: str | None = None

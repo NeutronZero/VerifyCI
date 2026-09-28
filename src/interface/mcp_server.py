@@ -1,7 +1,7 @@
 import asyncio
 from typing import Any
 
-from src.contracts.scheduler import TERMINAL_STATUSES, TaskStatus
+from src.contracts.scheduler import TERMINAL_STATUSES
 
 
 class MCPServer:

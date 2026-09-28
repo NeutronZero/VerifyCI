@@ -1,4 +1,3 @@
-from typing import Optional
 
 from src.contracts.memory_types import ProjectionState
 

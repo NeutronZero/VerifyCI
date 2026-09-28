@@ -1,5 +1,5 @@
 import time
-from typing import Any, Optional
+from typing import Optional
 
 from src.contracts.entity import Entity, EntityType
 from src.contracts.edge import Edge, EdgeType, CPGEdgeSubtype

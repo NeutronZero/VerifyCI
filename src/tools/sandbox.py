@@ -2,6 +2,9 @@ import subprocess
 
 
 def run_sandboxed(command: list[str], timeout: int = 30) -> dict:
+    """Run a subprocess with a timeout. Despite the name this performs NO
+    isolation (no chroot, namespace, or allowlist): callers must treat it
+    as local execution with the current process's privileges."""
     try:
         result = subprocess.run(
             command,

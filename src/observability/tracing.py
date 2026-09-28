@@ -1,7 +1,6 @@
 from opentelemetry import trace
 
 from src.observability.genai_semconv import (
-    GenAiAgentId,
     GenAiAgentName,
     GenAiAgentDescription,
     GenAiAgentVersion,

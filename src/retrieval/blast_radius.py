@@ -1,6 +1,6 @@
 from src.contracts.verification_ir import BlastRadiusResult
 from src.graph.traverse import (
-    CALL_FLOW_TYPES, derive_node_map, iter_edge_payloads, payload_id, traverse,
+    CALL_FLOW_TYPES, derive_node_map, iter_edge_payloads, traverse,
 )
 
 

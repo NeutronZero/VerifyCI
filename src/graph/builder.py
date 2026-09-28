@@ -2,7 +2,7 @@ from typing import Any
 
 from src.contracts.entity import Entity, EntityType
 from src.contracts.edge import Edge
-from src.contracts.identity import compute_logical_entity_id, compute_revision_entity_id
+from src.contracts.identity import compute_logical_entity_id
 
 
 class GraphBuilder:
