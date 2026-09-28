@@ -160,19 +160,32 @@ incorrect aggregation. Open option (not adopted): distinct
 resolver picks last definition per Python semantics — preserves
 edit-stability for the common case, correct for the rare one.
 
-## Ollama/dense-embedding run: refined, still open
+## Dense-embedding run: executed (local weights, no daemon)
 
-No `ollama` binary and nothing on `localhost:11434` here — but that turned
-out to understate the options: the box holds cached HF weights
-(`all-MiniLM-L6-v2` embeddings, `ms-marco-MiniLM-L-6-v2` cross-encoder)
-with CPU torch, and `sentence-transformers` is already a dependency. A
-local, daemonless dense run is possible without Ollama specifically; the
-cross-encoder half above proves the procedure works end to end. The
-constraint is someone wiring a thin `SentenceTransformerEmbeddingProvider`
-(~15 lines, lazy import) and re-running the per-arm table — recorded, not
-done. The question it must answer: does *real* dense move fused ranks
-anywhere the hash baseline doesn't, with the reranker column isolating
-attribution.
+`all-MiniLM-L6-v2` was in the local cache, so the "blocked on Ollama"
+constraint dissolved into a 15-line lazy `SentenceTransformerProvider`
+(no download, no server). Same five queries, columns are dense / fused /
+reranked per provider (hash vs st):
+
+```text
+Q: beam search paths        hash  3/1/1   st  1/1/1
+Q: find dma blast radius    hash  1/1/1   st  1/1/1
+Q: incremental index dirty  hash  1/1/2   st  5/2/2
+Q: weighted shortest path   hash 292/7/2  st  2/2/2
+Q: register a new domain    hash  6/2/9   st 29/7/9
+```
+
+Neither provider dominates. Real dense fixes the paraphrase pathology
+(292→2 on `weighted`) and loses where lexical overlap was carrying
+(1→5, 6→29). Fused-with-st beats fused-with-hash on one query, loses on
+two. Same caveat as the CE run: all-MiniLM is web-trained, so lexical
+losses are expected, not evidence against dense retrieval in general.
+
+What this closes: the dense arm's contribution is now measured rather
+than asserted, and fusion-with-either is complementary, not ordered.
+What it does not justify: fusing *both* dense providers, per-shape
+provider selection, or any new stage — those are decisions for later,
+with this table as the baseline. The queue from the reviews is now empty.
 
 ## Scaling note: non-finding
 

@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased — learned-reranker run + doc decisions (no product-code change)
+## Unreleased — dense-embedding run executed (queue now empty)
+
+- `SentenceTransformerProvider` (lazy, local weights only) + per-arm table
+  on the five queries, hash vs st: beam 3/1/1→1/1/1, dma 1/1/1→1/1/1,
+  incremental 1/1/2→5/2/2, weighted 292/7/2→2/2/2, register 6/2/9→29/7/9
+  (dense/fused/reranked). Neither provider dominates; both fusions are
+  complementary. No architecture change justified — tabled as baseline.
+  Details in `benchmarks/real_repo.md`.
 
 - Ran `ms-marco-MiniLM-L-6-v2` locally (cached weights, CPU torch, no
   download/daemon) over the five queries at top-50 depth: beam 1/1/1, dma

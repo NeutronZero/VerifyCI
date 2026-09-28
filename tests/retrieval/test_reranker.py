@@ -1,4 +1,5 @@
 from src.retrieval.dense import SearchResult
+from src.retrieval.provider import SentenceTransformerProvider
 from src.retrieval.reranker import CrossEncoderReranker, OfflineReranker, Reranker
 
 
@@ -49,3 +50,10 @@ def test_rerank_never_invents_results():
     results = [SearchResult(id=str(i), score=0.0, metadata={"text": f"doc {i}"}) for i in range(4)]
     ranked = reranker.rerank("doc", results, k=10)
     assert {r.id for r in ranked} <= {r.id for r in results}
+
+
+def test_st_provider_is_lazy_and_named():
+    # Hermetic: constructing must not import torch or touch disk/network.
+    provider = SentenceTransformerProvider()
+    assert provider.model_name() == "sentence-transformers/all-MiniLM-L6-v2"
+    assert provider._embedder is None
