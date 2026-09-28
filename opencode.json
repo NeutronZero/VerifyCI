@@ -1,0 +1,19 @@
+{
+  "mcp": {
+    "verifyci": {
+      "type": "local",
+      "command": [
+        "C:\\Users\\satya\\AppData\\Local\\Programs\\Python\\Python314\\python.exe",
+        "-m",
+        "src.interface.cli",
+        "serve",
+        "--db",
+        ".verifyci/verifyci.db",
+        "--transport",
+        "stdio"
+      ],
+      "enabled": true,
+      "timeout": 15000
+    }
+  }
+}
