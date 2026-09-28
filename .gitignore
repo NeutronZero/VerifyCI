@@ -4,3 +4,5 @@ __pycache__/
 .verifyci/
 storage/verifyci.db
 storage/vuln_cache.db
+
+.ruff_cache/
