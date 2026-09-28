@@ -75,7 +75,7 @@ def test_table_inability():
 
 def test_table_all_pass():
     d = _decide([_check(passed=True), _check(passed=True, blocking=False)])
-    assert (d.status, d.rationale) == ("PASS", "all_checks_passed")
+    assert (d.status, d.rationale) == ("PASS", "all_checks_passed_behavior_not_verified")
 
 
 def test_table_nonblocking_only():

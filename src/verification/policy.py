@@ -37,7 +37,7 @@ class PolicyEvaluator:
                 report_id=report.report_id,
                 status="PASS",
                 policy_id=policy.policy_id,
-                rationale="all_checks_passed",
+                rationale="all_checks_passed_behavior_not_verified",
                 timestamp=time.time(),
             )
 

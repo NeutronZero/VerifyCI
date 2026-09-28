@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — discrimination evidence: reverts, mutants, qualified PASS
+
+- Reverted commits (`c935eace`, `5c127217`) and the judged-bad commit they
+  revert (`12c49c75`): all PASS. Gate cannot distinguish judged-wrong from
+  fix. Recorded as discrimination gap (2016 paths ground via suffix match).
+- Mutation matrix, 5 single defects on real lines, all PASS: rename/dangling
+  is a gap not scope (candidate `no_dangling_calls` checker, not built);
+  deleted call, default, dropped return, swapped comparison are outside
+  stated scope — boundary now a table, not prose.
+- PASS rationale is `all_checks_passed_behavior_not_verified`: scope
+  qualifier travels with the decision, not just the README.
+
 ## Unreleased — agent-regen stability run (0/20 divergence)
 
 20 Flask commits regenerated from messages; human vs regen verdicts all
