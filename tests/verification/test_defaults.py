@@ -26,3 +26,30 @@ def test_repo_file_extends_builtins(tmp_path):
     assert _sig(resolved)[:2] == _sig(default_invariants())
     assert ("no-sync-in-sansio", "forbid_import:..config", True) in _sig(resolved)
     assert len(resolved) == 3
+
+
+def test_malformed_yaml_is_loud(tmp_path):
+    import pytest
+    from src.verification.config import load_repo_invariants
+    bad = tmp_path / "invariants.yaml"
+    bad.write_text("invariants:\n  - id: x\n   - bad indent\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="malformed invariants file"):
+        load_repo_invariants(path=str(bad))
+
+
+def test_empty_file_is_quiet(tmp_path):
+    from src.verification.config import load_repo_invariants
+    empty = tmp_path / "invariants.yaml"
+    empty.write_text("", encoding="utf-8")
+    assert _sig(load_repo_invariants(path=str(empty))) == _sig(default_invariants())
+
+
+def test_typo_rule_blocks_everything_explicitly():
+    # Misspelled kind fails closed: surprising, intentional, and pinned.
+    from src.verification.intent_align import evaluate_invariants
+    from src.contracts.verification_ir import Invariant
+    inv = Invariant(invariant_id="typo", rule="typo",
+                    compiled_query="forbid_imports:typing", blocking=True)
+    (check,), _ = evaluate_invariants("x = 1", [inv], graph=None)
+    assert check.passed is False
+    assert "fail-closed" in check.explanation

@@ -96,6 +96,11 @@ class CheckResult:
     blocking: bool = True
     certificate: Optional[Certificate] = None
     deterministic: bool = True  # False for LLM-opinion checks (policy ignores them)
+    established: bool = True  # False when the check ran against nothing
+    # (e.g. zero relevant edges): inability, not rejection. Policy routes
+    # established blocking failures to FAIL and unestablished ones to
+    # INCONCLUSIVE — a pass-on-zero-edges is a different verdict from a
+    # pass-on-500-edges, recorded here rather than in prose.
 
 
 @dataclass(frozen=True)

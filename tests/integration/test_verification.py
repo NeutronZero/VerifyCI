@@ -166,6 +166,43 @@ def test_invariant_blocking_flag_reaches_policy():
     assert check.blocking is False
 
 
+def test_unestablished_blocking_pass_deflects_to_inconclusive():
+    # Decided explicitly: pass-on-zero-edges is a different verdict from
+    # pass-on-500-edges. A blocking check that established nothing routes
+    # to INCONCLUSIVE even when nothing failed.
+    import dataclasses
+    policy = VerificationPolicy(
+        policy_id="pol1",
+        on_failure="block",
+        on_inconclusive="human_review",
+        on_human_review="block",
+        require_deterministic_checker=True,
+    )
+    established_pass = make_check(passed=True)
+    vacuous_pass = dataclasses.replace(
+        make_check(passed=True), check_id="vacuous", established=False)
+    report = make_report([established_pass, vacuous_pass])
+    decision = PolicyEvaluator().evaluate(report, policy)
+    assert decision.status == "INCONCLUSIVE"
+    assert decision.rationale == "unestablished_blocking_checks"
+
+
+def test_unestablished_nonblocking_pass_stays_pass():
+    import dataclasses
+    policy = VerificationPolicy(
+        policy_id="pol1",
+        on_failure="block",
+        on_inconclusive="human_review",
+        on_human_review="block",
+        require_deterministic_checker=True,
+    )
+    vacuous_soft = dataclasses.replace(
+        make_check(passed=True), check_id="soft", blocking=False, established=False)
+    report = make_report([make_check(passed=True), vacuous_soft])
+    decision = PolicyEvaluator().evaluate(report, policy)
+    assert decision.status == "PASS"
+
+
 def test_semi_formal_reasoner():
     reasoner = SemiFormalReasoner(model_name="test-model")
     cert = reasoner.verify(diff="test diff", graph=None)

@@ -41,7 +41,7 @@ def evaluate_invariants(
     """
     results = []
     for invariant in invariants:
-        passed, coverage = _check_invariant(diff, invariant, graph, evidence or [])
+        passed, coverage, established = _check_invariant(diff, invariant, graph, evidence or [])
         results.append(CheckResult(
             check_id=str(uuid.uuid4()),
             passed=passed,
@@ -50,6 +50,7 @@ def evaluate_invariants(
             explanation=f"invariant_{invariant.invariant_id}_{'passed' if passed else 'failed'}"
                         f" ({coverage})",
             blocking=invariant.blocking,
+            established=established,
         ))
 
     coverage = 1.0 if results else 0.0
@@ -91,12 +92,13 @@ def score_labeled(cases: list[tuple[str, Invariant, Any, list, bool]]) -> Invari
     results = []
     expected = []
     for diff, invariant, graph, evidence, violated in cases:
-        passed, coverage = _check_invariant(diff, invariant, graph, evidence or [])
+        passed, coverage, established = _check_invariant(diff, invariant, graph, evidence or [])
         results.append(CheckResult(
             check_id=str(uuid.uuid4()), passed=passed,
             score=1.0 if passed else 0.0, evidence=[],
             explanation=f"invariant_{invariant.invariant_id} ({coverage})",
             blocking=invariant.blocking,
+            established=established,
         ))
         expected.append(bool(violated))
     recall, precision = _score_against_labels(results, expected)
@@ -108,27 +110,30 @@ def score_labeled(cases: list[tuple[str, Invariant, Any, list, bool]]) -> Invari
 
 
 def _check_invariant(diff: str, invariant: Invariant, graph: Any, evidence: list
-                     ) -> tuple[bool, str]:
-    """Return (passed, coverage_note). The note names what was examined so a
-    vacuous pass — zero relevant edges, empty diff-side — is visible in the
-    verdict instead of confidence-shaped. Unknown or empty queries fail
-    closed (passed=False)."""
+                     ) -> tuple[bool, str, bool]:
+    """Return (passed, coverage_note, established).
+
+    `established=False` means the check ran against nothing (e.g. zero
+    relevant edges): inability, which policy routes to INCONCLUSIVE rather
+    than counting as a rejection or a meaningful pass. Unknown or empty
+    queries fail closed (passed=False, established=True — the failure is a
+    real rejection of an unevaluable rule)."""
     query = (invariant.compiled_query or "").strip()
     if not query:
-        return False, "empty query (fail-closed)"
+        return False, "empty query (fail-closed)", True
     if query == "secrets_scan":
-        return SECRET_RE.search(diff or "") is None, "diff text scanned"
+        return SECRET_RE.search(diff or "") is None, "diff text scanned", True
     if query == "provenance_check":
-        return bool(evidence), f"evidence items={len(evidence)}"
+        return bool(evidence), f"evidence items={len(evidence)}", True
     if query.startswith("forbid_call:"):
         name = query[len("forbid_call:"):].strip()
         violated, examined = _graph_search(graph, name, "CALLS")
-        return not violated, _coverage_note(examined, "CALLS", name)
+        return not violated, _coverage_note(examined, "CALLS", name), examined > 0
     if query.startswith("forbid_import:"):
         name = query[len("forbid_import:"):].strip()
         violated, examined = _graph_search(graph, name, "IMPORTS")
-        return not violated, _coverage_note(examined, "IMPORTS", name)
-    return False, f"unknown query kind (fail-closed): {query[:40]}"
+        return not violated, _coverage_note(examined, "IMPORTS", name), examined > 0
+    return False, f"unknown query kind (fail-closed): {query[:40]}", True
 
 
 def _coverage_note(examined: int, edge_type: str, name: str) -> str:

@@ -19,6 +19,19 @@ class PolicyEvaluator:
             )
 
         if all(check.passed for check in report.checks):
+            # A pass-on-zero-edges is not a pass-on-500-edges: a blocking
+            # check that established nothing deflects to INCONCLUSIVE even
+            # when nothing failed. Decided explicitly, not inherited.
+            if any(check.blocking and not getattr(check, "established", True)
+                   for check in report.checks):
+                return VerificationDecision(
+                    decision_id=str(uuid.uuid4()),
+                    report_id=report.report_id,
+                    status="INCONCLUSIVE",
+                    policy_id=policy.policy_id,
+                    rationale="unestablished_blocking_checks",
+                    timestamp=time.time(),
+                )
             return VerificationDecision(
                 decision_id=str(uuid.uuid4()),
                 report_id=report.report_id,
@@ -92,11 +105,13 @@ class PolicyEvaluator:
 
 
 def _is_inability(check) -> bool:
-    """An unverified certificate means the checker could not establish
-    anything (ungroundable diff) — inability, not a rejection. Invariant
-    verdicts without certificates are rejections when they fail."""
+    """Inability (route to INCONCLUSIVE), as opposed to rejection (FAIL):
+    an unverified certificate (ungroundable diff), or a check that ran
+    against nothing (established=False, e.g. zero relevant edges)."""
     cert = getattr(check, "certificate", None)
-    return cert is not None and not getattr(cert, "certificate_verified", False)
+    if cert is not None and not getattr(cert, "certificate_verified", False):
+        return True
+    return not getattr(check, "established", True)
 
 
 def _executed_deterministic(report: VerificationReport) -> bool:

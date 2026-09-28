@@ -10,6 +10,12 @@ Flat list only (`forbid_call:`, `forbid_import:`, `secrets_scan`,
 `provenance_check`). Scope-conditional rules wait until a flat list is
 proven insufficient (Principle 6).
 
+Sharp edge, stated plainly: a typo'd rule (missing `query`, or an unknown
+kind like `forbid_imports:`) fails closed — every diff FAILs until fixed.
+That is intentional (an unevaluable rule must block, not vanish), but it
+means a typo reads as a blocker. The checker's explanation names the
+unknown kind; the fix is spelling, not policy.
+
 ```yaml
 invariants:
   - id: no-sync-in-sansio
@@ -34,7 +40,9 @@ def repo_invariants_path(db_path: str | None) -> str | None:
 
 
 def load_repo_invariants(db_path: str | None = None, path: str | None = None) -> list[Invariant]:
-    """Built-ins plus repo-local rules. Missing file == built-ins only."""
+    """Built-ins plus repo-local rules. Missing file == built-ins only
+    (quiet). Malformed file raises (loud — a broken gate config must never
+    silently fall back). Empty file == no repo rules (quiet)."""
     resolved = path or repo_invariants_path(db_path)
     if not resolved:
         return default_invariants()
@@ -43,8 +51,12 @@ def load_repo_invariants(db_path: str | None = None, path: str | None = None) ->
 
 def _load_file(path: str) -> list[Invariant]:
     import yaml
-    with open(path, encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+    except yaml.YAMLError as e:
+        raise ValueError(f"malformed invariants file {path}: {e}") from e
+    data = data or {}
     invariants = []
     for i, item in enumerate(data.get("invariants", []) or []):
         invariants.append(Invariant(

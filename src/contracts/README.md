@@ -25,6 +25,16 @@ Cross-boundary types: `Constraint`, `Budget`, `SourceChunk`,
 - `InvariantMetrics.detection_recall/detection_precision` are only defined
   against a labeled ground-truth set (`score_labeled`); without labels both
   report 0.0 ("unmeasured").
+- `verification_ir.CheckResult` gains `established: bool = True`. Unlike the
+  amendments above, this one introduces a state the policy keys on: a
+  blocking check that ran against nothing (zero relevant edges) routes to
+  INCONCLUSIVE rather than counting as rejection or meaningful pass. First
+  amendment to change policy semantics since the freeze.
+- `verification_ir.CheckResult` gains `established: bool = True`. Decided
+  explicitly: a blocking check that ran against nothing (zero relevant
+  edges) routes to INCONCLUSIVE, not PASS — pass-on-zero-edges is a
+  different verdict from pass-on-500-edges, recorded here rather than in
+  explanation prose.
 
 ## Set-membership principle
 

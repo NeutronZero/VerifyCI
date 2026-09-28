@@ -96,6 +96,7 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
         )
         return {"query": question,
                 "results": [{"id": r.id, "score": r.score} for r in ranked],
+                "methods": methods,
                 "evidence": {"entities": len(pack.entities), "chunks": len(pack.source_chunks),
                              "provenance": len(pack.provenance)}}
     finally:

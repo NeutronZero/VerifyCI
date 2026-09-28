@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — decided explicitly, recorded the same way
+
+Suite 173 → 183. No new subsystems.
+
+- Policy: pass-on-zero-edges is now a different verdict from pass-on-500.
+  `CheckResult.established` marks checks that ran against nothing;
+  blocking-but-unestablished routes to INCONCLUSIVE (rejection vs inability,
+  completed). Decided, not inherited.
+- Config audit: malformed YAML raises (loud), absent file falls back
+  (quiet), empty file means no repo rules (quiet), typo'd rules fail closed
+  and say so in the explanation. All four pinned by tests.
+- `from . import thing` records `"."` (pinned, not resolved); relative
+  imports record the module, never the symbol.
+
 ## Unreleased — invariant config surface + coverage-visible verdicts
 
 - Reranker default-off implemented (fused-only default in CLI/MCP/FastMCP;

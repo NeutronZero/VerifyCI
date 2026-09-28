@@ -71,6 +71,18 @@ def test_relative_import_records_module_not_symbol():
     assert imports == ["..config", ".scaffold", "flask", "os"]
 
 
+def test_bare_relative_import_pinned():
+    # `from . import thing`: no module name exists in the statement, so the
+    # bare level (".") is recorded rather than inventing package resolution.
+    from src.contracts.entity import EntityType
+    from src.ingestion.extractor import extract_entities
+    from src.ingestion.parser import TreeSitterParser
+    parsed = TreeSitterParser().parse("x.py", b"from . import thing\n", "python")
+    imports = sorted(
+        e.name for e in extract_entities(parsed, "r", "rev") if e.type == EntityType.IMPORT)
+    assert imports == ["."]
+
+
 def test_docstring_code_examples_are_not_entities():
     # A regex ground truth would count `ghost`; the AST correctly ignores it.
     # Ground-truth annotation must be AST-aware (or human-read), not regex.
