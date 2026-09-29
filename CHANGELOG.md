@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — temporal disappearance closure (B-2)
+
+- **Deleted code expires.** New `GraphStore.close_disappeared`
+  runs last in ingest against the complete new revision: entities
+  whose logical id has no current row get `valid_until`/`t_expired`
+  stamped, as do live edges whose endpoint-pair no longer exists.
+  `get_entity_by_name` and graph loads stop returning ghosts
+  (verified end to end: deleted file + removed call → 2 entities and
+  4 edges closed, ghost lookup None, history queryable via `asOf`).
+- Supersession (re-observed facts) is untouched; disappearance covers
+  only what vanished. Scoped per repository; skipped with no parent
+  (fresh/same-state ingest). Carried unresolved references read as
+  continuing — incremental graphs keep cross-file visibility, pinned.
+  Also self-healing: pre-existing live ghost rows close on next
+  ingest. Counts surface in ingest totals (`disappeared_entities`,
+  `disappeared_edges`).
+- Suite 324, ruff clean, extraction benchmarks hold.
+
 ## Unreleased — MCP audit trail and tool-return grounding (A-2)
 
 - **Ledger attached to the served MCP path.** `create_fastmcp_server`

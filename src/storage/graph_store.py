@@ -216,8 +216,65 @@ class GraphStore:
         self._maybe_commit()
         return len(gone), n_d
 
+    def close_disappeared(self, current_revision_id: str, parent_revision_id: str,
+                            repository_id: str, now: float) -> tuple[int, int]:
+        """Expire entities and edges the new revision no longer contains.
+
+        Supersession closes what was re-observed; this closes what
+        vanished: entities whose logical id has no row in the current
+        revision (deleted/renamed files and functions), and live edges
+        whose endpoint-pair no longer exists (removed calls). Without
+        it, `get_entity_by_name` and graph loads return ghosts of
+        deleted code indefinitely. Returns (entities, edges) closed.
+
+        Scoped to one repository: multi-repo DBs must not expire each
+        other's rows. Skips when there is no parent (fresh or
+        same-state ingest — nothing could have disappeared). Carried
+        unresolved references are present in the new revision (re-
+        inserted by carry-forward), so they read as continuing, not
+        disappeared — no special-casing. Also self-healing: live ghost
+        rows predating this logic close on the next ingest.
+        """
+        if not parent_revision_id:
+            return 0, 0
+        cur = self.conn.execute(
+            "UPDATE entities SET valid_until = ?, t_expired = ?"
+            " WHERE revision_id != ? AND repository_id = ?"
+            " AND valid_until IS NULL AND logical_entity_id NOT IN ("
+            " SELECT logical_entity_id FROM entities WHERE revision_id = ?)",
+            (now, now, current_revision_id, repository_id, current_revision_id),
+        )
+        n_entities = cur.rowcount
+        entmap = {
+            r[0]: r[1] for r in self.conn.execute(
+                "SELECT revision_entity_id, logical_entity_id FROM entities"
+                " WHERE revision_id IN (SELECT revision_id FROM revisions"
+                " WHERE repository_id = ?)",
+                (repository_id,)).fetchall()
+        }
+        new_keys = set()
+        for r in self.conn.execute(
+                "SELECT src_entity_id, dst_entity_id, type FROM edges"
+                " WHERE revision_id = ?", (current_revision_id,)).fetchall():
+            new_keys.add((entmap.get(r[0], r[0]), entmap.get(r[1], r[1]), r[2]))
+        old = self.conn.execute(
+            "SELECT id, src_entity_id, dst_entity_id, type FROM edges"
+            " WHERE revision_id != ? AND valid_until IS NULL"
+            " AND revision_id IN (SELECT revision_id FROM revisions"
+            " WHERE repository_id = ?)",
+            (current_revision_id, repository_id)).fetchall()
+        gone = [r[0] for r in old
+                if (entmap.get(r[1], r[1]), entmap.get(r[2], r[2]), r[3]) not in new_keys]
+        if gone:
+            self.conn.executemany(
+                "UPDATE edges SET valid_until = ?, t_expired = ? WHERE id = ?",
+                [(now, now, i) for i in gone],
+            )
+        self._maybe_commit()
+        return n_entities, len(gone)
+
     def close_superseded_entities(self, logical_ids: list[str], current_revision_id: str,
-                                  now: float) -> int:
+                                   now: float) -> int:
         """Close prior live versions (valid_until/t_expired) superseded by the
         current revision. Single UPDATE, not one per id. Returns rows closed."""
         ids = list(set(logical_ids))

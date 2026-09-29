@@ -243,4 +243,15 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
             totals["edges"] += carried_d
             totals["carried_entities"] = carried_e
             totals["carried_edges"] = carried_d
+        # Disappearance closure runs last, against the complete new
+        # revision (fresh rows plus carried ones): entities and edges
+        # the new tree no longer contains are expired, so name lookups
+        # and graph loads stop returning deleted code.
+        gone_e, gone_d = store.close_disappeared(
+            revision.revision_id, revision.parent_revision_id or "",
+            repo.name, closed_at)
+        totals["closed_entities"] += gone_e
+        totals["closed_edges"] += gone_d
+        totals["disappeared_entities"] = gone_e
+        totals["disappeared_edges"] = gone_d
         return totals
