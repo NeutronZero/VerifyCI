@@ -67,7 +67,15 @@ def test_mapped_diff_verifies_with_seed_evidence():
 
 def test_deletion_hunk_diff_is_inconclusive():
     graph = FakeGraph([_payload("e1"), _payload("e2")])
-    cert = SemiFormalReasoner().verify(DIFF_APP, graph)
+    pure_deletion = (
+        "diff --git a/src/app.py b/src/app.py\n"
+        "--- a/src/app.py\n"
+        "+++ b/src/app.py\n"
+        "@@ -1,2 +1 @@\n"
+        "-x = 1\n"
+        " y = 2\n"
+    )
+    cert = SemiFormalReasoner().verify(pure_deletion, graph)
     assert cert.certificate_verified is False
     assert cert.conclusion.result == "inconclusive"
     assert "deletion" in cert.conclusion.reasoning

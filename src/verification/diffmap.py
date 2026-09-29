@@ -57,17 +57,33 @@ def map_files_to_entity_ids(files: list[str], entities: list) -> dict[str, list[
 
 
 def find_deletion_hunks(diff: str | None) -> list[tuple[int, str]]:
-    """Return (line_number, deleted_text) for each hunk containing a pure
-    deletion — a `-` line with no paired `+`. Content-level removal
-    verification is V1.1; this lets the verifier honestly admit it cannot
-    confirm removals rather than returning PASS."""
+    """Return (hunk_start_line, removed_text) for each hunk that removes
+    lines without adding any — a `-` line with no paired `+` in the same
+    hunk. Modifications (`-`/`+` pairs) are not deletions. Content-level
+    removal verification is V1.1; this lets the verifier honestly admit it
+    cannot confirm removals rather than returning PASS."""
     if not diff:
         return []
-    deletions = []
+    hunks = []
+    in_hunk = False
+    has_minus = has_plus = False
+    hunk_start = 0
+    removed: list[str] = []
     for i, line in enumerate(str(diff).splitlines(), 1):
-        if line.startswith("-") and not line.startswith("---"):
-            deletions.append((i, line[1:]))
-    return deletions
+        if line.startswith("@@"):
+            if in_hunk and has_minus and not has_plus:
+                hunks.append((hunk_start, "\n".join(removed)))
+            in_hunk, has_minus, has_plus, removed = True, False, False, []
+            hunk_start = i
+        elif in_hunk:
+            if line.startswith("-") and not line.startswith("---"):
+                has_minus = True
+                removed.append(line[1:])
+            elif line.startswith("+"):
+                has_plus = True
+    if in_hunk and has_minus and not has_plus:
+        hunks.append((hunk_start, "\n".join(removed)))
+    return hunks
 
 
 def find_ambiguous_files(files: list[str], entities: list) -> dict[str, list[str]]:

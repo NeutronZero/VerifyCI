@@ -6,12 +6,16 @@
   stock_intelligence, one false PASS (delete_function), real bug identified,
   fix applied, probes re-run. The tool used as a tool, finding a failure in
   the tool, with a mechanism for the finding to become a decision.
-- **Cheap fix (this commit):** diffs containing pure deletion hunks now
-  return INCONCLUSIVE with `diff_contains_deletion_hunks; content-level
-  removal verification is V1.1`. The verifier cannot distinguish additions,
-  modifications, and deletions — it treats all three identically because it
-  grounds on file membership without scoping to affected entities. PASS for
-  a deletion was a lie; INCONCLUSIVE is the truthful answer.
+- **Cheap fix (this commit):** diffs containing a hunk that removes lines
+  without adding any now return INCONCLUSIVE with
+  `diff_contains_deletion_hunks; content-level removal verification is
+  V1.1`. Correction to the first version of this fix: the initial
+  implementation flagged every `-` line, which made every modification
+  INCONCLUSIVE — broader than the stated spec ("a `-` line with no paired
+  `+`"). Per-hunk pairing now; modifications pass, pure removals don't.
+  Pinned by a unit test asserting a modification-only diff yields no
+  deletion hunks — the class of bug targeted unit tests close and
+  integration probes don't.
 - **V1.1 scoping (recorded, not implemented):** parse diff hunks, compute
   affected line ranges, intersect with entity line ranges. Seeds become
   only affected entities, blast radius runs only from affected entities, and

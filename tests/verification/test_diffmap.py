@@ -85,15 +85,31 @@ def test_find_deletion_hunks_detects_pure_deletions():
         "diff --git a/x.py b/x.py\n"
         "--- a/x.py\n"
         "+++ b/x.py\n"
-        "@@ -1,3 +1,4 @@\n"
+        "@@ -1,3 +1,1 @@\n"
         " context\n"
         "-deleted_line\n"
-        "+added_line\n"
-        " context2\n"
+        "-deleted_line2\n"
     )
     result = find_deletion_hunks(diff)
     assert len(result) == 1
-    assert result[0][1] == "deleted_line"
+    assert "deleted_line" in result[0][1]
+
+
+def test_find_deletion_hunks_empty_for_modification_only():
+    # Load-bearing: modifications are `-`/`+` pairs, not deletions.
+    # A per-line check would flag every modification; per-hunk must not.
+    from src.verification.diffmap import find_deletion_hunks
+    diff = (
+        "diff --git a/x.py b/x.py\n"
+        "--- a/x.py\n"
+        "+++ b/x.py\n"
+        "@@ -1,3 +1,3 @@\n"
+        " context\n"
+        "-old_line\n"
+        "+new_line\n"
+        " context2\n"
+    )
+    assert find_deletion_hunks(diff) == []
 
 
 def test_find_deletion_hunks_empty_for_additions_only():
@@ -115,9 +131,9 @@ def test_find_deletion_hunks_ignores_file_headers():
         "diff --git a/x.py b/x.py\n"
         "--- a/x.py\n"
         "+++ b/x.py\n"
-        "@@ -1 +1 @@\n"
+        "@@ -1,2 +1 @@\n"
         "-old\n"
-        "+new\n"
+        " kept\n"
     )
     result = find_deletion_hunks(diff)
     assert len(result) == 1
