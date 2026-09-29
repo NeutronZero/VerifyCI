@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — qualified scope resolution (`ns::Base`)
+
+- **Qualified bases resolve canonically.** `base_class_clause` now
+  emits `INHERITS_UNRESOLVED` with the raw qualified token sequence
+  (`ns::Base`, `::Global`); the builder matches it against canonical
+  `metadata["qualified_name"]` instead of flat `by_name`. A leading
+  `::` anchors to top level only. `Base<T>` template arguments still
+  emit nothing (pinned — the direct-children filter, not a walk).
+  Bare refs keep the flat path, unchanged.
+- **Namespace-aware naming without identity migration.** `namespace`
+  blocks push `("ns", name)` onto the scope stack for matching and
+  `qualified_name` recording, but logical ids still use the
+  namespace-free scope: wrapping code in a namespace renames nothing
+  already stored (pinned by id-equality test — no duplicate live rows
+  on re-ingest). Python untouched (no namespace node type exists
+  there); `qualified_name` is C/C++ only.
+- Ambiguity policy unchanged: zero or 2+ canonical matches stay
+  unlinked (`missing`/`ambiguous`), exact qualified match links even
+  where flat lookup would give up.
+- Benchmarks hold: extraction TP=13, Flask TP=142, firmware C++ TP=81,
+  all FP=0 FN=0. Suite 259, ruff clean.
+
 ## Unreleased — extractor: cross-file references, C++ inheritance, out-of-class methods
 
 Dogfooding on meshtastic/firmware (1,557 files, 10,428 entities) showed

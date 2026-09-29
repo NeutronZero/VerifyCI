@@ -89,13 +89,44 @@ class GraphBuilder:
                                     EdgeType.CALLS, CPGEdgeSubtype.CALLS_DIRECT)
             elif edge.type == EdgeType.INHERITS_UNRESOLVED:
                 name = (edge.metadata or {}).get("base", "")
-                candidates = [e for e in by_name.get(name, [])
-                              if self._graph[self._node_map[e]].type in _BASE_TARGET_TYPES]
+                if "::" in name:
+                    candidates = self._match_qualified(name)
+                else:
+                    candidates = [e for e in by_name.get(name, [])
+                                  if self._graph[self._node_map[e]].type in _BASE_TARGET_TYPES]
                 if len(candidates) != 1:
                     self.resolution_stats["ambiguous" if candidates else "missing"] += 1
                     continue
                 self._link_resolved(edge, src_idx, candidates[0],
                                     EdgeType.INHERITS, CPGEdgeSubtype.INHERITS)
+
+    def _match_qualified(self, name: str) -> list[str]:
+        """Match a qualified reference (`ns::Base`, `::Global`) against
+        canonical `metadata["qualified_name"]` values.
+
+        A leading `::` anchors to top level: it matches a top-level
+        entity (no qualified name, bare name equal) but never a
+        namespaced one. Unqualified refs never reach this path — flat
+        `by_name` lookup handles them, unchanged.
+        """
+        anchored = name.startswith("::")
+        bare = name.lstrip(":") if anchored else name
+        if not bare:
+            return []
+        matches = []
+        for eid, idx in self._node_map.items():
+            payload = self._graph[idx]
+            if not hasattr(payload, "type") or not hasattr(payload, "name"):
+                continue
+            if payload.type not in _BASE_TARGET_TYPES:
+                continue
+            qualified = (getattr(payload, "metadata", None) or {}).get("qualified_name")
+            if anchored:
+                if qualified == bare or (not qualified and payload.name == bare):
+                    matches.append(eid)
+            elif qualified == name:
+                matches.append(eid)
+        return matches
 
     def _link_resolved(self, unresolved: Edge, src_idx: int, dst_eid: str,
                        edge_type: EdgeType, subtype: CPGEdgeSubtype) -> None:

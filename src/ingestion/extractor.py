@@ -15,10 +15,20 @@ def _make_entity(
     repository_id: str, revision_id: str, file_path: str, name: str,
     entity_type: EntityType, language: str, source_hash: str,
     line_start: int, line_end: int, now: float, scope: str = "",
-    snippet: str = "",
+    snippet: str = "", identity_scope: Optional[str] = None,
+    qualified_name: str = "",
 ) -> Entity:
-    logical_id = compute_logical_entity_id(repository_id, file_path, name, entity_type, scope)
+    # identity_scope pins the logical id: namespace entries are filtered
+    # out of it, so wrapping code in `namespace ns {}` renames nothing
+    # already stored. `scope` (full path, namespaces included) travels in
+    # metadata for scope-aware matching; `qualified_name` ("ns::Base",
+    # C/C++ only) is the canonical name the deferred resolver matches
+    # qualified references against.
+    lid_scope = scope if identity_scope is None else identity_scope
+    logical_id = compute_logical_entity_id(repository_id, file_path, name, entity_type, lid_scope)
     metadata = {"scope": scope} if scope else {}
+    if qualified_name:
+        metadata["qualified_name"] = qualified_name
     if snippet:
         metadata["snippet"] = snippet
     return Entity(
@@ -123,12 +133,10 @@ def _qualified_name(node, source: bytes) -> Optional[tuple[str, str]]:
     for child in node.children:
         if child.type not in ("qualified_identifier", "scoped_identifier"):
             continue
-        parts = [
-            _text(c, source) for c in child.children
-            if c.type in ("identifier", "type_identifier",
-                          "namespace_identifier", "field_identifier",
-                          "destructor_name")
-        ]
+        raw = _qualified_raw(child, source)
+        if not raw:
+            return None
+        parts = raw.lstrip(":").split("::")
         if len(parts) >= 2:
             return "::".join(parts[:-1]), parts[-1]
         return None
@@ -161,6 +169,21 @@ def _scope_name(node, source: bytes, language: str = "python") -> Optional[str]:
     return None
 
 
+def _qualified_raw(node, source: bytes) -> Optional[str]:
+    """Raw qualified token sequence (`ns::Base`, `::Global`) for a
+    qualified/scoped identifier node, else None. Whitespace around `::`
+    is normalized away; a leading `::` (global scope anchor) is kept."""
+    parts = [
+        _text(c, source) for c in node.children
+        if c.type in ("identifier", "type_identifier", "namespace_identifier",
+                      "field_identifier", "destructor_name")
+    ]
+    if not parts:
+        return None
+    text = _text(node, source).lstrip()
+    return ("::" if text.startswith("::") else "") + "::".join(parts)
+
+
 def _qualified_scope(node, source: bytes) -> str:
     """Out-of-class scope for `void App::run() {}`: "App", else "".
 
@@ -179,11 +202,23 @@ def _qualified_scope(node, source: bytes) -> str:
     return ""
 
 
+def _ns_name(node, source: bytes) -> Optional[str]:
+    """Name of a `namespace_definition`, or None for anonymous ones."""
+    if node.type != "namespace_definition":
+        return None
+    for child in node.children:
+        if child.type in ("namespace_identifier", "identifier"):
+            return _text(child, source)
+    return None
+
+
 def _walk_scoped(node, source: bytes, stack: list[tuple[str, str]],
                  language: str = "python"):
     """Yield (node, enclosing stack). Stack entries are (kind, name) with
-    kind in {"class", "func"}. A def node itself reports the outer stack;
-    descendants see it pushed."""
+    kind in {"class", "func", "ns"}. A def node itself reports the outer
+    stack; descendants see it pushed. Namespace entries feed qualified
+    naming only — they are filtered out of identity scopes so logical
+    ids stay stable for code that never moved."""
     yield node, stack
     kind = "class" if node.type in CLASS_NODES else ("func" if node.type in FUNC_NODES else None)
     child_stack = stack
@@ -191,6 +226,10 @@ def _walk_scoped(node, source: bytes, stack: list[tuple[str, str]],
         name = _scope_name(node, source, language)
         if name:
             child_stack = stack + [(kind, name)]
+    elif node.type == "namespace_definition":
+        name = _ns_name(node, source)
+        if name:
+            child_stack = stack + [("ns", name)]
     for child in node.children:
         yield from _walk_scoped(child, source, child_stack, language)
 
@@ -234,10 +273,10 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
         return entities
 
     root = parsed.tree.root_node
+    is_c_like = parsed.language in ("c", "cpp")
     for node, stack in _walk_scoped(root, parsed.source, [], parsed.language):
         qualified_scope = (
-            _qualified_scope(node, parsed.source)
-            if parsed.language in ("c", "cpp") else ""
+            _qualified_scope(node, parsed.source) if is_c_like else ""
         )
         entity_type = _classify_node(node, parsed.language, stack, qualified_scope)
         if entity_type is None:
@@ -246,6 +285,13 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
         if not name:
             continue
         scope = qualified_scope or ".".join(n for _, n in stack)
+        identity_scope = qualified_scope or ".".join(
+            n for k, n in stack if k != "ns")
+        qualified_name = ""
+        if is_c_like and (qualified_scope or any(k == "ns" for k, _ in stack)):
+            qparts = ([qualified_scope] if qualified_scope
+                      else [n for _, n in stack])
+            qualified_name = "::".join(qparts + [name])
         line_start = node.start_point[0] + 1
         line_end = node.end_point[0] + 1
         entities.append(_make_entity(
@@ -253,9 +299,11 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
             parsed.language, parsed.source_hash,
             line_start, line_end, now, scope,
             snippet=_source_snippet(parsed.source, line_start, line_end),
+            identity_scope=identity_scope,
+            qualified_name=qualified_name,
         ))
         if entity_type in (EntityType.FUNCTION, EntityType.METHOD):
-            param_scope = f"{scope}.{name}" if scope else name
+            param_scope = f"{identity_scope}.{name}" if identity_scope else name
             for pname in _extract_params(node, parsed.source, parsed.language):
                 entities.append(_make_entity(
                     repository_id, revision_id, parsed.file_path, pname,
@@ -357,21 +405,32 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
             if cls:
                 for child in node.children:
                     if child.type == "superclasses":
-                        parents = [g for g in child.children if g.type == "identifier"]
+                        parent_names = [_text(g, parsed.source)
+                                        for g in child.children if g.type == "identifier"]
                     elif child.type == "base_class_clause":
                         # C++: `class App : public Base, protected Mixin`.
                         # Direct children only — a _walk would also catch
                         # template arguments (`Base<T>` yields T) as bogus
-                        # parents. Qualified bases (`ns::Base`) are out of
-                        # V1 scope, same as qualified calls were.
-                        parents = [g for g in child.children
-                                   if g.type in ("identifier", "type_identifier")]
+                        # parents. Qualified bases keep their raw token
+                        # sequence (`ns::Base`, `::Global`) for the
+                        # deferred resolver to match canonically.
+                        parent_names = []
+                        for g in child.children:
+                            if g.type in ("identifier", "type_identifier"):
+                                parent_names.append(_text(g, parsed.source))
+                            elif g.type in ("qualified_identifier", "scoped_identifier"):
+                                q = _qualified_raw(g, parsed.source)
+                                if q:
+                                    parent_names.append(q)
                     elif child.type == "argument_list":
-                        parents = [g for g in _walk(child) if g.type == "identifier"]
+                        parent_names = [_text(g, parsed.source)
+                                        for g in _walk(child) if g.type == "identifier"]
                     else:
                         continue
-                    for parent_node in parents:
-                        parent_name = _text(parent_node, parsed.source)
+                    for parent_name in parent_names:
+                        # Qualified refs resolve only by canonical name in
+                        # the deferred pass: a same-file bare `Base` must
+                        # not capture an `ns::Base` reference.
                         parent = resolve(parent_name, scope_of(cls))
                         if parent:
                             edges.append(_make_edge(
