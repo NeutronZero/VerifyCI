@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — MCP audit trail and tool-return grounding (A-2)
+
+- **Ledger attached to the served MCP path.** `create_fastmcp_server`
+  constructs an `EventLedger` and threads it through, so `task.run`
+  executions emit events, persist via the context store, and return a
+  real `ledger_head` instead of `None`. One ledger accumulates across
+  tasks on the long-lived server; `task_id` separates them and the L2
+  subchain verifier reads them back per task.
+- **Search → definition chaining works.** `code.search` hits now carry
+  `name`, `file_path`, `line_start`, `line_end` (None when the id has
+  no loaded entity); `code.definition` and `graph.query` resolve a
+  `revision_entity_id` first, then logical id, then name — the id a
+  search returns chains directly into definition with no re-derivation.
+- Suite 324, ruff clean, extraction benchmarks hold (13/142).
+
 ## Unreleased — diff-aware forbid rules (added-line references)
 
 - **Graph-blind spot closed.** `forbid_call` / `forbid_import`

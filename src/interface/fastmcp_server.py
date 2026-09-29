@@ -15,12 +15,18 @@ def create_fastmcp_server(db_path: str, name: str = "verifyci"):
     from src.interface.mcp_server import create_mcp_server
 
     db = resolve_db(db_path)
+    from src.memory.ledger import EventLedger
     from src.storage.graph_store import GraphStore
     store = GraphStore(db)
     graph, node_map, entities = load_graph(db)
     if not entities:
         entities = payload_entities(graph)
-    inner = create_mcp_server(graph=graph, store=store, node_map=node_map, entities=entities)
+    # Without a ledger, task.run executions leave no audit trail and
+    # report ledger_head None. The server is long-lived; one ledger
+    # accumulates across tasks (task_id separates them, and the L2
+    # subchain verifier reads them back per task).
+    inner = create_mcp_server(graph=graph, store=store, node_map=node_map,
+                              ledger=EventLedger(), entities=entities)
 
     mcp = FastMCP(name)
 

@@ -58,6 +58,15 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
     if entities is None:
         from src.interface.commands.graph_loader import payload_entities
         entities = payload_entities(graph)
+    # Revision-id index over the loaded revision: lets search hits carry
+    # file/name/lines and lets definition/query resolve a revision id
+    # directly, so an agent can chain search -> definition without
+    # re-deriving a logical id or symbol name.
+    by_revision_id = {}
+    for _e in entities or []:
+        _rid = getattr(_e, "revision_entity_id", None)
+        if _rid and _rid not in by_revision_id:
+            by_revision_id[_rid] = _e
     from src.verification.config import load_repo_invariants
     _repo_invariants = load_repo_invariants(getattr(store, "db_path", None))
 
@@ -111,31 +120,48 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                 methods = methods + [f"rerank:{reranker.backend}"]
             else:
                 ranked = [SearchResult(id=i, score=s, metadata={}) for i, s in fused[:k]]
-            return {"results": [{"id": r.id, "score": r.score} for r in ranked],
+            return {"results": [_enriched_hit(r) for r in ranked],
                     "query": query, "methods": methods}
 
-    async def code_definition(symbol: str) -> dict:
+    def _enriched_hit(hit: Any) -> dict:
+        entity = by_revision_id.get(hit.id)
+        return {"id": hit.id, "score": hit.score,
+                "name": getattr(entity, "name", None),
+                "file_path": getattr(entity, "file_path", None),
+                "line_start": getattr(entity, "line_start", None),
+                "line_end": getattr(entity, "line_end", None)}
+
+    def _resolve_symbol(symbol: str, asOf: float | None = None):
+        # Revision id first (what search returns), then logical id,
+        # then name — in that order, so chained lookups never miss.
+        if symbol in by_revision_id:
+            return by_revision_id[symbol]
         if store is None:
-            return {"symbol": symbol, "definition": None, "error": "no_store_loaded"}
-        entity = store.get_entity_by_logical(symbol)
+            return None
+        entity = store.get_entity_by_logical(symbol, asOf=asOf)
         if entity is None and hasattr(store, "get_entity_by_name"):
             entity = store.get_entity_by_name(symbol)
+        return entity
+
+    async def code_definition(symbol: str) -> dict:
+        if store is None and symbol not in by_revision_id:
+            return {"symbol": symbol, "definition": None, "error": "no_store_loaded"}
+        entity = _resolve_symbol(symbol)
         if entity:
             return {"symbol": symbol, "definition": {"file_path": entity.file_path,
                     "line_start": entity.line_start, "line_end": entity.line_end,
-                    "revision_entity_id": entity.revision_entity_id}}
+                    "revision_entity_id": getattr(entity, "revision_entity_id", None)}}
         return {"symbol": symbol, "definition": None}
 
     async def graph_query(query: str, asOf: float | None = None) -> dict:
-        if store is None:
+        if store is None and query not in by_revision_id:
             return {"query": query, "asOf": asOf, "results": [], "error": "no_store_loaded"}
-        entity = store.get_entity_by_logical(query, asOf=asOf)
-        if entity is None and hasattr(store, "get_entity_by_name"):
-            entity = store.get_entity_by_name(query)
+        entity = _resolve_symbol(query, asOf=asOf)
         if entity:
             return {"query": query, "asOf": asOf,
                     "results": [{"name": entity.name, "file_path": entity.file_path,
-                                 "revision_entity_id": entity.revision_entity_id}]}
+                                 "revision_entity_id": getattr(
+                                     entity, "revision_entity_id", None)}]}
         return {"query": query, "asOf": asOf, "results": []}
 
     async def verify_diff(diff: str, revision_id: str = "", conversation_id: str = "") -> dict:
