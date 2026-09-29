@@ -193,12 +193,6 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool]:
                   f"{sorted(set(hit_files))}"), False
 
 
-def _graph_calls(graph: Any, name: str, edge_type: str) -> bool:
-    """True when a live edge of edge_type targets an entity named `name`."""
-    violated, _ = _graph_search(graph, name, edge_type)
-    return violated
-
-
 def _graph_search(graph: Any, name: str, edge_type: str) -> tuple[bool, int]:
     """Return (violation_found, edges_examined)."""
     if graph is None or not name:

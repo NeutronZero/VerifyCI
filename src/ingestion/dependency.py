@@ -162,14 +162,14 @@ class VulnerabilityCache:
         count = 0
         conn = self._connect()
         try:
-            for edge in edges:
-                pkg = edge.metadata.get("package", "")
-                for vuln in findings.get(pkg, []):
-                    conn.execute(
-                        "INSERT OR REPLACE INTO vulns VALUES (?,?,?,?)",
-                        (pkg, str(vuln.get("id", vuln)), json.dumps(vuln), time.time()),
-                    )
-                    count += 1
+            rows = [
+                (pkg, str(vuln.get("id", vuln)), json.dumps(vuln), time.time())
+                for edge in edges
+                for pkg in [edge.metadata.get("package", "")]
+                for vuln in findings.get(pkg, [])
+            ]
+            conn.executemany("INSERT OR REPLACE INTO vulns VALUES (?,?,?,?)", rows)
+            count = len(rows)
             conn.commit()
         finally:
             self.close()  # writes done: drop the shared handle so no stale cursor survives

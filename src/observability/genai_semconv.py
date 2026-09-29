@@ -3,6 +3,16 @@
 Falls back to placeholder attributes when the semantic-conventions package
 is absent so core flows work offline; real attributes apply when installed.
 """
+__all__ = [
+    "GenAiAgentId",
+    "GenAiAgentName",
+    "GenAiAgentVersion",
+    "GenAiAgentDescription",
+    "GenAiConversationId",
+    "GenAiOperationName",
+    "GenAiUsageInputTokens",
+    "GenAiUsageOutputTokens",
+]
 try:
     from opentelemetry.semconv.gen_ai import (
         GenAiAgentId,

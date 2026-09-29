@@ -303,10 +303,6 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
     return edges
 
 
-def _extract_name(node, source: bytes, language: str = "python") -> Optional[str]:
-    return _scope_name(node, source, language)
-
-
 def _extract_params(node, source: bytes, language: str = "python") -> list[str]:
     params: list[str] = []
     if language in ("c", "cpp"):

@@ -101,3 +101,32 @@ def test_detect_language_unknown():
 
 def test_check_permission_deny():
     assert check_permission("rm_rf_everything") is False
+
+
+def test_run_stats_empty_db_counts_zero(tmp_path):
+    import sqlite3
+    from src.interface.commands.stats import run_stats
+    db = str(tmp_path / "empty.db")
+    sqlite3.connect(db).close()
+    stats = run_stats(db)
+    assert stats["db_path"] == db
+    for table in ("revisions", "entities", "edges", "events", "anchors", "deltas"):
+        assert stats[table] == 0
+
+
+def test_run_vuln_skips_invalid_json_metadata(tmp_path):
+    import sqlite3
+    from src.interface.commands.vuln import run_vuln
+    db = str(tmp_path / "v.db")
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE edges (metadata_json TEXT, type TEXT)")
+    conn.execute(
+        "INSERT INTO edges VALUES (?, ?)", ("{not json", "DEPENDS_ON"))
+    conn.execute(
+        "INSERT INTO edges VALUES (?, ?)",
+        ('{"package": "pkg-a"}', "DEPENDS_ON"))
+    conn.commit()
+    conn.close()
+    result = run_vuln(db, cache_path=str(tmp_path / "cache.db"))
+    assert result["packages_checked"] == 2
+    assert result["findings"] == []

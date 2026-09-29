@@ -16,6 +16,16 @@
   Pinned by a unit test asserting a modification-only diff yields no
   deletion hunks — the class of bug targeted unit tests close and
   integration probes don't.
+- **Suggestion-sweep triage (9 of 35 applied, rest rejected or deferred):**
+  deleted dead `_graph_calls` and `_extract_name` (no callers); added
+  `__all__` to genai_semconv (imports are re-exports via tracing.py, not
+  unused); batched vuln-cache inserts via executemany; new fusion tests
+  (incl. empty-input edge case), stats empty-DB test, vuln invalid-JSON
+  test. Rejected: ingest N+1 (loop is over distinct old revisions, usually
+  one, incremental-only), metadata path traversal (db_path is operator
+  config, not untrusted input). Deferred as architectural: scoped
+  retrieval, true sandboxing, long-function splits, batched vuln lookup,
+  and the remaining missing-test files.
 - **V1.1 scoping (recorded, not implemented):** parse diff hunks, compute
   affected line ranges, intersect with entity line ranges. Seeds become
   only affected entities, blast radius runs only from affected entities, and
