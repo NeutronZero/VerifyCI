@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.ingestion.parser import TreeSitterParser
-from src.ingestion.extractor import extract_entities, extract_edges
+from src.ingestion.extractor import extract_entities
 from src.contracts.entity import EntityType
 
 REPO_PATH = Path(__file__).parent.parent / "samples" / "test-repo"

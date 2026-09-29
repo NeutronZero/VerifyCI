@@ -48,8 +48,20 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
             bm25.add(rid, text)
         sparse_hits = bm25.search(question, k=k)
 
-        provider = dense_provider or HashEmbeddingProvider()
-        dense_hits = _dense_search(provider, texts, question, k)
+        from src.retrieval.provider import default_dense_provider
+        import os as _os
+        provider = dense_provider or default_dense_provider(
+            _os.path.dirname(_os.path.abspath(db)))
+        try:
+            dense_hits = _dense_search(provider, texts, question, k)
+            dense_label = provider.model_name()
+        except Exception:  # noqa: BLE001
+            # Advisory path (not a gate): an unreachable embedding
+            # server degrades to the offline hash with an honest label,
+            # never a failed query.
+            provider = HashEmbeddingProvider()
+            dense_hits = _dense_search(provider, texts, question, k)
+            dense_label = "hash-fallback(server-unreachable)"
 
         builder = GraphBuilder()
         entities = [store._row_to_entity(r) for r in store.conn.execute(
@@ -62,7 +74,7 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
         graph_hits = GraphRetriever(graph, node_map).retrieve(seeds) if graph is not None else []
 
         fused = rrf_fusion_with_scores(dense_hits, sparse_hits, graph_hits)
-        methods = ["dense:" + provider.model_name(), "bm25", "graph", "rrf"]
+        methods = ["dense:" + dense_label, "bm25", "graph", "rrf"]
         if rerank:
             ranked = CrossEncoderReranker().rerank(
                 question,

@@ -71,8 +71,12 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
         with start_agent_span("code.search", conversation_id, "code.search"):
             if graph is None:
                 return {"results": [], "query": query, "methods": [], "error": "no_graph_loaded"}
-            from src.retrieval.provider import HashEmbeddingProvider
-            provider = dense_provider or HashEmbeddingProvider()
+            from src.retrieval.provider import default_dense_provider
+            import os as _os
+            cache_dir = None
+            if store is not None and getattr(store, "db_path", None):
+                cache_dir = _os.path.dirname(_os.path.abspath(store.db_path))
+            provider = dense_provider or default_dense_provider(cache_dir)
             bm25, texts = _describe_graph(graph, node_map or {})
             sparse_hits = bm25.search(query, k=k)
             seeds = [h.id for h in sparse_hits[:3]]

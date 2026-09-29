@@ -75,11 +75,17 @@ interface (MCP / CLI / HTTP) → verification (semi-formal, blast, invariants, p
 ```
 
 Rerank is marked experimental until it beats fused ranking on a held-out
-set (measured 2 lifts / 4 demotions so far). Dense hash embeddings are a
-lower-bound placeholder; measured numbers reflect the offline stack.
+set (measured 2 lifts / 4 demotions so far). Dense defaults to offline
+hash embeddings (deterministic, no server); `ACI_EMBEDDINGS=ollama[:model]`
+opts into local Ollama embeddings behind a content-addressed cache, with
+honest fallback to hash when the server is unreachable. Measured on a
+small 5+5 query set (`benchmarks/embedding_eval.py`, needs a live server):
+ollama beats hash on all four cells (recall +0.10, ndcg +0.02–0.06),
+directional not gating; CPU inference runs ~50ms/doc, so the cache —
+not the model — is what makes it usable.
 
 ## Status
 
 V1 walking skeleton. `PLAN.md` is the full plan; `CHANGELOG.md` records what
-each revision proved, including measured numbers and known gaps. 246 tests:
+each revision proved, including measured numbers and known gaps. 289 tests:
 `python -m pytest tests/ -q`.

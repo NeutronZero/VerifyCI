@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — opt-in Ollama embeddings with content-addressed cache
+
+- **`ACI_EMBEDDINGS=ollama[:model]`** selects local Ollama embeddings
+  for `aci query` / MCP `code.search` (default stays offline hash:
+  deterministic, no server, tests untouched). Single selection helper;
+  unknown specs raise instead of silently grading wrong results.
+- **Batched transport + persistent cache.** The old per-text POST loop
+  (500 calls per 500-doc query) now uses chunked `/api/embed`; a
+  `CachedEmbeddingProvider` wraps any provider with a sha256-keyed
+  JSON cache beside the DB — no invalidation logic, changed text
+  simply misses; corrupt files rebuild. Unreachable server degrades
+  to hash with an honest `hash-fallback` methods label, never a failed
+  query.
+- Measured (`benchmarks/embedding_eval.py`, live server, small 5+5
+  sample — directional): ollama beats hash on dense and hybrid, lexical
+  and paraphrase (recall +0.10 throughout, ndcg +0.02–0.06). CPU
+  inference here is ~50ms/doc, so first queries are slow and the cache
+  carries repeat cost. Suite 289, ruff clean.
+
 ## Unreleased — ledger head pinning, L1 surfaced + L2 anchor file
 
 - **L1: every terminal task pins its ledger head.** The scheduler sets
