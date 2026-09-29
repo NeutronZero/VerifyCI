@@ -41,6 +41,14 @@ Grounding rules (no exceptions):
   diff was something the graph could reason about, so routine commits
   touching docs or config alongside code read `INCONCLUSIVE`
   (declined, routed to human review — not blocked) rather than `PASS`.
+- Every `-` line must have existed where claimed: removed lines are
+  checked against stored base-revision snippets at the hunk's old-side
+  offsets. A removal contradicting the stored record is `FAIL`
+  (stale, hallucinated, or forged diff). Verified removals of known
+  code stay `INCONCLUSIVE` (behavior not verified); removals outside
+  entity spans or inside truncated snippets are inability
+  (`INCONCLUSIVE`), never `PASS` — so comment-only edits decline
+  rather than verify.
 - `certificate_verified` requires every deterministic check passed, plus
   non-empty traces and evidence.
 - Invariant checkers fail closed: `secrets_scan`, `provenance_check`,

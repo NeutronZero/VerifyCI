@@ -54,6 +54,7 @@ class Executor:
             from src.verification.intent_align import evaluate_invariants
             from src.verification.blast_radius import blast_radius_check
             from src.verification.diffmap import parse_diff_files, seed_entities_for_diff
+            from src.verification.removal import removal_provenance_check
             from src.contracts.verification_ir import (
                 VerificationPolicy,
             )
@@ -92,6 +93,7 @@ class Executor:
                 node_map=node_map,
             )
             checks.append(blast_check)
+            checks.append(removal_provenance_check(diff, graph_entities))
 
             if invariants:
                 inv_checks, _metrics = evaluate_invariants(

@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — removal provenance (fail on fabricated `-` lines)
+
+- **New blocking check `removal_provenance`** (`src/verification/removal.py`,
+  wired into CLI/MCP/scheduler paths alongside blast): every `-` line is
+  matched against the stored base-revision snippet at the hunk's old-side
+  offset, exact content. A removal contradicting the stored record is
+  FAIL (stale, hallucinated, or forged diff). Verified removals of known
+  code stay with the deletion tripwire (INCONCLUSIVE); removals outside
+  entity spans, inside truncated snippets, or in ungrounded files are
+  inability (INCONCLUSIVE) — absence of record is not contradiction.
+  Comment-only edits therefore decline rather than verify (README
+  grounding rules say so explicitly).
+- Validated on real history: a one-character-off removal on the sample
+  repo FAILs while the true deletion stays INCONCLUSIVE; the same
+  discrimination the unit tests pin. Suite 269, ruff clean, extraction
+  benchmarks hold (13/81).
+- **Known consequence, not caused here, surfaced during validation:**
+  a 2-line docstring fix to a 41-caller function (`d73fa1cd`) now FAILs
+  on blast where it previously PASSED. Proved causal: same diff+DB
+  scores risk 0.35 with deferred resolution stripped, 1.0 with it
+  (1,122 links resolved on the Flask base). Deferred resolution works
+  as designed; the blast weights/threshold saturate fast once the
+  graph actually sees cross-file callers, and hunk anchors seed
+  enclosing code entities even for comment-only hunks. Recalibrating
+  blast (weights, threshold shape, comment-awareness, or non-blocking
+  blast) is a separate scoped change — deliberately not smuggled in.
+
 ## Unreleased — qualified scope resolution (`ns::Base`)
 
 - **Qualified bases resolve canonically.** `base_class_clause` now

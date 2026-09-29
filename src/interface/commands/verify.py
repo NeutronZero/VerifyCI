@@ -6,6 +6,7 @@ from src.verification.config import load_repo_invariants
 from src.verification.diffmap import parse_diff_files, seed_entities_for_diff
 from src.verification.intent_align import evaluate_invariants
 from src.verification.policy import PolicyEvaluator
+from src.verification.removal import removal_provenance_check
 from src.verification.semi_formal_reason import SemiFormalReasoner
 from src.verification.verification_ir import build_semi_check, build_verification_report
 
@@ -24,6 +25,7 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
     blast, blast_check = blast_radius_check(
         graph=graph, changed_entities=changed, test_entities=set(), node_map=node_map or None)
     checks.append(blast_check)
+    checks.append(removal_provenance_check(diff, entities or []))
     inv_checks, _metrics = evaluate_invariants(
         diff, load_repo_invariants(db), graph, evidence=list(cert.evidence))
     checks.extend(inv_checks)
