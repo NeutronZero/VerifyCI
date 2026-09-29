@@ -61,3 +61,21 @@ def test_extract_edges_python():
     assert len(edges) > 0
     edge_types = [e.type.value for e in edges]
     assert "CALLS" in edge_types
+
+
+def test_collect_excludes_venv_and_cache_dirs(tmp_path):
+    from src.interface.commands.ingest import _collect
+    (tmp_path / "venv").mkdir()
+    (tmp_path / "venv" / "junk.py").write_text("x = 1\n")
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "junk.py").write_text("x = 1\n")
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / "__pycache__" / "junk.py").write_text("x = 1\n")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "real.py").write_text("x = 1\n")
+    sources, _, _ = _collect(tmp_path)
+    rels = [rel for rel, _, _ in sources]
+    assert any("real.py" in r for r in rels)
+    assert not any("venv" in r for r in rels)
+    assert not any("node_modules" in r for r in rels)
+    assert not any("__pycache__" in r for r in rels)

@@ -13,8 +13,9 @@ DIFF = (
     "diff --git a/src/app.py b/src/app.py\n"
     "--- a/src/app.py\n"
     "+++ b/src/app.py\n"
-    "@@ -1 +1 @@\n"
-    "-x = 1\n+x = 2\n"
+    "@@ -1 +2 @@\n"
+    " x = 1\n"
+    "+x = 2\n"
 )
 
 

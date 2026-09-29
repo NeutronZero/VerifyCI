@@ -19,6 +19,15 @@ DIFF_APP = (
     "-x = 1\n+x = 2\n"
 )
 
+DIFF_APP_ADD_ONLY = (
+    "diff --git a/src/app.py b/src/app.py\n"
+    "--- a/src/app.py\n"
+    "+++ b/src/app.py\n"
+    "@@ -1 +2 @@\n"
+    " x = 1\n"
+    "+x = 2\n"
+)
+
 
 class FakeGraph:
     """Graph fake with optional call edges: {src_idx: [dst_idx]}."""
@@ -46,7 +55,7 @@ class FakeGraph:
 
 def test_mapped_diff_verifies_with_seed_evidence():
     graph = FakeGraph([_payload("e1"), _payload("e2")])
-    cert = SemiFormalReasoner().verify(DIFF_APP, graph)
+    cert = SemiFormalReasoner().verify(DIFF_APP_ADD_ONLY, graph)
     assert cert.certificate_verified is True
     assert cert.conclusion.result == "pass"
     assert [p.statement for p in cert.premises] == ["file_changed:src/app.py"]
@@ -56,10 +65,18 @@ def test_mapped_diff_verifies_with_seed_evidence():
     assert cert.confidence == 1.0
 
 
+def test_deletion_hunk_diff_is_inconclusive():
+    graph = FakeGraph([_payload("e1"), _payload("e2")])
+    cert = SemiFormalReasoner().verify(DIFF_APP, graph)
+    assert cert.certificate_verified is False
+    assert cert.conclusion.result == "inconclusive"
+    assert "deletion" in cert.conclusion.reasoning
+
+
 def test_caller_trace_follows_call_edges():
     graph = FakeGraph([_payload("e1", name="callee"), _payload("e2", name="caller")],
                       calls={1: [0]})
-    cert = SemiFormalReasoner().verify(DIFF_APP, graph)
+    cert = SemiFormalReasoner().verify(DIFF_APP_ADD_ONLY, graph)
     assert cert.certificate_verified is True
     paths = [t.path for t in cert.execution_traces]
     assert ["e2", "e1"] in paths  # caller -> callee edge traced
@@ -121,7 +138,7 @@ def test_evidence_cites_source_not_just_name():
         source_hash="abc123",
         metadata={"snippet": "def func():\n    return 42"},
     )
-    cert = SemiFormalReasoner().verify(DIFF_APP, FakeGraph([payload]))
+    cert = SemiFormalReasoner().verify(DIFF_APP_ADD_ONLY, FakeGraph([payload]))
     assert cert.certificate_verified is True
     assert "return 42" in cert.evidence[0].snippet
 

@@ -16,7 +16,7 @@ from src.contracts.verification_ir import (
     Certificate, Premise, FileEvidence, ExecutionTrace, Conclusion,
 )
 from src.graph.traverse import CALL_FLOW_TYPES, derive_node_map, traverse
-from src.verification.diffmap import map_files_to_entity_ids, parse_diff_files
+from src.verification.diffmap import map_files_to_entity_ids, parse_diff_files, find_deletion_hunks
 
 
 def _is_code_entity(entity: Any) -> bool:
@@ -46,7 +46,9 @@ class SemiFormalReasoner:
 
     def verify(self, diff: Any, graph: Any, node_map: dict | None = None,
                entities: list | None = None) -> Certificate:
-        files = parse_diff_files(diff if isinstance(diff, str) else str(diff or ""))
+        diff_str = diff if isinstance(diff, str) else str(diff or "")
+        files = parse_diff_files(diff_str)
+        deletion_hunks = find_deletion_hunks(diff_str)
         premises = [
             Premise(premise_id=str(uuid.uuid4()), statement=f"file_changed:{f}", source=f)
             for f in files
@@ -70,7 +72,8 @@ class SemiFormalReasoner:
             node_map = derive_node_map(graph)
         paths = self._trace_from_seeds(graph, seeds, node_map)
         evidence = self._collect_evidence(seeds, entities)
-        det_checks = self._run_deterministic_checks(files, mapping, paths, evidence, module_only)
+        det_checks = self._run_deterministic_checks(
+            files, mapping, paths, evidence, module_only, deletion_hunks)
         conclusion = self._derive_conclusion(paths, evidence, det_checks)
         verified = (
             bool(det_checks)
@@ -150,7 +153,9 @@ class SemiFormalReasoner:
     def _run_deterministic_checks(self, files: list[str], mapping: dict,
                                   paths: list[ExecutionTrace],
                                   evidence: list[FileEvidence],
-                                  module_only: list[str] | None = None) -> list[DeterministicCheck]:
+                                  module_only: list[str] | None = None,
+                                  deletion_hunks: list[tuple[int, str]] | None = None
+                                  ) -> list[DeterministicCheck]:
         from src.ingestion.language import is_ingestible
         grounded = [f for f, eids in mapping.items() if eids]
         # Only ingestible-but-absent files veto: docs/config outside the
@@ -158,10 +163,13 @@ class SemiFormalReasoner:
         ungrounded = [f for f in files
                       if f not in grounded and is_ingestible(f)]
         module_only = module_only or []
+        deletion_hunks = deletion_hunks or []
         seeds_ok = bool(files) and not ungrounded and not module_only
         detail = f"grounded={len(grounded)} ungrounded={ungrounded}"
         if module_only:
             detail += f" module_only={module_only}"
+        if deletion_hunks:
+            detail += f" deletion_hunks={len(deletion_hunks)}"
         return [
             DeterministicCheck(
                 checker_id="diff_parsed",
@@ -183,6 +191,11 @@ class SemiFormalReasoner:
                 passed=bool(evidence) and bool(files),
                 detail=f"evidence={len(evidence)}",
             ),
+            DeterministicCheck(
+                checker_id="no_deletion_hunks",
+                passed=not deletion_hunks,
+                detail=f"deletion_hunks={len(deletion_hunks)}",
+            ),
         ]
 
     def _derive_conclusion(self, paths: list[ExecutionTrace],
@@ -196,6 +209,10 @@ class SemiFormalReasoner:
                    if c.checker_id == "seeds_grounded" and not c.passed), "")
         if sg:
             reasoning += f" ({sg})"
+        dh = next((c for c in det_checks
+                   if c.checker_id == "no_deletion_hunks" and not c.passed), None)
+        if dh:
+            reasoning = "diff_contains_deletion_hunks; content-level removal verification is V1.1"
         return Conclusion(result="inconclusive", reasoning=reasoning)
 
     def _compute_confidence(self, det_checks: list[DeterministicCheck]) -> float:

@@ -11,6 +11,13 @@ from src.storage.revision import create_revision
 MANIFESTS = ("package.json", "requirements.txt", "Cargo.toml", "pom.xml", "go.mod")
 
 
+SKIP_DIRS = frozenset({
+    ".verifyci", ".git", ".hg", ".svn", "__pycache__", ".pytest_cache",
+    ".mypy_cache", ".ruff_cache", ".tox", ".nox", ".eggs", ".venv", "venv",
+    "env", "node_modules", "dist", "build", "target", ".idea", ".vscode",
+})
+
+
 def _collect(repo: Path) -> tuple[list[tuple[str, str, bytes]], list[tuple[str, str]], list[tuple[str, str]]]:
     """Pass 1 (no parsing): gather source files + dependency manifests.
 
@@ -19,7 +26,9 @@ def _collect(repo: Path) -> tuple[list[tuple[str, str, bytes]], list[tuple[str, 
     sources: list[tuple[str, str, bytes]] = []
     texts: list[tuple[str, str]] = []
     for file in sorted(repo.rglob("*")):
-        if ".verifyci" in file.parts or not file.is_file():
+        if not file.is_file():
+            continue
+        if any(part in SKIP_DIRS for part in file.parts):
             continue
         if file.suffix.lower() in INGESTIBLE_EXTENSIONS:
             language = detect_language(str(file))

@@ -56,6 +56,20 @@ def map_files_to_entity_ids(files: list[str], entities: list) -> dict[str, list[
     return mapping
 
 
+def find_deletion_hunks(diff: str | None) -> list[tuple[int, str]]:
+    """Return (line_number, deleted_text) for each hunk containing a pure
+    deletion — a `-` line with no paired `+`. Content-level removal
+    verification is V1.1; this lets the verifier honestly admit it cannot
+    confirm removals rather than returning PASS."""
+    if not diff:
+        return []
+    deletions = []
+    for i, line in enumerate(str(diff).splitlines(), 1):
+        if line.startswith("-") and not line.startswith("---"):
+            deletions.append((i, line[1:]))
+    return deletions
+
+
 def find_ambiguous_files(files: list[str], entities: list) -> dict[str, list[str]]:
     """Diff file -> distinct stored paths it matched, when more than one.
 

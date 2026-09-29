@@ -79,6 +79,57 @@ def test_normalize_path_separators():
     assert normalize_path("./src/app.py") == "src/app.py"
 
 
+def test_find_deletion_hunks_detects_pure_deletions():
+    from src.verification.diffmap import find_deletion_hunks
+    diff = (
+        "diff --git a/x.py b/x.py\n"
+        "--- a/x.py\n"
+        "+++ b/x.py\n"
+        "@@ -1,3 +1,4 @@\n"
+        " context\n"
+        "-deleted_line\n"
+        "+added_line\n"
+        " context2\n"
+    )
+    result = find_deletion_hunks(diff)
+    assert len(result) == 1
+    assert result[0][1] == "deleted_line"
+
+
+def test_find_deletion_hunks_empty_for_additions_only():
+    from src.verification.diffmap import find_deletion_hunks
+    diff = (
+        "diff --git a/x.py b/x.py\n"
+        "--- a/x.py\n"
+        "+++ b/x.py\n"
+        "@@ -1,2 +1,3 @@\n"
+        " context\n"
+        "+added_line\n"
+    )
+    assert find_deletion_hunks(diff) == []
+
+
+def test_find_deletion_hunks_ignores_file_headers():
+    from src.verification.diffmap import find_deletion_hunks
+    diff = (
+        "diff --git a/x.py b/x.py\n"
+        "--- a/x.py\n"
+        "+++ b/x.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    result = find_deletion_hunks(diff)
+    assert len(result) == 1
+    assert result[0][1] == "old"
+
+
+def test_find_deletion_hunks_none_for_empty():
+    from src.verification.diffmap import find_deletion_hunks
+    assert find_deletion_hunks(None) == []
+    assert find_deletion_hunks("") == []
+
+
 def test_suffix_ambiguity_flagged_not_silent():
     from types import SimpleNamespace
     from src.verification.diffmap import find_ambiguous_files, map_files_to_entity_ids

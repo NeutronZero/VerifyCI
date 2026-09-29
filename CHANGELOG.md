@@ -1,6 +1,26 @@
 # Changelog
 
-## Unreleased — C declarator requirement, verified wipes, overload collapse
+## Unreleased — deletion-hunk classifier, v1.1 scoping recorded
+
+- **Loop closed on the platform itself.** Five probes against
+  stock_intelligence, one false PASS (delete_function), real bug identified,
+  fix applied, probes re-run. The tool used as a tool, finding a failure in
+  the tool, with a mechanism for the finding to become a decision.
+- **Cheap fix (this commit):** diffs containing pure deletion hunks now
+  return INCONCLUSIVE with `diff_contains_deletion_hunks; content-level
+  removal verification is V1.1`. The verifier cannot distinguish additions,
+  modifications, and deletions — it treats all three identically because it
+  grounds on file membership without scoping to affected entities. PASS for
+  a deletion was a lie; INCONCLUSIVE is the truthful answer.
+- **V1.1 scoping (recorded, not implemented):** parse diff hunks, compute
+  affected line ranges, intersect with entity line ranges. Seeds become
+  only affected entities, blast radius runs only from affected entities, and
+  a deletion of a public function with callers becomes visible as a
+  blast-radius hit rather than a swallowed one. New parser, new arithmetic,
+  new semantics for what "affected" means when the diff isn't yet applied.
+- **SKIP_DIRS exclusion:** ingest no longer walks into venv/node_modules/
+  __pycache__/.pytest_cache/etc. Found by timing out on stock_intelligence
+  (venv had 5,898 Python files; the project has 27).
 
 - tree-sitter-c parses `enum class X {}` as `function_definition` with no
   declarator; C/C++ names now require the declarator path (Python keeps
