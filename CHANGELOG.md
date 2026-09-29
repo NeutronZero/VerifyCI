@@ -24,7 +24,9 @@ before fixing; every fix below is pinned by a regression test.
 - **C3 — secrets scanner required quotes; real secrets are unquoted.**
   Now flags long unquoted values (`DB_PASSWORD=...`), AWS keys, PEM
   blocks, JWTs, and credentialed URLs, with affix-tolerant keywords
-  (`DB_PASSWORD`, `AWS_SECRET_ACCESS_KEY`). Env-lookups
+  (`DB_PASSWORD`, `AWS_SECRET_ACCESS_KEY`). Unquoted values may end on
+  `;`/`,` (C-style `DB_PASSWORD=s3cr3tPr0dValue;`, caught dogfooding on
+  meshtastic/firmware). Env-lookups
   (`os.environ.get(...)`) and calls (`get_password()`) still do not
   match. Added lines outside `@@` regions (preamble, header-only
   sections) are scanned too — previously bypassed entirely. Labeled

@@ -33,10 +33,13 @@ SECRET_RE = re.compile(
 #: Unquoted assignments. The value must be 12+ chars with no parens,
 #: quotes, or comment markers, so `password = get_password()` and
 #: `token = os.environ["X"]` do not match but
-#: `DB_PASSWORD=s3cr3tPr0dValue` does. Short unquoted values stay
+#: `DB_PASSWORD=s3cr3tPr0dValue` does. The value may end the line, a
+#: `#` comment, or a `;`/`,` terminator (C-style
+#: `DB_PASSWORD=s3cr3tPr0dValue;` is a real leak shape the first version
+#: of this pattern missed on firmware code). Short unquoted values stay
 #: outside the scanner's reach by design (documented residual).
 UNQUOTED_SECRET_RE = re.compile(
-    r"(?i)" + _KEY + r"\s*[:=]\s*([^\s()\"'`#;]{12,})(?=\s*(?:#|$))"
+    r"(?i)" + _KEY + r"\s*[:=]\s*([^\s()\"'`#;,]{12,})(?=\s*(?:[;,#]|$))"
 )
 
 #: High-signal credential shapes that need no keyword context.
