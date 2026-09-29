@@ -98,12 +98,21 @@ def append_anchor(path: str, task_id: str, revision_id: str,
     return record
 
 
-def read_anchors(path: str) -> list[dict]:
-    """Read an anchor log, skipping blank and corrupt lines. A corrupt
-    line is ignored (fail-open read) but never trusted: verification
-    only ever compares against well-formed records."""
+def read_anchors(path: str) -> tuple[list[dict], int]:
+    """Read an anchor log as (well-formed records, malformed count).
+
+    Blank lines are benign (trailing newlines) and skipped. Anything
+    else that is not a JSON object with a `head_hash` — truncated
+    writes, interleaved garbage, foreign records — counts as malformed.
+    Callers fail closed on malformed > 0: verifying against the
+    surviving prefix would silently vouch for an older head as if the
+    newer write never happened, which is exactly the false negative
+    the anchor log exists to prevent. A missing file is ([], 0), not
+    corruption — absence and damage fail through different errors.
+    """
     import json as _json
-    records = []
+    records: list[dict] = []
+    malformed = 0
     try:
         with open(path, encoding="utf-8") as fh:
             for line in fh:
@@ -113,9 +122,12 @@ def read_anchors(path: str) -> list[dict]:
                 try:
                     record = _json.loads(line)
                 except ValueError:
+                    malformed += 1
                     continue
                 if isinstance(record, dict) and record.get("head_hash"):
                     records.append(record)
+                else:
+                    malformed += 1
     except OSError:
         pass
-    return records
+    return records, malformed

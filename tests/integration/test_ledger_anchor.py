@@ -35,7 +35,8 @@ def test_anchor_round_trip_and_tamper_detection(tmp_path):
     task_id, head = out["task_id"], out["ledger_head"]
     assert head
 
-    records = read_anchors(anchor)
+    records, malformed = read_anchors(anchor)
+    assert malformed == 0
     assert len(records) == 1
     assert records[0]["task_id"] == task_id
     assert records[0]["head_hash"] == head
@@ -118,15 +119,35 @@ def test_anchor_for_unknown_task_mismatches(tmp_path):
     assert result["error"] == "no_anchor_for_task"
 
 
-def test_read_anchors_skips_corrupt_lines(tmp_path):
+def test_read_anchors_counts_corrupt_lines(tmp_path):
+    # Blank lines are benign; everything else without a head_hash is
+    # damage, counted — never silently skipped.
     anchor = str(tmp_path / "heads.jsonl")
     with open(anchor, "w", encoding="utf-8") as fh:
         fh.write("\n")
         fh.write("not json\n")
         fh.write(json.dumps({"task_id": "t", "head_hash": "h"}) + "\n")
         fh.write(json.dumps({"task_id": "nohead"}) + "\n")
-    assert read_anchors(anchor) == [{"task_id": "t", "head_hash": "h"}]
-    assert read_anchors(str(tmp_path / "absent.jsonl")) == []
+    records, malformed = read_anchors(anchor)
+    assert records == [{"task_id": "t", "head_hash": "h"}]
+    assert malformed == 2
+    assert read_anchors(str(tmp_path / "absent.jsonl")) == ([], 0)
+
+
+def test_corrupt_anchor_fails_closed(tmp_path):
+    # A truncated log must never verify against its surviving prefix:
+    # damage anywhere in the file is HEAD_MISMATCH, even when the
+    # remaining records would confirm the chain.
+    db = str(tmp_path / "v.db")
+    anchor = str(tmp_path / "heads.jsonl")
+    out = _run(db, anchor)
+    assert run_verify_chain(db, anchor, out["task_id"])["status"] == "CHAIN_VALID"
+    with open(anchor, "a", encoding="utf-8") as fh:
+        fh.write("{truncated\n")
+    result = run_verify_chain(db, anchor, out["task_id"])
+    assert result["status"] == "HEAD_MISMATCH"
+    assert result["error"] == "anchor_file_corrupt"
+    assert result["malformed_lines"] == 1
 
 
 def test_verify_chain_cli_exit_codes(tmp_path):

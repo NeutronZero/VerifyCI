@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — resolver coverage surfaced; anchor reads fail loud
+
+- **`aci stats` reports deferred-resolution coverage.** `run_stats`
+  builds the latest revision's graph and reports
+  resolved/ambiguous/missing plus stored unresolved edges — the
+  resolver ran but established little must say so, or edge counts
+  read as coverage. Build failures surface as an `error` note, never
+  a zero-mask. CLI prints one `resolution:` line.
+- **`read_anchors` counts damage; `verify-chain` fails on any.**
+  Returns `(records, malformed)`; blank lines stay benign, everything
+  else without a `head_hash` counts. Any malformed line in play is
+  HEAD_MISMATCH (`anchor_file_corrupt`), even when surviving records
+  would confirm — a truncated log never verifies against its prefix.
+  Missing file stays ([], 0): absence and damage fail through
+  different errors. Suite 291, ruff clean.
+
 ## Unreleased — opt-in Ollama embeddings with content-addressed cache
 
 - **`ACI_EMBEDDINGS=ollama[:model]`** selects local Ollama embeddings

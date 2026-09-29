@@ -26,6 +26,15 @@ def stats(db: str = ""):
     result = run_stats(db or None)
     for table in ("revisions", "entities", "edges", "events", "anchors", "deltas"):
         typer.echo(f"{table}: {result.get(table, 0)}")
+    resolution = result.get("resolution") or {}
+    if "error" in resolution:
+        typer.echo(f"resolution: error: {resolution['error']}")
+    else:
+        typer.echo(
+            f"resolution: resolved={resolution.get('resolved', 0)} "
+            f"ambiguous={resolution.get('ambiguous', 0)} "
+            f"missing={resolution.get('missing', 0)} "
+            f"unresolved_edges={resolution.get('unresolved_edges', 0)}")
 
 
 @app.command()

@@ -11,9 +11,10 @@ Verdicts:
 - CHAIN_VALID — links hold (and the pinned head matches, when anchored).
 - CHAIN_BROKEN — an internal `prev_event_hash` link fails.
 - HEAD_MISMATCH — links hold but the head differs from the pinned
-  anchor (e.g. last-event payload rewritten), or no anchor exists for
-  the target task. Fail closed: an unconfirmable chain is not a valid
-  one.
+  anchor (e.g. last-event payload rewritten), no anchor exists for
+  the target task, or the anchor file itself has malformed lines.
+  Fail closed: an unconfirmable chain is not a valid one, and a
+  truncated log must never verify against its surviving prefix.
 - NO_EVENTS — nothing recorded (empty DB, missing DB, or no events for
   the task). A wrong `--db` must not read as a clean chain.
 """
@@ -44,11 +45,16 @@ def run_verify_chain(db_path: str | None = None, anchor_path: str | None = None,
         return {"db_path": db, "status": "NO_EVENTS", "events": 0,
                 "task_id": task_id or "", "error": "no_events_recorded"}
 
-    if anchor_path and not task_id:
-        # No target given: the latest anchor line names the target.
-        records = read_anchors(anchor_path)
-        if records:
-            task_id = records[-1].get("task_id") or ""
+    anchor_records: list[dict] = []
+    if anchor_path:
+        anchor_records, malformed = read_anchors(anchor_path)
+        if malformed:
+            return {"db_path": db, "status": "HEAD_MISMATCH",
+                    "events": len(events), "task_id": task_id or "",
+                    "error": "anchor_file_corrupt", "malformed_lines": malformed}
+        if not task_id and anchor_records:
+            # No target given: the latest anchor line names the target.
+            task_id = anchor_records[-1].get("task_id") or ""
 
     if task_id:
         scoped = EventLedger()
@@ -60,8 +66,7 @@ def run_verify_chain(db_path: str | None = None, anchor_path: str | None = None,
             return {"db_path": db, "status": "CHAIN_BROKEN", "events": len(events),
                     "task_id": task_id}
         if anchor_path:
-            records = [r for r in read_anchors(anchor_path)
-                       if r.get("task_id") == task_id]
+            records = [r for r in anchor_records if r.get("task_id") == task_id]
             if not records:
                 return {"db_path": db, "status": "HEAD_MISMATCH",
                         "events": len(events), "task_id": task_id,

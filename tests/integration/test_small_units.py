@@ -80,6 +80,48 @@ def test_run_stats_empty_db_counts_zero(tmp_path):
     assert stats["db_path"] == db
     for table in ("revisions", "entities", "edges", "events", "anchors", "deltas"):
         assert stats[table] == 0
+    assert stats["resolution"] == {"resolved": 0, "ambiguous": 0, "missing": 0}
+
+
+def test_run_stats_reports_resolution_coverage(tmp_path):
+    # Resolver coverage is operator-visible: resolved vs ambiguous vs
+    # missing, plus stored unresolved edges awaiting a unique target.
+    from src.contracts.edge import Edge, EdgeType
+    from src.contracts.entity import Entity, EntityType
+    from src.interface.commands.stats import run_stats
+    from src.storage.graph_store import GraphStore
+    from src.storage.revision import create_revision
+    db = str(tmp_path / "v.db")
+    store = GraphStore(db)
+    try:
+        revision = create_revision(repository_id="r", files=[("a.py", "h")])
+        store.insert_revision(revision)
+        rev = revision.revision_id
+
+        def _ent(eid, name, type_=EntityType.FUNCTION):
+            return Entity(
+                repository_id="r", logical_entity_id="l" + eid,
+                revision_entity_id=eid, type=type_, name=name,
+                file_path="a.py", line_start=1, line_end=2, language="python",
+                source_hash="h", revision_id=rev)
+
+        for eid, name in [("e1", "user"), ("e2", "helper")]:
+            store.insert_entity(_ent(eid, name))
+        store.insert_edge(Edge(
+            id="u1", revision_id=rev, src_entity_id="e1", dst_entity_id="",
+            type=EdgeType.CALLS_UNRESOLVED,
+            metadata={"callee": "helper", "caller_scope": ""}))
+        store.insert_edge(Edge(
+            id="u2", revision_id=rev, src_entity_id="e1", dst_entity_id="",
+            type=EdgeType.CALLS_UNRESOLVED,
+            metadata={"callee": "nobody", "caller_scope": ""}))
+    finally:
+        store.close()
+    resolution = run_stats(db)["resolution"]
+    assert resolution["resolved"] == 1
+    assert resolution["missing"] == 1
+    assert resolution["ambiguous"] == 0
+    assert resolution["unresolved_edges"] == 2
 
 
 def test_run_vuln_skips_invalid_json_metadata(tmp_path):
