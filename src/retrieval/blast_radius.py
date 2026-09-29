@@ -17,7 +17,6 @@ def compute_blast_radius(
         node_map = derive_node_map(graph)
     affected_callers = set()
     affected_callees = set()
-    seed_indices: set[int] = set()
 
     if graph is not None and node_map:
         reverse_map = {v: k for k, v in node_map.items()}
@@ -25,22 +24,28 @@ def compute_blast_radius(
             node_idx = node_map.get(entity_id)
             if node_idx is None:
                 continue
-            seed_indices.add(node_idx)
             callers = traverse(graph, node_idx, "incoming", max_hops, node_map, CALL_FLOW_TYPES)
             callees = traverse(graph, node_idx, "outgoing", max_hops, node_map, CALL_FLOW_TYPES)
             affected_callers.update(reverse_map.get(c, str(c)) for c in callers)
             affected_callees.update(reverse_map.get(c, str(c)) for c in callees)
 
-    seed_ids = {node_map.get(i, str(i)) for i in seed_indices} if node_map else set()
-    affected_callers.difference_update(changed_entities)
-    affected_callees.difference_update(changed_entities)
-    affected_callers.difference_update(seed_ids)
-    affected_callees.difference_update(seed_ids)
-
     impacted = (affected_callers | affected_callees) | set(changed_entities)
+    # No same-file wipeout: traverse() already excludes each seed itself,
+    # so a changed entity appears here only as a caller/callee of another
+    # changed entity — genuine impact. The old difference_update deleted
+    # every relative living in a changed file, and since this graph has no
+    # cross-file CALLS edges that was every relative: risk 0.00 always.
+    #
     # Coverage gap counts impacted *dependents* without tests — not the changed
     # entities themselves, which are the subject under review by definition.
-    test_coverage_gap = list((affected_callers | affected_callees) - set(test_entities))
+    # When no test mapping is provided (every V1 caller passes set()), the
+    # gap is unknown, not "everything untested": counting unknowns as gaps
+    # tripled all scores on missing metadata. Risk then measures structural
+    # impact only until a test-entity source is wired.
+    if test_entities:
+        test_coverage_gap = list((affected_callers | affected_callees) - set(test_entities))
+    else:
+        test_coverage_gap = []
     risk_score = min(1.0, len(affected_callers) * 0.1 + len(affected_callees) * 0.05 + len(test_coverage_gap) * 0.2)
 
     dependency_impact = _dependency_impact(dependency_graph, impacted, graph)

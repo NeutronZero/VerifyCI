@@ -3,7 +3,7 @@ from src.interface.commands import resolve_db
 from src.interface.commands.graph_loader import load_graph
 from src.verification.blast_radius import blast_radius_check
 from src.verification.config import load_repo_invariants
-from src.verification.diffmap import map_files_to_entity_ids, parse_diff_files
+from src.verification.diffmap import parse_diff_files, seed_entities_for_diff
 from src.verification.intent_align import evaluate_invariants
 from src.verification.policy import PolicyEvaluator
 from src.verification.semi_formal_reason import SemiFormalReasoner
@@ -19,7 +19,7 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
                            entities=entities or None)
     files = parse_diff_files(diff)
     checks = [build_semi_check(cert, files, entities)]
-    mapping = map_files_to_entity_ids(files, entities)
+    mapping = seed_entities_for_diff(files, entities, diff)
     changed = sorted({eid for eids in mapping.values() for eid in eids})
     blast, blast_check = blast_radius_check(
         graph=graph, changed_entities=changed, test_entities=set(), node_map=node_map or None)

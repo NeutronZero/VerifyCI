@@ -84,8 +84,18 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
             )
             for e in pack_entities if e.source_hash
         ]
-        blast = compute_blast_radius(
-            graph, [r.id for r in ranked[:3]], set(), node_map=node_map or None)
+        from src.graph.traverse import NodeMapError
+        try:
+            blast = compute_blast_radius(
+                graph, [r.id for r in ranked[:3]], set(), node_map=node_map or None)
+        except NodeMapError:
+            # Informational path (not a gate): an unreadable graph yields
+            # no blast data rather than a failed query. The verification
+            # gate (blast_radius_check) treats this as inability instead.
+            from src.contracts.verification_ir import BlastRadiusResult
+            blast = BlastRadiusResult(
+                affected_callers=[], affected_callees=[], test_coverage_gap=[],
+                risk_score=0.0, dependency_impact=[], vulnerability_impact=[])
         pack = build_evidence_pack(
             query=question, entities=pack_entities, relationships=[],
             source_chunks=chunks,

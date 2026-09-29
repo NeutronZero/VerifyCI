@@ -77,19 +77,28 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
             sparse_hits = bm25.search(query, k=k)
             seeds = [h.id for h in sparse_hits[:3]]
             graph_hits = GraphRetriever(graph, node_map or {}).retrieve(seeds)
+            # One shared universe for both channels: the old code embedded
+            # only the first 500 texts while BM25 indexed thousands, so the
+            # two channels ranked disjoint document sets.
+            universe = list(texts)[:500]
             try:
                 q_emb = (await provider.embed([query]))[0]
-                t_embs = await provider.embed([texts[e] for e in list(texts)[:500]])
+                t_embs = await provider.embed([texts[e] for e in universe])
                 dense_hits = []
-                for eid, t_emb in zip(list(texts)[:500], t_embs):
+                for eid, t_emb in zip(universe, t_embs):
                     dot = sum(a * b for a, b in zip(q_emb, t_emb))
                     dense_hits.append(SearchResult(id=eid, score=dot, metadata={"text": texts[eid]}))
                 dense_hits.sort(key=lambda r: r.score, reverse=True)
                 dense_hits = dense_hits[:k]
+                dense_ok = True
             except Exception:  # noqa: BLE001
-                dense_hits = [SearchResult(id=h.id, score=h.score, metadata={"text": texts.get(h.id, "")}) for h in sparse_hits]
+                # Dense is down: fuse sparse+graph only and SAY SO. The old
+                # code substituted a copy of the sparse channel, silently
+                # doubling every fused score while reporting a full fusion.
+                dense_hits = []
+                dense_ok = False
             fused = rrf_fusion_with_scores(dense_hits, sparse_hits, graph_hits)
-            methods = ["bm25", "graph", "rrf"]
+            methods = ["bm25", "graph", "rrf"] + (["dense"] if dense_ok else ["dense-unavailable"])
             if rerank:
                 reranker = CrossEncoderReranker()
                 ranked = reranker.rerank(
@@ -128,7 +137,7 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
     async def verify_diff(diff: str, revision_id: str = "", conversation_id: str = "") -> dict:
         from src.contracts.verification_ir import VerificationPolicy
         from src.verification.blast_radius import blast_radius_check
-        from src.verification.diffmap import map_files_to_entity_ids, parse_diff_files
+        from src.verification.diffmap import parse_diff_files, seed_entities_for_diff
         from src.verification.intent_align import evaluate_invariants
         from src.verification.policy import PolicyEvaluator
         from src.verification.semi_formal_reason import SemiFormalReasoner
@@ -140,7 +149,7 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                                    entities=entities or None)
             files = parse_diff_files(diff)
             checks = [build_semi_check(cert, files, entities or [])]
-            mapping = map_files_to_entity_ids(files, entities or [])
+            mapping = seed_entities_for_diff(files, entities or [], diff)
             changed = sorted({eid for eids in mapping.values() for eid in eids})
             blast, blast_check = blast_radius_check(
                 graph=graph, changed_entities=changed, test_entities=set(), node_map=node_map)
@@ -169,9 +178,10 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
             task_ir = planner.plan(task, intent.intent_package_id, "default")
             if not validate_task_ir(task_ir):
                 return {"task": task, "status": "FAILED", "error": "invalid_task_ir"}
+            from src.interface.commands.run import _dedupe_invariants
             context = {
                 "graph": graph, "node_map": node_map, "entities": entities,
-                "invariants": intent.invariants + _repo_invariants,
+                "invariants": _dedupe_invariants(intent.invariants + _repo_invariants),
                 "diff": diff, "store": store,
             }
             task_id = await scheduler.submit(task_ir, conversation_id=conversation_id,

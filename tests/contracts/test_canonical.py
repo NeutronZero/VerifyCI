@@ -3,7 +3,6 @@
 If these tests fail, the canonicalization contract changed.
 Update golden vectors only when the contract intentionally changes.
 """
-import pytest
 
 from src.contracts.event import Event
 from src.contracts.canonical import canonical_event_bytes, event_hash

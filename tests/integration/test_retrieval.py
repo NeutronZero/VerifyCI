@@ -14,6 +14,13 @@ def test_bm25_retriever():
     assert results[0].id == "doc1"
 
 
+def test_bm25_no_match_returns_empty():
+    retriever = BM25Retriever()
+    retriever.add("doc1", "authentication login password")
+    retriever.add("doc2", "database query sql")
+    assert retriever.search("xylophone zebras", k=2) == []
+
+
 def test_rrf_fusion():
     dense = [SearchResult(id="a", score=0.9, metadata={}), SearchResult(id="b", score=0.8, metadata={})]
     sparse = [SearchResult(id="b", score=0.9, metadata={}), SearchResult(id="c", score=0.8, metadata={})]

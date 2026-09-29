@@ -23,16 +23,16 @@ def _as_dag_dict(dag: Any) -> dict[str, Any]:
                 for s in dag.steps
             ],
             "conversation_id": "",
-            "budget_nano_usd": dag.budget.nano_usd if hasattr(dag, "budget") else 0,
+            "budget_nano_usd": dag.budget.nano_usd if hasattr(dag, "budget") else None,
         }
     if isinstance(dag, dict):
         return {
             "task_id": dag.get("task_id", ""),
             "nodes": dag.get("nodes", []),
             "conversation_id": dag.get("conversation_id", ""),
-            "budget_nano_usd": dag.get("budget_nano_usd", 0),
+            "budget_nano_usd": dag.get("budget_nano_usd"),
         }
-    return {"task_id": "", "nodes": [], "conversation_id": "", "budget_nano_usd": 0}
+    return {"task_id": "", "nodes": [], "conversation_id": "", "budget_nano_usd": None}
 
 
 def _topo_order(nodes: list[dict]) -> list[dict]:
@@ -95,9 +95,10 @@ class AsyncDAGScheduler(Scheduler):
             "conversation_id": conversation_id,
             "context": dict(context or {}),
             "decision": None, "error": None, "needs_review": False,
+            "executing": False, "handle": None,
         }
         self._emit("TASK_SUBMITTED", task_id, conversation_id, {"nodes": len(dag_dict["nodes"])})
-        asyncio.create_task(self._execute(task_id))
+        self._tasks[task_id]["handle"] = asyncio.create_task(self._execute(task_id))
         return task_id
 
     async def status(self, task_id: str) -> TaskStatus:
@@ -109,83 +110,140 @@ class AsyncDAGScheduler(Scheduler):
         return task.get("decision") if task else None
 
     async def cancel(self, task_id: str) -> None:
-        if task_id in self._tasks:
-            self._tasks[task_id]["status"] = TaskStatus.CANCELLED
-            self._emit("TASK_CANCELLED", task_id, self._tasks[task_id]["conversation_id"], {})
+        task = self._tasks.get(task_id)
+        if task is None:
+            return
+        task["status"] = TaskStatus.CANCELLED
+        handle = task.get("handle")
+        if handle is not None and not handle.done():
+            handle.cancel()
+        self._emit("TASK_CANCELLED", task_id, task["conversation_id"], {})
 
     async def resume(self, task_id: str) -> None:
-        if task_id in self._tasks and self._tasks[task_id]["status"] in (TaskStatus.CANCELLED, TaskStatus.FAILED):
-            self._tasks[task_id]["status"] = TaskStatus.PENDING
-            asyncio.create_task(self._execute(task_id))
+        task = self._tasks.get(task_id)
+        if task is None:
+            return
+        # Never fork a second _execute against the same task record: a
+        # still-running _execute owns the status writes.
+        if task["status"] in (TaskStatus.CANCELLED, TaskStatus.FAILED) and not task.get("executing"):
+            task["status"] = TaskStatus.PENDING
+            task["handle"] = asyncio.create_task(self._execute(task_id))
 
     async def _execute(self, task_id: str) -> None:
         from src.observability.tracing import start_agent_span
 
         task = self._tasks[task_id]
+        if task.get("executing") or task["status"] != TaskStatus.PENDING:
+            # Cancelled before start, or a duplicate _execute: the owner of
+            # the record keeps it. Never clobber another run's status.
+            return
+        task["executing"] = True
         conversation_id = task["conversation_id"]
-        with start_agent_span(f"task.{task_id}", conversation_id, "task.run"):
-            task["status"] = TaskStatus.RUNNING
-            self._emit("TASK_STARTED", task_id, conversation_id, {})
-            try:
-                nodes = _topo_order(task["dag"]["nodes"])
-                budget = task["dag"].get("budget_nano_usd", 0)
-                if budget and len(nodes) * self.NODE_COST_NANO_USD > budget:
-                    task["status"] = TaskStatus.FAILED
-                    task["error"] = "BUDGET_BREACHED"
-                    self._emit("BUDGET_BREACHED", task_id, conversation_id,
-                               {"nodes": len(nodes), "budget_nano_usd": budget})
-                    return
-                from src.orchestration.executor import Executor
-                executor = Executor()
-                shared = task.get("context", {}) or {}
-                review_status: str | None = None
-                for level in _levels(task["dag"]["nodes"]):
-                    outcomes = await asyncio.gather(*[
-                        self._run_node(executor, node, task_id, conversation_id, shared)
-                        for node in level
-                    ])
-                    for outcome in outcomes:
-                        kind, decision = outcome
-                        if kind == "ok":
-                            # Passing gates still produce decisions; the last
-                            # one labels the run so the ledger carries the
-                            # rationale even when nothing failed.
-                            if decision is not None:
-                                task["decision"] = decision
-                            continue
-                        if kind == "block":
-                            task["decision"] = decision
-                            task["status"] = TaskStatus.FAILED
-                            self._emit("TASK_FAILED", task_id, conversation_id,
-                                       {"reason": "verification_failed",
-                                        "decision": getattr(decision, "status", None),
-                                        "rationale": getattr(decision, "rationale", None)})
-                            self._persist(task_id)
+        try:
+            with start_agent_span(f"task.{task_id}", conversation_id, "task.run"):
+                task["status"] = TaskStatus.RUNNING
+                self._emit("TASK_STARTED", task_id, conversation_id, {})
+                try:
+                    nodes = _topo_order(task["dag"]["nodes"])
+                    budget = task["dag"].get("budget_nano_usd")
+                    if budget is not None and len(nodes) * self.NODE_COST_NANO_USD > budget:
+                        task["status"] = TaskStatus.FAILED
+                        task["error"] = "BUDGET_BREACHED"
+                        self._emit("BUDGET_BREACHED", task_id, conversation_id,
+                                   {"nodes": len(nodes), "budget_nano_usd": budget})
+                        await self._persist(task_id)
+                        return
+                    from src.orchestration.executor import Executor
+                    executor = Executor()
+                    shared = task.get("context", {}) or {}
+                    review_status: str | None = None
+                    for level in _levels(task["dag"]["nodes"]):
+                        if task["status"] == TaskStatus.CANCELLED:
+                            await self._persist(task_id)
                             return
-                        if kind == "review":
-                            task["decision"] = decision
-                            task["needs_review"] = True
-                            status = getattr(decision, "status", "HUMAN_REVIEW")
-                            if status == "INCONCLUSIVE":
-                                review_status = "INCONCLUSIVE"
-                            elif review_status is None:
-                                review_status = "HUMAN_REVIEW"
-                if review_status == "INCONCLUSIVE":
-                    task["status"] = TaskStatus.INCONCLUSIVE
-                elif review_status == "HUMAN_REVIEW":
-                    task["status"] = TaskStatus.HUMAN_REVIEW
-                else:
-                    task["status"] = TaskStatus.COMPLETED
-                self._emit("TASK_COMPLETED", task_id, conversation_id,
-                           {"needs_review": task["needs_review"],
-                            "status": task["status"].value,
-                            "decision": getattr(task.get("decision"), "status", None),
-                            "rationale": getattr(task.get("decision"), "rationale", None)})
-                self._persist(task_id)
-            except Exception as e:  # noqa: BLE001
-                task["status"] = TaskStatus.FAILED
-                task["error"] = str(e)
-                self._emit("TASK_FAILED", task_id, conversation_id, {"reason": str(e)})
+                        outcomes = await self._run_level(
+                            executor, level, task_id, conversation_id, shared)
+                        for outcome in outcomes:
+                            kind, decision = outcome
+                            if kind == "ok":
+                                # Passing gates still produce decisions; the last
+                                # one labels the run so the ledger carries the
+                                # rationale even when nothing failed.
+                                if decision is not None:
+                                    task["decision"] = decision
+                                continue
+                            if kind == "block":
+                                task["decision"] = decision
+                                task["status"] = TaskStatus.FAILED
+                                self._emit("TASK_FAILED", task_id, conversation_id,
+                                           {"reason": "verification_failed",
+                                            "decision": getattr(decision, "status", None),
+                                            "rationale": getattr(decision, "rationale", None)})
+                                await self._persist(task_id)
+                                return
+                            if kind == "review":
+                                task["decision"] = decision
+                                task["needs_review"] = True
+                                status = getattr(decision, "status", "HUMAN_REVIEW")
+                                if status == "INCONCLUSIVE":
+                                    review_status = "INCONCLUSIVE"
+                                elif review_status is None:
+                                    review_status = "HUMAN_REVIEW"
+                            if kind == "error":
+                                step_id, error = decision
+                                task["status"] = TaskStatus.FAILED
+                                task["error"] = f"{step_id}: {error}"
+                                self._emit("TASK_FAILED", task_id, conversation_id,
+                                           {"reason": "node_error", "step_id": step_id,
+                                            "error": error})
+                                await self._persist(task_id)
+                                return
+                    if review_status == "INCONCLUSIVE":
+                        task["status"] = TaskStatus.INCONCLUSIVE
+                    elif review_status == "HUMAN_REVIEW":
+                        task["status"] = TaskStatus.HUMAN_REVIEW
+                    else:
+                        task["status"] = TaskStatus.COMPLETED
+                    self._emit("TASK_COMPLETED", task_id, conversation_id,
+                               {"needs_review": task["needs_review"],
+                                "status": task["status"].value,
+                                "decision": getattr(task.get("decision"), "status", None),
+                                "rationale": getattr(task.get("decision"), "rationale", None)})
+                    await self._persist(task_id)
+                except asyncio.CancelledError:
+                    # Loop shutdown or cancel(): leave CANCELLED alone, and
+                    # never report a half-run as anything else.
+                    if task["status"] != TaskStatus.CANCELLED:
+                        task["status"] = TaskStatus.CANCELLED
+                        task["error"] = "cancelled"
+                        self._emit("TASK_CANCELLED", task_id, conversation_id, {})
+                    await self._persist(task_id)
+                    raise
+                except Exception as e:  # noqa: BLE001
+                    task["status"] = TaskStatus.FAILED
+                    task["error"] = f"{type(e).__name__}: {e}"
+                    self._emit("TASK_FAILED", task_id, conversation_id,
+                               {"reason": f"{type(e).__name__}: {e}"})
+                    await self._persist(task_id)
+        finally:
+            task["executing"] = False
+
+    async def _run_level(self, executor, level: list[dict], task_id: str,
+                         conversation_id: str, shared: dict) -> list:
+        """Run one level; on an unexpected node error, cancel the still-
+        running siblings instead of leaving them to write into a task
+        that is already FAILED."""
+        pending = [asyncio.create_task(
+            self._run_node(executor, node, task_id, conversation_id, shared))
+            for node in level]
+        try:
+            return await asyncio.gather(*pending)
+        except BaseException:
+            for t in pending:
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            raise
 
     async def _run_node(self, executor, node: dict, task_id: str,
                         conversation_id: str, shared: dict) -> tuple[str, Any]:
@@ -216,9 +274,21 @@ class AsyncDAGScheduler(Scheduler):
             return ("review", e.decision)
         except VerificationBlocker as e:
             return ("block", e.decision)
+        except Exception as e:  # noqa: BLE001
+            # Unexpected node failure, attributed: which step, what type,
+            # what message. The generic _execute handler can no longer tell.
+            step = node.get("step_id") or "unknown"
+            return ("error", (step, f"{type(e).__name__}: {e}"))
 
-    def _persist(self, task_id: str) -> None:
-        """Persist the task ledger to the shared store (events table)."""
+    async def _persist(self, task_id: str) -> None:
+        """Persist the task ledger to the shared store (events table).
+
+        Runs synchronously in the loop thread: the store is same-thread
+        sqlite, and cross-thread use corrupts it. A persist failure is
+        reported on stderr and recorded on the task — never swallowed,
+        since a verification product that silently drops its audit trail
+        is worse than one that errors loudly.
+        """
         task = self._tasks.get(task_id)
         if not task:
             return
@@ -227,8 +297,10 @@ class AsyncDAGScheduler(Scheduler):
             return
         try:
             self._ledger.save_to_store(store)
-        except Exception:  # noqa: BLE001, S110
-            pass
+        except Exception as e:  # noqa: BLE001
+            import traceback
+            task["persist_error"] = f"{type(e).__name__}: {e}"
+            traceback.print_exc()
 
     def _emit(self, type: str, task_id: str, conversation_id: str, payload: dict) -> None:
         if self._ledger is None:
@@ -239,5 +311,9 @@ class AsyncDAGScheduler(Scheduler):
                 provenance={"source": "scheduler"},
                 task_id=task_id, conversation_id=conversation_id,
             )
-        except Exception:  # noqa: BLE001, S110
-            pass
+        except Exception as e:  # noqa: BLE001
+            import traceback
+            task = self._tasks.get(task_id)
+            if task is not None:
+                task["emit_error"] = f"{type(e).__name__}: {e}"
+            traceback.print_exc()

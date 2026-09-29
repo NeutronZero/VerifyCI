@@ -9,7 +9,13 @@ def run_vuln(db_path: str | None = None, cache_path: str = "./storage/vuln_cache
              import_path: str | None = None) -> dict:
     """Offline vulnerability lookup. Findings enter the cache only via an
     explicit local import file ({package: [{id, ...}]}) — V1 never fetches
-    over the network."""
+    over the network.
+
+    A DB that cannot be read is an error, not an empty report: the old
+    code returned `findings: []` on a wrong path, a locked DB, or a
+    corrupt file, and a `len(findings) == 0` CI gate went green on a scan
+    that never ran.
+    """
     import json
     db = resolve_db(db_path)
     cache = VulnerabilityCache(Path(cache_path))
@@ -24,17 +30,22 @@ def run_vuln(db_path: str | None = None, cache_path: str = "./storage/vuln_cache
         imported = cache.refresh(edges, findings=data)
     findings: list[dict] = []
     try:
-        conn = sqlite3.connect(db)
+        try:
+            conn = sqlite3.connect(db)
+        except (sqlite3.Error, OSError) as e:
+            return {"db_path": db, "packages_checked": 0, "findings": [],
+                    "imported": imported,
+                    "error": f"cannot_open_db: {type(e).__name__}: {e}"}
         try:
             rows = conn.execute(
                 "SELECT metadata_json FROM edges WHERE type = 'DEPENDS_ON' LIMIT 5000"
             ).fetchall()
+        except sqlite3.Error as e:
+            return {"db_path": db, "packages_checked": 0, "findings": [],
+                    "imported": imported,
+                    "error": f"query_failed: {type(e).__name__}: {e}"}
         finally:
             conn.close()
-    except (sqlite3.OperationalError, OSError):
-        rows = []
-    import json
-    try:
         for (meta_json,) in rows:
             try:
                 meta = json.loads(meta_json) if meta_json else {}

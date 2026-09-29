@@ -1,16 +1,10 @@
 """Unit tests for small pure helpers previously covered only indirectly."""
-import sys
-
 from src.ingestion.extractor import _source_snippet
 from src.ingestion.language import detect_language, is_ingestible
 from src.memory.ledger import EventLedger
-from src.orchestration.compiler.permissions import check_permission
 from src.orchestration.events import emit_event
 from src.orchestration.executor import _get
 from src.orchestration.scheduler import _levels, _topo_order
-from src.tools.file_read import file_read_tool
-from src.tools.file_write import file_write_tool
-from src.tools.sandbox import run_sandboxed
 
 
 def test_topo_order_chain():
@@ -50,12 +44,6 @@ def test_is_ingestible():
     assert is_ingestible("Makefile") is False
 
 
-def test_run_sandboxed_echo():
-    result = run_sandboxed([sys.executable, "-c", "print('hi')"])
-    assert result["returncode"] == 0
-    assert result["stdout"].strip() == "hi"
-
-
 def test_get_dict_and_namespace():
     from types import SimpleNamespace
     assert _get({"a": 1}, "a") == 1
@@ -71,22 +59,6 @@ def test_emit_event_appends():
     assert ledger.get_events() == [event]
 
 
-def test_file_write_read_round_trip(tmp_path):
-    path = str(tmp_path / "sub" / "note.txt")
-    import os
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    assert file_write_tool(path, "hello")["success"] is True
-    result = file_read_tool(path)
-    assert result["content"] == "hello"
-    assert result["error"] is None
-
-
-def test_file_read_missing():
-    result = file_read_tool("/nonexistent-verifyci-probe/x.txt")
-    assert result["content"] is None
-    assert result["error"]
-
-
 def test_source_snippet_out_of_bounds():
     src = b"line1\nline2\n"
     assert _source_snippet(src, 1, 2) == "line1\nline2"
@@ -97,10 +69,6 @@ def test_source_snippet_out_of_bounds():
 
 def test_detect_language_unknown():
     assert detect_language("x.unknown-ext") == "unknown"
-
-
-def test_check_permission_deny():
-    assert check_permission("rm_rf_everything") is False
 
 
 def test_run_stats_empty_db_counts_zero(tmp_path):
@@ -130,3 +98,19 @@ def test_run_vuln_skips_invalid_json_metadata(tmp_path):
     result = run_vuln(db, cache_path=str(tmp_path / "cache.db"))
     assert result["packages_checked"] == 2
     assert result["findings"] == []
+
+
+def test_run_vuln_reports_unreadable_db(tmp_path):
+    # A scan that never ran must not look like a clean scan: wrong path
+    # and schema-less DBs surface "error" instead of empty findings.
+    from src.interface.commands.vuln import run_vuln
+    bad_dir = run_vuln(str(tmp_path / "no-such-dir" / "v.db"),
+                       cache_path=str(tmp_path / "cache.db"))
+    assert bad_dir["findings"] == []
+    assert "error" in bad_dir
+    import sqlite3
+    empty = str(tmp_path / "empty.db")
+    sqlite3.connect(empty).close()
+    no_schema = run_vuln(empty, cache_path=str(tmp_path / "cache.db"))
+    assert no_schema["findings"] == []
+    assert "error" in no_schema

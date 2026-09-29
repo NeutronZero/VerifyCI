@@ -35,7 +35,10 @@ class ExecutableDAG:
     edges: list[tuple[str, str]] = field(default_factory=list)
     task_id: str = ""
     conversation_id: str = ""
-    budget_nano_usd: int = 0
+    # None means "no budget set" (unlimited). 0 is a real zero budget:
+    # any node breaches it. The old default of 0 silently disabled the
+    # guard because `if budget` is falsy for 0.
+    budget_nano_usd: int | None = None
 
 
 class Scheduler(ABC):

@@ -62,7 +62,8 @@ def test_cli_result_carries_rationale():
     from src.interface.commands.verify import run_verify
     # CLI prints result['status'] and result['rationale'] verbatim;
     # pin the source dict, not the echo formatting.
-    import tempfile, os
+    import tempfile
+    import os
     from src.storage.graph_store import GraphStore
     from src.storage.revision import create_revision
     from src.ingestion.parser import TreeSitterParser

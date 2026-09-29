@@ -1,12 +1,7 @@
 import uuid
 
 from src.contracts.verification_ir import IntentPackage, Invariant
-
-
-DEFAULT_INVARIANTS = [
-    ("no_hardcoded_secrets", "diff must not introduce hardcoded secrets", "secrets_scan"),
-    ("provenance_complete", "every claim traceable to file + lines + source_hash", "provenance_check"),
-]
+from src.verification.defaults import default_invariants
 
 
 def build_intent_package(
@@ -16,15 +11,10 @@ def build_intent_package(
 ) -> IntentPackage:
     package_id = str(uuid.uuid4())
     if invariants is None:
-        invariants = [
-            Invariant(
-                invariant_id=str(uuid.uuid4()),
-                rule=rule,
-                compiled_query=query,
-                blocking=True,
-            )
-            for _, rule, query in DEFAULT_INVARIANTS
-        ]
+        # Single source of truth with verification.defaults: a duplicated
+        # blocking=True provenance_check here used to make run_task FAIL
+        # diffs that run_verify calls INCONCLUSIVE.
+        invariants = default_invariants()
     return IntentPackage(
         intent_package_id=package_id,
         specs=specs or [{"goal": goal}],

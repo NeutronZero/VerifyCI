@@ -30,6 +30,26 @@ def test_event_ledger_verify():
     assert ledger.verify_chain() is True
 
 
+def test_head_hash_pins_last_event():
+    # Chain links alone never anchor the last event: rewriting it keeps
+    # every prev_hash consistent. A pinned head (stored externally)
+    # detects the forgery; without it, verify_chain stays True.
+    import dataclasses
+    from src.memory.ledger import EventLedger
+    ledger = EventLedger()
+    for i in range(3):
+        ledger.append(f"T{i}", {"decision": "PASS"}, {"src": "test"})
+    head = ledger.head_hash()
+    assert head
+    assert ledger.verify_chain(head) is True
+    ledger._events[-1] = dataclasses.replace(
+        ledger._events[-1], payload={"decision": "FAIL"})
+    assert ledger.verify_chain() is True  # links alone: undetected
+    assert ledger.verify_chain(head) is False  # pinned head: detected
+    ledger.append("T3", {}, {})
+    assert ledger.verify_chain(head) is False  # no self-healing past the pin
+
+
 def test_replay_engine():
     engine = ReplayEngine()
     engine.add_anchor("rev1", {"state": "initial"})

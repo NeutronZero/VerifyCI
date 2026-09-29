@@ -17,10 +17,39 @@ from typing import Any
 from src.contracts.verification_ir import CheckResult, Invariant, InvariantMetrics
 from src.graph.traverse import iter_edge_payloads
 
+#: Keyword with optional underscore/dash affixes: DB_PASSWORD,
+#: AWS_SECRET_ACCESS_KEY, APP_AUTH_TOKEN. A bare \b boundary misses every
+#: one of these — and real .env files are always prefixed. Cost, stated
+#: plainly: `get_password = "..."` / `old_password = "..."` now match
+#: too. For a fail-closed gate that is correct (it IS a hardcoded
+#: password); the allowlist demote covers fixtures.
+_KEY = (r"(?:[A-Za-z0-9_]*[_-])?(?:password|passwd|secret|api[_-]?key"
+        r"|auth[_-]?token|private[_-]?key)(?:[_-][A-Za-z0-9_]+)?")
+
 SECRET_RE = re.compile(
-    r"(?i)\b(password|passwd|secret|api[_-]?key|auth[_-]?token|private[_-]?key)\b"
-    r"\s*[:=]\s*['\"][^'\"]{3,}['\"]"
+    r"(?i)" + _KEY + r"\s*[:=]\s*['\"][^'\"]{3,}['\"]"
 )
+
+#: Unquoted assignments. The value must be 12+ chars with no parens,
+#: quotes, or comment markers, so `password = get_password()` and
+#: `token = os.environ["X"]` do not match but
+#: `DB_PASSWORD=s3cr3tPr0dValue` does. Short unquoted values stay
+#: outside the scanner's reach by design (documented residual).
+UNQUOTED_SECRET_RE = re.compile(
+    r"(?i)" + _KEY + r"\s*[:=]\s*([^\s()\"'`#;]{12,})(?=\s*(?:#|$))"
+)
+
+#: High-signal credential shapes that need no keyword context.
+AWS_KEY_RE = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
+PEM_RE = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----")
+JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
+CONN_STR_RE = re.compile(r"://[^/\s:()\"']+:[^/\s@()\"']{4,}@")
+
+_SECRET_PATTERNS = (SECRET_RE, UNQUOTED_SECRET_RE, AWS_KEY_RE, PEM_RE, JWT_RE, CONN_STR_RE)
+
+
+def _has_secret(text: str) -> bool:
+    return any(p.search(text) for p in _SECRET_PATTERNS)
 
 #: Path segments whose secret-shaped strings are fixtures, not findings.
 #: A secrets hit confined to these demotes to inability (INCONCLUSIVE via
@@ -134,11 +163,15 @@ def _check_invariant(diff: str, invariant: Invariant, graph: Any, evidence: list
         return bool(evidence), f"evidence items={len(evidence)}", True
     if query.startswith("forbid_call:"):
         name = query[len("forbid_call:"):].strip()
-        violated, examined = _graph_search(graph, name, "CALLS")
+        violated, examined, evaluated = _graph_search(graph, name, "CALLS")
+        if not evaluated:
+            return False, f"graph traversal failed for forbid_call:{name} (fail-closed)", True
         return not violated, _coverage_note(examined, "CALLS", name), examined > 0
     if query.startswith("forbid_import:"):
         name = query[len("forbid_import:"):].strip()
-        violated, examined = _graph_search(graph, name, "IMPORTS")
+        violated, examined, evaluated = _graph_search(graph, name, "IMPORTS")
+        if not evaluated:
+            return False, f"graph traversal failed for forbid_import:{name} (fail-closed)", True
         return not violated, _coverage_note(examined, "IMPORTS", name), examined > 0
     return False, f"unknown query kind (fail-closed): {query[:40]}", True
 
@@ -162,27 +195,30 @@ def _is_allowlisted(path: str) -> str | None:
 
 
 def _scan_secrets(diff: str) -> tuple[bool, str, bool]:
-    """Scan added lines per file. A hit outside allowlisted paths is a
-    rejection. A hit confined to allowlisted paths (fixtures, examples)
-    is inability (`established=False` → INCONCLUSIVE), not a pass and not
-    a FAIL — the two labeled sets stay separate instead of contesting one
-    label."""
-    from src.verification.diffmap import parse_diff_files
+    """Scan every added line in the diff, attributed per file. A hit
+    outside allowlisted paths is a rejection. A hit confined to
+    allowlisted paths (fixtures, examples) is inability
+    (`established=False` → INCONCLUSIVE), not a pass and not a FAIL.
+
+    Added lines are collected with `iter_added_lines`, not by splitting
+    on `@@`: lines smuggled outside hunk regions (preamble, header-only
+    sections) previously bypassed the scanner entirely while still
+    grounding the diff. Lines attributable to no file fail as unscoped.
+    """
+    from src.verification.diffmap import iter_added_lines
     if not diff:
         return True, "empty diff, nothing to scan", True
-    sections = re.split(r"(?m)^diff --git ", diff)
     hit_files: list[str] = []
-    if len(sections) <= 1:
-        # No file headers: scan whole text as one unscoped unit.
-        if SECRET_RE.search(diff):
-            return False, "secret-shaped string (unscoped diff)", True
-        return True, "diff text scanned", True
-    for section in sections[1:]:
-        header, _, body = section.partition("\n@@")
-        files = parse_diff_files("diff --git " + header)
-        added = "\n".join(l[1:] for l in body.splitlines() if l.startswith("+"))
-        if SECRET_RE.search(added):
-            hit_files.extend(files or ["<unknown>"])
+    unscoped = False
+    for file, content in iter_added_lines(diff):
+        if not _has_secret(content):
+            continue
+        if file is None:
+            unscoped = True
+        else:
+            hit_files.append(file)
+    if unscoped:
+        return False, "secret-shaped string (unscoped diff lines)", True
     if not hit_files:
         return True, "diff text scanned", True
     outside = [f for f in hit_files if _is_allowlisted(f) is None]
@@ -193,10 +229,16 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool]:
                   f"{sorted(set(hit_files))}"), False
 
 
-def _graph_search(graph: Any, name: str, edge_type: str) -> tuple[bool, int]:
-    """Return (violation_found, edges_examined)."""
+def _graph_search(graph: Any, name: str, edge_type: str) -> tuple[bool, int, bool]:
+    """Return (violation_found, edges_examined, evaluated).
+
+    A broken graph (traversal raises) is NOT "no violation found": it is
+    unevaluable, and the caller fails closed. `evaluated=False` is
+    distinct from "zero edges examined" (graph=None or no name), which
+    stays inability → INCONCLUSIVE.
+    """
     if graph is None or not name:
-        return False, 0
+        return False, 0, True
     try:
         index = {}
         nodes_fn = getattr(graph, "nodes", None)
@@ -213,7 +255,7 @@ def _graph_search(graph: Any, name: str, edge_type: str) -> tuple[bool, int]:
             examined += 1
             dst = getattr(edge, "dst_entity_id", None)
             if dst is not None and index.get(dst) == name:
-                return True, examined
-        return False, examined
-    except Exception:  # noqa: BLE001, S110
-        return False, 0
+                return True, examined, True
+        return False, examined, True
+    except Exception:  # noqa: BLE001
+        return True, 0, False

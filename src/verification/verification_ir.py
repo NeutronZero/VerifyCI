@@ -23,6 +23,10 @@ def build_semi_check(cert, files: list[str], entities: list) -> CheckResult:
         score=cert.confidence,
         evidence=[e.file_path for e in cert.evidence],
         explanation=explanation,
+        # The certificate travels with the check so policy can tell
+        # inability (unverified cert → INCONCLUSIVE) from rejection
+        # (failed check on a verified cert → FAIL). Without it every
+        # grounding failure read as a rejection.
         certificate=cert,
     )
 

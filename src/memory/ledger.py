@@ -34,7 +34,17 @@ class EventLedger:
     def get_events(self) -> list[Event]:
         return list(self._events)
 
-    def verify_chain(self) -> bool:
+    def head_hash(self) -> Optional[str]:
+        """Hash of the latest event. The chain links each event to its
+        predecessor, so the *last* event is anchored by nothing — anyone
+        holding the DB can rewrite it and the links still check out. The
+        only fix is pinning the head externally (operator notebook, a
+        second store, a signed checkpoint) and verifying against it."""
+        if not self._events:
+            return None
+        return event_hash(self._events[-1])
+
+    def verify_chain(self, expected_head: Optional[str] = None) -> bool:
         for i, event in enumerate(self._events):
             if i == 0:
                 if event.prev_event_hash is not None:
@@ -42,6 +52,9 @@ class EventLedger:
                 continue
             expected_hash = event_hash(self._events[i - 1])
             if event.prev_event_hash != expected_hash:
+                return False
+        if expected_head is not None:
+            if not self._events or event_hash(self._events[-1]) != expected_head:
                 return False
         return True
 

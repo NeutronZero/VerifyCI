@@ -1,10 +1,7 @@
-import pytest
 
 from src.ingestion.language import detect_language
 from src.ingestion.parser import TreeSitterParser, compute_source_hash
 from src.ingestion.extractor import extract_entities, extract_edges
-from src.contracts.identity import compute_logical_entity_id, compute_revision_entity_id
-from src.contracts.entity import EntityType
 
 
 def test_detect_language():

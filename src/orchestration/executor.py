@@ -53,7 +53,7 @@ class Executor:
             from src.verification.semi_formal_reason import SemiFormalReasoner
             from src.verification.intent_align import evaluate_invariants
             from src.verification.blast_radius import blast_radius_check
-            from src.verification.diffmap import map_files_to_entity_ids, parse_diff_files
+            from src.verification.diffmap import parse_diff_files, seed_entities_for_diff
             from src.contracts.verification_ir import (
                 VerificationPolicy,
             )
@@ -75,7 +75,7 @@ class Executor:
             changed = list(_get(context, "changed_entities", []) or [])
             if not changed and diff:
                 files = parse_diff_files(diff)
-                mapping = map_files_to_entity_ids(files, graph_entities)
+                mapping = seed_entities_for_diff(files, graph_entities, diff)
                 changed = sorted({eid for eids in mapping.values() for eid in eids})
 
             reasoner = SemiFormalReasoner()

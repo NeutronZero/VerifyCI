@@ -12,6 +12,17 @@ from src.orchestration.scheduler import AsyncDAGScheduler
 from src.storage.graph_store import GraphStore
 
 
+def _dedupe_invariants(invariants: list) -> list:
+    seen: set[tuple] = set()
+    out = []
+    for inv in invariants:
+        key = (inv.compiled_query, inv.blocking)
+        if key not in seen:
+            seen.add(key)
+            out.append(inv)
+    return out
+
+
 def run_task(task: str, timeout: float = 30.0, diff: str = "",
              db_path: str | None = None) -> dict:
     async def _run() -> dict:
@@ -28,7 +39,11 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
             scheduler = AsyncDAGScheduler(ledger=ledger)
             context = {
                 "graph": graph, "node_map": node_map, "entities": entities,
-                "invariants": intent.invariants + load_repo_invariants(db),
+                # intent.invariants are the project defaults; repo rules
+                # extend them. Dedupe by query so the defaults are not
+                # evaluated twice with conflicting blocking flags.
+                "invariants": _dedupe_invariants(
+                    intent.invariants + load_repo_invariants(db)),
                 "diff": diff, "store": store,
             }
             task_id = await scheduler.submit(task_ir, context=context)

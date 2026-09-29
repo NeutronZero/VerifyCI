@@ -7,12 +7,17 @@ checker implementation first — near-misses were chosen from the shape of
 real inputs (env files, aliased imports, relative imports, split
 literals), not from knowledge of what the regex/graph walk matches.
 
-Measured baseline (2026-09-28, 12 cases): recall 4/9, precision 4/4.
+Measured baseline (2026-09-28, 17 cases): recall 5/9, precision 4/4.
 The fixture case (`flask-fixture-secret`) is a designed non-flag: the
 allowlist demotes it to pass-with-`established=False` instead of a
 violation flag, costing one recall point by design (pinned separately in
 `test_fixture_demotes_instead_of_flagging`). Near-misses cost the other
-four honestly.
+three honestly.
+Review note 2026-09-29: recall 4/9 -> 5/9. The unquoted-assignment pattern
+now flags `near-unquoted-env` (`PASSWORD=abc123loaded`), which the old
+quotes-only regex missed. No precision cost: the value must be 12+ chars
+with no parens and run to end-of-line/comment, so `os.environ.get(...)`
+lookups still do not match.
 Gates assert >= baseline - epsilon: regressions fail, improvements require
 updating the recorded baseline with a review note.
 """
@@ -27,7 +32,7 @@ from src.verification.intent_align import score_labeled
 
 LABELS = Path(__file__).parent / "labels" / "invariants.jsonl"
 
-BASELINE_RECALL = 4 / 9
+BASELINE_RECALL = 5 / 9
 BASELINE_PRECISION = 1.0
 EPSILON = 0.05
 
@@ -98,8 +103,8 @@ def load_cases():
 def test_labeled_ground_truth_meets_baseline():
     cases = load_cases()
     assert len(cases) == 17
-    by_item = {json.loads(l)["id"]: json.loads(l) for l in
-               LABELS.read_text(encoding="utf-8").splitlines() if l.strip()}
+    by_item = {json.loads(line)["id"]: json.loads(line) for line in
+               LABELS.read_text(encoding="utf-8").splitlines() if line.strip()}
     # Every label carries provenance; the current set predates the blind
     # protocol, so all are author-informed and the baseline inherits that.
     assert {v.get("label_provenance") for v in by_item.values()} == {"author-informed"}
@@ -115,8 +120,8 @@ def test_labeled_ground_truth_meets_baseline():
 def test_baseline_reported_by_stratum():
     # When blind-labeled cases arrive, this is where their stratum gets its
     # own baseline. Today the blind stratum is empty by construction.
-    by_item = [json.loads(l) for l in
-               LABELS.read_text(encoding="utf-8").splitlines() if l.strip()]
+    by_item = [json.loads(line) for line in
+               LABELS.read_text(encoding="utf-8").splitlines() if line.strip()]
     strata = {}
     for item in by_item:
         strata.setdefault(item.get("label_provenance", "unlabeled"), []).append(item["id"])

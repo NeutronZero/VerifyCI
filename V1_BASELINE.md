@@ -54,3 +54,20 @@ unknown-file diff      → INCONCLUSIVE  → task INCONCLUSIVE
 Provenance + graph impact + deterministic invariants. Not formal program
 verification; not proof of semantic intent. Deferred items live in
 CHANGELOG.md under V1.1 / V1.2.
+
+## Corrections (2026-09-29 audit, verified against the v1.0.0 archive)
+
+The numbers above are a tag-time record and stay as written, except:
+
+- "TP=11 FP=0 FN=0" was never true — running `run_extraction.py` from
+  the `v1.0.0` archive already yields **TP=13**. The sample repo gained
+  its C file before the tag; the baseline line was not re-run.
+- "12 tests require Tree-sitter grammars" is wrong at the tag too:
+  with the grammar packages blocked, the archived suite gives
+  **14 failed, 132 passed**, not 12.
+- The decisive-matrix row "unknown-file diff → INCONCLUSIVE" holds for
+  `verify` but `run_task` returned **FAIL** on the same diff (a blocking
+  `provenance_check` duplicate in `intent.py`). Fixed: both paths now
+  agree, and the Flask 5-commit distribution is 3 PASS / 2 INCONCLUSIVE
+  (the changelog commit is honestly ungroundable since the audit
+  closed the ungrounded-file exemption).

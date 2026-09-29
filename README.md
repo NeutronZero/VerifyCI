@@ -34,16 +34,27 @@ premises (per changed file) → traces (call-flow paths from changed entities)
 Grounding rules (no exceptions):
 
 - A diff naming no files, or only files absent from the graph, is
-  `INCONCLUSIVE` — never `PASS`.
+  `INCONCLUSIVE` — never `PASS`. Every named file must ground,
+  regardless of extension: a clean `.py` hunk does not launder
+  unverified content (`Dockerfile`, CI workflows, `.env`) in the same
+  diff into a `PASS`. Stated plainly: `PASS` means every file in the
+  diff was something the graph could reason about, so routine commits
+  touching docs or config alongside code read `INCONCLUSIVE`
+  (declined, routed to human review — not blocked) rather than `PASS`.
 - `certificate_verified` requires every deterministic check passed, plus
   non-empty traces and evidence.
 - Invariant checkers fail closed: `secrets_scan`, `provenance_check`,
   `forbid_call:<name>`, `forbid_import:<module>`. Unknown queries fail.
+  `secrets_scan` covers quoted assignments, long unquoted values, AWS
+  keys, PEM blocks, JWTs, and credentialed URLs — measured recall 5/9
+  on the labeled set, not a general leak detector.
 - V1 proves **provenance and impact**, not semantic intent: a mapped,
   secret-free diff verifies structurally. Intent judgment stays with policy
   reviewers and project-specific invariants. A PASS means "grounds in known
   entities and trips no invariant" — not "correct". Ordinary human code
-  rarely trips the gate (4 PASS / 1 INCONCLUSIVE / 0 FAIL on Flask history);
+  rarely trips the gate (3 PASS / 2 INCONCLUSIVE / 0 FAIL on the last 5
+  Flask commits; the two INCONCLUSIVE are an empty merge and a mixed
+  changelog diff, both honestly ungroundable);
   subtly-wrong agent patches, the population this exists for, are untested.
 
 ## Architecture
@@ -62,5 +73,5 @@ lower-bound placeholder; measured numbers reflect the offline stack.
 ## Status
 
 V1 walking skeleton. `PLAN.md` is the full plan; `CHANGELOG.md` records what
-each revision proved, including measured numbers and known gaps. 185 tests:
+each revision proved, including measured numbers and known gaps. 246 tests:
 `python -m pytest tests/ -q`.

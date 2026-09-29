@@ -305,17 +305,24 @@ d73fa1cd | files=['src/flask/app.py']                              | PASS
 d318b683 | files=['src/flask/helpers.py']                          | PASS
 2a8a38b0 | files=['src/flask/views.py']                            | PASS
 d8eaaba8 | files=[] (merge, empty diff without -m)                 | INCONCLUSIVE
-89992954 | files=[CHANGES.rst + 2 code files]                      | PASS
+89992954 | files=[CHANGES.rst + 2 code files]                      | INCONCLUSIVE
 ```
 
-Distribution 4 PASS / 1 INCONCLUSIVE / 0 FAIL. The merge-commit empty
-output is correct behavior on empty input (merges need `-m` handling —
-recorded limitation, not a bug). The last commit initially read
-INCONCLUSIVE because `CHANGES.rst` (uningestible) vetoed the whole diff;
-fixed same session: only ingestible-but-absent files veto
-(`INGESTIBLE_EXTENSIONS` single-sourced in `ingestion/language.py`, shared
-by ingest collection and grounding). Failing to do this would have made
-every docs-touching commit unverifiable — the common case, not the edge.
+Distribution 3 PASS / 2 INCONCLUSIVE / 0 FAIL (re-measured 2026-09-29
+after the audit fixes; previously 4/1/0). The merge-commit empty output
+is correct behavior on empty input (merges need `-m` handling —
+recorded limitation, not a bug). The last commit reads INCONCLUSIVE
+because `CHANGES.rst` names a file absent from the graph.
+
+Reversal, recorded honestly: this section previously documented the
+opposite decision ("only ingestible-but-absent files veto"), made so
+docs-touching commits would still verify. The 2026-09-29 audit showed
+that exemption launders arbitrary unverified content — a clean .py hunk
+carried a malicious Dockerfile, a CI workflow edit, and a new .env with
+secrets, all to PASS. Every named-but-ungrounded file now vetoes,
+regardless of extension. INCONCLUSIVE routes to human review, not FAIL:
+docs-touching commits are declined, not blocked. Blast seeds for
+89992954 also narrowed 621 whole-file entities -> 12 hunk-anchored ones.
 
 ## Second checker, second real input (forbid_import)
 

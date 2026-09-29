@@ -69,7 +69,14 @@ class SemiFormalReasoner:
         )
         seeds = code_seeds
         if node_map is None:
-            node_map = derive_node_map(graph)
+            from src.graph.traverse import NodeMapError
+            try:
+                node_map = derive_node_map(graph)
+            except NodeMapError:
+                # Unreadable graph: no traces, so trace_supported fails
+                # and the verdict is INCONCLUSIVE — never a crash, never
+                # a pass on missing structure.
+                node_map = {}
         paths = self._trace_from_seeds(graph, seeds, node_map)
         evidence = self._collect_evidence(seeds, entities)
         det_checks = self._run_deterministic_checks(
@@ -151,17 +158,17 @@ class SemiFormalReasoner:
         return evidence
 
     def _run_deterministic_checks(self, files: list[str], mapping: dict,
-                                  paths: list[ExecutionTrace],
-                                  evidence: list[FileEvidence],
-                                  module_only: list[str] | None = None,
-                                  deletion_hunks: list[tuple[int, str]] | None = None
-                                  ) -> list[DeterministicCheck]:
-        from src.ingestion.language import is_ingestible
+                                   paths: list[ExecutionTrace],
+                                   evidence: list[FileEvidence],
+                                   module_only: list[str] | None = None,
+                                   deletion_hunks: list[tuple[int, str]] | None = None
+                                   ) -> list[DeterministicCheck]:
         grounded = [f for f, eids in mapping.items() if eids]
-        # Only ingestible-but-absent files veto: docs/config outside the
-        # graph are legitimately ungroundable, not verification failures.
-        ungrounded = [f for f in files
-                      if f not in grounded and is_ingestible(f)]
+        # Every named file must ground. A clean .py hunk used to launder
+        # arbitrary unverified content (Dockerfile, CI workflows, .env)
+        # in the same diff into a PASS; ungroundable content is now
+        # inability (INCONCLUSIVE), never a free pass.
+        ungrounded = [f for f in files if f not in grounded]
         module_only = module_only or []
         deletion_hunks = deletion_hunks or []
         seeds_ok = bool(files) and not ungrounded and not module_only

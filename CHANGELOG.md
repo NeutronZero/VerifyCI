@@ -1,5 +1,103 @@
 # Changelog
 
+## Unreleased — external audit fixes (2026-09-29)
+
+An outside audit executed three reproducible false-PASS paths and a set
+of silent-failure / dead-control findings. All confirmed by re-execution
+before fixing; every fix below is pinned by a regression test.
+
+- **C1 — deletion tripwire bypassed by one `+` line.** `find_deletion_hunks`
+  treated any hunk containing a `+` line as a modification. Deleting a
+  whole function plus one blank line verified as PASS. Net-removal rule
+  now: a hunk with more `-` lines than `+` lines is a deletion.
+  Balanced pairs still pass. Residual, stated: adding at least as many
+  junk lines as removed lines still evades; content-level removal
+  verification stays V1.1.
+- **C2 — clean `.py` hunk laundered arbitrary content into PASS.**
+  Non-ingestible files were exempt from the ungrounded veto, so
+  `src/auth.py` + malicious `Dockerfile` / CI workflow / new `.env`
+  verified as PASS. Every named-but-ungrounded file now vetoes,
+  regardless of extension (reverses the `real_repo.md` decision, with
+  the reversal recorded there). Flask 5-commit distribution moves
+  4 PASS / 1 INCONCLUSIVE → 3 PASS / 2 INCONCLUSIVE / 0 FAIL; the
+  changelog commit is declined (human review), not blocked.
+- **C3 — secrets scanner required quotes; real secrets are unquoted.**
+  Now flags long unquoted values (`DB_PASSWORD=...`), AWS keys, PEM
+  blocks, JWTs, and credentialed URLs, with affix-tolerant keywords
+  (`DB_PASSWORD`, `AWS_SECRET_ACCESS_KEY`). Env-lookups
+  (`os.environ.get(...)`) and calls (`get_password()`) still do not
+  match. Added lines outside `@@` regions (preamble, header-only
+  sections) are scanned too — previously bypassed entirely. Labeled
+  recall 4/9 → 5/9 (`near-unquoted-env`), precision stays 1.00;
+  baseline constants updated with the review note the test protocol
+  requires.
+- **Hunk-aware header parsing.** A removed `-- comment` line renders as
+  `--- comment` and an added `++ i` as `+++ i`; both were parsed as
+  file headers, hallucinating phantom files. Only `---`/`+++` outside
+  hunk bodies name files now. `normalize_path` also stopped using
+  `str.lstrip("./")`, which ate dotfiles (`.verifyci/x` → `verifyci/x`)
+  and parents (`../etc/passwd` → `etc/passwd`).
+- **run_task / verify split closed.** `intent.py` hardcoded
+  `blocking=True` on a `provenance_check` duplicate, so `run_task`
+  FAILED diffs `run_verify` called INCONCLUSIVE (contradicted the
+  decisive matrix). Intent now reuses `default_invariants()`; both
+  paths dedupe repo rules. Decisive matrix re-verified end to end:
+  clean → PASS/COMPLETED, secret → FAIL/FAILED, unknown →
+  INCONCLUSIVE/INCONCLUSIVE.
+- **Scheduler: failures persist, siblings cancel, cancel works.**
+  `_persist` is now called on the budget-breach, block, error, and
+  exception paths (the events table previously held only successes);
+  persist/emit failures print to stderr and land on the task record
+  instead of `except: pass`. Unexpected node errors are attributed
+  (`step_id: ExcType: msg`). A faulting level cancels still-running
+  siblings. `cancel()` cancels the tracked task handle; `resume()`
+  refuses to fork a second `_execute`; `CancelledError` lands
+  CANCELLED with a terminal event instead of vanishing.
+- **Budget default is None (unlimited); 0 is a real zero budget.**
+  The old `0` default was falsy and silently disabled the guard.
+- **Ledger head-hash pinning.** `verify_chain()` alone never detects a
+  rewritten last event (verified: tamper → True, plus self-heal on next
+  append). New `head_hash()` + `verify_chain(expected_head)`; pin the
+  head externally or the last event is unanchored — documented on the
+  method.
+- **Blast radius measures again.** Removed the same-file
+  `difference_update` (with zero cross-file CALLS edges it deleted
+  every relative: risk 0.00 always) and stopped counting unknown test
+  coverage as gaps.   Blast seeds are now hunk-anchored entities
+  (`seed_entities_for_diff`) instead of all 600 entities of a touched
+  file — 89992954 narrowed 621 → 12 seeds. This is a semantic shift,
+  not just a number: an entity in the same file as the edit but outside
+  the touched line ranges no longer contributes to blast measurement,
+  so pre-fix and post-fix risk scores are not comparable. Unreadable
+  graphs yield `established=False` (INCONCLUSIVE), not a clean bill of
+  health (`NodeMapError`, surfaced, not swallowed).
+- **`forbid_call` / `forbid_import` fail closed for real.** Graph
+  traversal exceptions used to return "no violation"; now unevaluable
+  is a rejection, matching the documented contract.
+- **HTTP: optional bearer token + body caps.** `ACI_API_TOKEN` guards
+  all but `/health` when set; diffs capped at 1M chars, `k` at 1000.
+  Trust model documented on the module. No rate limiting — stated, not
+  solved.
+- **No more silent empty reports.** `run_vuln` returns `error` on
+  unreadable DBs instead of `findings: []`; dense-channel failure
+  reports `dense-unavailable` instead of doubling sparse scores;
+  BM25 drops zero-score non-matches; MCP dense/sparse share one
+  500-doc universe. Measured effect on `benchmarks/retrieval_eval.py`:
+  ndcg@10 0.86631 → 0.87737 (non-matching docs no longer earn RRF
+  credit); recall@5 and dense-only ndcg unchanged.
+- **Dead code deleted.** `config/default.yaml` (never read by anything;
+  policy is hardcoded in three places — now stated in one),
+  `contracts/config.py`, `graph/{serializer,stats,temporal}.py`,
+  `observability/{telemetry,metrics}.py`, `codeintel/`, `tools/`,
+  `memory/projections/`, `compiler/{permissions,budget,strategy}.py`,
+  and the tests that pinned them. Controls that looked wired but
+  weren't (`check_permission`, `BudgetManager`) are gone rather than
+  decorative.
+- Suite 246, ruff clean. `test_labeled_set_meets_plan_gates`
+  (by-construction 1.00/1.00 on six self-authored cases) deleted;
+  `test_blast_wrapper` tautology (`or risk_score >= 0.0`) replaced with
+  strict assertions.
+
 ## Unreleased — deletion-hunk classifier, v1.1 scoping recorded
 
 - **Loop closed on the platform itself.** Five probes against

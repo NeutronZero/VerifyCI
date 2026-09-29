@@ -26,7 +26,7 @@ def _policy():
 
 def _certified(verified: bool):
     from src.contracts.verification_ir import (
-        Certificate, Conclusion, ExecutionTrace, FileEvidence, Premise,
+        Certificate, Conclusion,
     )
     return Certificate(
         certificate_id="c", premises=[], evidence=[], execution_traces=[],

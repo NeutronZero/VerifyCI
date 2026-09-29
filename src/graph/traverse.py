@@ -24,6 +24,10 @@ def payload_id(payload: Any) -> str | None:
     return None
 
 
+class NodeMapError(Exception):
+    """The graph object is unreadable or internally inconsistent."""
+
+
 def derive_node_map(graph: Any) -> dict[str, int]:
     node_map: dict[str, int] = {}
     if graph is None or not hasattr(graph, "node_indices"):
@@ -31,12 +35,17 @@ def derive_node_map(graph: Any) -> dict[str, int]:
     try:
         indices = list(graph.node_indices())
         datas = list(graph.nodes()) if hasattr(graph, "nodes") else []
-        for idx, data in zip(indices, datas):
-            eid = payload_id(data)
-            if eid:
-                node_map[eid] = idx
-    except Exception:  # noqa: BLE001, S110
-        pass
+    except Exception as e:  # noqa: BLE001
+        raise NodeMapError(f"graph nodes unreadable: {type(e).__name__}: {e}") from e
+    if hasattr(graph, "nodes") and len(indices) != len(datas):
+        # zip() would silently drop the tail and every later check would
+        # pass on a partial map, forever, with no signal.
+        raise NodeMapError(
+            f"node_indices ({len(indices)}) and nodes ({len(datas)}) disagree")
+    for idx, data in zip(indices, datas):
+        eid = payload_id(data)
+        if eid:
+            node_map[eid] = idx
     return node_map
 
 

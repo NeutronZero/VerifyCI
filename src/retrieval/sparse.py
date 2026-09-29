@@ -40,6 +40,10 @@ class BM25Retriever:
                     continue
                 idf = math.log((len(self._documents) - self._df[token] + 0.5) / (self._df[token] + 0.5) + 1)
                 score += idf * (tf[token] * 2.5) / (tf[token] + 1.5 * (1 - 0.75 + 0.75 * len(tokens) / self._avgdl))
-            results.append(SearchResult(id=id, score=score, metadata={}))
+            # Zero-score documents matched nothing: emitting them lets a
+            # query with no hits return k arbitrary documents that earn
+            # full RRF credit downstream.
+            if score > 0:
+                results.append(SearchResult(id=id, score=score, metadata={}))
         results.sort(key=lambda r: r.score, reverse=True)
         return results[:k]

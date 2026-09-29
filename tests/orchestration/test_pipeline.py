@@ -65,3 +65,79 @@ async def test_scheduler_budget_breach():
     dag = ExecutableDAG(dag_id="d", nodes=[{"step_id": "s1"}, {"step_id": "s2"}], budget_nano_usd=1)
     task_id = await scheduler.submit(dag)
     assert await _drain(scheduler, task_id) == TaskStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_scheduler_no_budget_means_unlimited():
+    # None (the default) is "no budget set". The old default of 0
+    # silently disabled the guard via `if budget`.
+    from src.contracts.scheduler import ExecutableDAG
+    assert ExecutableDAG(dag_id="d").budget_nano_usd is None
+    scheduler = AsyncDAGScheduler()
+    dag = ExecutableDAG(dag_id="d", nodes=[
+        {"step_id": "s1", "type": "noop", "config": {}, "depends_on": []},
+    ])
+    task_id = await scheduler.submit(dag)
+    assert await _drain(scheduler, task_id) == TaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_scheduler_zero_budget_breaches():
+    # 0 is a real zero budget now, not a falsy alias for unlimited.
+    from src.contracts.scheduler import ExecutableDAG
+    scheduler = AsyncDAGScheduler()
+    dag = ExecutableDAG(dag_id="d", nodes=[{"step_id": "s1"}], budget_nano_usd=0)
+    task_id = await scheduler.submit(dag)
+    assert await _drain(scheduler, task_id) == TaskStatus.FAILED
+    assert scheduler._tasks[task_id]["error"] == "BUDGET_BREACHED"
+
+
+@pytest.mark.asyncio
+async def test_scheduler_persists_failed_runs():
+    # The audit trail must contain failures, not just successes: the
+    # budget-breach path persists before returning.
+    from src.contracts.scheduler import ExecutableDAG
+    from src.memory.ledger import EventLedger
+    from src.storage.graph_store import GraphStore
+    import tempfile
+    import os
+    db = os.path.join(tempfile.mkdtemp(prefix="vci_"), "v.db")
+    store = GraphStore(db)
+    try:
+        ledger = EventLedger()
+        scheduler = AsyncDAGScheduler(ledger=ledger)
+        dag = ExecutableDAG(dag_id="d", nodes=[{"step_id": "s1"}], budget_nano_usd=0)
+        task_id = await scheduler.submit(
+            dag, context={"store": store})
+        assert await _drain(scheduler, task_id) == TaskStatus.FAILED
+        rows = store.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        assert rows >= 2  # SUBMITTED + STARTED + BREACHED
+        types = [r[0] for r in store.conn.execute("SELECT type FROM events").fetchall()]
+        assert "BUDGET_BREACHED" in types
+    finally:
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_node_error_is_attributed():
+    # An unexpected node exception names the step and the exception type
+    # instead of landing as a bare reason string.
+    from src.contracts.scheduler import ExecutableDAG
+    scheduler = AsyncDAGScheduler()
+    dag = ExecutableDAG(dag_id="d", nodes=[
+        {"step_id": "boom", "type": "verify", "config": {"__raise__": True},
+         "depends_on": [], "pre_commit_hook_id": "h"},
+    ])
+    from src.orchestration import executor as _ex
+
+    async def _raise(self, node, context):
+        raise RuntimeError("kaput")
+
+    _real = _ex.Executor.execute_node
+    _ex.Executor.execute_node = _raise
+    try:
+        task_id = await scheduler.submit(dag)
+        assert await _drain(scheduler, task_id) == TaskStatus.FAILED
+        assert scheduler._tasks[task_id]["error"] == "boom: RuntimeError: kaput"
+    finally:
+        _ex.Executor.execute_node = _real

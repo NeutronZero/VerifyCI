@@ -5,7 +5,7 @@ from src.verification.evidence_verifier import verify_evidence_coverage
 from src.contracts.verification_ir import (
     VerificationReport, CheckResult, VerificationPolicy, BlastRadiusResult,
 )
-from src.contracts.evidence import EvidencePack, SourceChunk, ProvenanceEntry
+from src.contracts.evidence import EvidencePack, SourceChunk
 
 
 def make_check(passed=True, blocking=True):
@@ -95,7 +95,6 @@ def test_policy_failed_check_is_fail_not_inconclusive():
     # Auditor finding #1: a checker that RAN and rejected must yield FAIL,
     # even when no certificate verified. INCONCLUSIVE is reserved for
     # "no deterministic checker executed".
-    from src.contracts.verification_ir import Certificate
     policy = VerificationPolicy(
         policy_id="pol1",
         on_failure="block",
