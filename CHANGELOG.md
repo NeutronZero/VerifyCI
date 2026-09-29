@@ -16,7 +16,13 @@ did with it.
   wrong link invents impact, a missing one merely undercounts it.
   Resolution is deterministic per revision and in-memory only; the
   store keeps the observed reference. Same shape for
-  `INHERITS_UNRESOLVED` bases.
+  `INHERITS_UNRESOLVED` bases. Semantic change, named: `forbid_call`
+  now sees cross-file calls with a unique callee name (they resolve
+  into real edges), so a rule that previously fired only same-file now
+  fires repo-wide. Strictly more coverage, but a diff that passed
+  before can fail now — that is the check seeing the whole call graph,
+  not a regression. Forbidden calls to ambiguous or undefined names
+  stay invisible (qualified call resolution is a different scope).
 - **C++ inheritance clauses.** `base_class_clause` parents
   (`class App : public Base`) now emit `INHERITS` (same file) or
   `INHERITS_UNRESOLVED`, instead of nothing — the old code looked for
