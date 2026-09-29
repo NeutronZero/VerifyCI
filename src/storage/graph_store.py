@@ -94,6 +94,27 @@ CREATE TABLE IF NOT EXISTS deltas (
 """
 
 
+def latest_revision_id(conn, repository_id: str | None = None) -> str:
+    """Latest revision id for raw connections, scoped when possible.
+
+    Read-only paths (stats, vuln) must not construct a store — that
+    would mkdir and schema-write at client-chosen paths. Same
+    repo-then-global rule as the method form.
+    """
+    if repository_id:
+        row = conn.execute(
+            "SELECT revision_id FROM revisions WHERE repository_id = ?"
+            " ORDER BY timestamp DESC LIMIT 1",
+            (repository_id,),
+        ).fetchone()
+        if row:
+            return row[0]
+    row = conn.execute(
+        "SELECT revision_id FROM revisions ORDER BY timestamp DESC LIMIT 1"
+    ).fetchone()
+    return row[0] if row else ""
+
+
 class GraphStore:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -141,6 +162,16 @@ class GraphStore:
              revision.timestamp, revision.ingestion_config_hash),
         )
         self._maybe_commit()
+
+    def latest_revision_id(self, repository_id: str | None = None) -> str:
+        """Latest revision id, scoped to a repository when known.
+
+        A global MAX(timestamp) across repository ids lets one repo's
+        ingest hijack every other repo's commands sharing the file.
+        Callers pass the convention-derived repo (`resolve_repository`)
+        and fall back to global only when no convention applies.
+        """
+        return latest_revision_id(self.conn, repository_id)
 
     def get_latest_revision(self, repository_id: str):
         from src.contracts.revision import Revision

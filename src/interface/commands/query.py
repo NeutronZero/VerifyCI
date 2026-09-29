@@ -27,10 +27,10 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
     try:
         # Search the latest revision only: older revisions stay in the DB
         # for history, but returning superseded rows as answers is wrong.
-        latest = store.conn.execute(
-            "SELECT revision_id FROM revisions ORDER BY timestamp DESC LIMIT 1"
-        ).fetchall()
-        rev = latest[0][0] if latest else ""
+        # Scoped to this DB's repo so a shared file never answers from
+        # another repo's revision.
+        from src.interface.commands import resolve_repository
+        rev = store.latest_revision_id(resolve_repository(db))
         # No row cap: truncating the corpus silently drops recall (measured:
         # LIMIT 5000 hid 1676 of 6676 entities on a real repo).
         # TODO(scaling): uncapped loads the whole revision per query — fine

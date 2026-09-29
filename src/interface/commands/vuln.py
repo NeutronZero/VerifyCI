@@ -2,7 +2,8 @@ import sqlite3
 from pathlib import Path
 
 from src.ingestion.dependency import VulnerabilityCache
-from src.interface.commands import resolve_db
+from src.interface.commands import resolve_db, resolve_repository
+from src.storage.graph_store import latest_revision_id
 
 
 def run_vuln(db_path: str | None = None, cache_path: str = "./storage/vuln_cache.db",
@@ -44,11 +45,13 @@ def run_vuln(db_path: str | None = None, cache_path: str = "./storage/vuln_cache
             has_revisions = conn.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"
                 " AND name = 'revisions'").fetchone()[0]
-            if has_revisions:
+            revision_id = latest_revision_id(conn, resolve_repository(db)) \
+                if has_revisions else ""
+            if revision_id:
                 rows = conn.execute(
                     "SELECT metadata_json FROM edges WHERE type = 'DEPENDS_ON'"
-                    " AND revision_id = (SELECT revision_id FROM revisions"
-                    " ORDER BY timestamp DESC LIMIT 1) LIMIT 5001"
+                    " AND revision_id = ? LIMIT 5001",
+                    (revision_id,),
                 ).fetchall()
             else:
                 rows = conn.execute(

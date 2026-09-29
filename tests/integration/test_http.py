@@ -39,6 +39,16 @@ def test_no_token_set_means_open(monkeypatch):
     assert _client().get("/search", params={"q": "x", "k": 1}).status_code == 200
 
 
+def test_revise_command_is_gone():
+    # `aci revise` inserted contentless revisions that poisoned every
+    # latest-revision lookup; commit recording lives on ingest now.
+    from typer.testing import CliRunner
+    from src.interface.cli import app
+    runner = CliRunner()
+    assert "revise" not in runner.invoke(app, ["--help"]).output
+    assert runner.invoke(app, ["revise", "--commit", "abc"]).exit_code != 0
+
+
 def test_verify_diff_cli_exit_codes(tmp_path):
     # CI gating: PASS 0, FAIL 1, INCONCLUSIVE 2.
     from typer.testing import CliRunner

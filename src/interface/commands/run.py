@@ -23,14 +23,13 @@ def _dedupe_invariants(invariants: list) -> list:
     return out
 
 
-def _latest_revision_id(store) -> str:
+def _latest_revision_id(store, db_path: str = "") -> str:
     try:
-        rows = store.conn.execute(
-            "SELECT revision_id FROM revisions ORDER BY timestamp DESC LIMIT 1"
-        ).fetchall()
+        from src.interface.commands import resolve_repository
+        from src.storage.graph_store import latest_revision_id
+        return latest_revision_id(store.conn, resolve_repository(db_path))
     except Exception:  # noqa: BLE001
         return ""
-    return rows[0][0] if rows else ""
 
 
 def run_task(task: str, timeout: float = 30.0, diff: str = "",
@@ -76,7 +75,7 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
                     if anchor_file and head:
                         from src.memory.ledger import append_anchor
                         append_anchor(anchor_file, task_id,
-                                      _latest_revision_id(store), head)
+                                      _latest_revision_id(store, db), head)
                     return result
                 await asyncio.sleep(0.1)
             return {"task": task, "task_id": task_id, "status": "TIMEOUT",

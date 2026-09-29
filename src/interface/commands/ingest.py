@@ -133,19 +133,21 @@ def _carry_forward(store, carried_sources, carried_texts, revision_id, now) -> t
     return n_e, n_d
 
 
-def run_ingest(path: str, incremental: bool = False) -> dict:
+def run_ingest(path: str, incremental: bool = False,
+               commit_id: str | None = None) -> dict:
     repo = Path(path)
     db_path = str(repo / ".verifyci" / "verifyci.db")
     store = GraphStore(db_path)
     meta = MetadataStore(db_path, conn=store.conn)
     try:
       with store.batch():
-        return _run_ingest_inner(repo, db_path, store, meta, incremental)
+        return _run_ingest_inner(repo, db_path, store, meta, incremental, commit_id)
     finally:
         store.close()
 
 
-def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False) -> dict:
+def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False,
+                      commit_id: str | None = None) -> dict:
         sources, texts, manifest = _collect(repo)
         collected = len(sources) + len(texts)
 
@@ -168,7 +170,8 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
         # Revision identity always covers the full manifest so equal repo
         # states yield equal revisions regardless of incremental mode.
 
-        revision = create_revision(repository_id=repo.name, files=manifest)
+        revision = create_revision(repository_id=repo.name, files=manifest,
+                                     commit_id=commit_id)
         latest = store.get_latest_revision(repo.name)
         if latest is not None and latest.revision_id != revision.revision_id:
             import dataclasses

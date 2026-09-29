@@ -11,9 +11,11 @@ def init(path: str):
 
 
 @app.command()
-def ingest(path: str, incremental: bool = False):
+def ingest(path: str, incremental: bool = False,
+           commit: str = typer.Option("", "--commit", "-c",
+            help="Record the commit hash this graph state was ingested from")):
     from src.interface.commands.ingest import run_ingest
-    totals = run_ingest(path, incremental=incremental)
+    totals = run_ingest(path, incremental=incremental, commit_id=commit or None)
     typer.echo(f"Revision: {totals['revision_id']}")
     typer.echo(f"Files: {totals['files']} (skipped {totals['skipped']}), "
                f"entities: {totals['entities']}, edges: {totals['edges']}")
@@ -65,12 +67,6 @@ def vuln(db: str = "", cache: str = "./storage/vuln_cache.db", import_file: str 
 def vuln_refresh(db: str = "", cache: str = "./storage/vuln_cache.db", import_file: str = ""):
     vuln(db, cache, import_file)
 
-
-@app.command()
-def revise(commit_id: str = typer.Option("", "--commit", "-c"), repository_id: str = "default"):
-    from src.interface.commands.revise import run_revise
-    result = run_revise(commit_id, repository_id)
-    typer.echo(f"Created revision: {result['revision_id']}")
 
 
 def _read_diff(diff: str, diff_file: str) -> str:

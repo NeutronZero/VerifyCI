@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — remove revise; scope revisions by repository (B-1)
+
+- **`aci revise` deleted.** A marker command inserting entity-free
+  revisions poisoned every global latest-revision lookup. Commit
+  recording moves to the authoritative path: `aci ingest --commit
+  <sha>` persists `commit_id` on the revision row.
+- **Latest-revision selection is repo-scoped.** `resolve_repository`
+  derives the repo from `<repo>/.verifyci/*.db` (innermost wins);
+  `latest_revision_id` filters by it across graph loads, queries,
+  stats, vuln scans, and anchor revision lookup — falling back to
+  global only for custom paths with no convention. A newer foreign
+  revision in a shared file no longer hijacks another repo's
+  commands (pinned with a two-repo single-DB test).
+- Suite 334, ruff clean, extraction benchmarks hold (13/142).
+
 ## Unreleased — temporal disappearance closure (B-2)
 
 - **Deleted code expires.** New `GraphStore.close_disappeared`

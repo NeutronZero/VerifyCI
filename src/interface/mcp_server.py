@@ -230,14 +230,15 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                           "decision": decision.status if decision else None,
                           "ledger_head": head}
                 if anchor_file and head:
+                    from src.interface.commands import resolve_repository
                     from src.memory.ledger import append_anchor
+                    from src.storage.graph_store import latest_revision_id
                     revision = ""
                     if store is not None and hasattr(store, "conn"):
                         try:
-                            rows = store.conn.execute(
-                                "SELECT revision_id FROM revisions "
-                                "ORDER BY timestamp DESC LIMIT 1").fetchall()
-                            revision = rows[0][0] if rows else ""
+                            revision = latest_revision_id(
+                                store.conn, resolve_repository(
+                                    getattr(store, "db_path", None)))
                         except Exception:  # noqa: BLE001
                             revision = ""
                     append_anchor(anchor_file, task_id, revision, head)

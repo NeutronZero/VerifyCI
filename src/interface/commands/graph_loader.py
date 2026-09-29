@@ -1,6 +1,7 @@
 """Load the persisted code graph for verification commands."""
 from src.graph.builder import GraphBuilder
-from src.storage.graph_store import GraphStore
+from src.interface.commands import resolve_repository
+from src.storage.graph_store import GraphStore, latest_revision_id
 
 
 def payload_entities(graph) -> list:
@@ -22,10 +23,8 @@ def load_graph(db_path: str, revision_id: str = ""):
         return None, {}, []
     try:
         if not revision_id:
-            rows = store.conn.execute(
-                "SELECT revision_id FROM revisions ORDER BY timestamp DESC LIMIT 1"
-            ).fetchall()
-            revision_id = rows[0][0] if rows else ""
+            revision_id = latest_revision_id(
+                store.conn, resolve_repository(db_path))
         if not revision_id:
             return None, {}, []
         entities = store.get_entities_by_revision(revision_id)
