@@ -3,6 +3,14 @@
 Thin wrapper over the graph-traversal implementation in
 ``src.retrieval.blast_radius`` that additionally produces a ``CheckResult``
 suitable for inclusion in a ``VerificationReport``.
+
+The check is deliberately non-blocking: blast radius measures exposure
+(reach), not a defect or violation. A risk at or above the threshold
+routes to HUMAN_REVIEW through the policy fall-through — a human must
+look — instead of FAIL, which is reserved for proven invariant breaches
+(secrets, forbidden calls/imports, fabricated removals). Blocking on
+exposure conflated reach with defect and hard-failed routine maintenance
+on foundational modules.
 """
 from typing import Any
 
@@ -56,5 +64,6 @@ def blast_radius_check(
         score=1.0 - blast.risk_score,
         evidence=list(blast.affected_callers) + list(blast.affected_callees),
         explanation=f"risk_score={blast.risk_score:.2f}",
+        blocking=False,
     )
     return blast, check

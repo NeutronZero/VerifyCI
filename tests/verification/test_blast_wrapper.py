@@ -47,7 +47,11 @@ def test_blast_wrapper_unreadable_graph_is_inability():
     assert "graph_unreadable" in check.explanation
 
 
-def test_blast_wrapper_blocks_high_risk():
+def test_blast_wrapper_high_risk_is_advisory():
+    # Blast measures exposure, not violation: a high score fails the
+    # check but must not block — policy routes it to HUMAN_REVIEW.
+    # (Previously this test asserted blocking behavior; exposure is
+    # not a defect and must not reject.)
     class FakeGraph:
         def predecessors(self, idx):
             return [100 + i for i in range(8)] if idx == 1 else []
@@ -63,3 +67,55 @@ def test_blast_wrapper_blocks_high_risk():
     assert len(blast.affected_callers) == 8
     assert blast.risk_score >= 0.8
     assert check.passed is False
+    assert check.blocking is False
+
+
+def _decide(checks):
+    import time
+    import uuid
+    from src.contracts.verification_ir import (
+        BlastRadiusResult, VerificationPolicy, VerificationReport,
+    )
+    from src.verification.policy import PolicyEvaluator
+    report = VerificationReport(
+        report_id=str(uuid.uuid4()), task_id="t", policy_id="default",
+        checks=checks,
+        blast_radius=BlastRadiusResult(
+            affected_callers=[], affected_callees=[], test_coverage_gap=[],
+            risk_score=0.0, dependency_impact=[], vulnerability_impact=[]),
+        timestamp=time.time(),
+    )
+    policy = VerificationPolicy(
+        policy_id="default", on_failure="block", on_inconclusive="human_review",
+        on_human_review="block", require_deterministic_checker=True)
+    return PolicyEvaluator().evaluate(report, policy)
+
+
+def test_high_blast_alone_routes_human_review():
+    from src.contracts.verification_ir import CheckResult
+    _, check = blast_radius_check(
+        graph=None, changed_entities=[], test_entities=set())
+    passing = CheckResult(
+        check_id="semi_formal", passed=True, score=1.0, evidence=[],
+        explanation="t", blocking=True, certificate=None)
+    high = CheckResult(
+        check_id="blast_radius", passed=False, score=0.1, evidence=[],
+        explanation="risk_score=0.90", blocking=False)
+    assert check.blocking is False  # constructor contract, not just fixture
+    decision = _decide([passing, high])
+    assert (decision.status, decision.rationale) == (
+        "HUMAN_REVIEW", "non_blocking_failures")
+
+
+def test_violation_plus_high_blast_still_fails():
+    # The rejections filter runs before the non-blocking fall-through:
+    # a real violation alongside high exposure is FAIL, not review.
+    from src.contracts.verification_ir import CheckResult
+    violation = CheckResult(
+        check_id="secrets_scan", passed=False, score=0.0, evidence=[],
+        explanation="secret-shaped string", blocking=True, established=True)
+    high = CheckResult(
+        check_id="blast_radius", passed=False, score=0.1, evidence=[],
+        explanation="risk_score=0.90", blocking=False)
+    decision = _decide([violation, high])
+    assert (decision.status, decision.rationale) == ("FAIL", "blocking_check_failed")

@@ -2,7 +2,7 @@
 
 This test pins that the code implements the published table — it cannot
 prove the table itself is right. Table-correctness evidence lives outside
-the suite: the real-repo distributions (Flask 4 PASS / 1 INCONCLUSIVE,
+the suite: the real-repo distributions (Flask 3 PASS / 2 INCONCLUSIVE,
 secrets FAIL, ghost-file INCONCLUSIVE in benchmarks/real_repo.md). A table
 copied into code and tested against itself would be circular one level up;
 the distributions are the external authority. If a real distribution ever

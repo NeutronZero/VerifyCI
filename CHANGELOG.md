@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — blast demoted to advisory (exposure is not violation)
+
+- **Blast no longer blocks.** `blast_radius_check` sets `blocking=False`:
+  risk at or above threshold routes to HUMAN_REVIEW through the existing
+  policy fall-through instead of FAIL. Invariants reject, inability
+  deflects to INCONCLUSIVE, exposure alerts humans — the check that
+  conflated reach with defect now honors that separation. No policy-code
+  change; the fail-closed checkers (`secrets_scan`, `forbid_*`,
+  fabricated removals) keep blocking, and violation-plus-high-blast
+  still resolves FAIL (rejections filter first — pinned).
+- Validated end to end on the Flask docstring commit that motivated it:
+  `d73fa1cd` routes HUMAN_REVIEW / `non_blocking_failures` on both
+  `verify` and `run` paths (was FAIL), with the 41-caller risk still
+  measured and named — deferred resolution's visibility kept, the
+  rejection dropped.
+- Suite 271, ruff clean, extraction benchmarks hold (13/81).
+
 ## Unreleased — removal provenance (fail on fabricated `-` lines)
 
 - **New blocking check `removal_provenance`** (`src/verification/removal.py`,
