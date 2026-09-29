@@ -134,6 +134,70 @@ def test_forbid_fails_closed_on_broken_graph():
     assert "fail-closed" in checks[0].explanation
 
 
+def _shop_graph():
+    return _graph()
+
+
+def test_forbid_call_fires_on_added_lines():
+    # The base graph cannot see new code: `eval(` introduced by the diff
+    # must reject even with an empty graph. Graph side still runs too.
+    diff = ("diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n"
+            "@@ -1,0 +1,1 @@\n+    eval(user_input)\n")
+    checks, _ = evaluate_invariants(diff, [_inv("f", "forbid_call:eval")],
+                                    graph=None, evidence=[])
+    assert checks[0].passed is False
+    assert checks[0].established is True
+    assert "added in src/app.py" in checks[0].explanation
+
+
+def test_forbid_call_added_definition_does_not_flag():
+    # `def eval` defines; only call sites violate.
+    diff = ("diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n"
+            "@@ -1,0 +1,2 @@\n+def eval(node):\n+    return node\n")
+    checks, _ = evaluate_invariants(diff, [_inv("f", "forbid_call:eval")],
+                                    graph=None, evidence=[])
+    assert checks[0].passed is True
+
+
+def test_forbid_call_added_method_call_does_not_flag():
+    # Bare-name only: `obj.eval(` carries a receiver the fragment
+    # cannot resolve, so it never flags (stricter than the graph side,
+    # which is name-based throughout — documented in added_refs).
+    diff = ("diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n"
+            "@@ -1,0 +1,1 @@\n+    obj.eval(node)\n")
+    checks, _ = evaluate_invariants(diff, [_inv("f", "forbid_call:eval")],
+                                    graph=None, evidence=[])
+    assert checks[0].passed is True
+
+
+def test_forbid_import_fires_on_added_lines():
+    diff = ("diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n"
+            "@@ -1,0 +1,1 @@\n+import pickle\n")
+    checks, _ = evaluate_invariants(diff, [_inv("f", "forbid_import:pickle")],
+                                    graph=None, evidence=[])
+    assert checks[0].passed is False
+    assert "added in src/app.py" in checks[0].explanation
+
+
+def test_forbid_clean_added_code_passes():
+    # One-sided fail-on-detection: clean additions pass with the check
+    # established, so the decisive matrix (clean → PASS) holds.
+    diff = ("diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n"
+            "@@ -1,0 +1,1 @@\n+x = compute(1)\n")
+    checks, _ = evaluate_invariants(diff, [_inv("f", "forbid_call:eval")],
+                                    graph=_shop_graph(), evidence=[])
+    assert checks[0].passed is True
+    assert checks[0].established is True
+
+
+def test_forbid_added_c_call_flags_system():
+    diff = ("diff --git a/src/a.c b/src/a.c\n--- a/src/a.c\n+++ b/src/a.c\n"
+            "@@ -1,0 +1,1 @@\n+    system(cmd);\n")
+    checks, _ = evaluate_invariants(diff, [_inv("f", "forbid_call:system")],
+                                    graph=None, evidence=[])
+    assert checks[0].passed is False
+
+
 def test_unknown_query_fails_closed():
     # Check-level verdict (failed) vs decision-level routing: a failed
     # blocking check with no certificate is a *rejection* at the policy

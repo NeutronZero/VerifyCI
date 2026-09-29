@@ -178,14 +178,41 @@ def _check_invariant(diff: str, invariant: Invariant, graph: Any, evidence: list
         violated, examined, evaluated = _graph_search(graph, name, "CALLS")
         if not evaluated:
             return False, f"graph traversal failed for forbid_call:{name} (fail-closed)", True
+        hit_files = _added_hits(diff, "calls", name)
+        if hit_files:
+            # The base graph cannot see new code: a forbidden call the
+            # diff itself introduces is a positive detection, so it
+            # rejects even when the graph side established nothing.
+            return False, f"forbidden call {name!r} added in {hit_files[0]}", True
         return not violated, _coverage_note(examined, "CALLS", name), examined > 0
     if query.startswith("forbid_import:"):
         name = query[len("forbid_import:"):].strip()
         violated, examined, evaluated = _graph_search(graph, name, "IMPORTS")
         if not evaluated:
             return False, f"graph traversal failed for forbid_import:{name} (fail-closed)", True
+        hit_files = _added_hits(diff, "imports", name)
+        if hit_files:
+            return False, f"forbidden import {name!r} added in {hit_files[0]}", True
         return not violated, _coverage_note(examined, "IMPORTS", name), examined > 0
     return False, f"unknown query kind (fail-closed): {query[:40]}", True
+
+
+def _added_hits(diff: str, kind: str, name: str) -> list[str]:
+    """Files whose added lines reference a forbidden target.
+
+    Mirrors secrets_scan semantics: fail on detection, pass otherwise,
+    established always True. A syntactic claim about added lines — the
+    fragment parser's recall gaps are documented in added_refs, and the
+    graph-side check still runs either way.
+    """
+    if not diff or not name:
+        return []
+    from src.verification.added_refs import extract_added_refs
+    try:
+        refs = extract_added_refs(diff)
+    except Exception:  # noqa: BLE001
+        return []
+    return sorted(f for f, kinds in refs.items() if name in kinds.get(kind, set()))
 
 
 def _coverage_note(examined: int, edge_type: str, name: str) -> str:

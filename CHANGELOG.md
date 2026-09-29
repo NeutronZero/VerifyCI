@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — diff-aware forbid rules (added-line references)
+
+- **Graph-blind spot closed.** `forbid_call` / `forbid_import`
+  searched the base graph only, so `+    eval(user_input)` passed
+  silently. New `src/verification/added_refs.py` parses each file's
+  added lines as a fragment in that file's language (tree-sitter,
+  error-tolerant) and collects bare call names plus imported modules;
+  a forbidden target introduced by the diff rejects even when the
+  graph side established nothing. Graph-side matching kept unchanged
+  (pre-existing violations still fail — boy-scout gate, documented).
+- **One-sided like secrets_scan, by necessity.** Fail on detection,
+  pass otherwise, established always True. The alternative —
+  inability when fragments parse with errors — would deflect every
+  partial-line C hunk to INCONCLUSIVE and break the decisive matrix.
+  Fragment recall gaps are documented in the module, not hidden.
+- **Bare-name only, stricter than graph side.** `obj.eval(` carries a
+  receiver the fragment cannot resolve, so it never flags; `def eval`
+  defines rather than calls. The asymmetry is deliberate and
+  documented. Markdown/prose files are never parsed.
+- Verified end to end with a repo `invariants.yaml`: added `eval`
+  FAILs, clean addition still PASSes. Suite 320, ruff clean,
+  extraction benchmarks hold (13/142).
+
 ## Unreleased — external static audit fixes (batch 1: gate integrity)
 
 An outside read-through (no execution) produced ~60 findings; every
