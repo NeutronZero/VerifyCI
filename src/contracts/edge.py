@@ -6,6 +6,15 @@ from typing import Any, Optional
 class EdgeType(Enum):
     CONTAINS = "CONTAINS"
     CALLS = "CALLS"
+    #: A call reference observed at extraction whose callee is not defined
+    #: in the same file. `dst_entity_id` is empty; `metadata` carries
+    #: `callee` (name) and `caller_scope`. A post-build resolver links
+    #: these once the full entity set is known; the builder never adds
+    #: them as graph links.
+    CALLS_UNRESOLVED = "CALLS_UNRESOLVED"
+    #: Same shape for a base class not defined in the same file
+    #: (`metadata["base"]`).
+    INHERITS_UNRESOLVED = "INHERITS_UNRESOLVED"
     IMPORTS = "IMPORTS"
     INHERITS = "INHERITS"
     IMPLEMENTS = "IMPLEMENTS"

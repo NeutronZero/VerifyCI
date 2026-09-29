@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased — extractor: cross-file references, C++ inheritance, out-of-class methods
+
+Dogfooding on meshtastic/firmware (1,557 files, 10,428 entities) showed
+cross-file `CALLS` at exactly 0 and `INHERITS` at exactly 0: the
+extractor resolved everything against the current file only, so blast
+radius was intra-file by construction no matter what the policy layer
+did with it.
+
+- **Deferred call resolution.** Extraction emits `CALLS_UNRESOLVED`
+  (callee name + caller scope in metadata, empty dst) for calls with no
+  intra-file target instead of silence; `GraphBuilder` links them
+  post-build when exactly one eligible entity bears the name. Zero
+  candidates (builtins, libc) and ambiguous names stay unlinked — a
+  wrong link invents impact, a missing one merely undercounts it.
+  Resolution is deterministic per revision and in-memory only; the
+  store keeps the observed reference. Same shape for
+  `INHERITS_UNRESOLVED` bases.
+- **C++ inheritance clauses.** `base_class_clause` parents
+  (`class App : public Base`) now emit `INHERITS` (same file) or
+  `INHERITS_UNRESOLVED`, instead of nothing — the old code looked for
+  `argument_list`, a node type this grammar never emits there. Direct
+  children only, so `Base<T>` template arguments don't become bogus
+  parents; qualified bases (`ns::Base`) stay out of scope.
+- **Out-of-class definitions are methods.** `void App::run() {}` was
+  dropped entirely (no entity); it is now a METHOD with scope `App`,
+  and calls inside it resolve against that scope. In-class
+  declarations still emit nothing; free functions are untouched.
+- Benchmarks hold: extraction TP=13, Flask TP=142, Graph-RAG TP=149,
+  firmware C++ TP=81, all FP=0 FN=0. Suite 254, ruff clean.
+
 ## Unreleased — external audit fixes (2026-09-29)
 
 An outside audit executed three reproducible false-PASS paths and a set

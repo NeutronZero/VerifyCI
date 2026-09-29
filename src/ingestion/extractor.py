@@ -39,6 +39,37 @@ def _make_entity(
     )
 
 
+def _make_unresolved(
+    revision_id: str, src: str, kind: str, name: str, scope: str,
+    now: float, site: str = "",
+) -> Edge:
+    """A reference the current file cannot resolve: calls to functions
+    defined (or only declared) elsewhere, bases from other headers.
+    `dst_entity_id` stays empty so the builder never links it; the
+    post-build resolver fills it in when the name is unambiguous.
+    """
+    if kind == "inherits":
+        edge_type: EdgeType = EdgeType.INHERITS_UNRESOLVED
+        meta = {"base": name, "scope": scope}
+        eid = f"edge_{revision_id[:12]}_{src}_unresolved_inherits_{name}"
+    else:
+        edge_type = EdgeType.CALLS_UNRESOLVED
+        meta = {"callee": name, "caller_scope": scope}
+        eid = f"edge_{revision_id[:12]}_{src}_unresolved_calls_{name}_{site}"
+    return Edge(
+        id=eid,
+        revision_id=revision_id,
+        src_entity_id=src,
+        dst_entity_id="",
+        type=edge_type,
+        subtype=None,
+        valid_from=now,
+        observed_at=now,
+        t_created=now,
+        metadata=meta,
+    )
+
+
 def _make_edge(
     revision_id: str, src: str, dst: str,
     edge_type: EdgeType, subtype: CPGEdgeSubtype, now: float,
@@ -81,6 +112,29 @@ def _walk(node):
         yield from _walk(child)
 
 
+def _qualified_name(node, source: bytes) -> Optional[tuple[str, str]]:
+    """(qualifier, name) for `App::run`-style declarators, else None.
+
+    The declarator holds a `qualified_identifier` (this grammar version;
+    others emit `scoped_identifier`) whose parts are the scope chain plus
+    the name: `App::run` -> ("App", "run"). A single part (`::run`) or no
+    qualified node means "no qualifier here", not "unnamed".
+    """
+    for child in node.children:
+        if child.type not in ("qualified_identifier", "scoped_identifier"):
+            continue
+        parts = [
+            _text(c, source) for c in child.children
+            if c.type in ("identifier", "type_identifier",
+                          "namespace_identifier", "field_identifier",
+                          "destructor_name")
+        ]
+        if len(parts) >= 2:
+            return "::".join(parts[:-1]), parts[-1]
+        return None
+    return None
+
+
 def _scope_name(node, source: bytes, language: str = "python") -> Optional[str]:
     if node.type in FUNC_NODES:
         # Direct `identifier` is the name in Python. In C/C++ the name lives
@@ -90,6 +144,9 @@ def _scope_name(node, source: bytes, language: str = "python") -> Optional[str]:
         # never trust it, so it is not even a fallback there.
         for child in node.children:
             if child.type in ("function_declarator", "declarator", "method_declarator"):
+                qualified = _qualified_name(child, source)
+                if qualified is not None:
+                    return qualified[1]
                 found = _scope_name(child, source, language)
                 if found:
                     return found
@@ -102,6 +159,24 @@ def _scope_name(node, source: bytes, language: str = "python") -> Optional[str]:
         if child.type in ("identifier", "type_identifier"):
             return _text(child, source)
     return None
+
+
+def _qualified_scope(node, source: bytes) -> str:
+    """Out-of-class scope for `void App::run() {}`: "App", else "".
+
+    A definition qualified with its class is a method of that class even
+    though the AST stack is empty at namespace scope. Drives both the
+    METHOD classification and the entity scope, so the definition and its
+    intra-class callers resolve against each other.
+    """
+    if node.type not in FUNC_NODES:
+        return ""
+    for child in node.children:
+        if child.type in ("function_declarator", "declarator", "method_declarator"):
+            qualified = _qualified_name(child, source)
+            if qualified is not None:
+                return qualified[0]
+    return ""
 
 
 def _walk_scoped(node, source: bytes, stack: list[tuple[str, str]],
@@ -120,7 +195,8 @@ def _walk_scoped(node, source: bytes, stack: list[tuple[str, str]],
         yield from _walk_scoped(child, source, child_stack, language)
 
 
-def _classify_node(node, language: str, stack: Optional[list[tuple[str, str]]] = None) -> Optional[EntityType]:
+def _classify_node(node, language: str, stack: Optional[list[tuple[str, str]]] = None,
+                   qualified_scope: str = "") -> Optional[EntityType]:
     stack = stack or []
     if language == "python":
         if node.type == "function_definition":
@@ -129,7 +205,12 @@ def _classify_node(node, language: str, stack: Optional[list[tuple[str, str]]] =
             return EntityType.CLASS
     elif language in ("c", "cpp"):
         if node.type == "function_definition":
-            return EntityType.METHOD if stack and stack[-1][0] == "class" else EntityType.FUNCTION
+            # `void App::run() {}` at namespace scope is a method of App,
+            # not a free function: the qualifier is the scope the AST
+            # stack cannot see.
+            if qualified_scope or (stack and stack[-1][0] == "class"):
+                return EntityType.METHOD
+            return EntityType.FUNCTION
         if node.type in ("class_specifier", "struct_specifier"):
             # A bare `struct Foo` in type position (elaborated type
             # specifier, forward declaration) is a *reference*, not a
@@ -154,13 +235,17 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
 
     root = parsed.tree.root_node
     for node, stack in _walk_scoped(root, parsed.source, [], parsed.language):
-        entity_type = _classify_node(node, parsed.language, stack)
+        qualified_scope = (
+            _qualified_scope(node, parsed.source)
+            if parsed.language in ("c", "cpp") else ""
+        )
+        entity_type = _classify_node(node, parsed.language, stack, qualified_scope)
         if entity_type is None:
             continue
         name = _scope_name(node, parsed.source, parsed.language)
         if not name:
             continue
-        scope = ".".join(n for _, n in stack)
+        scope = qualified_scope or ".".join(n for _, n in stack)
         line_start = node.start_point[0] + 1
         line_end = node.end_point[0] + 1
         entities.append(_make_entity(
@@ -228,7 +313,10 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
         caller_name = _scope_name(node, parsed.source, parsed.language)
         if not caller_name:
             continue
-        caller_scope = ".".join(n for _, n in stack)
+        caller_scope = (
+            _qualified_scope(node, parsed.source)
+            or ".".join(n for _, n in stack)
+        )
         caller = resolve(caller_name, caller_scope)
         if caller is None:
             continue
@@ -239,9 +327,16 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
             if not callee_name:
                 continue
             callee = resolve(callee_name, caller_scope)
-            if callee is None:
-                continue
             site = f"{child.start_point[0] + 1}:{child.start_byte}"
+            if callee is None:
+                # Callee not defined in this file: emit an unresolved
+                # reference, not silence. A post-build resolver links it
+                # when exactly one entity with that name exists anywhere;
+                # builtins and ambiguous names stay unlinked.
+                edges.append(_make_unresolved(
+                    revision_id, caller.revision_entity_id, "calls",
+                    callee_name, caller_scope, now, site))
+                continue
             if callee.revision_entity_id == caller.revision_entity_id:
                 edges.append(_make_edge(
                     revision_id, caller.revision_entity_id, callee.revision_entity_id,
@@ -263,16 +358,29 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
                 for child in node.children:
                     if child.type == "superclasses":
                         parents = [g for g in child.children if g.type == "identifier"]
+                    elif child.type == "base_class_clause":
+                        # C++: `class App : public Base, protected Mixin`.
+                        # Direct children only — a _walk would also catch
+                        # template arguments (`Base<T>` yields T) as bogus
+                        # parents. Qualified bases (`ns::Base`) are out of
+                        # V1 scope, same as qualified calls were.
+                        parents = [g for g in child.children
+                                   if g.type in ("identifier", "type_identifier")]
                     elif child.type == "argument_list":
                         parents = [g for g in _walk(child) if g.type == "identifier"]
                     else:
                         continue
                     for parent_node in parents:
-                        parent = resolve(_text(parent_node, parsed.source), scope_of(cls))
+                        parent_name = _text(parent_node, parsed.source)
+                        parent = resolve(parent_name, scope_of(cls))
                         if parent:
                             edges.append(_make_edge(
                                 revision_id, cls.revision_entity_id, parent.revision_entity_id,
                                 EdgeType.INHERITS, CPGEdgeSubtype.INHERITS, now))
+                        else:
+                            edges.append(_make_unresolved(
+                                revision_id, cls.revision_entity_id, "inherits",
+                                parent_name, scope_of(cls), now))
 
     if module is not None:
         for imp in imports:
