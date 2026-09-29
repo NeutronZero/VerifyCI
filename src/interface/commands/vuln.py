@@ -37,16 +37,34 @@ def run_vuln(db_path: str | None = None, cache_path: str = "./storage/vuln_cache
                     "imported": imported,
                     "error": f"cannot_open_db: {type(e).__name__}: {e}"}
         try:
-            rows = conn.execute(
-                "SELECT metadata_json FROM edges WHERE type = 'DEPENDS_ON' LIMIT 5000"
-            ).fetchall()
+            # Latest revision only: unfiltered, every superseded row
+            # re-scanned, and fixed versions kept flagging. DBs without
+            # a revisions table (hand-built, tests) fall back to the
+            # unfiltered scan rather than matching nothing.
+            has_revisions = conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"
+                " AND name = 'revisions'").fetchone()[0]
+            if has_revisions:
+                rows = conn.execute(
+                    "SELECT metadata_json FROM edges WHERE type = 'DEPENDS_ON'"
+                    " AND revision_id = (SELECT revision_id FROM revisions"
+                    " ORDER BY timestamp DESC LIMIT 1) LIMIT 5001"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT metadata_json FROM edges WHERE type = 'DEPENDS_ON'"
+                    " LIMIT 5001"
+                ).fetchall()
         except sqlite3.Error as e:
             return {"db_path": db, "packages_checked": 0, "findings": [],
                     "imported": imported,
                     "error": f"query_failed: {type(e).__name__}: {e}"}
         finally:
             conn.close()
-        for (meta_json,) in rows:
+        # The 5001st row is a tripwire, not data: a silently
+        # truncated scan gates green on packages it never examined.
+        truncated = len(rows) > 5000
+        for (meta_json,) in rows[:5000]:
             try:
                 meta = json.loads(meta_json) if meta_json else {}
             except ValueError:
@@ -56,5 +74,5 @@ def run_vuln(db_path: str | None = None, cache_path: str = "./storage/vuln_cache
                 findings.append({"package": meta.get("package"), **vuln})
     finally:
         cache.close()
-    return {"db_path": db, "packages_checked": len(rows), "findings": findings,
-            "imported": imported}
+    return {"db_path": db, "packages_checked": len(rows[:5000]), "findings": findings,
+            "imported": imported, "truncated": truncated}

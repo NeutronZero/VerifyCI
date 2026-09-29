@@ -73,25 +73,52 @@ def revise(commit_id: str = typer.Option("", "--commit", "-c"), repository_id: s
     typer.echo(f"Created revision: {result['revision_id']}")
 
 
+def _read_diff(diff: str, diff_file: str) -> str:
+    """Diff text from argv, a file, or stdin (`-`). Argv hits shell
+    limits on real diffs; file/stdin is the CI path."""
+    if diff_file:
+        if diff_file == "-":
+            import sys
+            return sys.stdin.read()
+        with open(diff_file, encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    return diff
+
+
+def _exit_for_status(status: str) -> None:
+    """CI gate codes: PASS 0, FAIL 1, anything needing a human 2."""
+    if status == "PASS" or status == "COMPLETED":
+        return
+    raise typer.Exit(code=1 if status in ("FAIL", "FAILED") else 2)
+
+
 @app.command(name="verify-diff")
-def verify_diff(diff: str, revision_id: str = "", db: str = ""):
+def verify_diff(diff: str = typer.Argument("", help="Unified diff (or use --diff-file)"),
+                diff_file: str = typer.Option("", "--diff-file",
+                 help="Read the diff from a file (or - for stdin) instead of argv"),
+                revision_id: str = "", db: str = ""):
     from src.interface.commands.verify import run_verify
-    result = run_verify(diff, revision_id, db_path=db or None)
+    result = run_verify(_read_diff(diff, diff_file), revision_id, db_path=db or None)
     typer.echo(f"{result['status']}: {result['rationale']} ({result['report_id']})")
     if result.get("files"):
         typer.echo(f"files: {', '.join(result['files'])}")
+    _exit_for_status(result["status"])
 
 
 @app.command()
 def run(task: str, diff: str = typer.Option("", "--diff", "-d",
          help="Unified diff verified at each gate step"),
+         diff_file: str = typer.Option("", "--diff-file",
+          help="Read the diff from a file (or - for stdin) instead of argv"),
          db: str = "",
          anchor_file: str = typer.Option("", "--anchor-file",
           help="Append (task, revision, ledger head) to a JSONL anchor log (L2 tamper evidence)")):
     from src.interface.commands.run import run_task
     import json
-    typer.echo(json.dumps(run_task(task, diff=diff, db_path=db or None,
-                                   anchor_file=anchor_file or None), indent=2))
+    result = run_task(task, diff=_read_diff(diff, diff_file), db_path=db or None,
+                      anchor_file=anchor_file or None)
+    typer.echo(json.dumps(result, indent=2))
+    _exit_for_status(result["status"])
 
 
 @app.command(name="verify-chain")

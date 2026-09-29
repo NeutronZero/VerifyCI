@@ -63,6 +63,37 @@ def test_env_lookups_do_not_match():
         assert checks[0].passed is True, added
 
 
+def test_dotted_attribute_access_is_not_a_secret():
+    # `self.password = user_provided_password` and
+    # `secret_key = config.SECRET_KEY_NAME` are wiring, not literals:
+    # dotted access on either side excludes the unquoted match (dotted
+    # real secrets stay covered by the JWT/connection-string patterns).
+    for added in (
+        "self.password = user_provided_password",
+        "secret_key = config.SECRET_KEY_NAME",
+        "user.secret = fetch_secret_value",
+    ):
+        diff = f"diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1,0 +1,1 @@\n+{added}\n"
+        checks, _ = evaluate_invariants(diff, [_inv("s", "secrets_scan")], graph=None, evidence=[])
+        assert checks[0].passed is True, added
+
+
+def test_secret_matching_scales_linearly():
+    # The affix repetitions are bounded: a 100KB alphanumeric line must
+    # scan in well under a second, not quadratically. (An unbounded
+    # variant hung past a 300s timeout at this size.)
+    import time
+    from src.verification.intent_align import _has_secret
+    line = "x" * 100_000 + " = 1"
+    start = time.time()
+    assert _has_secret(line) is False
+    assert time.time() - start < 5.0
+    line = "password = " + "a" * 100_000
+    start = time.time()
+    assert _has_secret(line) is True  # secret-shaped; must still match fast
+    assert time.time() - start < 5.0
+
+
 def test_secrets_outside_hunks_still_fail():
     # Preamble lines and header-region lines (no @@) used to bypass the
     # scanner while still grounding the diff.

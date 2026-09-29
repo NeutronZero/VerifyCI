@@ -31,11 +31,14 @@ def _is_code(entity) -> bool:
 
 
 def _snippet_lines(entity) -> list[str] | None:
+    from src.ingestion.extractor import _split_source_lines
     meta = getattr(entity, "metadata", None) or {}
     snippet = meta.get("snippet")
     if not snippet:
         return None
-    return str(snippet).splitlines()
+    # Same split as the snippet builder: \n-only, or form feeds and
+    # non-UTF-8 bytes misalign stored lines against tree-sitter offsets.
+    return _split_source_lines(str(snippet).encode("utf-8", errors="replace"))
 
 
 def removal_provenance_check(diff: str | None, entities: list) -> CheckResult:

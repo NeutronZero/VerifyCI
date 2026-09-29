@@ -23,23 +23,32 @@ from src.graph.traverse import iter_edge_payloads
 #: plainly: `get_password = "..."` / `old_password = "..."` now match
 #: too. For a fail-closed gate that is correct (it IS a hardcoded
 #: password); the allowlist demote covers fixtures.
-_KEY = (r"(?:[A-Za-z0-9_]*[_-])?(?:password|passwd|secret|api[_-]?key"
-        r"|auth[_-]?token|private[_-]?key)(?:[_-][A-Za-z0-9_]+)?")
+#:
+#: Two bounds keep the matcher linear-time and precise. The affix
+#: repetitions are capped at 64 chars: unbounded `*` inside the optional
+#: group backtracked quadratically, and a 1 MB minified line burned
+#: minutes of CPU behind an unauthenticated endpoint. Real affixes
+#: (`AWS_SECRET_ACCESS_`) are an order of magnitude shorter.
+_KEY = (r"(?:[A-Za-z0-9_]{0,64}[_-])?(?:password|passwd|secret|api[_-]?key"
+        r"|auth[_-]?token|private[_-]?key)(?:[_-][A-Za-z0-9_]{1,64})?")
 
 SECRET_RE = re.compile(
     r"(?i)" + _KEY + r"\s*[:=]\s*['\"][^'\"]{3,}['\"]"
 )
 
 #: Unquoted assignments. The value must be 12+ chars with no parens,
-#: quotes, or comment markers, so `password = get_password()` and
-#: `token = os.environ["X"]` do not match but
-#: `DB_PASSWORD=s3cr3tPr0dValue` does. The value may end the line, a
-#: `#` comment, or a `;`/`,` terminator (C-style
-#: `DB_PASSWORD=s3cr3tPr0dValue;` is a real leak shape the first version
-#: of this pattern missed on firmware code). Short unquoted values stay
-#: outside the scanner's reach by design (documented residual).
+#: quotes, dots, or comment markers, so `password = get_password()`,
+#: `token = os.environ["X"]`, `self.password = user_provided_password`,
+#: and `secret_key = config.SECRET_KEY_NAME` do not match — dotted
+#: attribute access on either side is wiring, not a literal (real
+#: dotted secrets are covered by the JWT and connection-string
+#: patterns; the `(?<!\.)` guard covers the keyword side).
+#: `DB_PASSWORD=s3cr3tPr0dValue` matches. The value may end
+#: the line, a `#` comment, or a `;`/`,` terminator (C-style
+#: `DB_PASSWORD=s3cr3tPr0dValue;`). Short unquoted values stay outside
+#: the scanner's reach by design (documented residual).
 UNQUOTED_SECRET_RE = re.compile(
-    r"(?i)" + _KEY + r"\s*[:=]\s*([^\s()\"'`#;,]{12,})(?=\s*(?:[;,#]|$))"
+    r"(?i)(?<!\.)" + _KEY + r"\s*[:=]\s*([^\s().\"'`#;,]{12,})(?=\s*(?:[;,#]|$))"
 )
 
 #: High-signal credential shapes that need no keyword context.

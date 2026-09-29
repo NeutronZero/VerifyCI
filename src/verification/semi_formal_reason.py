@@ -40,7 +40,11 @@ class DeterministicCheck:
 
 
 class SemiFormalReasoner:
-    def __init__(self, model_name: str = "llama3.1", max_hops: int = 2):
+    # Default names the deterministic producer, not an LLM: every
+    # production path stamped generated_by="llama3.1" on certificates
+    # no model ever touched. Callers passing a real model name (an
+    # LLM-assisted premise drafter, when one exists) keep working.
+    def __init__(self, model_name: str = "semi_formal_reasoner", max_hops: int = 2):
         self.model_name = model_name
         self.max_hops = max_hops
 

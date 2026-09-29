@@ -133,6 +133,78 @@ def test_overload_definitions_collapse_to_one_entity():
     assert funcs[0].logical_entity_id == funcs[1].logical_entity_id  # ...one identity
 
 
+def test_pointer_and_reference_returns_emit_entities():
+    # `char *f()` / `T& f()` nest the declarator inside pointer/reference
+    # wrappers; the old trio missed them and whole functions vanished.
+    from src.contracts.entity import EntityType
+    from src.ingestion.extractor import extract_entities
+    from src.ingestion.parser import TreeSitterParser
+    src = (b"char *getbuf(void) { return 0; }\n"
+           b"int &counter(int &c) { return c; }\n")
+    parsed = TreeSitterParser().parse("x.cpp", src, "cpp")
+    funcs = {e.name: e for e in extract_entities(parsed, "r", "rev")
+             if e.type == EntityType.FUNCTION}
+    assert set(funcs) == {"getbuf", "counter"}
+    params = [e.name for e in extract_entities(parsed, "r", "rev")
+              if e.type == EntityType.PARAMETER]
+    assert "c" in params
+
+
+def test_destructor_and_operator_names():
+    from src.contracts.entity import EntityType
+    from src.ingestion.extractor import extract_entities
+    from src.ingestion.parser import TreeSitterParser
+    src = (b"class W {\n public:\n  ~W() {}\n"
+           b"  bool operator==(const W &o) { return true; }\n};\n")
+    parsed = TreeSitterParser().parse("x.cpp", src, "cpp")
+    methods = {e.name for e in extract_entities(parsed, "r", "rev")
+               if e.type == EntityType.METHOD}
+    assert "~W" in methods
+    assert "operator==" in methods
+
+
+def test_multi_import_statement_emits_all_modules():
+    from src.contracts.entity import EntityType
+    from src.ingestion.extractor import extract_entities
+    from src.ingestion.parser import TreeSitterParser
+    parsed = TreeSitterParser().parse("x.py", b"import os, sys\n", "python")
+    imports = sorted(
+        e.name for e in extract_entities(parsed, "r", "rev") if e.type == EntityType.IMPORT)
+    assert imports == ["os", "sys"]
+
+
+def test_typedef_names_new_type():
+    from src.contracts.entity import EntityType
+    from src.ingestion.extractor import extract_entities
+    from src.ingestion.parser import TreeSitterParser
+    parsed = TreeSitterParser().parse("x.c", b"typedef Bar Baz;\n", "c")
+    types = [e.name for e in extract_entities(parsed, "r", "rev")
+             if e.type == EntityType.TYPE]
+    assert types == ["Baz"]
+
+
+def test_struct_methods_are_methods():
+    from src.contracts.entity import EntityType
+    from src.ingestion.extractor import extract_entities
+    from src.ingestion.parser import TreeSitterParser
+    parsed = TreeSitterParser().parse(
+        "x.cpp", b"struct S {\n void m() {}\n};\n", "cpp")
+    methods = [e.name for e in extract_entities(parsed, "r", "rev")
+               if e.type == EntityType.METHOD]
+    assert methods == ["m"]
+
+
+def test_c_include_emits_import():
+    from src.contracts.entity import EntityType
+    from src.ingestion.extractor import extract_entities
+    from src.ingestion.parser import TreeSitterParser
+    parsed = TreeSitterParser().parse(
+        "x.c", b'#include <stdio.h>\n#include "util.h"\n', "c")
+    imports = sorted(
+        e.name for e in extract_entities(parsed, "r", "rev") if e.type == EntityType.IMPORT)
+    assert imports == ["stdio.h", "util.h"]
+
+
 def test_docstring_code_examples_are_not_entities():
     # A regex ground truth would count `ghost`; the AST correctly ignores it.
     # Ground-truth annotation must be AST-aware (or human-read), not regex.

@@ -6,7 +6,11 @@ LANGUAGE_BY_EXT = {
     ".cpp": "cpp",
     ".cc": "cpp",
     ".cxx": "cpp",
-    ".h": "c",
+    # Headers parse with the C++ grammar: tree-sitter-cpp covers C
+    # declaration syntax, while the C grammar cannot represent classes,
+    # namespaces, or templates — and real firmware headers are C++.
+    # This also matches what benchmarks/score_cpp.py already assumed.
+    ".h": "cpp",
     ".hpp": "cpp",
     ".md": "markdown",
     ".txt": "txt",

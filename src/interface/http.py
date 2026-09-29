@@ -32,10 +32,11 @@ def _api_token() -> str:
 
 
 async def require_auth(authorization: str = Header(default="")) -> None:
+    import hmac
     token = _api_token()
     if not token:
         return
-    if authorization != f"Bearer {token}":
+    if not hmac.compare_digest(authorization, f"Bearer {token}"):
         raise HTTPException(status_code=401, detail="unauthorized")
 
 

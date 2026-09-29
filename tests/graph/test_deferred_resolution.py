@@ -171,6 +171,62 @@ def test_qualified_name_recorded_and_ids_stable():
         "repo1", "x.cpp", "top", EntityType.FUNCTION, "")
 
 
+def test_cross_language_same_name_does_not_link():
+    # Python `obj.add(x)` must not link the C `add`: unique-name
+    # resolution is gated on same language.
+    builder, graph, _, _ = _build({
+        "a.py": (b"class Something:\n    def run(self):\n        self.add(x)\n",
+                 "python"),
+        "b.c": (b"int add(int a, int b) { return a + b; }\n", "c"),
+    })
+    assert [link for link in _links(graph) if link[2] == EdgeType.CALLS] == []
+    assert builder.resolution_stats["missing"] == 1
+
+
+def test_nested_calls_attribute_once_to_inner():
+    _, graph, _, _ = _build({
+        "a.py": (b"def outer():\n    def inner():\n        target()\n"
+                 b"    inner()\n\ndef target():\n    pass\n", "python"),
+    })
+    calls = sorted((s, t) for s, t, typ in _links(graph) if typ == EdgeType.CALLS)
+    assert calls == [("inner", "target"), ("outer", "inner")]
+    # ("outer", "target") must NOT appear: descending into the nested
+    # def double-attributed every inner call to the outer function.
+
+
+def test_decorator_calls_captured():
+    # `@app.route` lives outside the function body; without decorator
+    # scanning it produces no reference at all. `route` is undefined,
+    # so the reference stays unresolved rather than linking wrongly.
+    from src.ingestion.extractor import extract_edges, extract_entities
+    from src.ingestion.parser import TreeSitterParser
+    parsed = TreeSitterParser().parse(
+        "a.py", b"import app\n\n@app.route(\"/x\")\ndef view():\n    pass\n",
+        "python")
+    entities = extract_entities(parsed, "r", "rev1")
+    edges = extract_edges(parsed, entities, "rev1")
+    unres = [e for e in edges if e.type == EdgeType.CALLS_UNRESOLVED]
+    assert [(e.metadata or {}).get("callee") for e in unres] == ["route"]
+
+
+def test_decorator_call_links_when_defined():
+    _, graph, _, _ = _build({
+        "a.py": (b"def route(p):\n    return p\n\n"
+                 b"@route(\"/x\")\ndef view():\n    pass\n", "python"),
+    })
+    calls = [(s, t) for s, t, typ in _links(graph) if typ == EdgeType.CALLS]
+    assert ("view", "route") in calls
+
+
+def test_module_level_calls_attribute_to_module():
+    _, graph, _, _ = _build({
+        "a.py": (b"def main():\n    pass\n\nif __name__ == \"__main__\":\n    main()\n",
+                 "python"),
+    })
+    calls = [(s, t) for s, t, typ in _links(graph) if typ == EdgeType.CALLS]
+    assert ("a.py", "main") in calls
+
+
 def test_resolution_is_deterministic():
     first, _, _, _ = _build({
         "a.cpp": (b"void helper() {}\n", "cpp"),

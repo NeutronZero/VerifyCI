@@ -1,5 +1,85 @@
 # Changelog
 
+## Unreleased — external static audit fixes (batch 1: gate integrity)
+
+An outside read-through (no execution) produced ~60 findings; every
+Critical/High item was re-verified by execution before fixing. Two of
+its items were already fixed at HEAD (anchor fail-open, unsurfaced
+resolver stats); one was wrong (`deps.py` has no SKIP_DIRS matching).
+The rest below, each probed first.
+
+- **Ingest is atomic.** `batch()` rolled back nothing — commit in
+  `finally` plus a per-file commit in `MetadataStore.upsert_file`
+  left half-populated revisions that every command then loaded as
+  "latest". Batch rolls back on exception; upsert no longer commits
+  (sole caller runs inside the batch). Pinned.
+- **Manifests route before suffixes.** `requirements.txt` matched
+  `.txt` ingestible first, so the manifest branch was dead and Python
+  dependencies never entered the graph. `SKIP_DIRS` matched absolute
+  path parts, so repos under `/build/` (or `env`, `target`) ingested
+  zero files silently — now relative directory parts only.
+- **Secrets scanner: FPs closed, DoS bounded.** `self.password =
+  user_provided_password` and `secret_key = config.SECRET_KEY_NAME`
+  both FAILed merges (verified); dotted attribute access on either
+  side now excludes the unquoted match (dotted real secrets stay
+  covered by JWT/connection-string patterns). The affix repetitions
+  are capped at 64 chars: the unbounded form was confirmed quadratic
+  (hung past a 300s timeout at 100KB) behind a 1MB unauthenticated
+  endpoint. Pinned with a timing test.
+- **C/C++ extraction recovers dropped functions.** Pointer/reference
+  returns (`char *f`, `T& f`), destructors (`~W`), and operators
+  (`operator==`) emitted nothing — whole function sets vanished.
+  Declarator descent extended (abstract declarators still silent, so
+  function pointers stay out), including params. `struct` joins
+  CLASS_NODES (methods, not functions); `typedef Bar Baz` names Baz;
+  `import os, sys` emits both modules; `#include` emits IMPORTs
+  (forbid_import works for C now); `.h` parses as C++ in production,
+  matching what the firmware benchmark always assumed.
+- **Call collection: once each, in the right scope.** Nested
+  definitions double-attributed inner calls to the outer function;
+  the body walk now prunes nested named scopes. Decorator calls
+  (`@app.route`) were never captured — scanned via the parent
+  decorated_definition. Module- and class-body calls (`if __name__ ==
+  "__main__": main()`) attribute to module/class instead of silence.
+- **Deferred resolution gated on language.** A Python `obj.add(x)`
+  linked the C `add` (probed) — unique-name policy ignored language.
+  Candidates must now match the caller's language (languageless test
+  fakes still match anything).
+- **Incremental carry keeps unresolved refs** (previously dropped:
+  every incremental graph lost cross-file visibility), with the
+  referenced name in the carried id so parallel refs don't collapse;
+  plus the O(n²) set-in-comprehension. Parse errors recorded in
+  ingest totals instead of silent. Revision indexes added
+  (entities/edges by revision, path, name).
+- **Dependency parsers:** pip options skipped (were packages `-r`),
+  extras keep versions, cargo inline-table versions + `[dep.x]` /
+  workspace sections, maven per-block versions (the lazy optional
+  never captured — always "latest") + comment stripping, go `//`
+  skipped, npm section in edge ids, corrupt cache reads as no-vulns,
+  vuln scan scoped to latest revision with a `truncated` flag.
+- **Wiring:** `verify-diff`/`run` exit 0/1/2 (PASS/FAIL/needs-human)
+  with `--diff-file`/`-` stdin; `hmac.compare_digest` on the token;
+  policy rejects unknown `on_failure`/`on_inconclusive` instead of
+  falling through to PASS; `generated_by` defaults to the
+  deterministic producer, not `llama3.1`; `aci stats` is read-only
+  (no mkdir/schema at client paths); embedding cache gitignored.
+- **Line splitting aligned to tree-sitter/git** (`\n`-only) in
+  snippets and removal matching; form feeds no longer misalign into
+  false "fabricated" verdicts. Pinned.
+- Numbers: suite 314, ruff clean (incl. benchmarks), extraction
+  TP=13 FP=0 FN=0 (39 raw entities now — the 39th is the new
+  `stdlib.h` import), Flask TP=142. Firmware C++ benchmark unrunnable
+  (staged checkout gone); its paths are covered by new unit tests.
+- Deliberately deferred with reasons: diff-aware forbid rules (needs
+  added-line call analysis design, not a regex); MCP audit trail and
+  graph refresh (feature surface); `revise` semantics (what an empty
+  revision means is a product decision); temporal closure of removed
+  calls/files (valid-time redesign); intra-file `candidates[0]`
+  fallback and receiver-awareness (precision work, same-file stakes);
+  suffix-grounding veto and certificate/docstring labels (charter
+  decisions); version-aware vuln matching (semver feature); benchmark
+  scoring overhaul and `ingest_repo` dedup (measurement hygiene).
+
 ## Unreleased — resolver coverage surfaced; anchor reads fail loud
 
 - **`aci stats` reports deferred-resolution coverage.** `run_stats`

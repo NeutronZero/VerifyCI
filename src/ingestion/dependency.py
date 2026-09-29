@@ -34,9 +34,14 @@ def extract_dependencies(file_path: str, source: str, revision_id: str = "") -> 
     return []
 
 
-def _dep_edge(file_path: str, ecosystem: str, name: str, version: str, revision_id: str) -> Edge:
+def _dep_edge(file_path: str, ecosystem: str, name: str, version: str,
+              revision_id: str, section: str = "") -> Edge:
+    # The section disambiguates npm dependencies/devDependencies sharing
+    # a package name: without it both rows shared one id and INSERT OR
+    # REPLACE silently kept whichever was parsed last.
+    tag = f"_{section}" if section else ""
     return Edge(
-        id=f"dep_{revision_id[:12]}_{file_path}_{ecosystem}_{name}",
+        id=f"dep_{revision_id[:12]}_{file_path}_{ecosystem}_{name}{tag}",
         revision_id=revision_id,
         src_entity_id=file_path,
         dst_entity_id=f"{ecosystem}:{name}",
@@ -53,7 +58,8 @@ def _parse_npm(source: str, file_path: str, revision_id: str) -> list[Edge]:
     edges = []
     for section in ("dependencies", "devDependencies"):
         for name, version in (data.get(section, {}) or {}).items():
-            edges.append(_dep_edge(file_path, "npm", name, str(version), revision_id))
+            edges.append(_dep_edge(file_path, "npm", name, str(version), revision_id,
+                                   section=section))
     return edges
 
 
@@ -61,12 +67,24 @@ def _parse_pypi(source: str, file_path: str, revision_id: str) -> list[Edge]:
     edges = []
     for line in source.splitlines():
         line = line.strip()
-        if not line or line.startswith("#"):
+        if not line or line.startswith("#") or line.startswith("-"):
+            # pip options (-r, -e, --index-url, --extra-index-url) are
+            # directives, not packages. Recursive -r inclusion is out of
+            # scope; silently treating them as packages was worse.
             continue
-        match = re.match(r"^([a-zA-Z0-9_.-]+)\s*([>=<~!]+)?\s*([0-9.*]+)?", line)
+        match = re.match(
+            r"^([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?\s*"
+            r"([>=<~!]=?|==)?\s*([^\s;#]+)?", line)
         if match:
-            edges.append(_dep_edge(file_path, "pypi", match.group(1), match.group(3) or "latest", revision_id))
+            edges.append(_dep_edge(file_path, "pypi", match.group(1),
+                                   match.group(3) or "latest", revision_id))
     return edges
+
+
+def _dep_section(header: str) -> bool:
+    return header in ("[dependencies]", "[dev-dependencies]",
+                      "[workspace.dependencies]") or header.startswith(
+        ("[dependencies.", "[dev-dependencies.", "[workspace.dependencies."))
 
 
 def _parse_cargo(source: str, file_path: str, revision_id: str) -> list[Edge]:
@@ -75,23 +93,42 @@ def _parse_cargo(source: str, file_path: str, revision_id: str) -> list[Edge]:
     for line in source.splitlines():
         stripped = line.strip()
         if stripped.startswith("["):
-            in_deps = stripped in ("[dependencies]", "[dev-dependencies]")
+            in_deps = _dep_section(stripped)
             continue
         if in_deps:
-            match = re.match(r'^([a-zA-Z0-9_-]+)\s*=\s*"?([^"\s,]+)?', stripped)
-            if match:
-                edges.append(_dep_edge(file_path, "cargo", match.group(1), match.group(2) or "latest", revision_id))
+            match = re.match(r"^([A-Za-z0-9_-]+)\s*=\s*(.*)$", stripped)
+            if not match:
+                continue
+            name, value = match.group(1), match.group(2).strip()
+            if value.startswith("{"):
+                # Inline table: `serde = { version = "1", ... }`.
+                # The old regex captured "{" as the version.
+                version_match = re.search(r'version\s*=\s*"([^"]+)"', value)
+                version = version_match.group(1) if version_match else "latest"
+            else:
+                version = value.strip('"').strip() or "latest"
+            edges.append(_dep_edge(file_path, "cargo", name, version, revision_id))
     return edges
 
 
 def _parse_maven(source: str, file_path: str, revision_id: str) -> list[Edge]:
+    # Strip comments first: commented-out <dependency> blocks parsed as
+    # live dependencies. Then match the version per block — a lazy
+    # optional group preferred empty, so the old single regex reported
+    # "latest" for every pretty-printed pom.
+    clean = re.sub(r"<!--.*?-->", "", source, flags=re.DOTALL)
     edges = []
-    for match in re.finditer(
-        r"<dependency>.*?<groupId>(.*?)</groupId>.*?<artifactId>(.*?)</artifactId>.*?(?:<version>(.*?)</version>)?.*?</dependency>",
-        source, re.DOTALL,
-    ):
-        name = f"{match.group(1).strip()}:{match.group(2).strip()}"
-        edges.append(_dep_edge(file_path, "maven", name, (match.group(3) or "latest").strip(), revision_id))
+    for block in re.finditer(r"<dependency>(.*?)</dependency>", clean, re.DOTALL):
+        body = block.group(1)
+
+        def _tag(tag: str) -> str:
+            found = re.search(rf"<{tag}>(.*?)</{tag}>", body, re.DOTALL)
+            return found.group(1).strip() if found else ""
+
+        group, artifact, version = _tag("groupId"), _tag("artifactId"), _tag("version")
+        if group and artifact:
+            edges.append(_dep_edge(file_path, "maven", f"{group}:{artifact}",
+                                   version or "latest", revision_id))
     return edges
 
 
@@ -100,6 +137,8 @@ def _parse_go(source: str, file_path: str, revision_id: str) -> list[Edge]:
     in_require = False
     for line in source.splitlines():
         stripped = line.strip()
+        if not stripped or stripped.startswith("//"):
+            continue
         if stripped.startswith("require ("):
             in_require = True
             continue
@@ -154,7 +193,9 @@ class VulnerabilityCache:
             result = [json.loads(r[0]) for r in rows]
             self._cache[pkg] = result
             return result
-        except OSError:
+        except (OSError, sqlite3.Error):
+            # A corrupt cache file must read as "no known vulns", not
+            # crash the scan that consults it.
             return self._cache.get(pkg, [])
 
     def refresh(self, edges: list[Edge], findings: dict[str, list[dict]] | None = None) -> int:

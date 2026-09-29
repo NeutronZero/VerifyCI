@@ -94,6 +94,20 @@ def test_empty_and_none_diffs_pass():
     assert removal_provenance_check(None, []).passed is True
 
 
+def test_form_feed_does_not_misalign():
+    # `\x0c` splits str.splitlines() but not tree-sitter line counts.
+    # Snippets built \n-only stay aligned; a splitlines-built snippet
+    # would shift every later line into a false "fabricated" verdict.
+    from src.ingestion.extractor import _split_source_lines
+    src = b"def f():\n\x0c    return 1\n"
+    assert _split_source_lines(src) == ["def f():", "\x0c    return 1", ""]
+    ent = _ent(1, 2, "def f():\n\x0c    return 1")
+    diff = DIFF_HEAD + "@@ -1,2 +1,1 @@\n def f():\n-\x0c    return 1\n"
+    check = removal_provenance_check(diff, [ent])
+    assert check.passed is True
+    assert check.established is True
+
+
 def test_policy_routes_fabricated_to_fail_and_unverified_to_inconclusive():
     import time
     import uuid

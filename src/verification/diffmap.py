@@ -14,6 +14,22 @@ body name files.
 _HUNK_BODY_PREFIXES = (" ", "+", "-", "\\")
 
 
+def _diff_lines(diff: str | None) -> list[str]:
+    """Split diff text the way the format delimits it: on `\n` only.
+
+    `str.splitlines()` also splits on `\x0b\x0c\u2028\u2029`, so a form
+    feed inside a removed line's content became two body lines and the
+    halves mismatched stored snippets as "fabricated". A single trailing
+    `\r` per line is stripped to preserve `\r\n` behavior.
+    """
+    if not diff:
+        return []
+    lines = str(diff).split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return [line[:-1] if line.endswith("\r") else line for line in lines]
+
+
 def _is_header(line: str, marker: str) -> bool:
     return line.startswith(marker) and line[len(marker):len(marker) + 1] in (" ", "\t")
 
@@ -23,7 +39,7 @@ def parse_diff_files(diff: str | None) -> list[str]:
         return []
     new_side, old_side = [], []
     in_hunk = False
-    for line in str(diff).splitlines():
+    for line in _diff_lines(diff):
         if line.startswith("diff --git "):
             in_hunk = False
             continue
@@ -62,7 +78,7 @@ def iter_added_lines(diff: str | None) -> list[tuple[str | None, str]]:
         return out
     current: str | None = None
     in_hunk = False
-    for line in str(diff).splitlines():
+    for line in _diff_lines(diff):
         if line.startswith("diff --git "):
             current, in_hunk = None, False
             continue
@@ -137,7 +153,7 @@ def find_deletion_hunks(diff: str | None) -> list[tuple[int, str]]:
     hunk_start = 0
     minus = plus = 0
     removed: list[str] = []
-    for i, line in enumerate(str(diff).splitlines(), 1):
+    for i, line in enumerate(_diff_lines(diff), 1):
         if line.startswith("diff --git "):
             if in_hunk and minus > plus:
                 hunks.append((hunk_start, "\n".join(removed)))
@@ -188,7 +204,7 @@ def iter_hunks(diff: str | None) -> list:
             hunks.append(open_hunk)
             open_hunk = None
 
-    for line in (str(diff).splitlines() if diff else []):
+    for line in (_diff_lines(diff) if diff else []):
         if line.startswith("diff --git "):
             flush()
             current = None

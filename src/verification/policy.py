@@ -8,6 +8,15 @@ class PolicyEvaluator:
     def evaluate(self, report: VerificationReport, policy) -> VerificationDecision:
         # INCONCLUSIVE means "no deterministic checker ran" — never "a
         # checker ran and rejected". Rejection is FAIL (below).
+        # Only the consulted fields are validated: an unrecognized
+        # on_failure used to fall through past both branches, turning a
+        # real rejection into whatever the inconclusive path said
+        # (including PASS under warn). on_human_review is never read;
+        # validating it would break existing constructions for nothing.
+        if getattr(policy, "on_failure", None) not in ("block", "warn"):
+            raise ValueError(f"unknown on_failure: {policy.on_failure!r}")
+        if getattr(policy, "on_inconclusive", None) not in ("human_review", "warn"):
+            raise ValueError(f"unknown on_inconclusive: {policy.on_inconclusive!r}")
         if policy.require_deterministic_checker and not _executed_deterministic(report):
             return VerificationDecision(
                 decision_id=str(uuid.uuid4()),

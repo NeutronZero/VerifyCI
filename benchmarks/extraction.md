@@ -11,7 +11,8 @@
 - Ground truth: manual annotation of 13 entities (11 Python + 2 C)
 - Scored types: FUNCTION, METHOD, CLASS only. MODULE / IMPORT / PARAMETER /
   TYPE nodes are structural inventory outside this ground truth's scope and
-  are reported separately (38 raw entities across 4 scored files).
+  are reported separately (39 raw entities across 4 scored files; 38 before
+  C `#include` entities were extracted).
 - Reproduce: `python benchmarks/run_extraction.py`
 
 ## Results

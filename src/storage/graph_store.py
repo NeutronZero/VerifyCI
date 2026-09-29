@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS entities (
 );
 CREATE INDEX IF NOT EXISTS idx_entities_logical ON entities(logical_entity_id);
 CREATE INDEX IF NOT EXISTS idx_entities_logical_valid ON entities(logical_entity_id, valid_from, valid_until);
+CREATE INDEX IF NOT EXISTS idx_entities_revision ON entities(revision_id);
+CREATE INDEX IF NOT EXISTS idx_entities_path ON entities(file_path);
+CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name);
 
 CREATE TABLE IF NOT EXISTS edges (
     id TEXT PRIMARY KEY,
@@ -61,6 +64,7 @@ CREATE TABLE IF NOT EXISTS edges (
 );
 CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(src_entity_id);
 CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst_entity_id);
+CREATE INDEX IF NOT EXISTS idx_edges_revision ON edges(revision_id);
 
 CREATE TABLE IF NOT EXISTS events (
     id TEXT PRIMARY KEY,
@@ -103,11 +107,23 @@ class GraphStore:
 
     @_cm
     def batch(self):
-        """Defer commits until the block exits (bulk ingest path)."""
+        """Defer commits until the block exits (bulk ingest path).
+
+        An exception rolls back instead of committing: the old
+        commit-in-finally left half-populated revisions behind, and the
+        "latest revision" loader then served the wreckage to every
+        command. Partial ingest data is never loadable.
+        """
         self._batch_depth += 1
         try:
             yield self
-        finally:
+        except BaseException:
+            self._batch_depth -= 1
+            if self._batch_depth <= 0:
+                self._batch_depth = 0
+                self.conn.rollback()
+            raise
+        else:
             self._batch_depth -= 1
             if self._batch_depth <= 0:
                 self._batch_depth = 0
@@ -347,7 +363,8 @@ class GraphStore:
     def close(self):
         self.conn.close()
 
-    def _row_to_entity(self, row) -> Entity:
+    @staticmethod
+    def _row_to_entity(row) -> Entity:
         return Entity(
             repository_id=row[2],
             logical_entity_id=row[1],
@@ -368,7 +385,8 @@ class GraphStore:
             properties_json=row[16],
         )
 
-    def _row_to_edge(self, row) -> Edge:
+    @staticmethod
+    def _row_to_edge(row) -> Edge:
         return Edge(
             id=row[0],
             revision_id=row[1],
@@ -386,7 +404,8 @@ class GraphStore:
             properties_json=row[13],
         )
 
-    def _row_to_event(self, row):
+    @staticmethod
+    def _row_to_event(row):
         from src.contracts.event import Event
         return Event(
             id=row[0],

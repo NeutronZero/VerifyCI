@@ -22,11 +22,12 @@ class MetadataStore:
         self.conn.commit()
 
     def upsert_file(self, file_path: str, source_hash: str, language: str, revision_id: str):
+        # No commit here: the sole caller runs inside GraphStore.batch(),
+        # and a per-file commit defeated both the batch and its rollback.
         self.conn.execute(
             "INSERT OR REPLACE INTO file_metadata VALUES (?,?,?,?,?)",
             (file_path, source_hash, language, __import__('time').time(), revision_id),
         )
-        self.conn.commit()
 
     def get_file(self, file_path: str):
         return self.conn.execute(

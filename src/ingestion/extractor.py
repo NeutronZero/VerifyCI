@@ -8,7 +8,17 @@ from src.ingestion.parser import ParsedFile
 
 CALL_NODES = ("call", "call_expression")
 FUNC_NODES = ("function_definition", "function_declaration", "method_definition")
-CLASS_NODES = ("class_definition", "class_specifier")
+CLASS_NODES = ("class_definition", "class_specifier", "struct_specifier")
+#: Declarator node types that can wrap a C/C++ function name. Beyond the
+#: plain trio, functions returning pointers/references nest the real
+#: declarator inside pointer/reference wrappers — without these,
+#: `char *f()` and `T& f()` emit no entity at all. Array/parenthesized
+#: wrappers (`int f()[10]`, `int (f)(void)`) are included on the same
+#: grounds; abstract declarators (no identifier inside) still yield
+#: nothing, so function pointers stay silent.
+DECLARATOR_TYPES = ("function_declarator", "declarator", "method_declarator",
+                    "pointer_declarator", "reference_declarator",
+                    "array_declarator", "parenthesized_declarator")
 
 
 def _make_entity(
@@ -105,11 +115,22 @@ def _text(node, source: bytes) -> str:
     return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
 
 
+def _split_source_lines(source: bytes) -> list[str]:
+    """Split exactly the way tree-sitter and git count lines: on `\n`
+    only, with a trailing `\r` stripped per line. `str.splitlines()`
+    also splits on `\x0b\x0c\u2028\u2029`, which misaligns stored
+    snippets against both the AST and the diff for files containing
+    form feeds — removal provenance then hallucinated "fabricated"
+    verdicts on honest diffs."""
+    return [line[:-1] if line.endswith("\r") else line
+            for line in source.decode("utf-8", errors="replace").split("\n")]
+
+
 def _source_snippet(source: bytes, line_start: int, line_end: int, limit: int = 2000) -> str:
     """Citeable source fragment stored at ingest time, so evidence never
     depends on the working tree still containing the file."""
     try:
-        lines = source.decode("utf-8", errors="replace").splitlines()
+        lines = _split_source_lines(source)
         fragment = "\n".join(lines[max(0, line_start - 1):line_end])
     except Exception:  # noqa: BLE001, S110
         return ""
@@ -120,6 +141,19 @@ def _walk(node):
     yield node
     for child in node.children:
         yield from _walk(child)
+
+
+def _walk_pruned(node):
+    """Walk a function body for call sites without descending into
+    nested named definitions. A nested `def inner` is visited as its
+    own entity; descending into it here attributes every inner call to
+    the outer function too (double count). Lambdas and comprehensions
+    are anonymous and stay in scope."""
+    for child in node.children:
+        if child.type in FUNC_NODES or child.type in CLASS_NODES:
+            continue
+        yield child
+        yield from _walk_pruned(child)
 
 
 def _qualified_name(node, source: bytes) -> Optional[tuple[str, str]]:
@@ -151,7 +185,7 @@ def _scope_name(node, source: bytes, language: str = "python") -> Optional[str]:
         # parsed as a function_definition whose "name" is the enum tag) —
         # never trust it, so it is not even a fallback there.
         for child in node.children:
-            if child.type in ("function_declarator", "declarator", "method_declarator"):
+            if child.type in DECLARATOR_TYPES:
                 qualified = _qualified_name(child, source)
                 if qualified is not None:
                     return qualified[1]
@@ -163,6 +197,31 @@ def _scope_name(node, source: bytes, language: str = "python") -> Optional[str]:
                 if child.type == "identifier":
                     return _text(child, source)
         return None
+    if node.type in DECLARATOR_TYPES:
+        for child in node.children:
+            if child.type in DECLARATOR_TYPES:
+                found = _scope_name(child, source, language)
+                if found:
+                    return found
+        for child in node.children:
+            # Destructors and operators have neither identifier nor
+            # qualified node: `~W` and `operator==` are the whole name.
+            # field_identifier marks in-class members; it is safe here
+            # because declarations (field_declaration nodes) never reach
+            # this frame — only definitions do.
+            if child.type in ("destructor_name", "operator_name"):
+                return _text(child, source)
+            if child.type in ("identifier", "type_identifier", "field_identifier"):
+                return _text(child, source)
+        return None
+    if node.type == "type_definition":
+        # C typedef names the NEW type: `typedef Bar Baz` defines Baz.
+        # First-identifier-wins named the old type.
+        found = None
+        for child in node.children:
+            if child.type in ("identifier", "type_identifier"):
+                found = _text(child, source)
+        return found
     for child in node.children:
         if child.type in ("identifier", "type_identifier"):
             return _text(child, source)
@@ -195,7 +254,7 @@ def _qualified_scope(node, source: bytes) -> str:
     if node.type not in FUNC_NODES:
         return ""
     for child in node.children:
-        if child.type in ("function_declarator", "declarator", "method_declarator"):
+        if child.type in DECLARATOR_TYPES:
             qualified = _qualified_name(child, source)
             if qualified is not None:
                 return qualified[0]
@@ -314,15 +373,38 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
     seen_imports = set()
     for node in _walk(root):
         if node.type in ("import_statement", "import_from_statement"):
-            module_name = _extract_import_module(node, parsed.source)
-            if module_name and module_name not in seen_imports:
-                seen_imports.add(module_name)
+            # One statement can import several modules (`import os, sys`);
+            # taking only the first silently drops the rest.
+            for module_name in _extract_import_modules(node, parsed.source):
+                if module_name and module_name not in seen_imports:
+                    seen_imports.add(module_name)
+                    entities.append(_make_entity(
+                        repository_id, revision_id, parsed.file_path, module_name,
+                        EntityType.IMPORT, parsed.language, parsed.source_hash,
+                        node.start_point[0] + 1, node.end_point[0] + 1, now,
+                    ))
+        elif node.type == "preproc_include" and parsed.language in ("c", "cpp"):
+            # `#include <flask.h>` / `#include "util.h"`: without this,
+            # C/C++ translation units have no IMPORT entities and
+            # forbid_import cannot work for C at all.
+            header = _include_header(node, parsed.source)
+            if header and header not in seen_imports:
+                seen_imports.add(header)
                 entities.append(_make_entity(
-                    repository_id, revision_id, parsed.file_path, module_name,
+                    repository_id, revision_id, parsed.file_path, header,
                     EntityType.IMPORT, parsed.language, parsed.source_hash,
                     node.start_point[0] + 1, node.end_point[0] + 1, now,
                 ))
     return entities
+
+
+def _include_header(node, source: bytes) -> Optional[str]:
+    parts = [
+        _text(c, source).strip().strip("<>\"' \t")
+        for c in node.children
+        if c.type in ("string_literal", "system_lib_string")
+    ]
+    return parts[-1] if parts else None
 
 
 def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) -> list[Edge]:
@@ -354,7 +436,40 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
                 return c
         return candidates[0]
 
+    def _emit_call(caller: Entity, caller_scope: str, site_node) -> None:
+        callee_name = _extract_callee_name(site_node, parsed.source)
+        if not callee_name:
+            return
+        callee = resolve(callee_name, caller_scope)
+        site = f"{site_node.start_point[0] + 1}:{site_node.start_byte}"
+        if callee is None:
+            # Callee not defined in this file: emit an unresolved
+            # reference, not silence. A post-build resolver links it
+            # when exactly one entity with that name exists anywhere;
+            # builtins and ambiguous names stay unlinked.
+            edges.append(_make_unresolved(
+                revision_id, caller.revision_entity_id, "calls",
+                callee_name, caller_scope, now, site))
+            return
+        if callee.revision_entity_id == caller.revision_entity_id:
+            edges.append(_make_edge(
+                revision_id, caller.revision_entity_id, callee.revision_entity_id,
+                EdgeType.CALLS, CPGEdgeSubtype.CALLS_RECURSIVE, now, site))
+        else:
+            edges.append(_make_edge(
+                revision_id, caller.revision_entity_id, callee.revision_entity_id,
+                EdgeType.CALLS, CPGEdgeSubtype.CALLS_DIRECT, now, site))
+            edges.append(_make_edge(
+                revision_id, caller.revision_entity_id, callee.revision_entity_id,
+                EdgeType.REFERENCES, CPGEdgeSubtype.REFERENCES, now, site))
+
     root = parsed.tree.root_node
+    parents = {}
+    for _n in _walk(root):
+        for _c in _n.children:
+            parents.setdefault(id(_c), _n)
+
+    decorated_sites: set[int] = set()
     for node, stack in _walk_scoped(root, parsed.source, [], parsed.language):
         if node.type not in FUNC_NODES:
             continue
@@ -368,34 +483,42 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
         caller = resolve(caller_name, caller_scope)
         if caller is None:
             continue
-        for child in _walk(node):
-            if child is node or child.type not in CALL_NODES:
+        for child in _walk_pruned(node):
+            if child.type not in CALL_NODES:
                 continue
-            callee_name = _extract_callee_name(child, parsed.source)
-            if not callee_name:
-                continue
-            callee = resolve(callee_name, caller_scope)
-            site = f"{child.start_point[0] + 1}:{child.start_byte}"
-            if callee is None:
-                # Callee not defined in this file: emit an unresolved
-                # reference, not silence. A post-build resolver links it
-                # when exactly one entity with that name exists anywhere;
-                # builtins and ambiguous names stay unlinked.
-                edges.append(_make_unresolved(
-                    revision_id, caller.revision_entity_id, "calls",
-                    callee_name, caller_scope, now, site))
-                continue
-            if callee.revision_entity_id == caller.revision_entity_id:
-                edges.append(_make_edge(
-                    revision_id, caller.revision_entity_id, callee.revision_entity_id,
-                    EdgeType.CALLS, CPGEdgeSubtype.CALLS_RECURSIVE, now, site))
-            else:
-                edges.append(_make_edge(
-                    revision_id, caller.revision_entity_id, callee.revision_entity_id,
-                    EdgeType.CALLS, CPGEdgeSubtype.CALLS_DIRECT, now, site))
-                edges.append(_make_edge(
-                    revision_id, caller.revision_entity_id, callee.revision_entity_id,
-                    EdgeType.REFERENCES, CPGEdgeSubtype.REFERENCES, now, site))
+            _emit_call(caller, caller_scope, child)
+        # Decorators live on the parent decorated_definition, outside
+        # the function body — without this, `@app.route(...)` calls
+        # are never captured at all.
+        parent = parents.get(id(node))
+        if parent is not None and parent.type == "decorated_definition":
+            for dec in parent.children:
+                if dec.type != "decorator":
+                    continue
+                for site_node in _walk(dec):
+                    if site_node.type in CALL_NODES:
+                        decorated_sites.add(id(site_node))
+                        _emit_call(caller, caller_scope, site_node)
+
+    # Module- and class-body calls (`if __name__ == "__main__": main()`,
+    # `x = compute()` in a class body) execute but belong to no function.
+    # Attribute them to the innermost enclosing class, else the module —
+    # previously they produced no edge at all.
+    for node, stack in _walk_scoped(root, parsed.source, [], parsed.language):
+        if node.type not in CALL_NODES or id(node) in decorated_sites:
+            continue
+        if any(kind == "func" for kind, _ in stack):
+            continue  # attributed to the enclosing function above
+        names = [n for _, n in stack]
+        class_names = [n for kind, n in stack if kind == "class"]
+        if class_names:
+            caller = resolve(class_names[-1], ".".join(names[:-1]))
+            caller_scope = ".".join(names[:-1])
+        else:
+            caller, caller_scope = module, ""
+        if caller is None:
+            continue
+        _emit_call(caller, caller_scope, node)
 
     for node in _walk(root):
         if node.type in CLASS_NODES:
@@ -474,7 +597,7 @@ def _extract_params(node, source: bytes, language: str = "python") -> list[str]:
     params: list[str] = []
     if language in ("c", "cpp"):
         for child in node.children:
-            if child.type in ("function_declarator", "declarator"):
+            if child.type in DECLARATOR_TYPES:
                 for decl in _walk(child):
                     if decl.type == "parameter_list":
                         for pdecl in decl.children:
@@ -524,16 +647,18 @@ def _extract_callee_name(node, source: bytes) -> Optional[str]:
     return None
 
 
-def _extract_import_module(node, source: bytes) -> Optional[str]:
+def _extract_import_modules(node, source: bytes) -> list[str]:
     if node.type == "import_statement":
+        modules = []
         for child in node.children:
             if child.type == "dotted_name":
-                return _text(child, source)
-            if child.type == "aliased_import":
+                modules.append(_text(child, source))
+            elif child.type == "aliased_import":
                 for grandchild in child.children:
                     if grandchild.type == "dotted_name":
-                        return _text(grandchild, source)
-        return None
+                        modules.append(_text(grandchild, source))
+                        break
+        return modules
     # import_from_statement: the module precedes the `import` keyword, either
     # as a relative_import (`from ..config import X`) or a dotted_name
     # (`from flask import X`). Names after the keyword are imported symbols,
@@ -544,14 +669,15 @@ def _extract_import_module(node, source: bytes) -> Optional[str]:
             seen_import_kw = True
             continue
         if child.type == "relative_import":
-            return _relative_module(child, source)
+            found = _relative_module(child, source)
+            return [found] if found else []
         if child.type == "dotted_name" and not seen_import_kw:
-            return _text(child, source)
+            return [_text(child, source)]
         if child.type == "aliased_import" and not seen_import_kw:
             for grandchild in child.children:
                 if grandchild.type == "dotted_name":
-                    return _text(grandchild, source)
-    return None
+                    return [_text(grandchild, source)]
+    return []
 
 
 def _relative_module(node, source: bytes) -> Optional[str]:

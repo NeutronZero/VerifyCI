@@ -63,6 +63,7 @@ class GraphBuilder:
         depends only on the loaded entity set, so every load of the
         same revision resolves identically.
         """
+        by_lang: dict[str, str] = {}
         by_name: dict[str, list[str]] = {}
         for eid, idx in self._node_map.items():
             payload = self._graph[idx]
@@ -72,6 +73,9 @@ class GraphBuilder:
                                 EntityType.PARAMETER):
                 continue
             by_name.setdefault(payload.name, []).append(eid)
+            language = getattr(payload, "language", "") or ""
+            if language:
+                by_lang[eid] = language
 
         for edge in sorted(pending, key=lambda e: e.id):
             src_idx = self._node_map.get(edge.src_entity_id)
@@ -80,8 +84,15 @@ class GraphBuilder:
                 continue
             if edge.type == EdgeType.CALLS_UNRESOLVED:
                 name = (edge.metadata or {}).get("callee", "")
-                candidates = [e for e in by_name.get(name, [])
-                              if self._graph[self._node_map[e]].type in _CALL_TARGET_TYPES]
+                caller_lang = getattr(self._graph[src_idx], "language", "") or ""
+                candidates = [
+                    e for e in by_name.get(name, [])
+                    if self._graph[self._node_map[e]].type in _CALL_TARGET_TYPES
+                    # Same language only: a Python `obj.add(x)` must not
+                    # link a C `add` across the repo (unique-name policy
+                    # is necessary but not sufficient). Entities without
+                    # recorded language (test fakes) match anything.
+                    and (not caller_lang or by_lang.get(e, caller_lang) == caller_lang)]
                 if len(candidates) != 1:
                     self.resolution_stats["ambiguous" if candidates else "missing"] += 1
                     continue
