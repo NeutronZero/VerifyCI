@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased — ledger head pinning, L1 surfaced + L2 anchor file
+
+- **L1: every terminal task pins its ledger head.** The scheduler sets
+  `ledger_head` in a `finally`, so completed, failed, cancelled, and
+  review-stopped runs all leave one behind. Surfaced uniformly:
+  `run_task` / CLI `aci run` JSON, MCP `task.run` / `task.status`,
+  HTTP via `run_task`. New public accessor `scheduler.ledger_head()`.
+- **L2: JSONL anchor log + `aci verify-chain`.** `--anchor-file` on
+  `aci run` (also `run_task` / MCP `task_run` params) appends
+  `{task_id, revision_id, head_hash, timestamp}` per terminal run.
+  `aci verify-chain --db X --anchor-file Y [--task-id T]` scopes to
+  one task's subchain (the events table interleaves runs, so global
+  links are broken by construction — never verified as one chain) and
+  reports CHAIN_VALID (exit 0) / CHAIN_BROKEN / HEAD_MISMATCH /
+  NO_EVENTS (exit 1). No anchor for the target, or an empty DB, fails
+  closed — a wrong `--db` never reads as clean.
+- Pinned end to end: anchor a run, rewrite the last event's payload in
+  SQLite, links-only still passes (the known flaw, demonstrated not
+  asserted), anchored check returns HEAD_MISMATCH.
+- Integrity note: the anchor file must live in a different fault
+  domain than the DB it vouches for; hash excludes `attestation`
+  (canonical contract), so reload reproduces heads bit-for-bit, with a
+  `rowid` tiebreak for same-tick appends. Suite 280, ruff clean.
+
 ## Unreleased — blast demoted to advisory (exposure is not violation)
 
 - **Blast no longer blocks.** `blast_radius_check` sets `blocking=False`:

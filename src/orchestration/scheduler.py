@@ -3,7 +3,9 @@ import uuid
 from types import SimpleNamespace
 from typing import Any
 
-from src.contracts.scheduler import ExecutableDAG, Scheduler, TaskStatus
+from src.contracts.scheduler import (
+    ExecutableDAG, Scheduler, TERMINAL_STATUSES, TaskStatus,
+)
 
 
 def _as_dag_dict(dag: Any) -> dict[str, Any]:
@@ -95,7 +97,7 @@ class AsyncDAGScheduler(Scheduler):
             "conversation_id": conversation_id,
             "context": dict(context or {}),
             "decision": None, "error": None, "needs_review": False,
-            "executing": False, "handle": None,
+            "executing": False, "handle": None, "ledger_head": None,
         }
         self._emit("TASK_SUBMITTED", task_id, conversation_id, {"nodes": len(dag_dict["nodes"])})
         self._tasks[task_id]["handle"] = asyncio.create_task(self._execute(task_id))
@@ -108,6 +110,13 @@ class AsyncDAGScheduler(Scheduler):
     def decision(self, task_id: str) -> Any:
         task = self._tasks.get(task_id)
         return task.get("decision") if task else None
+
+    def ledger_head(self, task_id: str) -> Any:
+        """Head hash of the task's ledger at its terminal state (L1
+        tamper-evidence surfacing). None when the task never reached a
+        terminal state or no ledger is attached."""
+        task = self._tasks.get(task_id)
+        return task.get("ledger_head") if task else None
 
     async def cancel(self, task_id: str) -> None:
         task = self._tasks.get(task_id)
@@ -227,6 +236,15 @@ class AsyncDAGScheduler(Scheduler):
                     await self._persist(task_id)
         finally:
             task["executing"] = False
+            # L1: pin the ledger head once the run is terminal, whatever
+            # path got it there (completed, failed, cancelled, review).
+            # A second _execute can never run concurrently (resume is
+            # guarded), so the head cannot be clobbered mid-flight.
+            if task["status"] in TERMINAL_STATUSES and self._ledger is not None:
+                try:
+                    task["ledger_head"] = self._ledger.head_hash()
+                except Exception:  # noqa: BLE001
+                    task["ledger_head"] = None
 
     async def _run_level(self, executor, level: list[dict], task_id: str,
                          conversation_id: str, shared: dict) -> list:

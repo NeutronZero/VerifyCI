@@ -169,7 +169,8 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                     "report_id": report.report_id, "rationale": decision.rationale,
                     "files": files, "changed_entities": changed}
 
-    async def task_run(task: str, conversation_id: str = "", diff: str = "") -> dict:
+    async def task_run(task: str, conversation_id: str = "", diff: str = "",
+                       anchor_file: str = "") -> dict:
         from src.orchestration.compiler.validation import validate_task_ir
         from src.orchestration.intent import build_intent_package
         from src.orchestration.planner import Planner
@@ -179,7 +180,8 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
             intent = build_intent_package(task)
             task_ir = planner.plan(task, intent.intent_package_id, "default")
             if not validate_task_ir(task_ir):
-                return {"task": task, "status": "FAILED", "error": "invalid_task_ir"}
+                return {"task": task, "status": "FAILED", "error": "invalid_task_ir",
+                        "ledger_head": None}
             from src.interface.commands.run import _dedupe_invariants
             context = {
                 "graph": graph, "node_map": node_map, "entities": entities,
@@ -192,17 +194,34 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
             status = await scheduler.status(task_id)
             if status in TERMINAL_STATUSES:
                 decision = scheduler.decision(task_id)
-                return {"task": task, "task_id": task_id, "status": status.value,
-                        "steps": len(task_ir.steps),
-                        "decision": decision.status if decision else None}
+                head = scheduler.ledger_head(task_id)
+                result = {"task": task, "task_id": task_id, "status": status.value,
+                          "steps": len(task_ir.steps),
+                          "decision": decision.status if decision else None,
+                          "ledger_head": head}
+                if anchor_file and head:
+                    from src.memory.ledger import append_anchor
+                    revision = ""
+                    if store is not None and hasattr(store, "conn"):
+                        try:
+                            rows = store.conn.execute(
+                                "SELECT revision_id FROM revisions "
+                                "ORDER BY timestamp DESC LIMIT 1").fetchall()
+                            revision = rows[0][0] if rows else ""
+                        except Exception:  # noqa: BLE001
+                            revision = ""
+                    append_anchor(anchor_file, task_id, revision, head)
+                return result
             await asyncio.sleep(0.1)
-        return {"task": task, "task_id": task_id, "status": "TIMEOUT"}
+        return {"task": task, "task_id": task_id, "status": "TIMEOUT",
+                "ledger_head": None}
 
     async def task_status(task_id: str) -> dict:
         status = await scheduler.status(task_id)
         decision = scheduler.decision(task_id)
         return {"task_id": task_id, "status": status.value,
-                "decision": decision.status if decision else None}
+                "decision": decision.status if decision else None,
+                "ledger_head": scheduler.ledger_head(task_id)}
 
     server.register_tool("code.search", code_search, "Hybrid BM25 + graph retrieval with RRF + rerank")
     server.register_tool("code.definition", code_definition, "Symbol lookup")

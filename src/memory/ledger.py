@@ -73,3 +73,49 @@ class EventLedger:
         if not self._events:
             return None
         return event_hash(self._events[-1])
+
+
+def append_anchor(path: str, task_id: str, revision_id: str,
+                  head_hash_value: str) -> dict:
+    """Append one anchor line (L2 tamper-evidence log).
+
+    JSONL, append-only, one object per line:
+    ``{"task_id", "revision_id", "head_hash", "timestamp"}``. The anchor
+    file must live in a different fault domain than the events DB to
+    mean anything — an anchor next to the DB it vouches for is
+    decoration. Callers, not this function, choose the domain.
+    """
+    import json as _json
+    import time as _time
+    record = {
+        "task_id": task_id,
+        "revision_id": revision_id or "",
+        "head_hash": head_hash_value,
+        "timestamp": _time.time(),
+    }
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(_json.dumps(record, sort_keys=True) + "\n")
+    return record
+
+
+def read_anchors(path: str) -> list[dict]:
+    """Read an anchor log, skipping blank and corrupt lines. A corrupt
+    line is ignored (fail-open read) but never trusted: verification
+    only ever compares against well-formed records."""
+    import json as _json
+    records = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = _json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(record, dict) and record.get("head_hash"):
+                    records.append(record)
+    except OSError:
+        pass
+    return records

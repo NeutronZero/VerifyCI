@@ -326,7 +326,10 @@ class GraphStore:
         self._maybe_commit()
 
     def get_events(self) -> list:
-        rows = self.conn.execute("SELECT * FROM events ORDER BY timestamp ASC").fetchall()
+        # rowid tiebreak: same-tick appends (coarse Windows clocks) must
+        # reload in insertion order, or chain hashes won't reproduce.
+        rows = self.conn.execute(
+            "SELECT * FROM events ORDER BY timestamp ASC, rowid ASC").fetchall()
         return [self._row_to_event(r) for r in rows]
 
     def get_entities_by_revision(self, revision_id: str) -> list[Entity]:

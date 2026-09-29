@@ -23,14 +23,30 @@ def _dedupe_invariants(invariants: list) -> list:
     return out
 
 
+def _latest_revision_id(store) -> str:
+    try:
+        rows = store.conn.execute(
+            "SELECT revision_id FROM revisions ORDER BY timestamp DESC LIMIT 1"
+        ).fetchall()
+    except Exception:  # noqa: BLE001
+        return ""
+    return rows[0][0] if rows else ""
+
+
 def run_task(task: str, timeout: float = 30.0, diff: str = "",
-             db_path: str | None = None) -> dict:
+             db_path: str | None = None,
+             anchor_file: str | None = None) -> dict:
+    """Run a task to a terminal state. The returned dict always carries
+    ``ledger_head`` (L1 tamper-evidence surfacing; None when no ledger
+    ran). With ``anchor_file``, the (task, revision, head) tuple is
+    appended to a JSONL anchor log (L2) for later ``verify-chain``."""
     async def _run() -> dict:
         planner = Planner()
         intent = build_intent_package(task)
         task_ir = planner.plan(task, intent.intent_package_id, "default")
         if not validate_task_ir(task_ir):
-            return {"task": task, "status": "FAILED", "error": "invalid_task_ir"}
+            return {"task": task, "status": "FAILED", "error": "invalid_task_ir",
+                    "ledger_head": None}
         db = resolve_db(db_path)
         graph, node_map, entities = load_graph(db)
         ledger = EventLedger()
@@ -51,12 +67,20 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
                 status = await scheduler.status(task_id)
                 if status in TERMINAL_STATUSES:
                     decision = scheduler.decision(task_id)
-                    return {"task": task, "task_id": task_id, "status": status.value,
-                            "steps": len(task_ir.steps),
-                            "decision": decision.status if decision else None,
-                            "rationale": decision.rationale if decision else None}
+                    head = scheduler.ledger_head(task_id)
+                    result = {"task": task, "task_id": task_id, "status": status.value,
+                              "steps": len(task_ir.steps),
+                              "decision": decision.status if decision else None,
+                              "rationale": decision.rationale if decision else None,
+                              "ledger_head": head}
+                    if anchor_file and head:
+                        from src.memory.ledger import append_anchor
+                        append_anchor(anchor_file, task_id,
+                                      _latest_revision_id(store), head)
+                    return result
                 await asyncio.sleep(0.1)
-            return {"task": task, "task_id": task_id, "status": "TIMEOUT", "steps": len(task_ir.steps)}
+            return {"task": task, "task_id": task_id, "status": "TIMEOUT",
+                    "steps": len(task_ir.steps), "ledger_head": None}
         finally:
             store.close()
 

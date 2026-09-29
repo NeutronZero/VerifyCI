@@ -76,10 +76,31 @@ def verify_diff(diff: str, revision_id: str = "", db: str = ""):
 @app.command()
 def run(task: str, diff: str = typer.Option("", "--diff", "-d",
          help="Unified diff verified at each gate step"),
-         db: str = ""):
+         db: str = "",
+         anchor_file: str = typer.Option("", "--anchor-file",
+          help="Append (task, revision, ledger head) to a JSONL anchor log (L2 tamper evidence)")):
     from src.interface.commands.run import run_task
     import json
-    typer.echo(json.dumps(run_task(task, diff=diff, db_path=db or None), indent=2))
+    typer.echo(json.dumps(run_task(task, diff=diff, db_path=db or None,
+                                   anchor_file=anchor_file or None), indent=2))
+
+
+@app.command(name="verify-chain")
+def verify_chain(db: str = "",
+                 anchor_file: str = typer.Option("", "--anchor-file",
+                  help="JSONL anchor log: latest matching head is verified, not just links"),
+                 task_id: str = typer.Option("", "--task-id",
+                  help="Verify only this task's subchain (required to check an anchor)")):
+    """Verify the event ledger: links always, pinned head when anchored.
+
+    Exit 0 CHAIN_VALID; exit 1 CHAIN_BROKEN / HEAD_MISMATCH / NO_EVENTS.
+    """
+    from src.interface.commands.anchor import run_verify_chain
+    import json
+    result = run_verify_chain(db or None, anchor_file or None, task_id or None)
+    typer.echo(json.dumps(result, indent=2))
+    if result["status"] != "CHAIN_VALID":
+        raise typer.Exit(code=1)
 
 
 @app.command()

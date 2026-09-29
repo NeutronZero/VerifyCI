@@ -93,6 +93,20 @@ async def test_scheduler_zero_budget_breaches():
 
 
 @pytest.mark.asyncio
+async def test_scheduler_pins_head_on_failure_paths():
+    # L1: the ledger head is pinned in a finally, so every terminal
+    # path — including budget breach — leaves a head behind.
+    from src.contracts.scheduler import ExecutableDAG
+    from src.memory.ledger import EventLedger
+    scheduler = AsyncDAGScheduler(ledger=EventLedger())
+    dag = ExecutableDAG(dag_id="d", nodes=[{"step_id": "s1"}], budget_nano_usd=0)
+    task_id = await scheduler.submit(dag)
+    assert await _drain(scheduler, task_id) == TaskStatus.FAILED
+    assert scheduler.ledger_head(task_id)
+    assert scheduler.ledger_head("no-such-task") is None
+
+
+@pytest.mark.asyncio
 async def test_scheduler_persists_failed_runs():
     # The audit trail must contain failures, not just successes: the
     # budget-breach path persists before returning.
