@@ -1,0 +1,214 @@
+{
+  "frozen": {
+    "cases_sha256": "efbf6b4e12e62fd1"
+  },
+  "cases": [
+    {
+      "id": "B1-hub-midline",
+      "mode": "seeded",
+      "seed": "hub",
+      "n_changed_entities": 2,
+      "risk": 0.45,
+      "expected": [
+        "far",
+        "handle",
+        "leaf",
+        "mid1",
+        "mid2",
+        "remote"
+      ],
+      "detected": [
+        "far",
+        "handle",
+        "leaf",
+        "mid1",
+        "mid2",
+        "remote"
+      ],
+      "TP": 6,
+      "FN": 0,
+      "FP": 0,
+      "recall": 1.0,
+      "precision": 1.0
+    },
+    {
+      "id": "B2-leaf-midline",
+      "mode": "seeded",
+      "seed": "leaf",
+      "n_changed_entities": 2,
+      "risk": 0.3,
+      "expected": [
+        "hub",
+        "mid1",
+        "mid2"
+      ],
+      "detected": [
+        "hub",
+        "mid1",
+        "mid2"
+      ],
+      "TP": 3,
+      "FN": 0,
+      "FP": 0,
+      "recall": 1.0,
+      "precision": 1.0
+    },
+    {
+      "id": "B3-isolated-zero",
+      "mode": "seeded",
+      "seed": "isolated",
+      "n_changed_entities": 2,
+      "risk": 0.0,
+      "expected": [],
+      "detected": [],
+      "TP": 0,
+      "FN": 0,
+      "FP": 0,
+      "recall": 1.0,
+      "precision": 1.0
+    },
+    {
+      "id": "B4-far-change",
+      "mode": "seeded",
+      "seed": "far",
+      "n_changed_entities": 2,
+      "risk": 0.15,
+      "expected": [
+        "hub",
+        "mid1",
+        "mid2"
+      ],
+      "detected": [
+        "hub",
+        "mid1",
+        "mid2"
+      ],
+      "TP": 3,
+      "FN": 0,
+      "FP": 0,
+      "recall": 1.0,
+      "precision": 1.0
+    },
+    {
+      "id": "B5-hub-defline",
+      "mode": "seeded",
+      "seed": "hub",
+      "n_changed_entities": 4,
+      "risk": 0.55,
+      "expected": [
+        "far",
+        "handle",
+        "leaf",
+        "mid1",
+        "mid2",
+        "remote"
+      ],
+      "detected": [
+        "far",
+        "handle",
+        "hub",
+        "leaf",
+        "mid1",
+        "mid2",
+        "remote"
+      ],
+      "TP": 6,
+      "FN": 0,
+      "FP": 1,
+      "recall": 1.0,
+      "precision": 0.8571428571428571
+    },
+    {
+      "id": "B6-hub-tail-insert",
+      "mode": "known_gap",
+      "seed": "hub",
+      "n_changed_entities": 0,
+      "risk": 0.0,
+      "expected": [
+        "far",
+        "handle",
+        "leaf",
+        "mid1",
+        "mid2",
+        "remote"
+      ],
+      "detected": [],
+      "TP": 0,
+      "FN": 6,
+      "FP": 0,
+      "recall": 0.0,
+      "precision": null
+    },
+    {
+      "id": "B7-isolated-tail-insert",
+      "mode": "known_gap_empty",
+      "seed": "isolated",
+      "n_changed_entities": 0,
+      "risk": 0.0,
+      "expected": [],
+      "detected": [],
+      "TP": 0,
+      "FN": 0,
+      "FP": 0,
+      "recall": 1.0,
+      "precision": 1.0
+    },
+    {
+      "id": "B8-method-callee",
+      "mode": "seeded",
+      "seed": "handle",
+      "n_changed_entities": 3,
+      "risk": 0.15,
+      "expected": [
+        "hub",
+        "mid1",
+        "mid2"
+      ],
+      "detected": [
+        "hub",
+        "mid1",
+        "mid2"
+      ],
+      "TP": 3,
+      "FN": 0,
+      "FP": 0,
+      "recall": 1.0,
+      "precision": 1.0
+    },
+    {
+      "id": "B9-mid2-branch",
+      "mode": "seeded",
+      "seed": "mid2",
+      "n_changed_entities": 2,
+      "risk": 0.45,
+      "expected": [
+        "far",
+        "handle",
+        "hub",
+        "leaf",
+        "remote"
+      ],
+      "detected": [
+        "far",
+        "handle",
+        "hub",
+        "leaf",
+        "remote"
+      ],
+      "TP": 5,
+      "FN": 0,
+      "FP": 0,
+      "recall": 1.0,
+      "precision": 1.0
+    }
+  ],
+  "metrics": {
+    "coverage_all": 0.8571,
+    "coverage_seeded_only": 1.0,
+    "contract_fn_ids": [],
+    "known_gap_miss_ids": [
+      "B6-hub-tail-insert"
+    ],
+    "total_fp": 1
+  }
+}

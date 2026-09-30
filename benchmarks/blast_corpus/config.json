@@ -1,0 +1,25 @@
+{
+  "purpose": "C2: blast-radius coverage vs a frozen labeled impacted-set (PLAN.md gate: coverage > 0.90, measured graph traversal vs manual ground truth).",
+  "question": "Given a changed entity/hunk, does VerifyCI identify the entities actually exposed by the change?",
+  "provenance": "Fixture `fixture/src/core.py` + `src/app.py` encode a hand-annotated CALLS topology (hub -> mid1/mid2 -> leaf; far/remote/handle -> hub; isolated leafless). Expected impacted sets are derived BY HAND from that topology + the documented contract (2 hops, incoming+outgoing along CALL_FLOW_TYPES={CALLS,REFERENCES,IMPORTS,INHERITS,DEPENDS_ON}, seed excluded) BEFORE any blast computation. `author.py` regenerates cases.jsonl byte-identically.",
+  "frozen_before_measurement": true,
+  "labels_are_data": "expected_impacted was fixed before detection; misses are reported, never retuned. Traversal was NOT repaired for the tail-insertion gap.",
+  "detection_path": "identical to the gate: parse_diff_files -> seed_entities_for_diff (hunk-line based) -> compute_blast_radius (2 hops, CALL_FLOW_TYPES). Harness adds no retrieval/blast logic.",
+  "coverage_dimensions": ["direct callers", "transitive callers (2 hop)", "multi-path (leaf via mid1+mid2; mid2 branch)", "zero-impact change (isolated)", "function-boundary (def-line hunk)", "tail insertion (C1 known gap, B6/B7)", "path-grounding-succeeds-but-seeding-fails (B6)", "cross-file + method callee edges (B8)"],
+  "first_frozen_measurement": {
+    "date": "2026-10-01",
+    "coverage_all": 0.8571,
+    "coverage_seeded_only": 1.0,
+    "contract_fn_ids": [],
+    "known_gap_miss_ids": ["B6-hub-tail-insert"],
+    "total_fp": 1
+  },
+  "findings": {
+    "traversal": "EXACT (recall 1.0, FN 0) on every seeded hunk: direct, transitive, multi-path, cross-file, method callee. Zero-impact change correctly returns empty. 2-hop incoming+outgoing confirmed (B1/B4/B9).",
+    "tail_insertion_gap": "B6 (pure insertion after hub's last line): hunk-line seeding yields changed_entities=[] -> risk 0.0 -> 6 of 6 expected dependents missed. This is the C1 structural gap reproduced as a labeled case, NOT repaired.",
+    "precision_artifact": "B5 (def-line hunk): the 3 lines of diff context bleed into the adjacent `far` definition, so seed_entities_for_diff yields {hub, far}; far is a real hub caller, and hub then re-enters as far's callee -> detected includes the seed `hub`, an FP vs the contract (seed excluded). Detected set is a strict superset of expected (recall 1.0). Root cause: hunk context-window vs entity-span intersection, not traversal.",
+    "note": "seeded changed_entities includes PARAMETER rows (x, self); harmless (never traversal seeds) but shows seeding is entity-type-agnostic."
+  },
+  "gate_verdict": "coverage_all 0.8571 < 0.90 -> NOT MET. But: the ONLY sub-1.0 case is the pre-labeled tail-insertion gap, and that corpus is tiny (7 non-empty cases); coverage_seeded_only 1.0 shows traversal itself is correct. Result is measured, not established; the gap is a documented scope limit, the FP a disclosed seeding artifact.",
+  "no_tuning_rule": "first run is the baseline; any later seeding/traversal change must re-measure against this frozen corpus and update the recorded constants with a review note, never tune to it."
+}

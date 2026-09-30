@@ -83,6 +83,19 @@ Grounding rules (no exceptions):
   miss is a blast-exposure hunk-shape gap, reported not retuned). Synthetic
   stand-ins for agent output; a real recorded-LLM corpus remains the
   follow-on.
+- Blast-radius coverage measured on a frozen topology corpus
+  (`benchmarks/blast_corpus/`, expected sets hand-derived before
+  detection): traversal is **exact (1.0)** on every seeded hunk — direct,
+  transitive 2-hop, multi-path, cross-file, method callee, zero-impact.
+  The one miss is the **tail-insertion gap** reproduced as a labeled case
+  (a pure insertion after a function's last line seeds `changed_entities=[]`
+  → risk 0 → dependents missed): the C1 finding, kept as evidence, not
+  repaired. One disclosed precision artifact (a def-line hunk's diff
+  context bleeds into the neighbouring function, so the seed re-enters via
+  a real caller — detected set stays a superset of expected). Coverage
+  6/7 = **0.857** (the 7th being the pre-labeled gap); the corpus is too
+  small to *establish* the >0.90 gate, and no traversal defect was found
+  on any normally-seeded change.
 
 ## Architecture
 
@@ -111,6 +124,6 @@ historical smoke, never the evidence set.
 ## Status
 
 V1 walking skeleton. `PLAN.md` is the full plan; `CHANGELOG.md` records what
-each revision proved, including measured numbers and known gaps. 508 tests:
-`python -m pytest tests/ -q` (the frozen-corpus re-measure guard skips
-unless `VERIFYCI_PATCH_RERUN=1`).
+each revision proved, including measured numbers and known gaps. 513 tests:
+`python -m pytest tests/ -q` (two corpora re-measure guards skip unless
+`VERIFYCI_PATCH_RERUN=1` / `VERIFYCI_BLAST_RERUN=1`).

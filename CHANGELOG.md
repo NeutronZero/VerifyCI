@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — C2: frozen blast-topology corpus; coverage 0.857, gap reproduced as data
+
+- **Blast-radius coverage measured** against hand-frozen impacted sets
+  (`benchmarks/blast_corpus/`: core.py+app.py CALLS topology with
+  hub/mids/leaf/far/isolated + cross-file `remote` and method
+  `Gateway.handle`; 9 cases covering direct, 2-hop transitive,
+  multi-path, zero-impact, def-boundary, tail-insertion, seeding-can-fail,
+  cross-file+method). `author.py` regenerates the corpus byte-identically;
+  expected sets were derived from the topology + documented contract
+  (2 hops, in+out along CALL_FLOW_TYPES, seed excluded) **before** any
+  blast run. Traversal untouched — detection path is exactly the gate's.
+- **Result:** coverage_all **6/7 = 0.857 → gate NOT MET**;
+  coverage_seeded_only **1.000** — traversal is EXACT on every normally
+  seeded hunk (direct/transitive/multi-path/cross-file/method/zero-impact,
+  FN=0). The single miss is **B6, the pre-labeled tail-insertion gap**:
+  pure insertion after `hub`'s last line seeds `changed_entities=[]` →
+  risk 0.0 → 6/6 dependents missed. The C1 finding reproduced as frozen
+  data; NOT repaired (measurement phase).
+- **Disclosed precision artifact (B5, not tuned):** a def-line hunk's
+  3 context lines bleed into the adjacent `far` def, seeding {hub, far};
+  hub re-enters as far's callee → detected ⊃ expected (1 FP, recall 1.0).
+  Root cause documented: hunk context window vs entity-span intersection.
+- Zero contract-level FNs (no unannounced miss); regression guard +
+  frozen-corpus sha pin the baseline; `VERIFYCI_BLAST_RERUN=1` reproduces
+  the report exactly. Measured, not established (7 non-empty cases).
+  Suite 513 (was 509), ruff clean.
+
 ## Unreleased — C1: frozen patch corpus; first measurement of equivalence + precision
 
 - **Agent-patch equivalence and verification precision went from
