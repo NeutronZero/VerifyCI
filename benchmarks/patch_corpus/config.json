@@ -1,0 +1,30 @@
+{
+  "purpose": "C1: first measurement of semi-formal patch equivalence (gate >= 0.90) and verification precision (gate >= 0.85) on a frozen patch corpus.",
+  "provenance": "Patches authored by the audit process to mimic documented agent failure modes (hallucinated removals, forbidden APIs, hardcoded credentials, silent semantic drift) and valid maintenance. Synthetic stand-ins for agent output, stated plainly; the PLAN's 'agent-generated patches' intent is approximated, not faked as recorded-LLM data.",
+  "frozen_before_measurement": true,
+  "labels_are_data": "ground_truth and expected_status in cases.jsonl were fixed before any run. Disappointing first-run numbers are reported, not retuned.",
+  "verifier_frozen": true,
+  "metrics": {
+    "patch_equivalence": "over CORRECT patches: fraction whose verdict == expected_status (accept/decline both fine when expected). Gate >= 0.90.",
+    "verification_precision": "of all FAIL verdicts: fraction whose ground_truth is wrong. Gate >= 0.85.",
+    "deterministic_catch_rate": "of wrong patches with deterministic modes (fabricated/forbidden/secret): fraction that FAIL. Reported.",
+    "false_accept_rate": "of wrong SEMANTIC patches: fraction that PASS. Reported - the first measurement of V1's documented scope limit (provenance+impact, not intent).",
+    "decline_rate": "wrong patches routed INCONCLUSIVE/HUMAN_REVIEW. Reported."
+  },
+  "repo_invariants_file": "written to <repo>/.verifyci/invariants.yaml at setup: forbid_call:eval, forbid_import:subprocess (blocking). secrets_scan/provenance built-ins always run.",
+  "blast_hub": "send_email has 8 direct callers; risk = 0.1*callers + 0.05*callees (empty test mapping -> gap 0). 8*0.1 = 0.8 >= threshold -> non-blocking fail -> HUMAN_REVIEW, by the documented exposure contract.",
+  "blast_hub_measurement_note": "C3 measured PASS, not HUMAN_REVIEW: run_verify grounds files path-wise (any code entity) but seeds blast hunk-line-wise (old-side lines intersecting an entity span). A pure insertion after a function's last line touches only the hunk's old_start (a blank line outside send_email's span), so changed_entities is empty and risk is 0.0. The exposure contract is silent on tail-insertion hunks - a structural gap the corpus surfaced. The label was NOT retuned.",
+  "authoring_tool": "author.py (difflib against base/) — commit includes it so the frozen corpus's construction is reproducible; labels were set from the documented contract in that tool before any run.",
+  "first_frozen_measurement": {
+    "date": "2026-10-01",
+    "patch_equivalence": 0.875,
+    "verification_precision": 1.0,
+    "deterministic_catch_rate": 1.0,
+    "semantic_false_accept_rate": 1.0,
+    "confusion": {"wrong_all": {"caught": 4, "accepted": 4, "declined": 1},
+                  "correct_all": {"caught": 0, "accepted": 6, "declined": 2},
+                  "wrong_deterministic": {"caught": 4, "accepted": 0, "declined": 0},
+                  "wrong_semantic": {"caught": 0, "accepted": 4, "declined": 0}}
+  },
+  "single_run_rule": "measure.py is run once for the baseline; test_patch_corpus.py re-runs it as a regression guard against the recorded constants."
+}

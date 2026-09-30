@@ -72,7 +72,17 @@ Grounding rules (no exceptions):
   rarely trips the gate (3 PASS / 2 INCONCLUSIVE / 0 FAIL on the last 5
   Flask commits; the two INCONCLUSIVE are an empty merge and a mixed
   changelog diff, both honestly ungroundable);
-  subtly-wrong agent patches, the population this exists for, are untested.
+  subtly-wrong agent patches — the population this exists for — are now
+  measured on a frozen 17-case corpus (`benchmarks/patch_corpus/`, labels
+  fixed before the run): every *deterministic* wrong patch (forbidden
+  call/import, hardcoded secret, fabricated removal) was caught (4/4, FAIL),
+  but all 4 *semantic* wrong patches (weakened validation, wrong variable,
+  wrong return, wrong constant) were accepted — false-accept 1.0 — confirming
+  the scope limit above is real, not just asserted. Verification precision
+  1.0 (all FAILs were truly-wrong); patch equivalence 7/8 = 0.875 (the one
+  miss is a blast-exposure hunk-shape gap, reported not retuned). Synthetic
+  stand-ins for agent output; a real recorded-LLM corpus remains the
+  follow-on.
 
 ## Architecture
 
@@ -101,5 +111,6 @@ historical smoke, never the evidence set.
 ## Status
 
 V1 walking skeleton. `PLAN.md` is the full plan; `CHANGELOG.md` records what
-each revision proved, including measured numbers and known gaps. 493 tests:
-`python -m pytest tests/ -q`.
+each revision proved, including measured numbers and known gaps. 508 tests:
+`python -m pytest tests/ -q` (the frozen-corpus re-measure guard skips
+unless `VERIFYCI_PATCH_RERUN=1`).

@@ -1,0 +1,184 @@
+{
+  "frozen": {
+    "cases_sha256": "5ff5ab1b4d075559"
+  },
+  "verdicts": [
+    {
+      "id": "C1-login-audit",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "C2-db-normalize",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "C3-send-notify",
+      "ground_truth": "correct",
+      "category": "human_review",
+      "expected": "HUMAN_REVIEW",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "C4-caller-extra",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "C5-util-paren",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "C6-readme-doc",
+      "ground_truth": "correct",
+      "category": "inconclusive",
+      "expected": "INCONCLUSIVE",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established"
+    },
+    {
+      "id": "C7-new-module",
+      "ground_truth": "correct",
+      "category": "inconclusive",
+      "expected": "INCONCLUSIVE",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established"
+    },
+    {
+      "id": "C8-hash-echo",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "W1-eval-call",
+      "ground_truth": "wrong",
+      "category": "forbid_call",
+      "expected": "FAIL",
+      "status": "FAIL",
+      "rationale": "blocking_check_failed"
+    },
+    {
+      "id": "W2-subprocess-import",
+      "ground_truth": "wrong",
+      "category": "forbid_import",
+      "expected": "FAIL",
+      "status": "FAIL",
+      "rationale": "blocking_check_failed"
+    },
+    {
+      "id": "W3-hardcoded-key",
+      "ground_truth": "wrong",
+      "category": "secret",
+      "expected": "FAIL",
+      "status": "FAIL",
+      "rationale": "blocking_check_failed"
+    },
+    {
+      "id": "W4-fabricated-removal",
+      "ground_truth": "wrong",
+      "category": "fabricated_removal",
+      "expected": "FAIL",
+      "status": "FAIL",
+      "rationale": "blocking_check_failed"
+    },
+    {
+      "id": "S1-weak-validation",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "PASS",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "S2-wrong-var",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "PASS",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "S3-return-identity",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "PASS",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "S4-wrong-multiplier",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "PASS",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "S5-drop-guard",
+      "ground_truth": "wrong",
+      "category": "decline",
+      "expected": "INCONCLUSIVE",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established"
+    }
+  ],
+  "metrics": {
+    "counts": {
+      "PASS": 10,
+      "INCONCLUSIVE": 3,
+      "FAIL": 4
+    },
+    "patch_equivalence": 0.875,
+    "overall_agreement": 0.9412,
+    "verification_precision": 1.0,
+    "deterministic_catch_rate": 1.0,
+    "semantic_false_accept_rate": 1.0,
+    "semantic_decline_rate": 0.0,
+    "false_reject_ids": [],
+    "false_positive_fail_ids": [],
+    "missed_deterministic_ids": [],
+    "confusion": {
+      "wrong_all": {
+        "caught": 4,
+        "accepted": 4,
+        "declined": 1
+      },
+      "correct_all": {
+        "caught": 0,
+        "accepted": 6,
+        "declined": 2
+      },
+      "wrong_deterministic": {
+        "caught": 4,
+        "accepted": 0,
+        "declined": 0
+      },
+      "wrong_semantic": {
+        "caught": 0,
+        "accepted": 4,
+        "declined": 0
+      }
+    },
+    "n_correct": 8,
+    "n_wrong": 9,
+    "n_fail": 4
+  }
+}

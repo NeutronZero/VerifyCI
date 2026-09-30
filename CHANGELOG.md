@@ -1,5 +1,46 @@
 # Changelog
 
+## Unreleased — C1: frozen patch corpus; first measurement of equivalence + precision
+
+- **Agent-patch equivalence and verification precision went from
+  unmeasured to measured**, on a frozen 17-case corpus
+  (`benchmarks/patch_corpus/`): `author.py` (difflib against `base/`,
+  byte-valid hunks) + `cases.jsonl` with intent, ground truth
+  (correct/wrong), category, and expected outcome fixed from the
+  documented contract **before any run**. Synthetic stand-ins mimic agent
+  failure modes (hallucinated removal, forbidden call/import, hardcoded
+  secret, silent semantic drift) and valid maintenance (8 correct / 9
+  wrong: 4 deterministic + 4 semantic + 1 decline). Verifier and gate
+  frozen throughout; labels were not retuned after seeing results.
+- **First measurement (single run, recorded in `results.json`):**
+  - **Verification precision 1.00 MET** (4/4 FAILs truly-wrong, 0
+    false-positive FAILs on correct patches). Too few FAILs to
+    *establish*; deterministic-catch half (4/4) solid.
+  - **Patch equivalence 0.875 < 0.90, target unmet** (7/8). The miss is
+    the one case below.
+  - **All 4 deterministic wrong patches caught** (forbid_call,
+    forbid_import, secret, fabricated_removal).
+  - **All 4 semantic wrong patches accepted** (false-accept 1.0):
+    weakened validation, wrong variable, wrong return, wrong constant.
+    This is the first *measured* confirmation of the V1 scope limit
+    (proves provenance + impact, not intent) — previously only asserted.
+- **C3 structural gap surfaced and reported, not tuned away:** a correct
+  `send_email` change (8 callers → expected HUMAN_REVIEW via exposure)
+  measured PASS. `run_verify` grounds files path-wise
+  (`map_files_to_entity_ids`) but seeds blast hunk-line-wise
+  (`seed_entities_for_diff`), so a tail-insertion after a function's last
+  line yields `changed_entities=[]` → risk 0.0. Exposure contract never
+  applies to that hunk shape. Label kept as HUMAN_REVIEW (frozen);
+  divergence is the finding.
+- **Reproducibility:** `test_patch_corpus.py` pins the recorded metrics +
+  frozen-corpus sha; full re-measure under `VERIFYCI_PATCH_RERUN=1`
+  reproduces the report exactly (bit-identical metrics).
+- **Conclusion:** equivalence gate NOT met (0.875 < 0.90, and a 17-case
+  synthetic corpus cannot establish it); precision measured-met but not
+  established (small n). Next real evidence: a recorded-LLM patch corpus.
+  509 (508 pass + the opt-in re-measure, skipped unless
+  `VERIFYCI_PATCH_RERUN=1`); prior 504, ruff clean.
+
 ## Unreleased — B2: frozen BEIR-style retrieval gate, measured at +3.84 pts
 
 - **Eval infrastructure only; retrieval behavior untouched** (no BM25,
