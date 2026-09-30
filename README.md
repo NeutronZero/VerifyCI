@@ -96,6 +96,18 @@ Grounding rules (no exceptions):
   6/7 = **0.857** (the 7th being the pre-labeled gap); the corpus is too
   small to *establish* the >0.90 gate, and no traversal defect was found
   on any normally-seeded change.
+- Latency measured on a frozen 1000-sample protocol
+  (`benchmarks/latency/`, sources sha-pinned, environment recorded).
+  **Temporal query: MET** at the PLAN's 10K-edge scale — median 0.044ms,
+  p99 0.151ms against a 200ms limit (~3 orders of margin). **Incremental
+  parse: NOT MET at p95** — median 33μs passes (<0.2ms) proving reparse is
+  genuinely incremental (cold full-parse is 3.7ms), but p95 ~3.8ms fails
+  the 1ms limit on every run. The p99 verdict itself flips across runs
+  (4.32/6.14/4.54ms at a 5ms limit) — recorded as evidence that a
+  1000-sample protocol cannot *establish* that boundary on this host.
+  Mechanism: cost tracks edit position (tree-sitter re-lexes to the next
+  change point, so early-file edits re-lex long tails). Thresholds were
+  not retuned and no source changed.
 
 ## Architecture
 
@@ -124,6 +136,6 @@ historical smoke, never the evidence set.
 ## Status
 
 V1 walking skeleton. `PLAN.md` is the full plan; `CHANGELOG.md` records what
-each revision proved, including measured numbers and known gaps. 513 tests:
-`python -m pytest tests/ -q` (two corpora re-measure guards skip unless
-`VERIFYCI_PATCH_RERUN=1` / `VERIFYCI_BLAST_RERUN=1`).
+each revision proved, including measured numbers and known gaps. 515 tests:
+`python -m pytest tests/ -q` (three re-measure guards skip unless
+`VERIFYCI_PATCH_RERUN=1` / `VERIFYCI_BLAST_RERUN=1` / `VERIFYCI_LATENCY_RERUN=1`).

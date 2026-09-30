@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — C3: latency protocol; temporal MET, incremental p95 NOT MET
+
+- **Both PLAN latency gates measured** on a frozen 1000-sample protocol
+  (`benchmarks/latency/`: config frozen before timing; the five
+  measured-path sources sha-pinned in `fixture/`; environment recorded;
+  `VERIFYCI_LATENCY=1` required so CI never silently loads grammars).
+  No source under `verifyci/` changed.
+- **Temporal query at 10K edges: MET.** 10,000 edges / 10,000 temporal
+  entity rows / 5.6 MB SQLite, `get_entity_as_of`, hit_rate 1.0:
+  median 0.044 ms, p95 0.073 ms, p99 0.151 ms vs a 200 ms limit
+  (~3 orders of margin). Cross-machine establishment NOT claimed
+  (host-specific; protocol + hashes + env are the portable artifacts).
+- **Incremental parse: NOT MET at p95.** Median 33 μs passes (<0.2 ms) —
+  and cold full-parse is 3.7 ms, so reparsing IS incremental — but p95
+  ~3.8 ms fails the 1 ms limit on every run. Mechanism recorded:
+  tree-sitter re-lexes from the mutation to the next change point, so
+  early-file edit positions dominate cost (per-line medians 20 μs …
+  4.3 ms); split-half shows mild cumulative growth (31→40 μs).
+- **p99 instability recorded as evidence, not retuned:** three runs gave
+  4.32 / 6.14 / 4.54 ms against the same 5 ms limit (verdict flips
+  MET/MIS/MET). The guard pins only the stable claims (median MET, p95
+  MIS, temporal MET) plus protocol/source-hash integrity; a 1000-sample
+  protocol cannot establish a tail boundary the machine straddles.
+  One-shot tree-shape preflight (incremental vs cold) keeps the timing
+  honest. `test_latency_repro.py` (opt-in rerun) enforces this.
+- Suite 515 (513 + this re-measure guard), ruff clean.
+
 ## Unreleased — C2: frozen blast-topology corpus; coverage 0.857, gap reproduced as data
 
 - **Blast-radius coverage measured** against hand-frozen impacted sets

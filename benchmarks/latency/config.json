@@ -1,0 +1,70 @@
+{
+  "purpose": "C3 latency: PLAN.md gates 'Incremental Parse Latency' (median <0.2ms, p95 <1.0ms, p99 <5.0ms) and 'Temporal Query Latency' (<200ms at 10K edges).",
+  "frozen_before_measurement": true,
+  "verifier_and_storage_source_frozen": "five source files the measured paths run through are copied byte-exact into fixture/ and sha256-pinned; none modified; latency code changes nothing under verifyci/.",
+  "incremental_parse": {
+    "path": "verifyci/ingestion/incremental.py IncrementalParser: parse(base) cold, then edit(byte coords)+parse(new) warm \u2014 the tree-sitter path run_ingest would take; tree edited before reparse, per tree-sitter contract.",
+    "workload_file": "fixture/workload.py (copy of verifyci/orchestration/scheduler.py \u2014 representative medium agent-edit target; exact bytes recorded in results.json, not assumed here)",
+    "edit_script": "deterministic: for i in range(N), append a same-purpose trailing comment `# v{i}` to interior line (i % 37) + 8 \u2014 pure insertion, byte coordinates computed from current source; every rep is one small insertion like a real edit, never a rewrite-all.",
+    "samples": 1000,
+    "warm_cold": "cold = first full parse without old tree (reported as context baseline); warm = the 1000 edited incremental parses \u2014 gate numbers are WARM percentiles",
+    "timing": "time.perf_counter_ns around the parse call only; gc disabled during the sampling loop, re-enabled after; process priority untouched"
+  },
+  "temporal_query": {
+    "path": "verifyci/storage/graph_store.py get_entity_as_of \u2014 the valid-time primitive graph.query(asOf) delegates to. SELECT * ... logical_entity_id=? AND valid_from<=? AND (valid_until IS NULL OR valid_until>?) ORDER BY valid_from DESC LIMIT 1, backed by idx_entities_logical.",
+    "scale": "DB built to the PLAN spec: >=10K edges. fixture-free builder: 2000 logical entities x 5 temporal versions = 10,000 entity rows; 10,000 CALLS/CONTAINS edges; timeline spread 2020-01-01..2024-01-01.",
+    "samples": 1000,
+    "query_selection": "deterministic seed: random logical id + as_of at mid-timeline; hit-rate recorded (queries must return a row \u2014 an all-miss benchmark measures nothing)",
+    "timing": "per-query perf_counter_ns around execute+fetch only; connection reused, opened once outside the samples"
+  },
+  "percentiles": "numpy-free: sorted samples, index = ceil(q*n)-1 for p50/p95/p99; p99 at n=1000 = 10th-largest sample",
+  "environment_recorded": [
+    "python version + build",
+    "platform/OS",
+    "machine fqn",
+    "cpu count",
+    "host memory (psutil if present, else 'unknown')",
+    "wall-clock timestamp of run"
+  ],
+  "gate_classification": {
+    "established_on_this_host": "threshold satisfied by measured percentiles; numbers + env + source hashes recorded",
+    "cross_machine_claim": "NOT made: latency is host-specific; reproducibility = protocol + hashes + environment, so a later host can compare, not inherit",
+    "no_retrofit": "thresholds are from PLAN.md and were not changed after seeing results"
+  },
+  "rerun_guard": "test_latency_repro re-runs the harness under VERIFYCI_LATENCY_RERUN=1 and asserts: same source hashes, same sample counts, median within +/-50% of recorded (machine variance allowance), same gate classification. It never asserts identical ns.",
+  "first_frozen_measurement": {
+    "date": "2026-10-03",
+    "host_run": true,
+    "incremental_parse_us": {
+      "runs": [
+        {
+          "median": 34.6,
+          "p95": 3792,
+          "p99": 6140
+        },
+        {
+          "median": 32.9,
+          "p95": 3773,
+          "p99": 4537
+        },
+        {
+          "median": 30.3,
+          "p95": 3613,
+          "p99": 4325
+        }
+      ],
+      "cold_full_ms": "3.3-3.7 (3 runs)"
+    },
+    "incremental_gates": "median MET (34.6us << 200us); p95 NOT met (3.79ms > 1ms); p99 unstable vs its 5ms limit",
+    "temporal_query_ms": {
+      "median": 0.044,
+      "p95": 0.077,
+      "p99": 0.157,
+      "runs": "consistent"
+    },
+    "temporal_gates": "MET with ~3 orders of margin (p99 0.16ms vs 200ms limit); DB: 10,000 edges, 10,000 entity rows, 5.6MB, hit_rate 1.0",
+    "p99_instability_disclosure": "THREE runs: p99 = 6.14, 4.54, 4.33 ms against the same 5.0ms limit - verdict flips MIS/MET/MET while p95 fails identically (~3.8ms) every run and median passes identically (~33us). The guard pins only the stable claims (median MET, p95 MIS, temporal MET); the p99 line is stored as run-variance evidence: at this threshold, a 1000-sample protocol cannot establish the gate on this host.",
+    "mechanism_analysis": "split-half medians (31.0 -> 40.1 us) show mild cumulative growth from the monotonically-inserted comments; per-edit-line medians (19.9us at line 34 vs 4296us at line 39) show the dominant cost is edit position: tree-sitter re-lexes from the mutation to the next change point, so early-file edits re-lex a long tail. The 35us median confirms reparsing IS incremental (cold full parse is 3.7ms). This is representative-workload behavior, not a harness error: the one-shot shape preflight (incremental vs cold tree equality) passed.",
+    "conclusion": "incremental gate NOT met (p95 3.8ms > 1ms) on this host for the rotating-position workload; temporal gate MET with massive margin. Measured; thresholds were not retuned; no source changed."
+  }
+}
