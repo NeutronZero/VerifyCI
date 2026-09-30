@@ -24,6 +24,9 @@ def ingest(path: str, incremental: bool = False,
     typer.echo(f"Files: {totals['files']} (skipped {totals['skipped']}), "
                f"entities: {totals['entities']}, edges: {totals['edges']}")
     typer.echo(f"DB: {totals['db_path']}")
+    skipped_dirs = totals.get("skipped_dirs") or []
+    if skipped_dirs:
+        typer.echo(f"Skipped dirs: {', '.join(skipped_dirs)}")
     n_parse = len(totals.get("parse_errors") or [])
     if n_parse:
         typer.echo(f"Parse errors: {n_parse} ({', '.join(totals['parse_errors'])})")

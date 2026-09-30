@@ -63,6 +63,9 @@ def test_extract_edges_python():
 def test_collect_excludes_venv_and_cache_dirs(tmp_path):
     from verifyci.interface.commands.ingest import _collect
     (tmp_path / "venv").mkdir()
+    # A real virtualenv carries pyvenv.cfg; detection is marker-based now,
+    # not name-based (a source dir merely *named* venv is not a venv).
+    (tmp_path / "venv" / "pyvenv.cfg").write_text("home = /usr\n")
     (tmp_path / "venv" / "junk.py").write_text("x = 1\n")
     (tmp_path / "node_modules").mkdir()
     (tmp_path / "node_modules" / "junk.py").write_text("x = 1\n")
@@ -76,3 +79,13 @@ def test_collect_excludes_venv_and_cache_dirs(tmp_path):
     assert not any("venv" in r for r in rels)
     assert not any("node_modules" in r for r in rels)
     assert not any("__pycache__" in r for r in rels)
+
+
+def test_collect_includes_markerless_venv_named_dir(tmp_path):
+    # Deliberate: a directory named `venv` without pyvenv.cfg is ordinary
+    # source, not a virtualenv, and is ingested.
+    from verifyci.interface.commands.ingest import _collect
+    (tmp_path / "venv").mkdir()
+    (tmp_path / "venv" / "junk.py").write_text("x = 1\n")
+    sources, _, _ = _collect(tmp_path)
+    assert any("venv" in rel for rel, _, _ in sources)

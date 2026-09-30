@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from verifyci.ingestion.ignore import iter_repo_files, skipped_dir_names
 from verifyci.ingestion.language import INGESTIBLE_EXTENSIONS, detect_language
 from verifyci.ingestion.parser import TreeSitterParser, compute_source_hash
 from verifyci.ingestion.extractor import extract_entities, extract_edges
@@ -11,42 +12,26 @@ from verifyci.storage.revision import create_revision
 MANIFESTS = ("package.json", "requirements.txt", "Cargo.toml", "pom.xml", "go.mod", "pyproject.toml")
 
 
-SKIP_DIRS = frozenset({
-    ".verifyci", ".git", ".hg", ".svn", "__pycache__", ".pytest_cache",
-    ".mypy_cache", ".ruff_cache", ".tox", ".nox", ".eggs", ".venv", "venv",
-    "env", "node_modules", "dist", "build", "target", ".idea", ".vscode",
-})
-
-
 def _collect(repo: Path) -> tuple[list[tuple[str, str, bytes]], list[tuple[str, str]], list[tuple[str, str]]]:
     """Pass 1 (no parsing): gather source files + dependency manifests.
 
     Returns ((rel_path, language, bytes) list, manifest (rel_path, sha256) list).
+    Skipped paths come only from `verifyci.ingestion.ignore` so every
+    discovery path agrees on what is excluded.
     """
     sources: list[tuple[str, str, bytes]] = []
     texts: list[tuple[str, str]] = []
-    for file in sorted(repo.rglob("*")):
-        if not file.is_file():
-            continue
-        # Relative parts only: matching absolute parts skipped every file
-        # of repos living under /build/, /env/, or */target/* with no
-        # warning. (A top-level source package literally named `build`
-        # or `dist` is still skipped — documented SKIP_DIRS behavior.)
-        try:
-            rel_parts = file.relative_to(repo).parts[:-1]
-        except ValueError:
-            continue
-        if any(part in SKIP_DIRS for part in rel_parts):
-            continue
+    for file in iter_repo_files(repo):
+        rel = file.relative_to(repo).as_posix()
         if file.name in MANIFESTS:
             # Manifests first: requirements.txt also matches the .txt
             # ingestible suffix, which used to swallow it silently and
             # drop Python dependencies from the graph.
-            texts.append((file.relative_to(repo).as_posix(), file.read_text(errors="replace")))
+            texts.append((rel, file.read_text(errors="replace")))
         elif file.suffix.lower() in INGESTIBLE_EXTENSIONS:
             language = detect_language(str(file))
             # Docs have no AST: parsed with tree=None yields a MODULE entity.
-            sources.append((file.relative_to(repo).as_posix(), language, file.read_bytes()))
+            sources.append((rel, language, file.read_bytes()))
     manifest = [(rel, compute_source_hash(src)) for rel, _, src in sources]
     manifest += [(rel, compute_source_hash(text.encode("utf-8"))) for rel, text in texts]
     return sources, texts, manifest
@@ -225,6 +210,7 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
         parser = TreeSitterParser()
         totals = {"entities": 0, "edges": 0, "files": 0,
                   "skipped": collected - len(sources) - len(texts),
+                  "skipped_dirs": skipped_dir_names(repo),
                   "closed_entities": 0, "closed_edges": 0,
                   "parse_errors": [],
                   "revision_id": revision.revision_id,

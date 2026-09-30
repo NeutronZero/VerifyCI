@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — one skip classifier for every discovery path
+
+- **Skip rules unified.** New `verifyci/ingestion/ignore.py` is the
+  single source of truth (`iter_repo_files`, `skipped_dir_names`).
+  `aci deps` used to match *absolute* path parts and only skipped
+  `.verifyci`, so `node_modules/`, `.venv/`, `build/`, `.git/` manifests
+  leaked into deps output while ingest excluded them. Both paths now
+  agree; live probe: 4 leaked manifests → 0.
+- **Venvs detected by marker.** A `pyvenv.cfg` marks a virtualenv,
+  pruned under any name; a directory merely named `venv` is ordinary
+  source and ingested.
+- **Ambiguous names no longer default-skipped.** `build`, `dist`,
+  `target`, `env` are legitimate package names in some repos and were
+  removed from `DEFAULT_SKIP_DIRS`. Projects re-skip them with a
+  gitignore-style `.verifyciignore` at the repo root.
+- **Skips reported.** `aci ingest` prints skipped top-level dirs, so a
+  silent zero-file ingest is visible.
+- Files moved into a skipped dir disappear from the incremental
+  revision (probe); adding content under a skipped dir does not change
+  revision identity (probe).
+- Suite 469 (was 462), ruff clean.
+
 ## Unreleased — revision identity: content vs lineage
 
 - **Content identity separated from lineage.** `revision_id` is now a
