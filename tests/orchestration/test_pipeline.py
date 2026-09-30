@@ -27,13 +27,14 @@ def test_planner_three_steps_chained():
     assert len(task.steps) == 3
     assert task.steps[0].depends_on == []
     assert task.steps[1].depends_on == [task.steps[0].step_id]
-    assert all(s.pre_commit_hook_id for s in task.steps)
+    gated = [s for s in task.steps if s.pre_commit_hook_id]
+    assert len(gated) == 1 and gated[0].type == "verify_change"
 
 
 @pytest.mark.asyncio
 async def test_gated_dag_without_evidence_ends_inconclusive():
-    # Planner steps carry pre-commit hooks; with no graph and no diff the
-    # semi-formal checker RUNS but establishes nothing (ungrounded) and no
+    # Only verify_change is gated; with no graph and no diff the
+    # semi-formal checker RUNS once but establishes nothing (ungrounded) and no
     # invariant rejects → INCONCLUSIVE, never a misleading FAIL or PASS.
     scheduler = AsyncDAGScheduler()
     planner_task = Planner().plan("goal", "intent1", "pol1")

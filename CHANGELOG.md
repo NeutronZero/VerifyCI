@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — planner gates once, not 3x
+
+- **Verification runs once per task.** The planner stamped
+  `pre_commit_hook_id` on all three steps, so every task ran the
+  full reasoner+blast+removal+invariants pipeline 3x (measured live:
+  3 `verify` calls per `run_task`, last decision winning by
+  accident). Only `verify_change` is gated now; placeholders
+  complete without checks. `validate_task_ir` requires at least one
+  gated step instead of every step.
+- Suite 450 (was 443), ruff clean.
+
 ## Unreleased — resolver: no guessed links, no suffix PASS
 
 - **Intra-file resolution stops guessing.** Several same-named

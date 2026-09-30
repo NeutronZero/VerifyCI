@@ -19,7 +19,10 @@ class Planner:
                 step_id=step_id,
                 type=step_type,
                 config={**config, "goal": goal},
-                pre_commit_hook_id="default",
+                # Only the verification step is gated: retrieve/propose
+                # are placeholders that complete without running checks.
+                # Gating every step ran the full pipeline 3x per task.
+                pre_commit_hook_id="default" if step_type == "verify_change" else None,
                 depends_on=[prev_id] if prev_id else [],
             ))
             prev_id = step_id
