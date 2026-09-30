@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased — retrieval: stop rebuilding, honor edge semantics
+
+Advisory-path only (`retrieval/*` + the MCP search cache). No file under
+`verification/`, `graph/`, `memory/`, or `orchestration/` imports these
+components; the gate matrix was re-run before/after and every verdict is
+unchanged (forged removal → INCONCLUSIVE, secret → FAIL, etc.).
+
+- **BM25 no longer rebuilds per query.** `search()` used to build a fresh
+  `Counter(tokens)` for every document on every query (real corpus: 2149
+  Counter builds/query → 0 now). Term frequencies are stored at `add()`;
+  re-adding an id reconciles document frequency exactly (the old code
+  double-counted df and left a stale tf). Ranking ties break on id for a
+  deterministic order. Dropped the unused `BM25Index` dataclass.
+- **GraphRetriever honors edge types.** It expanded `successors()`/
+  `predecessors()` blindly, so a two-hop seed pulled its entire module
+  via CONTAINS (and DOCUMENTS). Adjacency now comes from edge payloads
+  filtered to semantic types (CALLS/IMPORTS/INHERITS/REFERENCES/USES/...);
+  CONTAINS, DOCUMENTS, DEFINES and DEPENDS_ON are structural and pruned.
+  Results are scored by hop distance (closer = higher) and deduped. A
+  graph exposing only successor/predecessor callables still works via an
+  unfiltered fallback. Real graph: `ndcg_at` 2-hop returns 5 semantic
+  neighbors and 0 module files.
+- **`code_search` reuses the search index.** The long-lived server
+  rebuilt the whole BM25 index + texts map on every call (real server:
+  4 describes/4 queries → 1). Now cached and keyed on a structural
+  fingerprint (`num_nodes`/`num_edges`); an unchanged graph is reused
+  (identical, still-correct hits) and any node/edge change busts the
+  cache so no stale index is served.
+- **Probes:** `tests/retrieval/test_sparse.py`,
+  `tests/retrieval/test_graph_retriever.py`,
+  `tests/integration/test_search_reuse.py` (14 tests; 7 fail against the
+  pre-fix code). Fusion benchmark smoke scores stay a behavioral control,
+  not a retrieval gate.
+- Suite 490 (was 476), ruff clean.
+
 ## Unreleased — rename: `verifyci` primary, `aci` alias, `VERIFYCI_*` env
 
 - **`verifyci` is the primary console script; `aci` stays installed as an

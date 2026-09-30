@@ -62,6 +62,31 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
     if entities is None:
         from verifyci.interface.commands.graph_loader import payload_entities
         entities = payload_entities(graph)
+
+    # Search-index reuse: the server is long-lived and loads the graph
+    # once, but code_search used to rebuild the whole BM25 index (and its
+    # texts map) on every call. Cache keyed on a structural fingerprint
+    # of the graph; any node/edge change busts it, so a rebuilt graph is
+    # never served stale. A graph that exposes no counts is always
+    # rebuilt (no cheap staleness guard available).
+    _index_cache: dict[str, Any] = {"key": None, "bm25": None, "texts": None}
+
+    def _index_fingerprint():
+        try:
+            return (id(graph), int(graph.num_nodes()), int(graph.num_edges()))
+        except Exception:  # noqa: BLE001 - adapter without counts
+            return None
+
+    def _search_index():
+        key = _index_fingerprint()
+        if key is None:
+            return _describe_graph(graph, node_map or {})
+        if _index_cache["key"] == key and _index_cache["bm25"] is not None:
+            return _index_cache["bm25"], _index_cache["texts"]
+        bm25, texts = _describe_graph(graph, node_map or {})
+        _index_cache.update({"key": key, "bm25": bm25, "texts": texts})
+        return bm25, texts
+
     # Revision-id index over the loaded revision: lets search hits carry
     # file/name/lines and lets definition/query resolve a revision id
     # directly, so an agent can chain search -> definition without
@@ -90,7 +115,7 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
             if store is not None and getattr(store, "db_path", None):
                 cache_dir = _os.path.dirname(_os.path.abspath(store.db_path))
             provider = dense_provider or default_dense_provider(cache_dir)
-            bm25, texts = _describe_graph(graph, node_map or {})
+            bm25, texts = _search_index()
             sparse_hits = bm25.search(query, k=k)
             seeds = [h.id for h in sparse_hits[:3]]
             graph_hits = GraphRetriever(graph, node_map or {}).retrieve(seeds)
