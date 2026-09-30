@@ -1,0 +1,41 @@
+{
+  "frozen": {
+    "corpus_sha256": "cac3aa9750f2e6b8b73fa4d8599df02429d97f32e35ae06fc8265b3dd8006a44",
+    "qrels_sha256": "b1debc8b40663c9b655d94a2f3bce386ff2fbd0e7426d09750615259df593873",
+    "config_sha256": "fdde798524d295eeb9b586f30f57b91ae5ef773a2afb37949692015c4aed624e",
+    "model": "nomic-embed-text",
+    "rrf_k": 60,
+    "k_ndcg": 10,
+    "k_recall": 5
+  },
+  "run": {
+    "provider": "cached:nomic-embed-text",
+    "queries": 62,
+    "documents": 60,
+    "dry_run": false
+  },
+  "metrics": {
+    "dense": {
+      "ndcg": 0.6219642456212527,
+      "recall": 0.6465053763440861
+    },
+    "hybrid": {
+      "ndcg": 0.6603443467936309,
+      "recall": 0.6706989247311829
+    },
+    "delta_ndcg": 0.03838010117237811
+  },
+  "validators": {
+    "errors": [],
+    "drift": false
+  },
+  "gate": {
+    "established": false,
+    "rule": {
+      "target_delta_ndcg_abs": 0.05,
+      "note": "established = (nDCG@10_hybrid - nDCG@10_dense) >= +0.05 absolute AND n_queries >= min_queries_to_establish AND validators passed. Otherwise the result is measured-only."
+    },
+    "note": "dry_run and non-frozen-provider runs are pipeline checks, not gate evidence"
+  },
+  "smoke_disclaimer": "benchmarks/retrieval_eval.py (5 queries) remains historical smoke evidence and is NOT this gate's evidence set."
+}

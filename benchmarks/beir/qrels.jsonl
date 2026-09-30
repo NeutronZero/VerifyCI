@@ -1,0 +1,63 @@
+{"_doc": "Graded relevance judgments frozen 2026-10-01 BEFORE any embedding run, from file-level knowledge of the repo. Grade 3 = primary answer, 2 = directly relevant, 1 = marginal. Queries paraphrase intent (semantic) or use surface terms (lexical) deliberately mixed so dense and lexical channels each have honest strengths. 62 queries, all docids exist in corpus.jsonl."}
+{"qid": "q001", "text": "verify removed lines against stored base revision", "relevance": {"d001": 3, "d004": 2, "d017": 1}}
+{"qid": "q002", "text": "which files does this diff touch", "relevance": {"d002": 3, "d005": 2, "d017": 1}}
+{"qid": "q003", "text": "parse unified diff hunks with old and new line offsets", "relevance": {"d003": 3, "d002": 2}}
+{"qid": "q004", "text": "detect hunks that delete more lines than they add", "relevance": {"d004": 3, "d003": 2}}
+{"qid": "q005", "text": "map diff file paths to graph entity ids", "relevance": {"d005": 3, "d002": 2, "d031": 1}}
+{"qid": "q006", "text": "turn a verification report into PASS FAIL or INCONCLUSIVE", "relevance": {"d006": 3, "d007": 3, "d015": 1}}
+{"qid": "q007", "text": "policy decision evaluator", "relevance": {"d007": 3, "d006": 3}}
+{"qid": "q008", "text": "build premises traces and certificate from a diff", "relevance": {"d008": 3, "d009": 2, "d015": 2}}
+{"qid": "q009", "text": "what fields does the verification certificate carry", "relevance": {"d009": 3, "d010": 2}}
+{"qid": "q010", "text": "blocking vs established check outcome", "relevance": {"d010": 3, "d006": 2}}
+{"qid": "q011", "text": "run secrets and forbidden-call invariants over a diff", "relevance": {"d011": 3, "d012": 2, "d013": 2}}
+{"qid": "q012", "text": "hardcoded credential detection patterns", "relevance": {"d012": 3, "d011": 2}}
+{"qid": "q013", "text": "ban a specific function call through policy", "relevance": {"d013": 3, "d016": 2, "d011": 2}}
+{"qid": "q014", "text": "how much blast area does a change cover", "relevance": {"d014": 3, "d030": 3, "d008": 1}}
+{"qid": "q015", "text": "construct the semi-formal check result with suffix grounding note", "relevance": {"d015": 3, "d005": 2}}
+{"qid": "q016", "text": "which calls and imports do the added lines introduce", "relevance": {"d016": 3, "d013": 2}}
+{"qid": "q017", "text": "cli entry point to verify a diff", "relevance": {"d017": 3, "d006": 1, "d008": 1}}
+{"qid": "q018", "text": "bm25 lexical scorer", "relevance": {"d018": 3, "d019": 3}}
+{"qid": "q019", "text": "rank documents by term frequency and inverse document frequency", "relevance": {"d019": 3, "d018": 3}}
+{"qid": "q020", "text": "expand seed entities along semantic graph edges", "relevance": {"d020": 3, "d021": 3}}
+{"qid": "q021", "text": "graph retrieval hop distance", "relevance": {"d021": 3, "d020": 3}}
+{"qid": "q022", "text": "reciprocal rank fusion of multiple result lists", "relevance": {"d022": 3, "d015": 1}}
+{"qid": "q023", "text": "offline deterministic embedding without a server", "relevance": {"d023": 3, "d025": 2, "d024": 1}}
+{"qid": "q024", "text": "local ollama embeddings over http", "relevance": {"d024": 3, "d025": 2}}
+{"qid": "q025", "text": "pick the embedding backend from an environment variable", "relevance": {"d025": 3, "d024": 2, "d023": 2, "d060": 2}}
+{"qid": "q026", "text": "rescore fused candidates with a cross encoder", "relevance": {"d026": 3, "d022": 1}}
+{"qid": "q027", "text": "hybrid search command returning evidence hits", "relevance": {"d027": 3, "d028": 2, "d022": 1, "d018": 1}}
+{"qid": "q028", "text": "assemble provenance evidence pack", "relevance": {"d028": 3, "d027": 1, "d037": 1}}
+{"qid": "q029", "text": "split identifiers camelCase snake_case for indexing", "relevance": {"d029": 3, "d018": 1}}
+{"qid": "q030", "text": "compute affected callers and coverage gap", "relevance": {"d030": 3, "d014": 3, "d031": 1}}
+{"qid": "q031", "text": "build the code property graph with deferred resolution", "relevance": {"d031": 3, "d032": 3, "d034": 1}}
+{"qid": "q032", "text": "link unresolved calls once the whole revision is known", "relevance": {"d032": 3, "d031": 2}}
+{"qid": "q033", "text": "walk the tree-sitter AST emitting functions classes methods", "relevance": {"d033": 3, "d034": 2, "d036": 2}}
+{"qid": "q034", "text": "edges between callers and definitions in a file", "relevance": {"d034": 3, "d033": 2}}
+{"qid": "q035", "text": "C++ out-of-class method qualified scope name", "relevance": {"d035": 3, "d033": 2}}
+{"qid": "q036", "text": "parse source bytes with grammars per language", "relevance": {"d036": 3, "d038": 2}}
+{"qid": "q037", "text": "normalize line endings before hashing content", "relevance": {"d037": 3, "d053": 1}}
+{"qid": "q038", "text": "choose python c or cpp grammar by extension", "relevance": {"d038": 3, "d036": 2}}
+{"qid": "q039", "text": "read manifest files into dependency package edges", "relevance": {"d039": 3, "d043": 1}}
+{"qid": "q040", "text": "incremental reparse reusing the previous tree", "relevance": {"d040": 3, "d036": 1, "d043": 1}}
+{"qid": "q041", "text": "ingest a repository into the sqlite graph", "relevance": {"d041": 3, "d042": 2, "d050": 2}}
+{"qid": "q042", "text": "walk repo files applying ignore rules", "relevance": {"d042": 3, "d044": 3}}
+{"qid": "q043", "text": "carry unchanged files forward into a new revision", "relevance": {"d043": 3, "d041": 2}}
+{"qid": "q044", "text": "skip virtualenv and node_modules during discovery", "relevance": {"d044": 3, "d042": 2}}
+{"qid": "q045", "text": "schedule a task DAG with review and block outcomes", "relevance": {"d045": 3, "d048": 2, "d046": 2}}
+{"qid": "q046", "text": "plan retrieve propose verify steps", "relevance": {"d046": 3, "d045": 2, "d047": 1}}
+{"qid": "q047", "text": "reject a task ir missing a gated step", "relevance": {"d047": 3, "d046": 2}}
+{"qid": "q048", "text": "run one node through the pre-commit gate", "relevance": {"d048": 3, "d049": 3, "d045": 2}}
+{"qid": "q049", "text": "executor builds checks and policy decision per node", "relevance": {"d049": 3, "d048": 2, "d006": 1}}
+{"qid": "q050", "text": "persist entities edges revisions in sqlite", "relevance": {"d050": 3, "d041": 2}}
+{"qid": "q051", "text": "expire deleted entities and edges in temporal close-out", "relevance": {"d051": 3, "d050": 2, "d043": 1}}
+{"qid": "q052", "text": "find the newest ingest revision for a repository", "relevance": {"d052": 3, "d054": 2, "d050": 2}}
+{"qid": "q053", "text": "content identity hash of a repository state", "relevance": {"d053": 3, "d054": 3, "d037": 2}}
+{"qid": "q054", "text": "canonical json manifest for revision identity", "relevance": {"d054": 3, "d053": 2}}
+{"qid": "q055", "text": "hash chain of audit events", "relevance": {"d055": 3, "d056": 2}}
+{"qid": "q056", "text": "verify one task's subchain with continuity check", "relevance": {"d056": 3, "d055": 2}}
+{"qid": "q057", "text": "replay ledger deltas to rebuild state", "relevance": {"d057": 3, "d055": 1}}
+{"qid": "q058", "text": "mcp tool server exposing search and verify", "relevance": {"d058": 3, "d059": 1, "d027": 1}}
+{"qid": "q059", "text": "bearer token auth on the http api", "relevance": {"d059": 3, "d060": 1}}
+{"qid": "q060", "text": "environment variable prefix compatibility", "relevance": {"d060": 3, "d025": 2}}
+{"qid": "q061", "text": "is a deleted function really gone from history", "relevance": {"d051": 3, "d001": 2, "d037": 1}}
+{"qid": "q062", "text": "why did my clean diff not pass verification", "relevance": {"d006": 3, "d002": 2, "d010": 2, "d005": 1}}

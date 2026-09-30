@@ -1,0 +1,36 @@
+{
+  "protocol": "BEIR-style dense-only vs hybrid gate (PLAN.md: nDCG@10 hybrid >= dense-only + 5 points)",
+  "frozen_at": "2026-10-01",
+  "frozen_before_any_embedding": true,
+  "model": "nomic-embed-text",
+  "provider": "ollama",
+  "ollama_url": "http://localhost:11434",
+  "k_recall": 5,
+  "k_ndcg": 10,
+  "rrf_k": 60,
+  "channels_hybrid": ["dense", "bm25"],
+  "rerank": false,
+  "graph_channel": false,
+  "graph_channel_note": "production run_query adds graph expansion seeded from BM25 hits; the entity graph does not exist for a corpus-agnostic judged set. The gate claim is fusion-over-ranking (dense+BM25 RRF), so the graph channel is excluded from BOTH conditions, stated, not tuned away.",
+  "document_text": "f'{name} {file_path}' — identical to the production indexing in interface/commands/query.py",
+  "scoring": {
+    "ndcg_gain": "graded: gain = 2^grade - 1 (D = Σ gain / log2(i+2), IDCG from ideal grade ordering)",
+    "recall_at_5_relevance": "grade >= 2 only (marginal grade-1 docs excluded from the recall denominator)",
+    "channel_k": 10,
+    "metric_source": "frozen formula; identical code path scores both conditions"
+  },
+  "embedding_cache": "benchmarks/beir/embedding_cache_<model-safe-name>.json (per-model file, mirroring retrieval/provider cache naming; content-keyed so switching models cannot reuse another model's vectors)",
+  "min_queries_to_establish": 50,
+  "pass_rule": {
+    "target_delta_ndcg_abs": 0.05,
+    "note": "established = (nDCG@10_hybrid - nDCG@10_dense) >= +0.05 absolute AND n_queries >= min_queries_to_establish AND validators passed. Otherwise the result is measured-only."
+  },
+  "determinism": "ranks tie-broken on (-score, docid); both conditions share one embedding pass and the same corpus/query hashes, recorded per run",
+  "drift_guards": [
+    "reject: missing qrels for a query, empty relevance set, duplicate query ids",
+    "reject: qrel docid not in corpus, corpus doc text empty",
+    "reject: dense and hybrid executed over different corpus/query hashes",
+    "reject: different model name between conditions"
+  ],
+  "smoke_disclaimer": "benchmarks/retrieval_eval.py (5 queries) remains historical smoke evidence and is NOT this gate's evidence set."
+}

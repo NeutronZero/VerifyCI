@@ -91,7 +91,12 @@ honest fallback to hash when the server is unreachable. Measured on a
 small 5+5 query set (`benchmarks/embedding_eval.py`, needs a live server):
 ollama beats hash on all four cells (recall +0.10, ndcg +0.02–0.06),
 directional not gating; CPU inference runs ~50ms/doc, so the cache —
-not the model — is what makes it usable.
+not the model — is what makes it usable. The retrieval gate itself is
+measured on a frozen BEIR-style set (`benchmarks/beir/`, 62 graded queries,
+60 docs, judgments frozen before any embedding; drift-guarded harness):
+**hybrid nDCG@10 0.6603 vs dense-only 0.6220 = +3.84 points — below the
++5 gate; measured, target not met.** `benchmarks/retrieval_eval.py` stays
+historical smoke, never the evidence set.
 
 ## Status
 

@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased — B2: frozen BEIR-style retrieval gate, measured at +3.84 pts
+
+- **Eval infrastructure only; retrieval behavior untouched** (no BM25,
+  RRF, rerank, or embedding changes). `benchmarks/beir/`: frozen corpus
+  (60 codebase docs in production `name file_path` form), graded qrels
+  (62 queries), config pinning the protocol (gain 2^g−1 nDCG@10,
+  grade≥2 Recall@5, RRF k=60, model `nomic-embed-text`), and a harness
+  that reuses production `InMemoryVectorStore`/`rrf_fusion`/`BM25Retriever`
+  — it adds no retrieval logic of its own.
+- **Frozen before measurement:** corpus+qrels written from file-level
+  knowledge before any embedding run; drift guards reject duplicate
+  query ids, unknown/empty/unjudged docs, empty relevance sets, and
+  condition or model mismatch; corpus/qrels/config sha256 recorded so
+  reruns are bit-comparable (confirmed: identical delta on re-run).
+- **Live result:** dense-only 0.6220 → hybrid 0.6603 = **+3.84 pts**,
+  Recall@5 0.6465 → 0.6707. Below the +5 gate: **measured, target not
+  met**. The `established` flag requires non-dry + frozen provider + ≥50
+  queries + delta ≥ 0.05 — all recorded in `results.json`. The 5-query
+  smoke (0.866 vs 0.877) stays historical, never evidence.
+- **No tuning** against the judged set: whether to do retrieval work is
+  now an evidence-based decision, not a knob turned to cross +5.
+- Tests: `tests/evaluation/test_beir_harness.py` (11: metric formula,
+  every drift guard, dry-run/non-frozen never establishes the gate).
+  Suite 504 (was 493), ruff clean.
+
+## Unreleased — B1: expanded labeled corpus for invariant recall
+
+- Evaluation-only; scanner (`intent_align.py`) and the verification gate
+  frozen — zero source lines changed. New `tests/evaluation/labels/`
+  `invariants_v2.jsonl`: 26 cases, 18 expected-violated, labels frozen
+  before the single scoring run, 11 distinct positive secret mechanisms
+  and the audited triple-quoted pattern capped at exactly one instance.
+- Measured once: **recall 16/18 = 0.889, precision 1.00** (v1 baseline
+  6/9 reproduced separately and preserved). The only two misses are the
+  pre-declared `known gap` cases (unquoted value below the 12-char floor;
+  graph relative-import blindness), not post-hoc discoveries.
+- Conclusion: 0.889 < 0.90 → **target unmet, and a 26-case corpus would
+  not establish the gate even above 0.90** (measured, not established).
+  Pinned by `test_v2_target_not_established_documented`.
+
 ## Unreleased — retrieval: stop rebuilding, honor edge semantics
 
 Advisory-path only (`retrieval/*` + the MCP search cache). No file under

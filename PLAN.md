@@ -1088,7 +1088,7 @@ specified, or the result misses; **unmeasured**: no number at all.
 | Entity extraction precision | > 0.85 | Manual sample of 100 entities | measured, sample smaller than specified | 1.00 on 13-entity smoke set (not 100) |
 | Entity extraction recall | > 0.80 | Compare against ground truth | measured, sample smaller than specified | 1.00 on same 13-entity set |
 | Retrieval Recall@5 | > 0.80 | 50 sample queries | measured, below protocol | 0.80 on 5 queries |
-| Retrieval nDCG@10 | +5-15 over dense-only | BEIR-style benchmark | **not established** | hybrid 0.866 vs dense-only 0.877 — smoke run, hybrid *below* dense; the +5pt gate was never met; rerank is default-off as a result |
+| Retrieval nDCG@10 | +5-15 over dense-only | BEIR-style benchmark | measured, **below target** | frozen BEIR-style set (62 judged queries, 60 codebase docs, graded gains, corpus/qrels frozen before any embedding, drift-guarded harness): dense-only 0.6220 → hybrid 0.6603 = **+3.84 pts < +5**. Reruns bit-identical; Recall@5 0.6465→0.6707. Hybrid clearly helps, not yet at gate margin. The 5-query smoke (0.866/0.877) stays historical, never the evidence set |
 | Semi-formal Patch Equivalence | > 0.90 | Agent-generated patches | **unmeasured** | mechanism implemented + gate matrix verified; no labeled agent-patch corpus exists |
 | Blast Radius Coverage | > 0.90 | Graph traversal vs. manual | **unmeasured** | advisory-only check implemented; coverage never scored vs. manual |
 | Invariant check coverage | 100% | All invariants applicable to a diff are evaluated | implemented + measured | 1.0 by construction (unapplicable invariants reported) |
@@ -1146,7 +1146,7 @@ supporting evidence, not the audit conclusion.**
 [x] 07  ingest one Python repository  — verifyci ingest writes to SQLite
 [x] 08  extraction benchmark          — precision > 0.85, recall > 0.80
 [x] 09  Dense + BM25 + Graph          — individual retrievers return
-[x] 10  RRF + cross-encoder           — nDCG@10 +5pt gate NOT established (smoke: hybrid 0.866 vs dense-only 0.877; rerank default-off)
+[x] 10  RRF + cross-encoder           — nDCG@10 +5pt gate NOT established (smoke: hybrid 0.866 vs dense-only 0.877; rerank default-off) → superseded by frozen BEIR-style run: hybrid +3.84 pts over dense-only (0.6603 vs 0.6220), below +5, measured below target
 [x] 11  EvidencePack                  — full provenance populated
 [x] 12  blast radius                  — blast radius coverage > 0.90 gate UNMEASURED (check implemented, advisory-only; rerank/gate unaffected)
 [x] 13  VerificationReport            — no `passed` field
