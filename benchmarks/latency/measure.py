@@ -117,7 +117,8 @@ def measure_incremental():
     _preflight_shape(src0)   # raises loudly if the harness is broken
 
     cold = IncrementalParser("python")
-    gc.collect(); gc.disable()
+    gc.collect()
+    gc.disable()
     try:
         t0 = time.perf_counter_ns()
         cold.parse(src0)
@@ -231,7 +232,8 @@ def measure_temporal():
         t0, span = 1_577_836_800.0, 4 * 366 * 86_400.0
         mid = t0 + span / 2
         samples, hits = [], 0
-        gc.collect(); gc.disable()
+        gc.collect()
+        gc.disable()
         try:
             for _ in range(N_QUERY):
                 lid = lids[rng.randrange(len(lids))]
