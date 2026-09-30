@@ -87,5 +87,5 @@ not the model — is what makes it usable.
 ## Status
 
 V1 walking skeleton. `PLAN.md` is the full plan; `CHANGELOG.md` records what
-each revision proved, including measured numbers and known gaps. 437 tests:
+each revision proved, including measured numbers and known gaps. 443 tests:
 `python -m pytest tests/ -q`.

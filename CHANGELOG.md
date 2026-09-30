@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — resolver: no guessed links, no suffix PASS
+
+- **Intra-file resolution stops guessing.** Several same-named
+  candidates with no scope match and no unique top-level fallback
+  now emit `CALLS_UNRESOLVED` instead of linking `candidates[0]`;
+  the post-build resolver links only globally-unique names.
+  Single candidates and unique top-level fallbacks still resolve.
+- **Suffix-only grounding declines.** `build_semi_check` reports
+  `established=False` when a diff file grounds with no exact stored
+  path (or several colliding ones), so policy routes to
+  INCONCLUSIVE — suffix-grounded diffs never PASS. Exact-path
+  grounding unchanged.
+- Suite 443 (was 437), ruff clean.
+
 ## Unreleased — re-audit fixes: ingestion, evidence, tamper-evidence
 
 - **Incremental carry-forward scoped.** `DEPENDS_ON` edges carry only

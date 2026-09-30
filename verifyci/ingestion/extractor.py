@@ -462,15 +462,21 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
     def resolve(name: str, caller_scope: str) -> Optional[Entity]:
         candidates = [c for c in by_name.get(name, [])
                       if c.type in (EntityType.FUNCTION, EntityType.METHOD, EntityType.CLASS)]
-        if not candidates:
-            return None
+        if len(candidates) <= 1:
+            return candidates[0] if candidates else None
         for c in candidates:
             if scope_of(c) == caller_scope:
                 return c
-        for c in candidates:
-            if not scope_of(c):
-                return c
-        return candidates[0]
+        unscoped = [c for c in candidates if not scope_of(c)]
+        if len(unscoped) == 1:
+            return unscoped[0]
+        # Several same-named candidates, none matching the caller's
+        # scope and no unique top-level fallback: any pick is a guess,
+        # and a wrong link invents impact while a missing one merely
+        # undercounts it. Emit unresolved; the post-build resolver
+        # links it only when exactly one entity with that name exists
+        # anywhere, else it stays unlinked.
+        return None
 
     def _emit_call(caller: Entity, caller_scope: str, site_node) -> None:
         callee_name = _extract_callee_name(site_node, parsed.source)
