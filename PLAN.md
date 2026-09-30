@@ -62,7 +62,7 @@ Freeze all schemas. No code without a contract.
 ### Day 1: Core Entity Schemas
 
 ```
-src/contracts/
+verifyci/contracts/
 ├── entity.py
 ├── edge.py
 ├── event.py
@@ -446,7 +446,7 @@ class DurableScheduler(Scheduler):
 ```
 
 ```
-src/contracts/
+verifyci/contracts/
 ├── embedding.py
 ├── vector_store.py
 ├── tool.py
@@ -501,7 +501,7 @@ class PlatformConfig:
 
 `BDDSpec`, `NFR`, `Diff`, `CodeGraph`, `ExecutionContext` — transient, single-module, don't cross frozen boundary.
 
-This boundary must also be documented in `src/contracts/README.md` under a "Not Frozen" heading.
+This boundary must also be documented in `verifyci/contracts/README.md` under a "Not Frozen" heading.
 
 ### Acceptance Gate
 - All dataclasses serialize to/from JSON
@@ -523,7 +523,7 @@ Incremental Tree-sitter parsing → AST-derived CPG builder → bitemporal graph
 
 **Day 1-2: Incremental Tree-sitter parser**
 ```
-src/ingestion/
+verifyci/ingestion/
 ├── parser.py
 ├── extractor.py
 ├── language.py
@@ -539,7 +539,7 @@ src/ingestion/
 
 **Day 5: CPG builder with bitemporal edges**
 ```
-src/graph/
+verifyci/graph/
 ├── builder.py
 ├── temporal.py
 ├── serializer.py
@@ -630,16 +630,20 @@ CREATE TABLE deltas (
 );
 ```
 
-**Day 8-10: CLI**
+**Day 8-10: CLI** (current interface — `verifyci` is the command, `aci` a legacy alias; commit recording lives on `ingest` since `revise` was removed at `d3056c8`)
 ```bash
-aci init ./repo
-aci ingest ./repo
-aci ingest --incremental
-aci stats
-aci query "Where is auth?"
-aci deps
-aci vuln refresh
-aci revise --commit <hash>
+verifyci init ./repo
+verifyci ingest ./repo
+verifyci ingest ./repo --incremental
+verifyci ingest ./repo --commit <hash>
+verifyci stats
+verifyci query "Where is auth?"
+verifyci deps
+verifyci verify-diff "$(git diff)" --db ./repo/.verifyci/verifyci.db
+verifyci run "ship it" --diff "$(git diff)" --db ./repo/.verifyci/verifyci.db
+verifyci vuln refresh
+verifyci verify-chain --db ./repo/.verifyci/verifyci.db
+verifyci serve --transport stdio
 ```
 
 ### Acceptance Gate
@@ -659,7 +663,7 @@ aci revise --commit <hash>
 Hybrid retrieval with rank-based RRF fusion → EvidencePack with blast radius.
 
 ```
-src/retrieval/
+verifyci/retrieval/
 ├── dense.py
 ├── sparse.py          # BM25 (V1) → SPLADE-Code (V1.1)
 ├── graph_retriever.py
@@ -696,7 +700,7 @@ def rrf_fusion(dense_results, sparse_results, graph_results, k=60):
 Event-sourced memory with hash-chained ledger, bitemporal projections, anchor+delta replay.
 
 ```
-src/memory/
+verifyci/memory/
 ├── ledger.py          # Hash-chained, SHA-256 only (V1)
 ├── projections/
 │   ├── memory.py
@@ -723,7 +727,7 @@ Planner → Compiler → AsyncDAGScheduler with verification gates.
 ### Week 5: Planner + Compiler
 
 ```
-src/orchestration/
+verifyci/orchestration/
 ├── planner.py
 ├── intent.py
 └── compiler/
@@ -736,7 +740,7 @@ src/orchestration/
 ### Week 6: Verification Layer + Scheduler
 
 ```
-src/verification/
+verifyci/verification/
 ├── semi_formal_reason.py
 ├── blast_radius.py
 ├── intent_align.py
@@ -826,7 +830,7 @@ Expose platform via MCP with progressive disclosure, instrument with OTel.
 
 **OTel compatibility layer:**
 ```python
-# src/observability/genai_semconv.py
+# verifyci/observability/genai_semconv.py
 from opentelemetry.semconv.gen_ai import (
     GenAiAgentId, GenAiAgentName, GenAiAgentVersion,
     GenAiAgentDescription, GenAiConversationId, GenAiOperationName,
@@ -844,6 +848,24 @@ from opentelemetry.semconv.gen_ai import (
 ---
 
 ## V1 Scope (Walking Skeleton)
+
+### V1 status — as of `ae171cb`
+
+**Implementation: complete and audit-hardened.** All Phase 0–5 mechanisms
+exist, the freeze checklist is `[x]`, and the six-item re-audit remediation
+queue is **closed** (resolver `c247d30` · planner `9486efb` · revision
+identity `c1e91ca` · SKIP_DIRS `8ea8f11` · rename `1aba78f` · retriever
+`ae171cb`), with a passing end-to-end closure: full suite green, gate
+matrix re-verified on real DBs, and every probe demonstrating its defect
+before its fix.
+
+**Empirical validation: in progress.** See Success Criteria table — each
+gate is marked implemented / measured / target met / not established /
+unmeasured. Retrieval smoke results stay reported honestly (hybrid 0.866
+vs dense-only 0.877; the +5pt BEIR-scale gate is not established), and the
+agent-patch equivalence, verification precision, blast coverage, and
+latency gates remain unmeasured. **V1 is implementation-complete, not
+empirically validated.**
 
 ### Included in V1
 - Contracts with logical/revision entity IDs
@@ -888,7 +910,7 @@ from opentelemetry.semconv.gen_ai import (
 
 ```
 verifyci/
-├── src/
+├── verifyci/
 │   ├── contracts/
 │   │   ├── entity.py
 │   │   ├── edge.py
@@ -1008,6 +1030,8 @@ verifyci/
 
 ## Dependencies
 
+Current state (matches `pyproject.toml` at the `ae171cb` endpoint):
+
 ```toml
 [project]
 name = "verifyci"
@@ -1015,52 +1039,83 @@ version = "0.1.0"
 requires-python = ">=3.12"
 
 dependencies = [
-    "pydantic>=2.0",
-    "typer>=0.9",
-    "pyyaml>=6.0",
-    "tree-sitter>=0.22",
-    "tree-sitter-python>=0.21",
-    "tree-sitter-c>=0.21",
-    "tree-sitter-cpp>=0.21",
-    "rustworkx>=0.14",
-    "ollama>=0.3",
-    "sentence-transformers>=3.0",
-    "rank-bm25>=0.2",
-    "aiosqlite>=0.19",
-    "fastmcp>=0.1",
-    "uvicorn>=0.29",
-    "opentelemetry-api>=1.20",
-    "opentelemetry-sdk>=1.20",
-    "opentelemetry-semantic-conventions>=0.40b0",
+    "pydantic>=2.13",
+    "typer>=0.25",
+    "pyyaml>=6.0.3",
+    "tree-sitter>=0.25",
+    "tree-sitter-python>=0.25",
+    "tree-sitter-c>=0.24",
+    "tree-sitter-cpp>=0.23",
+    "rustworkx>=0.17",
+    "fastmcp>=4.0",
+    "fastapi>=0.141",
+    "aiohttp>=3.14",
+    "opentelemetry-api>=1.42",
 ]
 
 [project.optional-dependencies]
 temporal = ["temporalio>=1.0"]
 attestation = ["cryptography>=42.0"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0"]
+embeddings = ["sentence-transformers>=3.0"]
+otel-semconv = ["opentelemetry-semantic-conventions>=0.40b0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0", "ruff>=0.15"]
+
+[project.scripts]
+verifyci = "verifyci.interface.cli:app"
+aci = "verifyci.interface.cli:app"  # legacy alias
 ```
+
+Plan-errata (original plan listed these as core deps; each was removed at
+the `563db16` packaging repair): `ollama` (Ollama is called over raw
+`aiohttp`, never through the SDK), `rank-bm25` (BM25 is implemented in
+`retrieval/sparse.py`), `aiosqlite` (storage uses sync `sqlite3` inside
+`asyncio.to_thread`), `uvicorn` (no HTTP runner exists yet), and
+`opentelemetry-sdk` (only the API is imported). `sentence-transformers`
+moved to the `[embeddings]` extra because it drags in PyTorch and the
+provider lazy-imports it.
 
 ---
 
 ## Success Criteria (V1)
 
-| Criterion | Target | Measurement |
+State legend — **implemented**: the mechanism exists and is audit-hardened;
+**measured**: an observed number exists; **target met**: measured ≥ target;
+**not established**: measured exists but the gate's protocol isn't the one
+specified, or the result misses; **unmeasured**: no number at all.
+
+| Criterion | Target | Measurement | Status | Observed (at `ae171cb`) |
+|---|---|---|---|---|
+| Entity extraction precision | > 0.85 | Manual sample of 100 entities | measured, sample smaller than specified | 1.00 on 13-entity smoke set (not 100) |
+| Entity extraction recall | > 0.80 | Compare against ground truth | measured, sample smaller than specified | 1.00 on same 13-entity set |
+| Retrieval Recall@5 | > 0.80 | 50 sample queries | measured, below protocol | 0.80 on 5 queries |
+| Retrieval nDCG@10 | +5-15 over dense-only | BEIR-style benchmark | **not established** | hybrid 0.866 vs dense-only 0.877 — smoke run, hybrid *below* dense; the +5pt gate was never met; rerank is default-off as a result |
+| Semi-formal Patch Equivalence | > 0.90 | Agent-generated patches | **unmeasured** | mechanism implemented + gate matrix verified; no labeled agent-patch corpus exists |
+| Blast Radius Coverage | > 0.90 | Graph traversal vs. manual | **unmeasured** | advisory-only check implemented; coverage never scored vs. manual |
+| Invariant check coverage | 100% | All invariants applicable to a diff are evaluated | implemented + measured | 1.0 by construction (unapplicable invariants reported) |
+| Invariant detection recall | ≥ 0.90 | On labeled ground-truth set | measured, **below target** | 6/9 ≈ 0.67 on the labeled secret set |
+| Invariant detection precision | ≥ 0.85 | On same set | measured, small set | 1.00 on 6 true positives (FP=0) |
+| Verification Precision | > 0.85 | Flagged issues vs. ground truth | **unmeasured** | no issue-level ground truth exists |
+| Incremental Parse Latency | median < 0.2ms, p95 < 1.0ms, p99 < 5.0ms | Benchmark protocol | **unmeasured** (at target scale) | `.benchmarks/` exists; percentiles at repo scale not published |
+| Temporal Query Latency | < 200ms | At 10K edges | **unmeasured** | no 10K-edge scale test |
+| Replay Equivalence | 100% | 44 tests | measured, met | 44/44 |
+| Provenance Coverage | 100% | Every claim traceable | implemented + closure-verified | closure item 10: evidence `source_hash` == entity hash |
+| Local-only | Zero cloud deps | No external API calls | implemented, met | embeddings default to offline hash; Ollama is opt-in to a local server |
+
+### Audit-remediation addendum (all six closed, end-to-end closure passed at `ae171cb`)
+
+| Item | Commit | Evidence |
 |---|---|---|
-| Entity extraction precision | > 0.85 | Manual sample of 100 entities |
-| Entity extraction recall | > 0.80 | Compare against ground truth |
-| Retrieval Recall@5 | > 0.80 | 50 sample queries |
-| Retrieval nDCG@10 | +5-15 over dense-only | BEIR-style benchmark |
-| Semi-formal Patch Equivalence | > 0.90 | Agent-generated patches |
-| Blast Radius Coverage | > 0.90 | Graph traversal vs. manual |
-| Invariant check coverage | 100% | All invariants applicable to a diff are evaluated |
-| Invariant detection recall | ≥ 0.90 | On labeled ground-truth set |
-| Invariant detection precision | ≥ 0.85 | On same set |
-| Verification Precision | > 0.85 | Flagged issues vs. ground truth |
-| Incremental Parse Latency | median < 0.2ms, p95 < 1.0ms, p99 < 5.0ms | Benchmark protocol |
-| Temporal Query Latency | < 200ms | At 10K edges |
-| Replay Equivalence | 100% | 44 tests |
-| Provenance Coverage | 100% | Every claim traceable |
-| Local-only | Zero cloud deps | No external API calls |
+| Resolver (no guessed links; suffix grounding declines) | `c247d30` | 6 probes, 3 fail pre-fix; live matrix |
+| Planner runs verification once, not 3× | `9486efb` | 4/7 probes fail pre-fix; call count 3→1 |
+| Revision identity = content; lineage = append-only `ingests` | `c1e91ca` | revert-cycle probe True→False; live chain ingest→revision→entity→verify |
+| SKIP_DIRS single classifier, `pyvenv.cfg` marker, `.verifyciignore` | `8ea8f11` | deps-leak probe 4→0; six-question matrix pinned |
+| `verifyci`/`VERIFYCI_*` canonical, `aci`/`ACI_*` fallback | `1aba78f` | 7 prefix probes; argv-derived prog name |
+| Retriever: stored BM25 tf, semantic-edge expansion, cached `code_search` | `ae171cb` | construction-count probes (2149→0, 4→1, 5→1); 7 probes fail pre-fix; gate matrix unchanged |
+| End-to-end closure | `ae171cb` | items 1–10 re-verified on real DBs (see V1_BASELINE / closure record) |
+
+The closure conclusion rests on targeted regression probes + real-DB
+reproduction + controls + unchanged gate semantics. **"N tests pass" is
+supporting evidence, not the audit conclusion.**
 
 ---
 
@@ -1088,12 +1143,12 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0"]
 [x] 04  Tree-sitter parser            — parses Python repo end-to-end
 [x] 05  AST extractor                 — emits entities + AST edges
 [x] 06  minimal rustworkx graph       — in-memory build succeeds
-[x] 07  ingest one Python repository  — aci ingest writes to SQLite
+[x] 07  ingest one Python repository  — verifyci ingest writes to SQLite
 [x] 08  extraction benchmark          — precision > 0.85, recall > 0.80
 [x] 09  Dense + BM25 + Graph          — individual retrievers return
-[x] 10  RRF + cross-encoder           — nDCG@10 beats dense-only by 5+
+[x] 10  RRF + cross-encoder           — nDCG@10 +5pt gate NOT established (smoke: hybrid 0.866 vs dense-only 0.877; rerank default-off)
 [x] 11  EvidencePack                  — full provenance populated
-[x] 12  blast radius                  — coverage > 0.90
+[x] 12  blast radius                  — blast radius coverage > 0.90 gate UNMEASURED (check implemented, advisory-only; rerank/gate unaffected)
 [x] 13  VerificationReport            — no `passed` field
 [x] 14  VerificationPolicy            — produces VerificationDecision
 [x] 15  Planner → TaskIR → DAG        — 3-step task compiles
