@@ -58,8 +58,13 @@ Grounding rules (no exceptions):
 - Invariant checkers fail closed: `secrets_scan`, `provenance_check`,
   `forbid_call:<name>`, `forbid_import:<module>`. Unknown queries fail.
   `secrets_scan` covers quoted assignments, long unquoted values, AWS
-  keys, PEM blocks, JWTs, and credentialed URLs — measured recall 5/9
-  on the labeled set, not a general leak detector.
+  keys, PEM blocks, JWTs, credentialed URLs, JSON-colon values, and
+  multiline/continuation literals. Labeled-set recall: **6/9 (0.67)** on
+  the v1 set, **16/18 (0.89, precision 1.00)** on the 26-case expanded v2
+  set spanning 11 positive secret mechanisms; the ≥0.90 gate is **not
+  met** and neither corpus establishes it. Misses are two documented
+  residuals (unquoted value below the 12-char floor; graph-relative-import
+  blindness). Not a general leak detector.
 - V1 proves **provenance and impact**, not semantic intent: a mapped,
   secret-free diff verifies structurally. Intent judgment stays with policy
   reviewers and project-specific invariants. A PASS means "grounds in known
@@ -91,5 +96,5 @@ not the model — is what makes it usable.
 ## Status
 
 V1 walking skeleton. `PLAN.md` is the full plan; `CHANGELOG.md` records what
-each revision proved, including measured numbers and known gaps. 490 tests:
+each revision proved, including measured numbers and known gaps. 493 tests:
 `python -m pytest tests/ -q`.

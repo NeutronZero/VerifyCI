@@ -1092,8 +1092,8 @@ specified, or the result misses; **unmeasured**: no number at all.
 | Semi-formal Patch Equivalence | > 0.90 | Agent-generated patches | **unmeasured** | mechanism implemented + gate matrix verified; no labeled agent-patch corpus exists |
 | Blast Radius Coverage | > 0.90 | Graph traversal vs. manual | **unmeasured** | advisory-only check implemented; coverage never scored vs. manual |
 | Invariant check coverage | 100% | All invariants applicable to a diff are evaluated | implemented + measured | 1.0 by construction (unapplicable invariants reported) |
-| Invariant detection recall | ≥ 0.90 | On labeled ground-truth set | measured, **below target** | 6/9 ≈ 0.67 on the labeled secret set |
-| Invariant detection precision | ≥ 0.85 | On same set | measured, small set | 1.00 on 6 true positives (FP=0) |
+| Invariant detection recall | ≥ 0.90 | On labeled ground-truth set | measured, **below target; not established** | v1 set 6/9 ≈ 0.67; expanded 26-case v2 set 16/18 ≈ 0.89 (precision 16/16 = 1.00, 11 positive secret mechanisms, triple-quoted capped at 1); misses = two documented residuals (unquoted <12-char floor, graph relative-import blindness). Corpus too small to establish the gate even above 0.90 |
+| Invariant detection precision | ≥ 0.85 | On same set | measured | v1 4/4; expanded v2 16/16 = 1.00 — zero false alarms across 8 true negatives (env/config lookups, comment, name-only, plain string, empty string) |
 | Verification Precision | > 0.85 | Flagged issues vs. ground truth | **unmeasured** | no issue-level ground truth exists |
 | Incremental Parse Latency | median < 0.2ms, p95 < 1.0ms, p99 < 5.0ms | Benchmark protocol | **unmeasured** (at target scale) | `.benchmarks/` exists; percentiles at repo scale not published |
 | Temporal Query Latency | < 200ms | At 10K edges | **unmeasured** | no 10K-edge scale test |
