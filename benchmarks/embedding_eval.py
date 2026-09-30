@@ -21,13 +21,13 @@ from benchmarks.retrieval_eval import (  # noqa: E402
     ndcg_at,
     recall_at,
 )
-from src.retrieval.dense import SearchResult  # noqa: E402
-from src.retrieval.fusion import rrf_fusion  # noqa: E402
-from src.retrieval.provider import (  # noqa: E402
+from verifyci.retrieval.dense import SearchResult  # noqa: E402
+from verifyci.retrieval.fusion import rrf_fusion  # noqa: E402
+from verifyci.retrieval.provider import (  # noqa: E402
     HashEmbeddingProvider,
     OllamaEmbeddingProvider,
 )
-from src.retrieval.sparse import BM25Retriever  # noqa: E402
+from verifyci.retrieval.sparse import BM25Retriever  # noqa: E402
 
 PARAPHRASE = {
     "how do I sign in": {"auth_login", "auth_oauth"},

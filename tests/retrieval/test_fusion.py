@@ -1,6 +1,6 @@
 """RRF fusion over dense/sparse/graph result lists."""
-from src.retrieval.dense import SearchResult
-from src.retrieval.fusion import rrf_fusion, rrf_fusion_with_scores
+from verifyci.retrieval.dense import SearchResult
+from verifyci.retrieval.fusion import rrf_fusion, rrf_fusion_with_scores
 
 
 def _res(rid, score=1.0):

@@ -1,4 +1,4 @@
-from src.verification.blast_radius import blast_radius_check
+from verifyci.verification.blast_radius import blast_radius_check
 
 
 def test_blast_wrapper_returns_check():
@@ -73,10 +73,10 @@ def test_blast_wrapper_high_risk_is_advisory():
 def _decide(checks):
     import time
     import uuid
-    from src.contracts.verification_ir import (
+    from verifyci.contracts.verification_ir import (
         BlastRadiusResult, VerificationPolicy, VerificationReport,
     )
-    from src.verification.policy import PolicyEvaluator
+    from verifyci.verification.policy import PolicyEvaluator
     report = VerificationReport(
         report_id=str(uuid.uuid4()), task_id="t", policy_id="default",
         checks=checks,
@@ -92,7 +92,7 @@ def _decide(checks):
 
 
 def test_high_blast_alone_routes_human_review():
-    from src.contracts.verification_ir import CheckResult
+    from verifyci.contracts.verification_ir import CheckResult
     _, check = blast_radius_check(
         graph=None, changed_entities=[], test_entities=set())
     passing = CheckResult(
@@ -110,7 +110,7 @@ def test_high_blast_alone_routes_human_review():
 def test_violation_plus_high_blast_still_fails():
     # The rejections filter runs before the non-blocking fall-through:
     # a real violation alongside high exposure is FAIL, not review.
-    from src.contracts.verification_ir import CheckResult
+    from verifyci.contracts.verification_ir import CheckResult
     violation = CheckResult(
         check_id="secrets_scan", passed=False, score=0.0, evidence=[],
         explanation="secret-shaped string", blocking=True, established=True)

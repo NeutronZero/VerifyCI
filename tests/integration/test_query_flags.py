@@ -4,8 +4,8 @@ If a refactor renames the flag in one place and not another, the default
 path must stay fused-only everywhere. The `methods` list in the result is
 the observable pin.
 """
-from src.interface.commands.query import run_query
-from src.storage.graph_store import GraphStore
+from verifyci.interface.commands.query import run_query
+from verifyci.storage.graph_store import GraphStore
 
 
 def _empty_db(tmp_path):

@@ -1,8 +1,8 @@
-from src.contracts.verification_ir import Invariant
-from src.graph.builder import GraphBuilder
-from src.ingestion.extractor import extract_edges, extract_entities
-from src.ingestion.parser import TreeSitterParser
-from src.verification.intent_align import evaluate_invariants
+from verifyci.contracts.verification_ir import Invariant
+from verifyci.graph.builder import GraphBuilder
+from verifyci.ingestion.extractor import extract_edges, extract_entities
+from verifyci.ingestion.parser import TreeSitterParser
+from verifyci.verification.intent_align import evaluate_invariants
 
 SOURCE = b"""def order():
     return checkout("cart")
@@ -83,7 +83,7 @@ def test_secret_matching_scales_linearly():
     # scan in well under a second, not quadratically. (An unbounded
     # variant hung past a 300s timeout at this size.)
     import time
-    from src.verification.intent_align import _has_secret
+    from verifyci.verification.intent_align import _has_secret
     line = "x" * 100_000 + " = 1"
     start = time.time()
     assert _has_secret(line) is False
@@ -209,7 +209,7 @@ def test_unknown_query_fails_closed():
 
 
 def test_provenance_needs_evidence():
-    from src.contracts.verification_ir import FileEvidence
+    from verifyci.contracts.verification_ir import FileEvidence
     ev = [FileEvidence(file_path="a.py", line_start=1, line_end=2, snippet="x", source_hash="h")]
     (fail,) = evaluate_invariants("x", [_inv("p", "provenance_check")], graph=None, evidence=[])[0]
     (ok,) = evaluate_invariants("x", [_inv("p", "provenance_check")], graph=None, evidence=ev)[0]
@@ -222,3 +222,76 @@ def test_unlabeled_metrics_report_unmeasured():
     assert metrics.check_coverage == 1.0
     assert metrics.detection_recall is None
     assert metrics.detection_precision is None
+
+
+def test_forbid_added_qualified_builtin_eval():
+    diff = ("diff --git a/src/a.py b/src/a.py\n--- a/src/a.py\n+++ b/src/a.py\n"
+            "@@ -1,0 +1,1 @@\n+    builtins.eval(user_code)\n")
+    checks, _ = evaluate_invariants(diff, [_inv("f", "forbid_call:eval")],
+                                    graph=None, evidence=[])
+    assert checks[0].passed is False
+
+
+def test_forbid_added_qualified_call_os_system():
+    diff = ("diff --git a/src/a.py b/src/a.py\n--- a/src/a.py\n+++ b/src/a.py\n"
+            "@@ -1,0 +1,1 @@\n+    os.system('id')\n")
+    checks, _ = evaluate_invariants(diff, [_inv("f", "forbid_call:os.system")],
+                                    graph=None, evidence=[])
+    assert checks[0].passed is False
+
+
+def test_forbid_call_does_not_flag_unrelated_methods():
+    diff = ("diff --git a/src/a.py b/src/a.py\n--- a/src/a.py\n+++ b/src/a.py\n"
+            "@@ -1,0 +1,1 @@\n+    calculator.eval(expr)\n")
+    checks, _ = evaluate_invariants(diff, [_inv("f", "forbid_call:eval")],
+                                    graph=None, evidence=[])
+    assert checks[0].passed is True
+
+
+def test_multiline_triple_quoted_secret_fails():
+    # triple quoted assignment across added lines must fail closed
+    nl = chr(10)
+    dq = chr(34)
+    diff = 'diff --git a/src/app.py b/src/app.py' + nl + '--- a/src/app.py' + nl + '+++ b/src/app.py' + nl + '@@ -1,0 +1,3 @@' + nl + '+password = ' + dq*3 + nl + '+secret' + nl + '+' + dq*3 + nl
+    checks, _ = evaluate_invariants(diff, [_inv('s', 'secrets_scan')], graph=None, evidence=[])
+    assert checks[0].passed is False
+    assert checks[0].established is True
+
+def test_multiline_paren_continuation_secret_fails():
+    # paren continuation with quoted secret must fail closed
+    nl = chr(10)
+    dq = chr(34)
+    diff = 'diff --git a/src/app.py b/src/app.py' + nl + '--- a/src/app.py' + nl + '+++ b/src/app.py' + nl + '@@ -1,0 +1,3 @@' + nl + '+password = (' + nl + '+' + dq + 'secret' + dq + nl + '+)' + nl
+    checks, _ = evaluate_invariants(diff, [_inv('s', 'secrets_scan')], graph=None, evidence=[])
+    assert checks[0].passed is False
+    assert checks[0].established is True
+
+def test_multiline_env_lookup_single_line_passes():
+    # legit env lookup on one logical line without long literals must keep passing
+    nl = chr(10)
+    dq = chr(34)
+    diff = 'diff --git a/src/app.py b/src/app.py' + nl + '--- a/src/app.py' + nl + '+++ b/src/app.py' + nl + '@@ -1,0 +1,1 @@' + nl + '+password = (os.environ.get(' + dq + 'X' + dq + '))' + nl
+    checks, _ = evaluate_invariants(diff, [_inv('s', 'secrets_scan')], graph=None, evidence=[])
+    assert checks[0].passed is True
+
+def test_same_line_literal_still_fails():
+    # same line hardcoded secret still fails
+    nl = chr(10)
+    dq = chr(34)
+    diff = 'diff --git a/src/app.py b/src/app.py' + nl + '--- a/src/app.py' + nl + '+++ b/src/app.py' + nl + '@@ -1,0 +1,1 @@' + nl + '+password = ' + dq + 'hunter2hunter' + dq + nl
+    checks, _ = evaluate_invariants(diff, [_inv('s', 'secrets_scan')], graph=None, evidence=[])
+    assert checks[0].passed is False
+    assert checks[0].evidence != []
+
+def test_forbid_parse_failure_fails_closed(monkeypatch):
+    # parser exception must fail closed, never vacuous pass
+    import verifyci.verification.added_refs as ar
+    def _boom(diff):
+        raise RuntimeError('parse boom')
+    monkeypatch.setattr(ar, 'extract_added_refs', _boom)
+    nl = chr(10)
+    diff = 'diff --git a/src/app.py b/src/app.py' + nl + '--- a/src/app.py' + nl + '+++ b/src/app.py' + nl + '@@ -1,0 +1,1 @@' + nl + '+    eval(user_input)' + nl
+    checks, _ = evaluate_invariants(diff, [_inv('f', 'forbid_call:eval')], graph=None, evidence=[])
+    assert checks[0].passed is False
+    assert checks[0].established is True
+    assert 'fail-closed' in checks[0].explanation

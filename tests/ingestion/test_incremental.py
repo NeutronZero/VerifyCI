@@ -1,7 +1,7 @@
 """Wiring tests for IncrementalParser. No tree-sitter dependency needed:
 fake parsers stand in for the real binding and assert old_tree passthrough.
 """
-from src.ingestion.incremental import IncrementalParser
+from verifyci.ingestion.incremental import IncrementalParser
 
 
 class FakeTree:

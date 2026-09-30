@@ -4,7 +4,7 @@ The UTF-16 case is a frozen regression fixture: a real PowerShell-redirected
 `git diff` decoded as UTF-8 yields NUL-interleaved garbage. The parser must
 return no seeds (→ inconclusive downstream), never throw, never hallucinate.
 """
-from src.verification.diffmap import normalize_path, parse_diff_files
+from verifyci.verification.diffmap import normalize_path, parse_diff_files
 
 
 def test_plusplus_lines_yield_files():
@@ -104,7 +104,7 @@ def test_body_lines_are_not_file_headers():
 def test_find_deletion_hunks_flags_net_removal_with_junk_addition():
     # The one-blank-line evasion: deleting a function and adding a single
     # `+` line in the same hunk used to verify as PASS.
-    from src.verification.diffmap import find_deletion_hunks
+    from verifyci.verification.diffmap import find_deletion_hunks
     diff = (
         "diff --git a/x.py b/x.py\n"
         "--- a/x.py\n"
@@ -122,7 +122,7 @@ def test_find_deletion_hunks_flags_net_removal_with_junk_addition():
 def test_find_deletion_hunks_counts_dashdash_content():
     # Removed `-- x` content renders as `--- x`; it is a removal, and the
     # old code's `not startswith("---")` guard silently dropped it.
-    from src.verification.diffmap import find_deletion_hunks
+    from verifyci.verification.diffmap import find_deletion_hunks
     diff = (
         "diff --git a/x.sql b/x.sql\n"
         "--- a/x.sql\n"
@@ -137,7 +137,7 @@ def test_find_deletion_hunks_counts_dashdash_content():
 
 
 def test_iter_added_lines_catches_lines_outside_hunks():
-    from src.verification.diffmap import iter_added_lines
+    from verifyci.verification.diffmap import iter_added_lines
     diff = (
         "From abc123 Mon Sep 17 00:00:00 2001\n"
         '+password = "preamble-secret"\n'
@@ -158,7 +158,7 @@ def test_iter_added_lines_catches_lines_outside_hunks():
 
 
 def test_find_deletion_hunks_detects_pure_deletions():
-    from src.verification.diffmap import find_deletion_hunks
+    from verifyci.verification.diffmap import find_deletion_hunks
     diff = (
         "diff --git a/x.py b/x.py\n"
         "--- a/x.py\n"
@@ -176,7 +176,7 @@ def test_find_deletion_hunks_detects_pure_deletions():
 def test_find_deletion_hunks_empty_for_modification_only():
     # Load-bearing: modifications are `-`/`+` pairs, not deletions.
     # A per-line check would flag every modification; per-hunk must not.
-    from src.verification.diffmap import find_deletion_hunks
+    from verifyci.verification.diffmap import find_deletion_hunks
     diff = (
         "diff --git a/x.py b/x.py\n"
         "--- a/x.py\n"
@@ -191,7 +191,7 @@ def test_find_deletion_hunks_empty_for_modification_only():
 
 
 def test_find_deletion_hunks_empty_for_additions_only():
-    from src.verification.diffmap import find_deletion_hunks
+    from verifyci.verification.diffmap import find_deletion_hunks
     diff = (
         "diff --git a/x.py b/x.py\n"
         "--- a/x.py\n"
@@ -204,7 +204,7 @@ def test_find_deletion_hunks_empty_for_additions_only():
 
 
 def test_find_deletion_hunks_ignores_file_headers():
-    from src.verification.diffmap import find_deletion_hunks
+    from verifyci.verification.diffmap import find_deletion_hunks
     diff = (
         "diff --git a/x.py b/x.py\n"
         "--- a/x.py\n"
@@ -219,7 +219,7 @@ def test_find_deletion_hunks_ignores_file_headers():
 
 
 def test_find_deletion_hunks_none_for_empty():
-    from src.verification.diffmap import find_deletion_hunks
+    from verifyci.verification.diffmap import find_deletion_hunks
     assert find_deletion_hunks(None) == []
     assert find_deletion_hunks("") == []
 
@@ -229,7 +229,7 @@ def test_seed_entities_narrows_to_touched_lines():
     # entity in the file: whole-file seeding made connected diffs
     # report risk 1.0 on hundreds of untouched entities.
     from types import SimpleNamespace
-    from src.verification.diffmap import seed_entities_for_diff
+    from verifyci.verification.diffmap import seed_entities_for_diff
 
     def ent(eid, start, end, type_="FUNCTION"):
         return SimpleNamespace(revision_entity_id=eid, name=eid,
@@ -249,7 +249,7 @@ def test_seed_entities_falls_back_without_hunks():
     # Header-only diffs (mode change, whole-file delete) carry no line
     # info: whole-file mapping so they still ground.
     from types import SimpleNamespace
-    from src.verification.diffmap import seed_entities_for_diff
+    from verifyci.verification.diffmap import seed_entities_for_diff
 
     def ent(eid):
         return SimpleNamespace(revision_entity_id=eid, name=eid,
@@ -267,7 +267,7 @@ def test_seed_entities_pure_addition_anchors_enclosing_scope():
     # A pure addition names no old-side lines; the hunk anchor seeds the
     # enclosing entity instead of the whole file (or nothing).
     from types import SimpleNamespace
-    from src.verification.diffmap import seed_entities_for_diff
+    from verifyci.verification.diffmap import seed_entities_for_diff
 
     def ent(eid, start, end):
         return SimpleNamespace(revision_entity_id=eid, name=eid,
@@ -284,8 +284,8 @@ def test_seed_entities_pure_addition_anchors_enclosing_scope():
 
 def test_suffix_ambiguity_flagged_not_silent():
     from types import SimpleNamespace
-    from src.verification.diffmap import find_ambiguous_files, map_files_to_entity_ids
-    from src.verification.verification_ir import build_semi_check
+    from verifyci.verification.diffmap import find_ambiguous_files, map_files_to_entity_ids
+    from verifyci.verification.verification_ir import build_semi_check
 
     def ent(eid, path):
         return SimpleNamespace(revision_entity_id=eid, name="load",
@@ -310,3 +310,15 @@ def test_suffix_ambiguity_flagged_not_silent():
 
     grounded = map_files_to_entity_ids(["pkg_one/utils.py"], entities)
     assert sorted(grounded["pkg_one/utils.py"]) == ["a"]
+
+
+def test_git_rename_diff_files():
+    diff = (
+        "diff --git a/old_path.py b/new_path.py\n"
+        "similarity index 100%\n"
+        "rename from old_path.py\n"
+        "rename to new_path.py\n"
+    )
+    files = parse_diff_files(diff)
+    assert "new_path.py" in files
+    assert "old_path.py" in files

@@ -1,7 +1,7 @@
 import time
 
-from src.storage.graph_store import GraphStore
-from src.storage.revision import create_revision
+from verifyci.storage.graph_store import GraphStore
+from verifyci.storage.revision import create_revision
 
 
 def _rev(store, repo="r", files=()):
@@ -11,8 +11,8 @@ def _rev(store, repo="r", files=()):
 
 
 def _ent(store, logical, rev, path="a.py", name="f", repo="r"):
-    from src.contracts.entity import Entity, EntityType
-    from src.contracts.identity import compute_revision_entity_id
+    from verifyci.contracts.entity import Entity, EntityType
+    from verifyci.contracts.identity import compute_revision_entity_id
     e = Entity(
         repository_id=repo, logical_entity_id=logical,
         revision_entity_id=compute_revision_entity_id(logical, rev.revision_id),
@@ -52,7 +52,7 @@ def test_deleted_entities_close_on_reingest(tmp_path):
 
 def _edge(store, eid, rev, src, dst, type_="CALLS"):
     import time as _time
-    from src.contracts.edge import Edge, EdgeType
+    from verifyci.contracts.edge import Edge, EdgeType
     now = _time.time()
     e = Edge(id=eid, revision_id=rev.revision_id, src_entity_id=src,
              dst_entity_id=dst, type=EdgeType(type_), metadata={},
@@ -153,7 +153,7 @@ def test_disappearance_is_repo_scoped_and_needs_parent(tmp_path):
 def test_carried_unresolved_refs_are_continuing_not_gone(tmp_path):
     # Incremental carry re-inserts unresolved refs into the new revision;
     # disappearance must read them as continuing edges, not expire them.
-    from src.contracts.edge import Edge, EdgeType
+    from verifyci.contracts.edge import Edge, EdgeType
     store = GraphStore(str(tmp_path / "t.db"))
     try:
         r1 = _rev(store, files=[("a.py", "h1")])

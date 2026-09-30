@@ -1,10 +1,10 @@
 import json
 
-from src.contracts.edge import Edge, EdgeType
-from src.contracts.entity import Entity, EntityType
-from src.contracts.event import Event
-from src.contracts.jsonio import edge_from_json, entity_from_json, event_from_json, to_json
-from src.contracts.validate import validate
+from verifyci.contracts.edge import Edge, EdgeType
+from verifyci.contracts.entity import Entity, EntityType
+from verifyci.contracts.event import Event
+from verifyci.contracts.jsonio import edge_from_json, entity_from_json, event_from_json, to_json
+from verifyci.contracts.validate import validate
 
 
 def _entity():

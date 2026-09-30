@@ -1,8 +1,8 @@
 """Bulk-ingest atomicity: a failed batch rolls back, never half-commits."""
 import pytest
 
-from src.storage.graph_store import GraphStore
-from src.storage.revision import create_revision
+from verifyci.storage.graph_store import GraphStore
+from verifyci.storage.revision import create_revision
 
 
 def test_batch_rolls_back_on_exception(tmp_path):

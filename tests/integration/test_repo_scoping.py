@@ -7,7 +7,7 @@ back to the global lookup.
 """
 import time
 
-from src.interface.commands import resolve_repository
+from verifyci.interface.commands import resolve_repository
 
 
 def test_resolve_repository_convention():
@@ -21,16 +21,16 @@ def test_resolve_repository_convention():
 
 
 def _rev(store, repo, files, commit=None):
-    from src.storage.revision import create_revision
+    from verifyci.storage.revision import create_revision
     rev = create_revision(repository_id=repo, files=files, commit_id=commit)
     store.insert_revision(rev)
     return rev
 
 
 def test_multi_repo_db_loads_own_latest(tmp_path):
-    from src.contracts.entity import Entity, EntityType
-    from src.interface.commands.graph_loader import load_graph
-    from src.storage.graph_store import GraphStore
+    from verifyci.contracts.entity import Entity, EntityType
+    from verifyci.interface.commands.graph_loader import load_graph
+    from verifyci.storage.graph_store import GraphStore
     db = str(tmp_path / "repoA" / ".verifyci" / "v.db")
     store = GraphStore(db)
     try:
@@ -54,8 +54,8 @@ def test_multi_repo_db_loads_own_latest(tmp_path):
 
 
 def test_custom_path_falls_back_to_global(tmp_path):
-    from src.interface.commands.graph_loader import load_graph
-    from src.storage.graph_store import GraphStore
+    from verifyci.interface.commands.graph_loader import load_graph
+    from verifyci.storage.graph_store import GraphStore
     db = str(tmp_path / "shared.db")
     store = GraphStore(db)
     try:
@@ -70,8 +70,8 @@ def test_custom_path_falls_back_to_global(tmp_path):
 
 def test_ingest_commit_id_persisted(tmp_path):
     import shutil
-    from src.interface.commands.ingest import run_ingest
-    from src.storage.graph_store import GraphStore
+    from verifyci.interface.commands.ingest import run_ingest
+    from verifyci.storage.graph_store import GraphStore
     repo = tmp_path / "proj"
     (repo / "src").mkdir(parents=True)
     (repo / "src" / "a.py").write_text("def f():\n    pass\n")

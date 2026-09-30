@@ -1,5 +1,5 @@
 """Dependency manifest parsing: options are not packages, versions survive."""
-from src.ingestion.dependency import VulnerabilityCache, extract_dependencies
+from verifyci.ingestion.dependency import VulnerabilityCache, extract_dependencies
 
 
 def _pkgs(file_name, source):
@@ -50,7 +50,7 @@ def test_go_skips_comments():
 
 
 def test_npm_sections_do_not_collide(tmp_path=None):
-    from src.ingestion.dependency import extract_dependencies as ex
+    from verifyci.ingestion.dependency import extract_dependencies as ex
     edges = ex("package.json",
                '{"dependencies": {"leftpad": "1.0"}, "devDependencies": {"leftpad": "2.0"}}',
                "rev")
@@ -61,7 +61,7 @@ def test_npm_sections_do_not_collide(tmp_path=None):
 
 
 def test_vuln_lookup_survives_corrupt_cache(tmp_path):
-    from src.contracts.edge import Edge, EdgeType
+    from verifyci.contracts.edge import Edge, EdgeType
     cache = VulnerabilityCache(tmp_path / "cache.db")
     with open(tmp_path / "cache.db", "w", encoding="utf-8") as fh:
         fh.write("not a database")
@@ -69,3 +69,34 @@ def test_vuln_lookup_survives_corrupt_cache(tmp_path):
                 type=EdgeType.DEPENDS_ON, metadata={"package": "pkg"})
     assert cache.lookup(edge) == []
     cache.close()
+
+
+def test_pyproject_toml_dependencies():
+    toml = """
+[project]
+dependencies = [
+    "pydantic>=2.0",
+    "typer>=0.9",
+    "tree-sitter[all]==0.22",
+]
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+"""
+    rows = _pkgs("pyproject.toml", toml)
+    assert ("pydantic", "2.0") in rows
+    assert ("typer", "0.9") in rows
+    assert ("tree-sitter", "0.22") in rows
+    assert ("pytest", "8.0") in rows
+
+
+def test_maven_with_attributes():
+    pom = """<dependencies>
+  <dependency scope="test">
+    <groupId>junit</groupId>
+    <artifactId>junit</artifactId>
+    <version>4.13.2</version>
+  </dependency>
+</dependencies>
+"""
+    rows = _pkgs("pom.xml", pom)
+    assert ("junit:junit", "4.13.2") in rows

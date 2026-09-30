@@ -10,9 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.contracts.entity import EntityType
-from src.ingestion.extractor import extract_entities
-from src.ingestion.parser import TreeSitterParser
+from verifyci.contracts.entity import EntityType
+from verifyci.ingestion.extractor import extract_entities
+from verifyci.ingestion.parser import TreeSitterParser
 
 TARGET = Path(r"C:\Users\satya\AppData\Local\Temp\opencode\graphrag-target")
 F = EntityType.FUNCTION
@@ -105,10 +105,17 @@ SCORED = {EntityType.FUNCTION, EntityType.METHOD, EntityType.CLASS}
 
 
 def run_benchmark():
+    import os
+    target_str = os.environ.get("VERIFYCI_GRAPHRAG_TARGET")
+    target = Path(target_str) if target_str else TARGET
+    if not target.exists() or not any((target / rel).exists() for rel in GROUND_TRUTH):
+        print(f"Benchmark skipped: TARGET directory {target} does not exist.")
+        print("Set VERIFYCI_GRAPHRAG_TARGET environment variable to point to target repo.")
+        return 0.0, 0.0
     parser = TreeSitterParser()
     tp = fp = fn = 0
     for rel, truth in GROUND_TRUTH.items():
-        path = TARGET / rel
+        path = target / rel
         parsed = parser.parse(rel, path.read_bytes(), "python")
         found = {(e.name, e.type) for e in extract_entities(parsed, "graphrag", "rev1")
                  if e.type in SCORED}

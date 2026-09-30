@@ -19,7 +19,7 @@ The rule text as written, literally — not human intent. The Flask
 `password="test"` fixture is labeled violated=True under `secrets_scan`
 because the rule says "no secret-shaped strings", full stop. Intent-level
 disagreement (fixture vs real credential) belongs in a second mechanism
-(the path allowlist, tested separately), never in a contested label.
+(no allowlist, fixtures fail), never in a contested label.
 If a case is genuinely ambiguous under its rule, split the rule first,
 then label.
 

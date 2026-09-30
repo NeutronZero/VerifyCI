@@ -1,7 +1,7 @@
 
-from src.ingestion.language import detect_language
-from src.ingestion.parser import TreeSitterParser, compute_source_hash
-from src.ingestion.extractor import extract_entities, extract_edges
+from verifyci.ingestion.language import detect_language
+from verifyci.ingestion.parser import TreeSitterParser, compute_source_hash
+from verifyci.ingestion.extractor import extract_entities, extract_edges
 
 
 def test_detect_language():
@@ -61,7 +61,7 @@ def test_extract_edges_python():
 
 
 def test_collect_excludes_venv_and_cache_dirs(tmp_path):
-    from src.interface.commands.ingest import _collect
+    from verifyci.interface.commands.ingest import _collect
     (tmp_path / "venv").mkdir()
     (tmp_path / "venv" / "junk.py").write_text("x = 1\n")
     (tmp_path / "node_modules").mkdir()

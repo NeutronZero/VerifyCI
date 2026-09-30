@@ -10,11 +10,11 @@ contradicts a row below, the table is wrong, not the world.
 """
 import dataclasses
 
-from src.contracts.verification_ir import (
+from verifyci.contracts.verification_ir import (
     BlastRadiusResult, CheckResult, VerificationDecision, VerificationPolicy,
     VerificationReport,
 )
-from src.verification.policy import PolicyEvaluator
+from verifyci.verification.policy import PolicyEvaluator
 
 
 def _policy():
@@ -25,7 +25,7 @@ def _policy():
 
 
 def _certified(verified: bool):
-    from src.contracts.verification_ir import (
+    from verifyci.contracts.verification_ir import (
         Certificate, Conclusion,
     )
     return Certificate(

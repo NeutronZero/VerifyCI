@@ -1,10 +1,10 @@
 import pytest
 
-from src.orchestration.planner import Planner
-from src.orchestration.scheduler import AsyncDAGScheduler
-from src.orchestration.executor import Executor
-from src.orchestration.compiler.validation import validate_task_ir
-from src.interface.mcp_server import MCPServer
+from verifyci.orchestration.planner import Planner
+from verifyci.orchestration.scheduler import AsyncDAGScheduler
+from verifyci.orchestration.executor import Executor
+from verifyci.orchestration.compiler.validation import validate_task_ir
+from verifyci.interface.mcp_server import MCPServer
 
 
 def test_planner():

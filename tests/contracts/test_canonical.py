@@ -4,8 +4,8 @@ If these tests fail, the canonicalization contract changed.
 Update golden vectors only when the contract intentionally changes.
 """
 
-from src.contracts.event import Event
-from src.contracts.canonical import canonical_event_bytes, event_hash
+from verifyci.contracts.event import Event
+from verifyci.contracts.canonical import canonical_event_bytes, event_hash
 
 
 def test_canonical_event_bytes_matches_golden_vector():

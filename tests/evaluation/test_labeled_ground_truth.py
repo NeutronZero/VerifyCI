@@ -1,38 +1,39 @@
-"""Labeled ground truth for invariant detection, loaded from data.
+'''Labeled ground truth for invariant detection, loaded from data.
 
-Each case carries a `source` (synthetic | flask-history:<sha> |
-adversarial) so the provenance of every label is visible. Labels were
-assigned from the rule text and the Flask history WITHOUT reading the
-checker implementation first — near-misses were chosen from the shape of
-real inputs (env files, aliased imports, relative imports, split
-literals), not from knowledge of what the regex/graph walk matches.
+Each case carries source synthetic or flask-history colon sha or
+adversarial so provenance of every label is visible. Labels were
+assigned from rule text and Flask history WITHOUT reading checker
+implementation first. Near misses were chosen from shape of real
+inputs such as env files, aliased imports, relative imports, split
+literals, not from knowledge of what regex or graph walk matches.
 
-Measured baseline (2026-09-28, 17 cases): recall 5/9, precision 4/4.
-The fixture case (`flask-fixture-secret`) is a designed non-flag: the
-allowlist demotes it to pass-with-`established=False` instead of a
-violation flag, costing one recall point by design (pinned separately in
-`test_fixture_demotes_instead_of_flagging`). Near-misses cost the other
-three honestly.
-Review note 2026-09-29: recall 4/9 -> 5/9. The unquoted-assignment pattern
-now flags `near-unquoted-env` (`PASSWORD=abc123loaded`), which the old
-quotes-only regex missed. No precision cost: the value must be 12+ chars
-with no parens and run to end-of-line/comment, so `os.environ.get(...)`
-lookups still do not match.
-Gates assert >= baseline - epsilon: regressions fail, improvements require
-updating the recorded baseline with a review note.
-"""
+Measured baseline 2026-09-30, 17 cases: recall 6/9, precision 4/4.
+The fixture case flask-fixture-secret is a true positive: fixtures
+fail like any secret, no allowlist demotion. Near misses cost three
+recall points honestly.
+Review note 2026-09-30: recall 5/9 to 6/9. Allowlist removal makes
+fixture secrets fail closed, adding one true positive. No precision
+cost.
+Review note 2026-09-29: recall 4/9 to 5/9. Unquoted assignment pattern
+now flags near-unquoted-env with PASSWORD abc123loaded, which old
+quotes only regex missed. No precision cost: value must be 12 plus
+chars with no parens and run to end of line or comment, so
+os.environ.get lookups still do not match.
+Gates assert above baseline minus epsilon: regressions fail,
+improvements require updating recorded baseline with review note.
+'''
 import json
 from pathlib import Path
 
-from src.contracts.verification_ir import FileEvidence, Invariant
-from src.graph.builder import GraphBuilder
-from src.ingestion.extractor import extract_edges, extract_entities
-from src.ingestion.parser import TreeSitterParser
-from src.verification.intent_align import score_labeled
+from verifyci.contracts.verification_ir import FileEvidence, Invariant
+from verifyci.graph.builder import GraphBuilder
+from verifyci.ingestion.extractor import extract_edges, extract_entities
+from verifyci.ingestion.parser import TreeSitterParser
+from verifyci.verification.intent_align import score_labeled
 
 LABELS = Path(__file__).parent / "labels" / "invariants.jsonl"
 
-BASELINE_RECALL = 5 / 9
+BASELINE_RECALL = 6 / 9
 BASELINE_PRECISION = 1.0
 EPSILON = 0.05
 
@@ -129,12 +130,12 @@ def test_baseline_reported_by_stratum():
     assert len(strata["author-informed"]) == 17
 
 
-def test_fixture_demotes_instead_of_flagging():
-    # The allowlist path: fixture secrets pass with established=False, so
-    # policy routes INCONCLUSIVE rather than FAIL — and the labeled-set
-    # recall honestly excludes this case instead of claiming the flag.
-    from src.contracts.verification_ir import Invariant
-    from src.verification.intent_align import evaluate_invariants
+def test_fixture_now_fails_like_any_secret():
+    # fixture secrets fail like any secret, no demotion
+    # policy routes FAIL, recall includes this flag
+    # labeled recall counts this true positive
+    from verifyci.contracts.verification_ir import Invariant
+    from verifyci.verification.intent_align import evaluate_invariants
     inv = Invariant(invariant_id="s", rule="s", compiled_query="secrets_scan",
                     blocking=True)
     diff = ("diff --git a/examples/tutorial/tests/conftest.py "
@@ -144,6 +145,7 @@ def test_fixture_demotes_instead_of_flagging():
             "@@ -1 +1 @@\n"
             '+    def login(self, username="test", password="test"):\n')
     (check,), _ = evaluate_invariants(diff, [inv], graph=None)
-    assert check.passed is True
-    assert check.established is False
-    assert "demoted because directory 'examples'" in check.explanation
+    assert check.passed is False
+    assert check.established is True
+    assert 'secret-shaped' in check.explanation
+    assert check.evidence != []

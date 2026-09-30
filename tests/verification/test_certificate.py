@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from src.verification.semi_formal_reason import SemiFormalReasoner
+from verifyci.verification.semi_formal_reason import SemiFormalReasoner
 
 
 def _payload(eid, name="func", path="src/app.py"):
@@ -200,7 +200,7 @@ def test_module_only_grounding_is_inconclusive():
     # The enum gap made concrete: a diff touching only content the
     # extractor cannot map (here simulated by a MODULE-only entity list)
     # must not verify on file-existence alone.
-    from src.contracts.entity import Entity, EntityType
+    from verifyci.contracts.entity import Entity, EntityType
     module = Entity(
         repository_id="r", logical_entity_id="l",
         revision_entity_id="m1", type=EntityType.MODULE, name="relay.h",
@@ -220,7 +220,7 @@ def test_unmapped_files_veto_code():
     # CI workflows, .env, changelogs outside the graph) in the same diff
     # into a PASS. Any named-but-ungrounded file is inability, never a
     # free pass — the grounding rule has no per-extension exceptions.
-    from src.verification.diffmap import parse_diff_files
+    from verifyci.verification.diffmap import parse_diff_files
     diff = (
         "diff --git a/CHANGES.rst b/CHANGES.rst\n"
         "--- a/CHANGES.rst\n"

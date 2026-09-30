@@ -16,9 +16,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.contracts.entity import EntityType
-from src.ingestion.extractor import extract_entities
-from src.ingestion.parser import TreeSitterParser
+from verifyci.contracts.entity import EntityType
+from verifyci.ingestion.extractor import extract_entities
+from verifyci.ingestion.parser import TreeSitterParser
 
 TARGET = Path(r"C:\Users\satya\AppData\Local\Temp\opencode\sem-target"
               r"\firmware\ra4m1\src")
@@ -85,10 +85,17 @@ SCORED = {EntityType.FUNCTION, EntityType.METHOD, EntityType.CLASS}
 
 
 def run_benchmark():
+    import os
+    target_str = os.environ.get("VERIFYCI_CPP_TARGET")
+    target = Path(target_str) if target_str else TARGET
+    if not target.exists() or not any((target / rel).exists() for rel in GROUND_TRUTH):
+        print(f"Benchmark skipped: TARGET directory {target} does not exist.")
+        print("Set VERIFYCI_CPP_TARGET environment variable to point to firmware repo.")
+        return 0.0, 0.0
     parser = TreeSitterParser()
     tp = fp = fn = 0
     for rel, truth in GROUND_TRUTH.items():
-        path = TARGET / rel
+        path = target / rel
         language = "cpp" if path.suffix == ".cpp" else "c"
         if path.suffix == ".h":
             language = "cpp"

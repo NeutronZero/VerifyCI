@@ -7,11 +7,11 @@ exactly one entity with the referenced name exists. Zero candidates
 stay unlinked: a wrong link invents impact, a missing one merely
 undercounts it.
 """
-from src.contracts.edge import EdgeType
-from src.contracts.entity import EntityType
-from src.graph.builder import GraphBuilder
-from src.ingestion.extractor import extract_edges, extract_entities
-from src.ingestion.parser import TreeSitterParser
+from verifyci.contracts.edge import EdgeType
+from verifyci.contracts.entity import EntityType
+from verifyci.graph.builder import GraphBuilder
+from verifyci.ingestion.extractor import extract_edges, extract_entities
+from verifyci.ingestion.parser import TreeSitterParser
 
 
 def _build(files: dict[str, tuple[bytes, str]]):
@@ -157,8 +157,8 @@ def test_qualified_name_recorded_and_ids_stable():
     # `qualified_name` is additive metadata; the logical id still uses
     # the namespace-free scope, so wrapping code in a namespace renames
     # nothing already stored (no duplicate live rows on re-ingest).
-    from src.contracts.identity import compute_logical_entity_id
-    from src.contracts.entity import EntityType
+    from verifyci.contracts.identity import compute_logical_entity_id
+    from verifyci.contracts.entity import EntityType
     _, _, entities, _ = _build({
         "x.cpp": (b"namespace ns {\nvoid helper() {}\n}\nvoid top() {}\n", "cpp"),
     })
@@ -198,8 +198,8 @@ def test_decorator_calls_captured():
     # `@app.route` lives outside the function body; without decorator
     # scanning it produces no reference at all. `route` is undefined,
     # so the reference stays unresolved rather than linking wrongly.
-    from src.ingestion.extractor import extract_edges, extract_entities
-    from src.ingestion.parser import TreeSitterParser
+    from verifyci.ingestion.extractor import extract_edges, extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
     parsed = TreeSitterParser().parse(
         "a.py", b"import app\n\n@app.route(\"/x\")\ndef view():\n    pass\n",
         "python")

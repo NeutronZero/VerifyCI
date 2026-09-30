@@ -6,7 +6,7 @@ and batch chunking is pinned through a stubbed transport.
 """
 import asyncio
 
-from src.retrieval.provider import (
+from verifyci.retrieval.provider import (
     CachedEmbeddingProvider,
     HashEmbeddingProvider,
     OllamaEmbeddingProvider,

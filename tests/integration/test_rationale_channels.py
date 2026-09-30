@@ -59,15 +59,15 @@ def _context(diff=DIFF):
 
 
 def test_cli_result_carries_rationale():
-    from src.interface.commands.verify import run_verify
+    from verifyci.interface.commands.verify import run_verify
     # CLI prints result['status'] and result['rationale'] verbatim;
     # pin the source dict, not the echo formatting.
     import tempfile
     import os
-    from src.storage.graph_store import GraphStore
-    from src.storage.revision import create_revision
-    from src.ingestion.parser import TreeSitterParser
-    from src.ingestion.extractor import extract_entities, extract_edges
+    from verifyci.storage.graph_store import GraphStore
+    from verifyci.storage.revision import create_revision
+    from verifyci.ingestion.parser import TreeSitterParser
+    from verifyci.ingestion.extractor import extract_entities, extract_edges
 
     db = os.path.join(tempfile.mkdtemp(), "q.db")
     store = GraphStore(db)
@@ -90,7 +90,7 @@ def test_cli_result_carries_rationale():
 
 @pytest.mark.asyncio
 async def test_mcp_result_carries_rationale():
-    from src.interface.mcp_server import create_mcp_server
+    from verifyci.interface.mcp_server import create_mcp_server
     server = create_mcp_server(graph=_FakeGraph(), node_map={"e1": 0})
     result = await server.call_tool("verify.diff", diff=DIFF)
     assert result["status"] == "PASS"
@@ -98,7 +98,7 @@ async def test_mcp_result_carries_rationale():
 
 
 def test_http_response_carries_rationale(monkeypatch):
-    from src.interface import http as http_module
+    from verifyci.interface import http as http_module
 
     class _Req:
         diff = DIFF
@@ -118,9 +118,9 @@ def test_http_response_carries_rationale(monkeypatch):
 @pytest.mark.asyncio
 async def test_ledger_event_carries_rationale():
     import asyncio
-    from src.contracts.scheduler import TaskStatus
-    from src.memory.ledger import EventLedger
-    from src.orchestration.scheduler import AsyncDAGScheduler
+    from verifyci.contracts.scheduler import TaskStatus
+    from verifyci.memory.ledger import EventLedger
+    from verifyci.orchestration.scheduler import AsyncDAGScheduler
 
     ledger = EventLedger()
     scheduler = AsyncDAGScheduler(ledger=ledger)

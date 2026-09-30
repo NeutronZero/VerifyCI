@@ -1,10 +1,10 @@
 """Unit tests for small pure helpers previously covered only indirectly."""
-from src.ingestion.extractor import _source_snippet
-from src.ingestion.language import detect_language, is_ingestible
-from src.memory.ledger import EventLedger
-from src.orchestration.events import emit_event
-from src.orchestration.executor import _get
-from src.orchestration.scheduler import _levels, _topo_order
+from verifyci.ingestion.extractor import _source_snippet
+from verifyci.ingestion.language import detect_language, is_ingestible
+from verifyci.memory.ledger import EventLedger
+from verifyci.orchestration.events import emit_event
+from verifyci.orchestration.executor import _get
+from verifyci.orchestration.scheduler import _levels, _topo_order
 
 
 def test_topo_order_chain():
@@ -73,7 +73,7 @@ def test_detect_language_unknown():
 
 def test_run_stats_empty_db_counts_zero(tmp_path):
     import sqlite3
-    from src.interface.commands.stats import run_stats
+    from verifyci.interface.commands.stats import run_stats
     db = str(tmp_path / "empty.db")
     sqlite3.connect(db).close()
     stats = run_stats(db)
@@ -86,11 +86,11 @@ def test_run_stats_empty_db_counts_zero(tmp_path):
 def test_run_stats_reports_resolution_coverage(tmp_path):
     # Resolver coverage is operator-visible: resolved vs ambiguous vs
     # missing, plus stored unresolved edges awaiting a unique target.
-    from src.contracts.edge import Edge, EdgeType
-    from src.contracts.entity import Entity, EntityType
-    from src.interface.commands.stats import run_stats
-    from src.storage.graph_store import GraphStore
-    from src.storage.revision import create_revision
+    from verifyci.contracts.edge import Edge, EdgeType
+    from verifyci.contracts.entity import Entity, EntityType
+    from verifyci.interface.commands.stats import run_stats
+    from verifyci.storage.graph_store import GraphStore
+    from verifyci.storage.revision import create_revision
     db = str(tmp_path / "v.db")
     store = GraphStore(db)
     try:
@@ -126,7 +126,7 @@ def test_run_stats_reports_resolution_coverage(tmp_path):
 
 def test_run_vuln_skips_invalid_json_metadata(tmp_path):
     import sqlite3
-    from src.interface.commands.vuln import run_vuln
+    from verifyci.interface.commands.vuln import run_vuln
     db = str(tmp_path / "v.db")
     conn = sqlite3.connect(db)
     conn.execute("CREATE TABLE edges (metadata_json TEXT, type TEXT)")
@@ -145,7 +145,7 @@ def test_run_vuln_skips_invalid_json_metadata(tmp_path):
 def test_run_vuln_reports_unreadable_db(tmp_path):
     # A scan that never ran must not look like a clean scan: wrong path
     # and schema-less DBs surface "error" instead of empty findings.
-    from src.interface.commands.vuln import run_vuln
+    from verifyci.interface.commands.vuln import run_vuln
     bad_dir = run_vuln(str(tmp_path / "no-such-dir" / "v.db"),
                        cache_path=str(tmp_path / "cache.db"))
     assert bad_dir["findings"] == []
@@ -156,3 +156,39 @@ def test_run_vuln_reports_unreadable_db(tmp_path):
     no_schema = run_vuln(empty, cache_path=str(tmp_path / "cache.db"))
     assert no_schema["findings"] == []
     assert "error" in no_schema
+
+
+def test_run_deps_skips_verifyci(tmp_path):
+    from verifyci.interface.commands.deps import run_deps
+    (tmp_path / 'requirements.txt').write_text('requests==2.0\n')
+    vdir = tmp_path / '.verifyci'
+    vdir.mkdir()
+    (vdir / 'requirements.txt').write_text('requests==2.0\n')
+    out = run_deps(str(tmp_path))
+    assert any('requirements.txt' in k and '.verifyci' not in k for k in out)
+    assert not any('.verifyci' in k for k in out)
+
+
+def test_run_evaluate_keys():
+    from verifyci.interface.commands.evaluate import run_evaluate
+    out = run_evaluate()
+    for k in ('ledger_chain', 'replay_equivalence', 'event_replay', 'invariant_metrics'):
+        assert k in out
+
+
+def test_run_init_creates_db(tmp_path):
+    import os
+    from verifyci.interface.commands.init import run_init
+    db = run_init(str(tmp_path))
+    assert os.path.exists(db)
+    assert db.endswith('.verifyci' + '/' + 'verifyci.db') or 'verifyci.db' in db
+
+
+def test_provenance_and_graph_schema_imports():
+    from verifyci.contracts import provenance as prov
+    from verifyci.contracts import graph_schema as gs
+    assert hasattr(prov, 'validate_provenance_chain')
+    assert hasattr(gs, 'GRAPH_TYPES')
+    assert hasattr(gs, 'NODE_PROPERTIES')
+    assert prov.validate_provenance_chain([{ 'file_path': 'a', 'source_hash': 'h', 'revision_id': 'r'}]) is True
+    assert prov.validate_provenance_chain([{ 'file_path': 'a'}]) is False

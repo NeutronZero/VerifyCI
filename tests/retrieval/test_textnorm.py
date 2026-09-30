@@ -1,4 +1,4 @@
-from src.retrieval.textnorm import tokenize
+from verifyci.retrieval.textnorm import tokenize
 
 
 def test_snake_case_with_digits():

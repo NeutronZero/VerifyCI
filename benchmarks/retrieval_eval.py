@@ -12,11 +12,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.retrieval.dense import SearchResult
-from src.retrieval.fusion import rrf_fusion
-from src.retrieval.provider import HashEmbeddingProvider
-from src.retrieval.reranker import OfflineReranker
-from src.retrieval.sparse import BM25Retriever
+from verifyci.retrieval.dense import SearchResult
+from verifyci.retrieval.fusion import rrf_fusion
+from verifyci.retrieval.provider import HashEmbeddingProvider
+from verifyci.retrieval.reranker import OfflineReranker
+from verifyci.retrieval.sparse import BM25Retriever
 
 CORPUS = {
     "auth_login": "authentication login password user session",

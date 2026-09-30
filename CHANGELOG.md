@@ -1,5 +1,46 @@
 # Changelog
 
+## Unreleased — audit fixes: fail-closed verification, packaging, hardening
+
+- **Removal provenance closes the outside-hunk bypass.** `-` lines
+  outside any `@@` body (or under `@@@` combined headers, now parsed
+  and marked approximate) count as unverified, never fabricated:
+  before-hunk forged removals went PASS → INCONCLUSIVE. Verified in
+  production path (`run_verify`), pinned by regression tests.
+- **`secrets_scan` fails closed on multiline secrets.** Triple-quoted,
+  backslash, and paren-continued values carrying string literals now
+  FAIL; single-line env lookups still pass. Labeled recall 5/9 → 6/9.
+  Fixture/test-dir demotion removed: allowlisted secrets FAIL.
+- **Forbid rules fail closed on parser errors.** `_added_hits`
+  returns None on exception; both call sites reject with
+  "fragment parse failed (fail-closed)". `on_failure` restricted to
+  `block` (the `warn`-to-PASS conversion is gone). Invariant hits
+  carry `file:line:pattern` evidence.
+- **Ledger scoped verification fixed.** New `verify_subchain`
+  checks links within the task's subchain instead of demanding a
+  global-first event, so `verify-chain --task-id` is valid for every
+  task, not just the first. Anchor read errors other than missing
+  file surface as HEAD_MISMATCH, not absence.
+- **Orchestrator hardened.** Review decisions survive later `ok`
+  outcomes; `validate_task_ir` rejects hook-less steps; executor
+  floors to default invariants; unknown `depends_on` raises;
+  per-node timeout (300s default); cancel no longer clobbers terminal
+  status; ledger persists only new events in one batch; node work
+  offloaded with `to_thread`.
+- **HTTP fails closed off-loopback.** Tokenless access allowed only
+  from loopback sources; anything else is 401. MCP `verify_diff` /
+  `task_run` capped at 1M/100k chars like HTTP; MCP `anchor_file`
+  arbitrary-path append removed (CLI-only now).
+- **Packaging repaired.** `src/` → `verifyci/` (entry point was
+  installing a top-level package named `src`); dropped unused deps
+  (`aiosqlite`, `rank-bm25`, `ollama`, `uvicorn`,
+  `opentelemetry-sdk/semconv` — semconv stays optional);
+  `sentence-transformers` moved to `[embeddings]` extra; floors
+  raised to tested versions; `storage/verifyci.db` untracked;
+  CI workflow added (3.12–3.14, ruff + pytest); ruff excludes
+  deliberate dirty fixture `samples/`.
+- Suite 380 (was 334), coverage 89% (was 84%), ruff clean.
+
 ## Unreleased — remove revise; scope revisions by repository (B-1)
 
 - **`aci revise` deleted.** A marker command inserting entity-free

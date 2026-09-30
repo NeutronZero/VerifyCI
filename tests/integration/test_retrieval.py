@@ -1,6 +1,6 @@
-from src.retrieval.sparse import BM25Retriever
-from src.retrieval.fusion import rrf_fusion
-from src.retrieval.dense import SearchResult
+from verifyci.retrieval.sparse import BM25Retriever
+from verifyci.retrieval.fusion import rrf_fusion
+from verifyci.retrieval.dense import SearchResult
 
 
 def test_bm25_retriever():

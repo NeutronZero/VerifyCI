@@ -7,9 +7,9 @@ passes (the known last-event flaw); the anchored check fails closed.
 import json
 import sqlite3
 
-from src.interface.commands.anchor import run_verify_chain
-from src.interface.commands.run import run_task
-from src.memory.ledger import EventLedger, append_anchor, read_anchors
+from verifyci.interface.commands.anchor import run_verify_chain
+from verifyci.interface.commands.run import run_task
+from verifyci.memory.ledger import EventLedger, append_anchor, read_anchors
 
 
 def _run(db, anchor=None):
@@ -60,7 +60,7 @@ def test_anchor_round_trip_and_tamper_detection(tmp_path):
         conn.close()
 
     # Links-only still passes: the last event is anchored by nothing.
-    from src.storage.graph_store import GraphStore
+    from verifyci.storage.graph_store import GraphStore
     store = GraphStore(db)
     try:
         ledger = EventLedger.load_from_store(store)
@@ -152,7 +152,7 @@ def test_corrupt_anchor_fails_closed(tmp_path):
 
 def test_verify_chain_cli_exit_codes(tmp_path):
     from typer.testing import CliRunner
-    from src.interface.cli import app
+    from verifyci.interface.cli import app
     runner = CliRunner()
     missing = str(tmp_path / "missing.db")
     result = runner.invoke(app, ["verify-chain", "--db", missing])

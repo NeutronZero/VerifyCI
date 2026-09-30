@@ -1,7 +1,7 @@
-from src.graph.builder import GraphBuilder
-from src.ingestion.extractor import extract_edges, extract_entities
-from src.ingestion.parser import TreeSitterParser
-from src.retrieval.blast_radius import compute_blast_radius
+from verifyci.graph.builder import GraphBuilder
+from verifyci.ingestion.extractor import extract_edges, extract_entities
+from verifyci.ingestion.parser import TreeSitterParser
+from verifyci.retrieval.blast_radius import compute_blast_radius
 
 SOURCE = b"""import os
 

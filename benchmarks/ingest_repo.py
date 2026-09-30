@@ -4,11 +4,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.ingestion.parser import TreeSitterParser, compute_source_hash, ParsedFile
-from src.ingestion.extractor import extract_entities, extract_edges
-from src.ingestion.language import INGESTIBLE_EXTENSIONS, detect_language
-from src.storage.graph_store import GraphStore
-from src.storage.revision import create_revision
+from verifyci.ingestion.parser import TreeSitterParser, compute_source_hash, ParsedFile
+from verifyci.ingestion.extractor import extract_entities, extract_edges
+from verifyci.ingestion.language import INGESTIBLE_EXTENSIONS, detect_language
+from verifyci.storage.graph_store import GraphStore
+from verifyci.storage.revision import create_revision
 
 SOURCE_EXTS = INGESTIBLE_EXTENSIONS
 

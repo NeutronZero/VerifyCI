@@ -8,9 +8,9 @@ import json
 
 import pytest
 
-from src.memory.ledger import EventLedger
-from src.memory.replay import ReplayEngine
-from src.memory.snapshot import SnapshotStore
+from verifyci.memory.ledger import EventLedger
+from verifyci.memory.replay import ReplayEngine
+from verifyci.memory.snapshot import SnapshotStore
 
 LENGTHS = [1, 2, 3, 5, 8, 13]
 
@@ -84,7 +84,7 @@ def test_snapshot_round_trip(threshold):
 
 
 def test_ledger_store_round_trip(tmp_path):
-    from src.storage.graph_store import GraphStore
+    from verifyci.storage.graph_store import GraphStore
     db = str(tmp_path / "mem.db")
     ledger = _build("linear", 4)
     store = GraphStore(db)

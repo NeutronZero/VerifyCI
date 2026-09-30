@@ -1,5 +1,5 @@
-from src.contracts.identity import compute_logical_entity_id, compute_revision_entity_id
-from src.contracts.entity import EntityType
+from verifyci.contracts.identity import compute_logical_entity_id, compute_revision_entity_id
+from verifyci.contracts.entity import EntityType
 
 
 def test_logical_entity_id_stable_across_revisions():

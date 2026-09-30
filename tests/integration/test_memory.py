@@ -1,6 +1,6 @@
-from src.memory.ledger import EventLedger
-from src.memory.replay import ReplayEngine
-from src.memory.snapshot import SnapshotStore
+from verifyci.memory.ledger import EventLedger
+from verifyci.memory.replay import ReplayEngine
+from verifyci.memory.snapshot import SnapshotStore
 
 
 def test_event_ledger_append():
@@ -35,7 +35,7 @@ def test_head_hash_pins_last_event():
     # every prev_hash consistent. A pinned head (stored externally)
     # detects the forgery; without it, verify_chain stays True.
     import dataclasses
-    from src.memory.ledger import EventLedger
+    from verifyci.memory.ledger import EventLedger
     ledger = EventLedger()
     for i in range(3):
         ledger.append(f"T{i}", {"decision": "PASS"}, {"src": "test"})

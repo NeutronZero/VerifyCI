@@ -1,15 +1,15 @@
-from src.verification.policy import PolicyEvaluator
-from src.verification.semi_formal_reason import SemiFormalReasoner
-from src.verification.intent_align import evaluate_invariants
-from src.verification.evidence_verifier import verify_evidence_coverage
-from src.contracts.verification_ir import (
+from verifyci.verification.policy import PolicyEvaluator
+from verifyci.verification.semi_formal_reason import SemiFormalReasoner
+from verifyci.verification.intent_align import evaluate_invariants
+from verifyci.verification.evidence_verifier import verify_evidence_coverage
+from verifyci.contracts.verification_ir import (
     VerificationReport, CheckResult, VerificationPolicy, BlastRadiusResult,
 )
-from src.contracts.evidence import EvidencePack, SourceChunk
+from verifyci.contracts.evidence import EvidencePack, SourceChunk
 
 
 def make_check(passed=True, blocking=True):
-    from src.contracts.verification_ir import Certificate, Premise, FileEvidence, ExecutionTrace, Conclusion
+    from verifyci.contracts.verification_ir import Certificate, Premise, FileEvidence, ExecutionTrace, Conclusion
     cert = Certificate(
         certificate_id="cert1",
         premises=[Premise(premise_id="p1", statement="test", source="test")],
@@ -156,8 +156,8 @@ def test_policy_inability_plus_nonblocking_is_inconclusive():
 
 def test_invariant_blocking_flag_reaches_policy():
     # Non-blocking invariant failures must not FAIL the report on their own.
-    from src.verification.intent_align import evaluate_invariants
-    from src.contracts.verification_ir import Invariant
+    from verifyci.verification.intent_align import evaluate_invariants
+    from verifyci.contracts.verification_ir import Invariant
     inv = Invariant(invariant_id="p", rule="prov", compiled_query="provenance_check",
                     blocking=False)
     (check,), _ = evaluate_invariants("x", [inv], graph=None, evidence=[])

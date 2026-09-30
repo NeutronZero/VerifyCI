@@ -4,7 +4,7 @@ Stdio is a framed byte stream; any decoration on stdout corrupts every
 client read. These tests pin the surface without launching a server
 (serving is verified manually against a real client handshake).
 """
-from src.interface.fastmcp_server import create_fastmcp_server
+from verifyci.interface.fastmcp_server import create_fastmcp_server
 
 
 async def _tools(mcp):
@@ -27,7 +27,7 @@ def test_fastmcp_exposes_six_v1_tools(tmp_path):
 
 def test_fastmcp_serve_hides_banner():
     import inspect
-    from src.interface import fastmcp_server
+    from verifyci.interface import fastmcp_server
     src = inspect.getsource(fastmcp_server.serve)
     assert "show_banner=False" in src
 
@@ -60,14 +60,14 @@ class _FakeGraph:
 def test_fastmcp_server_attaches_ledger():
     # MCP task executions must leave an audit trail, not ledger_head None.
     import inspect
-    from src.interface import fastmcp_server
+    from verifyci.interface import fastmcp_server
     src = inspect.getsource(fastmcp_server.create_fastmcp_server)
     assert "EventLedger()" in src
 
 
 def test_search_hits_carry_definition_coordinates():
     import asyncio
-    from src.interface.mcp_server import create_mcp_server
+    from verifyci.interface.mcp_server import create_mcp_server
     server = create_mcp_server(graph=_FakeGraph(), node_map={"e1": 0},
                                entities=[_Payload()])
     out = asyncio.run(server.call_tool("code.search", query="func"))
@@ -83,7 +83,7 @@ def test_definition_resolves_search_revision_id():
     # The chaining loop: search returns a revision id, definition
     # accepts it directly — no logical-id derivation needed.
     import asyncio
-    from src.interface.mcp_server import create_mcp_server
+    from verifyci.interface.mcp_server import create_mcp_server
     server = create_mcp_server(graph=_FakeGraph(), node_map={"e1": 0},
                                entities=[_Payload()], store=None)
     found = asyncio.run(server.call_tool("code.search", query="func"))
@@ -97,14 +97,14 @@ def test_definition_resolves_search_revision_id():
 
 def test_mcp_task_run_records_ledger_and_head():
     import asyncio
-    from src.contracts.scheduler import TERMINAL_STATUSES
-    from src.interface.mcp_server import create_mcp_server
-    from src.memory.ledger import EventLedger
+    from verifyci.contracts.scheduler import TERMINAL_STATUSES
+    from verifyci.interface.mcp_server import create_mcp_server
+    from verifyci.memory.ledger import EventLedger
     ledger = EventLedger()
     server = create_mcp_server(graph=_FakeGraph(), node_map={"e1": 0},
                                entities=[_Payload()], ledger=ledger, store=None)
     out = asyncio.run(server.call_tool("task.run", task="probe", diff=""))
-    from src.contracts.scheduler import TaskStatus
+    from verifyci.contracts.scheduler import TaskStatus
     assert TaskStatus(out["status"]) in TERMINAL_STATUSES
     assert out["ledger_head"] == ledger.head_hash()
     assert out["ledger_head"] is not None

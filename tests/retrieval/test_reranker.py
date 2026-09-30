@@ -1,6 +1,6 @@
-from src.retrieval.dense import SearchResult
-from src.retrieval.provider import SentenceTransformerProvider
-from src.retrieval.reranker import CrossEncoderReranker, OfflineReranker, Reranker
+from verifyci.retrieval.dense import SearchResult
+from verifyci.retrieval.provider import SentenceTransformerProvider
+from verifyci.retrieval.reranker import CrossEncoderReranker, OfflineReranker, Reranker
 
 
 def test_offline_reranker_is_explicit_backend():

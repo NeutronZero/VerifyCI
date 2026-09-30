@@ -1,7 +1,7 @@
 import pytest
 
-from src.memory.ledger import EventLedger
-from src.memory.replay import ReplayEngine
+from verifyci.memory.ledger import EventLedger
+from verifyci.memory.replay import ReplayEngine
 
 
 def test_replay_prefix_equivalence():

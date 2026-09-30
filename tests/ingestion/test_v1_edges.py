@@ -1,5 +1,5 @@
-from src.ingestion.extractor import extract_edges, extract_entities
-from src.ingestion.parser import TreeSitterParser
+from verifyci.ingestion.extractor import extract_edges, extract_entities
+from verifyci.ingestion.parser import TreeSitterParser
 
 BANNED = {"calls_indirect", "controls", "flows_to", "sequential", "reaches", "uses", "defines"}
 REQUIRED = {"contains", "has_name", "calls_direct", "imports", "inherits", "references"}
@@ -45,8 +45,8 @@ def test_self_recursion_uses_recursive_subtype():
 
 
 def test_entities_carry_source_snippet():
-    from src.ingestion.extractor import extract_entities
-    from src.ingestion.parser import TreeSitterParser
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
     parsed = TreeSitterParser().parse("t.py", b"def f():\n    return 42\n", "python")
     entities = [e for e in extract_entities(parsed, "r", "rev") if e.name == "f"]
     assert entities and "return 42" in (entities[0].metadata or {}).get("snippet", "")
@@ -56,9 +56,9 @@ def test_relative_import_records_module_not_symbol():
     # `from ..config import Config` must attribute the edge to the module
     # (`..config`), never the imported symbol — otherwise forbid_import
     # rules silently miss relative imports.
-    from src.contracts.entity import EntityType
-    from src.ingestion.extractor import extract_entities
-    from src.ingestion.parser import TreeSitterParser
+    from verifyci.contracts.entity import EntityType
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
     src = (
         "from ..config import Config\n"
         "from .scaffold import Scaffold\n"
@@ -74,9 +74,9 @@ def test_relative_import_records_module_not_symbol():
 def test_bare_relative_import_pinned():
     # `from . import thing`: no module name exists in the statement, so the
     # bare level (".") is recorded rather than inventing package resolution.
-    from src.contracts.entity import EntityType
-    from src.ingestion.extractor import extract_entities
-    from src.ingestion.parser import TreeSitterParser
+    from verifyci.contracts.entity import EntityType
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
     parsed = TreeSitterParser().parse("x.py", b"from . import thing\n", "python")
     imports = sorted(
         e.name for e in extract_entities(parsed, "r", "rev") if e.type == EntityType.IMPORT)
@@ -87,9 +87,9 @@ def test_struct_reference_is_not_an_entity():
     # `struct Point *p;` mentions the type without defining it: elaborated
     # type specifiers and forward declarations emit nothing. Only a body
     # (field_declaration_list) makes a CLASS.
-    from src.contracts.entity import EntityType
-    from src.ingestion.extractor import extract_entities
-    from src.ingestion.parser import TreeSitterParser
+    from verifyci.contracts.entity import EntityType
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
     src = (b"struct Point { int x; };\n"
            b"struct Point *p;\n"
            b"struct Empty;\n")
@@ -104,9 +104,9 @@ def test_enum_class_in_c_grammar_is_not_a_function():
     # file (parsed as C) misparses as function_definition with a bare
     # identifier name and no declarator. C/C++ names must come from the
     # declarator, so this emits nothing instead of a phantom FUNCTION.
-    from src.contracts.entity import EntityType
-    from src.ingestion.extractor import extract_entities
-    from src.ingestion.parser import TreeSitterParser
+    from verifyci.contracts.entity import EntityType
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
     src = (b"enum class TripReason {\n"
            b"    OVERCURRENT,\n"
            b"    NONE\n"
@@ -121,9 +121,9 @@ def test_overload_definitions_collapse_to_one_entity():
     # Two `write` overloads share (file, name, type, scope) and therefore
     # one logical id; storage keeps first-wins. Documented, not blessed:
     # overloads are invisible to identity, same as same-name redefinitions.
-    from src.contracts.entity import EntityType
-    from src.ingestion.extractor import extract_entities
-    from src.ingestion.parser import TreeSitterParser
+    from verifyci.contracts.entity import EntityType
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
     src = (b"void write(uint8_t v) { (void)v; }\n"
            b"void write(const char *s) { (void)s; }\n")
     parsed = TreeSitterParser().parse("x.cpp", src, "cpp")
@@ -136,9 +136,9 @@ def test_overload_definitions_collapse_to_one_entity():
 def test_pointer_and_reference_returns_emit_entities():
     # `char *f()` / `T& f()` nest the declarator inside pointer/reference
     # wrappers; the old trio missed them and whole functions vanished.
-    from src.contracts.entity import EntityType
-    from src.ingestion.extractor import extract_entities
-    from src.ingestion.parser import TreeSitterParser
+    from verifyci.contracts.entity import EntityType
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
     src = (b"char *getbuf(void) { return 0; }\n"
            b"int &counter(int &c) { return c; }\n")
     parsed = TreeSitterParser().parse("x.cpp", src, "cpp")
@@ -151,9 +151,9 @@ def test_pointer_and_reference_returns_emit_entities():
 
 
 def test_destructor_and_operator_names():
-    from src.contracts.entity import EntityType
-    from src.ingestion.extractor import extract_entities
-    from src.ingestion.parser import TreeSitterParser
+    from verifyci.contracts.entity import EntityType
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
     src = (b"class W {\n public:\n  ~W() {}\n"
            b"  bool operator==(const W &o) { return true; }\n};\n")
     parsed = TreeSitterParser().parse("x.cpp", src, "cpp")
@@ -164,9 +164,9 @@ def test_destructor_and_operator_names():
 
 
 def test_multi_import_statement_emits_all_modules():
-    from src.contracts.entity import EntityType
-    from src.ingestion.extractor import extract_entities
-    from src.ingestion.parser import TreeSitterParser
+    from verifyci.contracts.entity import EntityType
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
     parsed = TreeSitterParser().parse("x.py", b"import os, sys\n", "python")
     imports = sorted(
         e.name for e in extract_entities(parsed, "r", "rev") if e.type == EntityType.IMPORT)
@@ -174,9 +174,9 @@ def test_multi_import_statement_emits_all_modules():
 
 
 def test_typedef_names_new_type():
-    from src.contracts.entity import EntityType
-    from src.ingestion.extractor import extract_entities
-    from src.ingestion.parser import TreeSitterParser
+    from verifyci.contracts.entity import EntityType
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
     parsed = TreeSitterParser().parse("x.c", b"typedef Bar Baz;\n", "c")
     types = [e.name for e in extract_entities(parsed, "r", "rev")
              if e.type == EntityType.TYPE]
@@ -184,9 +184,9 @@ def test_typedef_names_new_type():
 
 
 def test_struct_methods_are_methods():
-    from src.contracts.entity import EntityType
-    from src.ingestion.extractor import extract_entities
-    from src.ingestion.parser import TreeSitterParser
+    from verifyci.contracts.entity import EntityType
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
     parsed = TreeSitterParser().parse(
         "x.cpp", b"struct S {\n void m() {}\n};\n", "cpp")
     methods = [e.name for e in extract_entities(parsed, "r", "rev")
@@ -195,9 +195,9 @@ def test_struct_methods_are_methods():
 
 
 def test_c_include_emits_import():
-    from src.contracts.entity import EntityType
-    from src.ingestion.extractor import extract_entities
-    from src.ingestion.parser import TreeSitterParser
+    from verifyci.contracts.entity import EntityType
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
     parsed = TreeSitterParser().parse(
         "x.c", b'#include <stdio.h>\n#include "util.h"\n', "c")
     imports = sorted(
@@ -208,8 +208,8 @@ def test_c_include_emits_import():
 def test_docstring_code_examples_are_not_entities():
     # A regex ground truth would count `ghost`; the AST correctly ignores it.
     # Ground-truth annotation must be AST-aware (or human-read), not regex.
-    from src.ingestion.extractor import extract_entities
-    from src.ingestion.parser import TreeSitterParser
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
     src = (
         "def f():\n"
         '    """Example:\n'

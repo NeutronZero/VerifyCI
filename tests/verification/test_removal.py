@@ -8,7 +8,7 @@ never FAIL — absence of record is not contradiction.
 """
 from types import SimpleNamespace
 
-from src.verification.removal import removal_provenance_check
+from verifyci.verification.removal import removal_provenance_check
 
 
 def _ent(start, end, snippet, path="src/app.py", type_=None):
@@ -74,7 +74,7 @@ def test_truncated_snippet_cannot_contradict():
 
 
 def test_module_only_covering_is_unverified():
-    from src.contracts.entity import EntityType
+    from verifyci.contracts.entity import EntityType
     ent = _ent(1, 1, "src/app.py", type_=EntityType.MODULE)
     diff = DIFF_HEAD + "@@ -1,1 +1,1 @@\n-x = 1\n+x = 2\n"
     check = removal_provenance_check(diff, [ent])
@@ -98,7 +98,7 @@ def test_form_feed_does_not_misalign():
     # `\x0c` splits str.splitlines() but not tree-sitter line counts.
     # Snippets built \n-only stay aligned; a splitlines-built snippet
     # would shift every later line into a false "fabricated" verdict.
-    from src.ingestion.extractor import _split_source_lines
+    from verifyci.ingestion.extractor import _split_source_lines
     src = b"def f():\n\x0c    return 1\n"
     assert _split_source_lines(src) == ["def f():", "\x0c    return 1", ""]
     ent = _ent(1, 2, "def f():\n\x0c    return 1")
@@ -111,10 +111,10 @@ def test_form_feed_does_not_misalign():
 def test_policy_routes_fabricated_to_fail_and_unverified_to_inconclusive():
     import time
     import uuid
-    from src.contracts.verification_ir import (
+    from verifyci.contracts.verification_ir import (
         BlastRadiusResult, CheckResult, VerificationPolicy, VerificationReport,
     )
-    from src.verification.policy import PolicyEvaluator
+    from verifyci.verification.policy import PolicyEvaluator
 
     def _report(check):
         return VerificationReport(
@@ -147,10 +147,10 @@ def test_policy_routes_fabricated_to_fail_and_unverified_to_inconclusive():
 def test_run_verify_routes_fabricated_removal_to_fail(tmp_path):
     # End-to-end wiring through verify.py: a `-` line contradicting the
     # stored snippet must FAIL, not ride the tripwire to INCONCLUSIVE.
-    from src.contracts.entity import Entity, EntityType
-    from src.interface.commands.verify import run_verify
-    from src.storage.graph_store import GraphStore
-    from src.storage.revision import create_revision
+    from verifyci.contracts.entity import Entity, EntityType
+    from verifyci.interface.commands.verify import run_verify
+    from verifyci.storage.graph_store import GraphStore
+    from verifyci.storage.revision import create_revision
 
     db = str(tmp_path / "v.db")
     store = GraphStore(db)
@@ -169,3 +169,59 @@ def test_run_verify_routes_fabricated_removal_to_fail(tmp_path):
     out = run_verify(diff, db_path=db)
     assert out["status"] == "FAIL"
     assert out["rationale"] == "blocking_check_failed"
+
+
+def test_stray_before_hunk_is_unverified():
+    # stray minus before first hunk is inability, never vacuous pass
+    nl = chr(10)
+    diff = DIFF_HEAD + '-forged line' + nl + '@@ -10,2 +10,1 @@' + nl + ' def f():' + nl + '-    return 1' + nl
+    ent = _ent(10, 11, 'def f():' + nl + '    return 1')
+    check = removal_provenance_check(diff, [ent])
+    assert check.passed is True
+    assert check.established is False
+
+def test_combined_diff_removal_is_unverified_not_fabricated():
+    # combined hunks are approximate, removals unverified not fabricated
+    nl = chr(10)
+    diff = 'diff --git a/src/app.py b/src/app.py' + nl + '--- a/src/app.py' + nl + '+++ b/src/app.py' + nl + '@@@ -10,2 -10,2 +10,1 @@@' + nl + '-    return 1' + nl + '+    return 2' + nl
+    ent = _ent(10, 11, 'def f():' + nl + '    return 1')
+    check = removal_provenance_check(diff, [ent])
+    assert check.passed is True
+    assert check.established is False
+    assert check.evidence == []
+
+def test_fabricated_in_hunk_still_fails():
+    # exact hunk contradiction still fails closed
+    nl = chr(10)
+    ent = _ent(10, 12, 'def f():' + nl + '    return 1' + nl + '    return 2')
+    diff = DIFF_HEAD + '@@ -10,3 +10,3 @@' + nl + ' def f():' + nl + '-    return 1' + nl + '-    launch_missiles()' + nl + '+    return 2' + nl
+    check = removal_provenance_check(diff, [ent])
+    assert check.passed is False
+    assert check.established is True
+
+def test_addition_only_still_vacuous_pass():
+    # no removed lines at all keeps vacuous pass
+    nl = chr(10)
+    diff = DIFF_HEAD + '@@ -1,2 +1,3 @@' + nl + ' ctx' + nl + '+added' + nl + ' ctx' + nl
+    check = removal_provenance_check(diff, [_ent(1, 10, 'ctx' + nl + 'ctx')])
+    assert check.passed is True
+    assert check.established is True
+
+def test_run_verify_stray_before_hunk_not_pass(tmp_path):
+    # end to end stray before hunk never yields overall PASS
+    from verifyci.contracts.entity import Entity, EntityType
+    from verifyci.interface.commands.verify import run_verify
+    from verifyci.storage.graph_store import GraphStore
+    from verifyci.storage.revision import create_revision
+    nl = chr(10)
+    db = str(tmp_path / 'v.db')
+    store = GraphStore(db)
+    try:
+        revision = create_revision(repository_id='r', files=[('src/app.py', 'h')])
+        store.insert_revision(revision)
+        store.insert_entity(Entity(repository_id='r', logical_entity_id='l', revision_entity_id='e1', type=EntityType.FUNCTION, name='f', file_path='src/app.py', line_start=10, line_end=12, language='python', source_hash='h', revision_id=revision.revision_id, metadata={'snippet': 'def f():' + nl + '    return 1' + nl + '    return 2'}))
+    finally:
+        store.close()
+    diff = DIFF_HEAD + '-forged line' + nl + '@@ -10,3 +10,3 @@' + nl + ' def f():' + nl + '-    return 1' + nl + '-    launch_missiles()' + nl + '+    return 2' + nl
+    out = run_verify(diff, db_path=db)
+    assert out['status'] != 'PASS'

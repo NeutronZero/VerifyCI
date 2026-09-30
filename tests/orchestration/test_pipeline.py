@@ -1,9 +1,9 @@
 import pytest
 
-from src.orchestration.intent import build_intent_package
-from src.orchestration.planner import Planner
-from src.orchestration.scheduler import AsyncDAGScheduler
-from src.contracts.scheduler import TERMINAL_STATUSES, TaskStatus
+from verifyci.orchestration.intent import build_intent_package
+from verifyci.orchestration.planner import Planner
+from verifyci.orchestration.scheduler import AsyncDAGScheduler
+from verifyci.contracts.scheduler import TERMINAL_STATUSES, TaskStatus
 
 
 async def _drain(scheduler, task_id, tries=100):
@@ -47,7 +47,7 @@ async def test_gated_dag_without_evidence_ends_inconclusive():
 
 @pytest.mark.asyncio
 async def test_ungated_dag_completes():
-    from src.contracts.scheduler import ExecutableDAG
+    from verifyci.contracts.scheduler import ExecutableDAG
     scheduler = AsyncDAGScheduler()
     dag = ExecutableDAG(dag_id="d", nodes=[
         {"step_id": "s1", "type": "noop", "config": {}, "depends_on": []},
@@ -60,7 +60,7 @@ async def test_ungated_dag_completes():
 
 @pytest.mark.asyncio
 async def test_scheduler_budget_breach():
-    from src.contracts.scheduler import ExecutableDAG
+    from verifyci.contracts.scheduler import ExecutableDAG
     scheduler = AsyncDAGScheduler()
     dag = ExecutableDAG(dag_id="d", nodes=[{"step_id": "s1"}, {"step_id": "s2"}], budget_nano_usd=1)
     task_id = await scheduler.submit(dag)
@@ -71,7 +71,7 @@ async def test_scheduler_budget_breach():
 async def test_scheduler_no_budget_means_unlimited():
     # None (the default) is "no budget set". The old default of 0
     # silently disabled the guard via `if budget`.
-    from src.contracts.scheduler import ExecutableDAG
+    from verifyci.contracts.scheduler import ExecutableDAG
     assert ExecutableDAG(dag_id="d").budget_nano_usd is None
     scheduler = AsyncDAGScheduler()
     dag = ExecutableDAG(dag_id="d", nodes=[
@@ -84,7 +84,7 @@ async def test_scheduler_no_budget_means_unlimited():
 @pytest.mark.asyncio
 async def test_scheduler_zero_budget_breaches():
     # 0 is a real zero budget now, not a falsy alias for unlimited.
-    from src.contracts.scheduler import ExecutableDAG
+    from verifyci.contracts.scheduler import ExecutableDAG
     scheduler = AsyncDAGScheduler()
     dag = ExecutableDAG(dag_id="d", nodes=[{"step_id": "s1"}], budget_nano_usd=0)
     task_id = await scheduler.submit(dag)
@@ -96,8 +96,8 @@ async def test_scheduler_zero_budget_breaches():
 async def test_scheduler_pins_head_on_failure_paths():
     # L1: the ledger head is pinned in a finally, so every terminal
     # path — including budget breach — leaves a head behind.
-    from src.contracts.scheduler import ExecutableDAG
-    from src.memory.ledger import EventLedger
+    from verifyci.contracts.scheduler import ExecutableDAG
+    from verifyci.memory.ledger import EventLedger
     scheduler = AsyncDAGScheduler(ledger=EventLedger())
     dag = ExecutableDAG(dag_id="d", nodes=[{"step_id": "s1"}], budget_nano_usd=0)
     task_id = await scheduler.submit(dag)
@@ -110,9 +110,9 @@ async def test_scheduler_pins_head_on_failure_paths():
 async def test_scheduler_persists_failed_runs():
     # The audit trail must contain failures, not just successes: the
     # budget-breach path persists before returning.
-    from src.contracts.scheduler import ExecutableDAG
-    from src.memory.ledger import EventLedger
-    from src.storage.graph_store import GraphStore
+    from verifyci.contracts.scheduler import ExecutableDAG
+    from verifyci.memory.ledger import EventLedger
+    from verifyci.storage.graph_store import GraphStore
     import tempfile
     import os
     db = os.path.join(tempfile.mkdtemp(prefix="vci_"), "v.db")
@@ -136,13 +136,13 @@ async def test_scheduler_persists_failed_runs():
 async def test_scheduler_node_error_is_attributed():
     # An unexpected node exception names the step and the exception type
     # instead of landing as a bare reason string.
-    from src.contracts.scheduler import ExecutableDAG
+    from verifyci.contracts.scheduler import ExecutableDAG
     scheduler = AsyncDAGScheduler()
     dag = ExecutableDAG(dag_id="d", nodes=[
         {"step_id": "boom", "type": "verify", "config": {"__raise__": True},
          "depends_on": [], "pre_commit_hook_id": "h"},
     ])
-    from src.orchestration import executor as _ex
+    from verifyci.orchestration import executor as _ex
 
     async def _raise(self, node, context):
         raise RuntimeError("kaput")
