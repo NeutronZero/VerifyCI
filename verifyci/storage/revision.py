@@ -1,13 +1,17 @@
 """Deterministic revision identity.
 
 revision_id = SHA256(canonical_json({
-    repository_id, commit_id, parent_revision_id,
+    repository_id,
     files: [{path, source_hash} sorted by path],
     ingestion_config_hash,
 }))
 
-Same repository state -> same revision_id. Wall-clock timestamp is
-recorded metadata only and never feeds identity.
+Same repository state -> same revision_id. Commit id, lineage, and
+wall-clock timestamp are *ingest metadata*, recorded on the append-only
+``ingests`` row, never inputs to content identity: two ingests of the
+same tree at different commits share one revision. A revert re-points a
+new ingest at the old revision, so lineage cannot cycle and the stored
+revision row is never rewritten.
 """
 import hashlib
 import json
@@ -25,10 +29,14 @@ def canonical_manifest(
     parent_revision_id: Optional[str],
     files: list[tuple[str, str]] | None,
 ) -> bytes:
+    """Canonical bytes of *content* identity.
+
+    ``commit_id`` and ``parent_revision_id`` are accepted for signature
+    compatibility with callers that still pass them, but are deliberately
+    excluded from the hash: they are ingest metadata, not content.
+    """
     manifest = {
         "repository_id": repository_id,
-        "commit_id": commit_id,
-        "parent_revision_id": parent_revision_id,
         "files": [
             {"path": path, "source_hash": source_hash}
             for path, source_hash in sorted(files or [])

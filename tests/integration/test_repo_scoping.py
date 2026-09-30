@@ -69,6 +69,9 @@ def test_custom_path_falls_back_to_global(tmp_path):
 
 
 def test_ingest_commit_id_persisted(tmp_path):
+    # Commit is ingest metadata now (not content identity): it lives on
+    # the append-only ingests row, and the revision row also carries the
+    # first observation's commit for backward compatibility.
     import shutil
     from verifyci.interface.commands.ingest import run_ingest
     from verifyci.storage.graph_store import GraphStore
@@ -78,10 +81,14 @@ def test_ingest_commit_id_persisted(tmp_path):
     out = run_ingest(str(repo), commit_id="abc123")
     store = GraphStore(out["db_path"])
     try:
-        row = store.conn.execute(
+        ing = store.conn.execute(
+            "SELECT commit_id FROM ingests WHERE revision_id = ?",
+            (out["revision_id"],)).fetchone()
+        assert ing[0] == "abc123"
+        rev = store.conn.execute(
             "SELECT commit_id FROM revisions WHERE revision_id = ?",
             (out["revision_id"],)).fetchone()
-        assert row[0] == "abc123"
+        assert rev[0] == "abc123"
     finally:
         store.close()
     shutil.rmtree(repo / ".verifyci", ignore_errors=True)

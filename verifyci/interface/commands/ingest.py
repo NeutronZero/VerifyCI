@@ -154,6 +154,17 @@ def run_ingest(path: str, incremental: bool = False,
         store.close()
 
 
+def _ingest_revision_id(store, ingest_id: str) -> str:
+    """Revision a prior ingest pointed at (lineage target for deltas and
+    disappearance closure); "" when there is no prior ingest."""
+    if not ingest_id:
+        return ""
+    row = store.conn.execute(
+        "SELECT revision_id FROM ingests WHERE ingest_id = ?", (ingest_id,)
+    ).fetchone()
+    return row[0] if row else ""
+
+
 def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False,
                       commit_id: str | None = None) -> dict:
         sources, texts, manifest = _collect(repo)
@@ -175,23 +186,37 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
             texts = [t for t in texts if t[0] in changed_paths]
         else:
             carried_sources, carried_texts = [], []
-        # Revision identity always covers the full manifest so equal repo
-        # states yield equal revisions regardless of incremental mode.
-
-        revision = create_revision(repository_id=repo.name, files=manifest,
-                                     commit_id=commit_id)
-        latest = store.get_latest_revision(repo.name)
-        if latest is not None and latest.revision_id != revision.revision_id:
-            import dataclasses
-            revision = dataclasses.replace(revision, parent_revision_id=latest.revision_id)
+        # Content id carries no commit/parent (they are excluded from the
+        # hash); they ride along only as the revision row's first-
+        # observation metadata. Lineage and commit are authoritative on
+        # the append-only ingest record below.
+        prev_ingest_id = store.latest_ingest_id(repo.name)
+        prev_revision_id = _ingest_revision_id(store, prev_ingest_id)
+        revision = create_revision(repository_id=repo.name,
+                                   commit_id=commit_id,
+                                   parent_revision_id=prev_revision_id or None,
+                                   files=manifest)
         store.insert_revision(revision)
+        from verifyci.contracts.revision import Ingest
+        ingest = Ingest(
+            ingest_id=str(__import__("uuid").uuid4()),
+            revision_id=revision.revision_id,
+            repository_id=repo.name,
+            parent_ingest_id=prev_ingest_id or None,
+            commit_id=commit_id,
+            timestamp=revision.timestamp,
+        )
+        store.insert_ingest(ingest)
+        # Same-state re-ingest has no distinct predecessor: skip the
+        # self-delta and the disappearance pass (nothing changed).
+        lineage_prev = prev_revision_id if prev_revision_id != revision.revision_id else ""
         snapshot = {"files": [{"path": p, "source_hash": h} for p, h in sorted(manifest)]}
         store.insert_anchor(revision.revision_id, snapshot)
-        if revision.parent_revision_id:
-            prev = store.get_anchor(revision.parent_revision_id) or {"files": []}
+        if lineage_prev:
+            prev = store.get_anchor(lineage_prev) or {"files": []}
             prev_map = {f["path"]: f["source_hash"] for f in prev.get("files", [])}
             cur_map = dict(manifest)
-            store.insert_delta(revision.parent_revision_id, revision.revision_id, {
+            store.insert_delta(lineage_prev, revision.revision_id, {
                 "added": sorted([p for p in cur_map if p not in prev_map]),
                 "removed": sorted([p for p in prev_map if p not in cur_map]),
                 "changed": sorted([p for p in cur_map
@@ -203,7 +228,7 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
                   "closed_entities": 0, "closed_edges": 0,
                   "parse_errors": [],
                   "revision_id": revision.revision_id,
-                  "parent_revision_id": revision.parent_revision_id,
+                  "parent_revision_id": prev_revision_id,
                   "db_path": db_path}
         import time as _time
         for rel, language, source in sources:
@@ -248,7 +273,7 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
             totals["closed_edges"] += store.close_superseded_edges(
                 edges, revision.revision_id, closed_at, repository_id=repo.name)
             totals["edges"] += len(edges)
-        if incremental and revision.parent_revision_id:
+        if incremental and lineage_prev:
             closed_at = _time.time()
             carried_e, carried_d = _carry_forward(
                 store, carried_sources, carried_texts, revision.revision_id, closed_at)
@@ -262,7 +287,7 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
         # and graph loads stop returning deleted code.
         closed_at = _time.time()
         gone_e, gone_d = store.close_disappeared(
-            revision.revision_id, revision.parent_revision_id or "",
+            revision.revision_id, lineage_prev or "",
             repo.name, closed_at)
         totals["closed_entities"] += gone_e
         totals["closed_edges"] += gone_d

@@ -19,10 +19,13 @@ def test_state_change_new_id():
     assert r1.revision_id != r2.revision_id
 
 
-def test_commit_bound_to_identity():
+def test_commit_is_metadata_not_identity():
+    # Content identity excludes commit: same tree at two commits is one
+    # revision. The commit is still carried on the returned record.
     r1 = create_revision("repo", commit_id="abc", files=_files())
     r2 = create_revision("repo", commit_id="def", files=_files())
-    assert r1.revision_id != r2.revision_id
+    assert r1.revision_id == r2.revision_id
+    assert r1.commit_id == "abc" and r2.commit_id == "def"
 
 
 def test_empty_manifest_deterministic():

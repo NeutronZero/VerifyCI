@@ -37,6 +37,11 @@ Cross-boundary types: `Constraint`, `Budget`, `SourceChunk`,
   edges) routes to INCONCLUSIVE, not PASS — pass-on-zero-edges is a
   different verdict from pass-on-500-edges, recorded here rather than in
   explanation prose.
+- Revision content identity vs ingest lineage: `Revision.revision_id` is a
+  pure function of repository + file manifest + config; `Ingest` carries
+  the append-only `parent_ingest_id`/`commit_id` chain. Commit and parent
+  never feed the content hash, revision rows are never rewritten (a revert
+  appends an ingest pointing at the old revision), so lineage cannot cycle.
 
 ## Set-membership principle
 

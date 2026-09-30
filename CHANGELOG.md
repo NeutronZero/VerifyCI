@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — revision identity: content vs lineage
+
+- **Content identity separated from lineage.** `revision_id` is now a
+  pure function of repository + full file manifest + ingestion config;
+  commit id and parent no longer feed the hash. Two ingests of the same
+  tree at different commits share one revision (was: distinct ids).
+- **Revision rows immutable.** `insert_revision` is `INSERT OR IGNORE`;
+  re-ingest never rewrites a stored row's commit/parent.
+- **Lineage moved to an append-only `ingests` chain.** New `Ingest`
+  contract + `ingests` table + `insert_ingest`/`latest_ingest_id`;
+  `latest_revision_id` reads the ingest chain (rowid tie-break), so a
+  revert correctly reports the old revision as latest and can never
+  create a parent cycle (was: `INSERT OR REPLACE` rewrote the old
+  revision's parent → A.parent=B, B.parent=A on revert). Same-state
+  re-ingest skips the self-delta and disappearance pass.
+- Live chain verified ingest→revision→entity→verify on the real DB;
+  cycle probe flips True→False.
+- Suite 462 (was 450), ruff clean.
+
 ## Unreleased — planner gates once, not 3x
 
 - **Verification runs once per task.** The planner stamped

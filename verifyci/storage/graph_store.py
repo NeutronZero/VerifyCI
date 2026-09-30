@@ -91,6 +91,16 @@ CREATE TABLE IF NOT EXISTS deltas (
     to_revision_id TEXT NOT NULL,
     delta_json TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS ingests (
+    ingest_id TEXT PRIMARY KEY,
+    revision_id TEXT NOT NULL,
+    repository_id TEXT NOT NULL,
+    parent_ingest_id TEXT,
+    commit_id TEXT,
+    timestamp REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ingests_repo ON ingests(repository_id, timestamp);
 """
 
 
@@ -109,12 +119,34 @@ def _edge_match_key(src_logic: str, dst_logic: str, etype: str,
 
 
 def latest_revision_id(conn, repository_id: str | None = None) -> str:
-    """Latest revision id for raw connections, scoped when possible.
+    """Latest ingested revision id for raw connections, scoped when
+    possible.
+
+    Reads the append-only ``ingests`` chain (insertion order), so a
+    revert (old content reappearing) correctly reports the old revision
+    as latest — ordering by the immutable ``revisions.timestamp`` would
+    freeze "latest" at first observation. Falls back to the
+    ``revisions`` table for DBs written before the ingest log existed.
 
     Read-only paths (stats, vuln) must not construct a store — that
     would mkdir and schema-write at client-chosen paths. Same
     repo-then-global rule as the method form.
     """
+    if _has_table(conn, "ingests"):
+        if repository_id:
+            row = conn.execute(
+                "SELECT revision_id FROM ingests WHERE repository_id = ?"
+                " ORDER BY timestamp DESC, rowid DESC LIMIT 1",
+                (repository_id,),
+            ).fetchone()
+            if row:
+                return row[0]
+        row = conn.execute(
+            "SELECT revision_id FROM ingests"
+            " ORDER BY timestamp DESC, rowid DESC LIMIT 1"
+        ).fetchone()
+        if row:
+            return row[0]
     if repository_id:
         row = conn.execute(
             "SELECT revision_id FROM revisions WHERE repository_id = ?"
@@ -127,6 +159,12 @@ def latest_revision_id(conn, repository_id: str | None = None) -> str:
         "SELECT revision_id FROM revisions ORDER BY timestamp DESC LIMIT 1"
     ).fetchone()
     return row[0] if row else ""
+
+
+def _has_table(conn, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone() is not None
 
 
 class GraphStore:
@@ -169,11 +207,23 @@ class GraphStore:
             self.conn.commit()
 
     def insert_revision(self, revision: Revision):
+        # Immutable: identical content is one row forever. A later
+        # ingest must never rewrite an existing revision's commit or
+        # parent — that is how a revert used to create a parent cycle.
         self.conn.execute(
-            "INSERT OR REPLACE INTO revisions VALUES (?,?,?,?,?,?,?)",
+            "INSERT OR IGNORE INTO revisions VALUES (?,?,?,?,?,?,?)",
             (revision.revision_id, revision.repository_id, revision.commit_id,
              revision.parent_revision_id, revision.source_hash,
              revision.timestamp, revision.ingestion_config_hash),
+        )
+        self._maybe_commit()
+
+    def insert_ingest(self, ingest) -> None:
+        """Append one ingest event (lineage chain, never rewritten)."""
+        self.conn.execute(
+            "INSERT INTO ingests VALUES (?,?,?,?,?,?)",
+            (ingest.ingest_id, ingest.revision_id, ingest.repository_id,
+             ingest.parent_ingest_id, ingest.commit_id, ingest.timestamp),
         )
         self._maybe_commit()
 
@@ -186,6 +236,14 @@ class GraphStore:
         and fall back to global only when no convention applies.
         """
         return latest_revision_id(self.conn, repository_id)
+
+    def latest_ingest_id(self, repository_id: str) -> str:
+        row = self.conn.execute(
+            "SELECT ingest_id FROM ingests WHERE repository_id = ?"
+            " ORDER BY timestamp DESC, rowid DESC LIMIT 1",
+            (repository_id,),
+        ).fetchone()
+        return row[0] if row else ""
 
     def get_latest_revision(self, repository_id: str):
         from verifyci.contracts.revision import Revision
