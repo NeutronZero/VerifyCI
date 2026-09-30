@@ -10,6 +10,14 @@ UNRESOLVED_TYPES = frozenset({EdgeType.CALLS_UNRESOLVED, EdgeType.INHERITS_UNRES
 _CALL_TARGET_TYPES = frozenset({EntityType.FUNCTION, EntityType.METHOD, EntityType.CLASS})
 _BASE_TARGET_TYPES = frozenset({EntityType.CLASS, EntityType.TYPE})
 
+#: Languages that link calls freely across each other. C and C++ share
+#: headers and `extern "C"`; every other language links only itself.
+_LANGUAGE_FAMILIES = {"c": "c-family", "cpp": "c-family"}
+
+
+def _same_lang_family(a: str, b: str) -> bool:
+    return _LANGUAGE_FAMILIES.get(a, a) == _LANGUAGE_FAMILIES.get(b, b)
+
 
 class GraphBuilder:
     def __init__(self, allow_external: bool = True):
@@ -88,11 +96,15 @@ class GraphBuilder:
                 candidates = [
                     e for e in by_name.get(name, [])
                     if self._graph[self._node_map[e]].type in _CALL_TARGET_TYPES
-                    # Same language only: a Python `obj.add(x)` must not
-                    # link a C `add` across the repo (unique-name policy
-                    # is necessary but not sufficient). Entities without
+                    # Same language family only: a Python `obj.add(x)`
+                    # must not link a C `add` across the repo (unique-name
+                    # policy is necessary but not sufficient). C and C++
+                    # are one family — `.c` files routinely call
+                    # header-defined functions (`.h` parses as C++) and
+                    # `extern "C"` bridges both ways. Entities without
                     # recorded language (test fakes) match anything.
-                    and (not caller_lang or by_lang.get(e, caller_lang) == caller_lang)]
+                    and (not caller_lang or _same_lang_family(
+                        by_lang.get(e, caller_lang), caller_lang))]
                 if len(candidates) != 1:
                     self.resolution_stats["ambiguous" if candidates else "missing"] += 1
                     continue

@@ -34,7 +34,8 @@ def test_deleted_entities_close_on_reingest(tmp_path):
         r2 = _rev(store, files=[("a.py", "h2")])
         _ent(store, "keep", r2)
         store.close_superseded_entities(["keep"], r2.revision_id, now)
-        n_e, n_d = store.close_deleted_file_version("a.py", ["keep"], r2.revision_id, now)
+        n_e, n_d = store.close_disappeared(
+            r2.revision_id, r1.revision_id, "r", now)
         assert n_e == 1
         live = [r[0] for r in store.conn.execute(
             "SELECT logical_entity_id FROM entities WHERE valid_until IS NULL").fetchall()]
@@ -203,7 +204,7 @@ def _two_revs(store):
     r2 = _rev(store, files=[("a.py", "h2")])
     _ent(store, "keep", r2)
     store.close_superseded_entities(["keep"], r2.revision_id, now)
-    store.close_deleted_file_version("a.py", ["keep"], r2.revision_id, now)
+    store.close_disappeared(r2.revision_id, r1.revision_id, "r", now)
     return r1, r2, now
 
 

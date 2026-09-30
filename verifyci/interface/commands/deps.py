@@ -11,7 +11,7 @@ def run_deps(path: str = ".") -> dict:
             if ".verifyci" in file.parts:
                 continue
             edges = extract_dependencies(file.name, file.read_text(errors="replace"))
-            result[str(file)] = [
+            result[file.as_posix()] = [
                 {"package": e.metadata.get("package"), "version": e.metadata.get("version"), "ecosystem": ecosystem}
                 for e in edges
             ]

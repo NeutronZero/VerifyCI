@@ -56,8 +56,9 @@ AWS_KEY_RE = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
 PEM_RE = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----")
 JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
 CONN_STR_RE = re.compile(r"://[^/\s:()\"']+:[^/\s@()\"']{4,}@")
+JSON_SECRET_RE = re.compile("(?i)" + chr(34) + ".{0,128}?" + _KEY + ".{0,128}?" + chr(34) + " *: *" + chr(34) + ".{8,512}" + chr(34))
 
-_SECRET_PATTERNS = (SECRET_RE, UNQUOTED_SECRET_RE, AWS_KEY_RE, PEM_RE, JWT_RE, CONN_STR_RE)
+_SECRET_PATTERNS = (SECRET_RE, UNQUOTED_SECRET_RE, AWS_KEY_RE, PEM_RE, JWT_RE, CONN_STR_RE, JSON_SECRET_RE)
 
 _KEYWORD_RE = re.compile('(?i)' + _KEY)
 
@@ -102,19 +103,26 @@ def _secret_pat_name(text):
         return 'JWT_RE'
     if CONN_STR_RE.search(text):
         return 'CONN_STR_RE'
+    if JSON_SECRET_RE.search(text):
+        return "JSON_SECRET_RE"
     return 'SECRET'
 
 def _forbid_evidence(diff, kind, name):
-    # build file line pattern evidence for forbid hits, no doublequote chars in source
-    from verifyci.verification.diffmap import iter_added_lines
+    # file:line:pattern evidence, citing only lines the parser's own
+    # matching would flag: bare `name(` calls (never `obj.name(`) and
+    # word-boundary import mentions. Substring hits like `evaluation`
+    # for `eval` must never appear here.
+    import re
+    from verifyci.verification.diffmap import iter_added_lines_with_lineno
     out = []
-    counts = {}
-    for file, content in iter_added_lines(diff):
-        counts[file] = counts.get(file, 0) + 1
-        lineno = counts[file]
-        fname = file if file is not None else 'unscoped'
-        if name in content:
-            out.append(f'{fname}:{lineno}:forbid_{kind}:{name}')
+    if kind == "imports":
+        pat = re.compile(r"(?<![\w])" + re.escape(name) + r"(?![\w])")
+    else:
+        pat = re.compile(r"(?<![\w.])" + re.escape(name) + r"\s*\(")
+    for file, lineno, content in iter_added_lines_with_lineno(diff):
+        if pat.search(content):
+            fname = file if file is not None else 'unscoped'
+            out.append(f'{fname}:{lineno if lineno is not None else "?"}:forbid_{kind}:{name}')
     return out
 
 
@@ -232,45 +240,47 @@ def _check_invariant(diff: str, invariant: Invariant, graph: Any, evidence: list
         violated, examined, evaluated = _graph_search(graph, name, "CALLS")
         if not evaluated:
             return False, f'graph traversal failed for forbid_call:{name} (fail-closed)', True, []
-        hit_files = _added_hits(diff, "calls", name)
-        if hit_files is None:
-            return False, 'fragment parse failed (fail-closed)', True, []
+        hit_files, parse_ok = _added_hits(diff, "calls", name)
         if hit_files:
             # The base graph cannot see new code: a forbidden call the
             # diff itself introduces is a positive detection, so it
             # rejects even when the graph side established nothing.
             return False, f'forbidden call {name!r} added in {hit_files[0]}', True, _forbid_evidence(diff, 'calls', name)
+        if not parse_ok:
+            return True, 'fragment parse incomplete (inconclusive, established=False)', False, []
         return not violated, _coverage_note(examined, 'CALLS', name), examined > 0, []
     if query.startswith("forbid_import:"):
         name = query[len("forbid_import:"):].strip()
         violated, examined, evaluated = _graph_search(graph, name, "IMPORTS")
         if not evaluated:
             return False, f'graph traversal failed for forbid_import:{name} (fail-closed)', True, []
-        hit_files = _added_hits(diff, "imports", name)
-        if hit_files is None:
-            return False, 'fragment parse failed (fail-closed)', True, []
+        hit_files, parse_ok = _added_hits(diff, "imports", name)
         if hit_files:
             return False, f'forbidden import {name!r} added in {hit_files[0]}', True, _forbid_evidence(diff, 'imports', name)
+        if not parse_ok:
+            return True, 'fragment parse incomplete (inconclusive, established=False)', False, []
         return not violated, _coverage_note(examined, 'IMPORTS', name), examined > 0, []
     return False, f'unknown query kind (fail-closed): {query[:40]}', True, []
 
 
-def _added_hits(diff: str, kind: str, name: str) -> list[str] | None:
-    """Files whose added lines reference a forbidden target.
+def _added_hits(diff: str, kind: str, name: str) -> tuple[list[str], bool]:
+    """Files whose added lines reference a forbidden target, plus whether
+    every fragment parsed cleanly.
 
-    Mirrors secrets_scan semantics: fail on detection, pass otherwise,
-    established always True. A syntactic claim about added lines — the
-    fragment parser's recall gaps are documented in added_refs, and the
+    Mirrors secrets_scan semantics: fail on detection, pass otherwise.
+    A parse exception, or fragments that errored while yielding no refs
+    at all, is inability (ok=False → INCONCLUSIVE), never a silent pass
+    and never a violation. A syntactic claim about added lines — the
     graph-side check still runs either way.
     """
     if not diff or not name:
-        return []
-    from verifyci.verification.added_refs import extract_added_refs
+        return [], True
+    from verifyci.verification.added_refs import extract_added_refs_status
     try:
-        refs = extract_added_refs(diff)
+        refs, parse_ok = extract_added_refs_status(diff)
     except Exception:  # noqa: BLE001
-        return None
-    return sorted(f for f, kinds in refs.items() if name in kinds.get(kind, set()))
+        return [], False
+    return sorted(f for f, kinds in refs.items() if name in kinds.get(kind, set())), parse_ok
 
 
 def _coverage_note(examined: int, edge_type: str, name: str) -> str:
@@ -283,17 +293,18 @@ def _coverage_note(examined: int, edge_type: str, name: str) -> str:
 
 def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
     # scan added lines with per file continuation, fail closed, evidence file line pattern
-    from verifyci.verification.diffmap import iter_added_lines
+    from verifyci.verification.diffmap import iter_added_lines_with_lineno
     if not diff:
         return True, 'empty diff, nothing to scan', True, []
     tdq = chr(34) * 3
     tsq = chr(39) * 3
-    counts = {}
     states = {}
     hits = []
-    for file, content in iter_added_lines(diff):
-        counts[file] = counts.get(file, 0) + 1
-        lineno = counts[file]
+
+    def _lineno(fname, lineno):
+        return f'{fname}:{lineno if lineno is not None else "?"}'
+
+    for file, lineno, content in iter_added_lines_with_lineno(diff):
         fname = file if file is not None else 'unscoped'
         st = states.get(file)
         if st is None:
@@ -302,7 +313,7 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
         # single line hits, including high signal shapes in continuation lines
         if _has_secret(content):
             pat = _secret_pat_name(content)
-            hits.append(f'{fname}:{lineno}:{pat}')
+            hits.append(f'{_lineno(fname, lineno)}:{pat}')
         if st[0] is not None or st[1] > 0 or st[2]:
             st[3].append(content)
             joined = ' '.join(st[3])
@@ -328,7 +339,7 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
                     why = 'multiline-paren' if st[1] > 0 else 'multiline-backslash'
             if found:
                 if not _has_secret(content):
-                    hits.append(f'{fname}:{lineno}:{why}')
+                    hits.append(f'{_lineno(fname, lineno)}:{why}')
             if st[0] is not None:
                 if st[0] in content:
                     st[0] = None
@@ -385,6 +396,12 @@ def _graph_search(graph: Any, name: str, edge_type: str) -> tuple[bool, int, boo
         examined = 0
         for edge in iter_edge_payloads(graph):
             etype = getattr(getattr(edge, "type", None), "value", getattr(edge, "type", None))
+            if edge_type == "CALLS" and etype == "CALLS_UNRESOLVED":
+                examined += 1
+                meta = getattr(edge, "metadata", None) or {}
+                if isinstance(meta, dict) and meta.get("callee") == name:
+                    return True, examined, True
+                continue
             if etype != edge_type:
                 continue
             examined += 1

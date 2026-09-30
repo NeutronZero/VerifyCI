@@ -21,14 +21,17 @@ def create_fastmcp_server(db_path: str, name: str = "verifyci"):
     db = resolve_db(db_path)
     from verifyci.memory.ledger import EventLedger
     from verifyci.storage.graph_store import GraphStore
-    store = GraphStore(db)
+    import os as _os
+    # Fail closed on a missing path: constructing a GraphStore would
+    # mkdir and materialize an empty database at a client-chosen path.
+    store = GraphStore(db) if _os.path.exists(db) else None
     graph, node_map, entities = load_graph(db)
     if not entities:
         entities = payload_entities(graph)
     # Without a ledger, task.run executions leave no audit trail and
-    # report ledger_head None. The server is long-lived; one ledger
-    # accumulates across tasks (task_id separates them, and the L2
-    # subchain verifier reads them back per task).
+    # report ledger_head None. The server is long-lived; the scheduler
+    # keeps one ledger per task (plus this aggregate mirror), so
+    # interleaved tasks keep verifiable per-task subchains and heads.
     inner = create_mcp_server(graph=graph, store=store, node_map=node_map,
                               ledger=EventLedger(), entities=entities)
 
@@ -55,7 +58,7 @@ def create_fastmcp_server(db_path: str, name: str = "verifyci"):
     async def verify_diff(diff: str, revision_id: str = "", conversation_id: str = "") -> dict[str, Any]:
         """Verify a unified diff: semi-formal certificate + blast radius + policy decision."""
         if len(diff) > MAX_DIFF_CHARS:
-            return {"diff": diff, "revision_id": revision_id, "status": "FAILED", "error": "diff_too_large"}
+            return {"revision_id": revision_id, "status": "FAILED", "error": "diff_too_large"}
         return await inner.call_tool("verify.diff", diff=diff, revision_id=revision_id,
                                      conversation_id=conversation_id)
 

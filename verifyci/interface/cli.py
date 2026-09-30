@@ -15,11 +15,18 @@ def ingest(path: str, incremental: bool = False,
            commit: str = typer.Option("", "--commit", "-c",
             help="Record the commit hash this graph state was ingested from")):
     from verifyci.interface.commands.ingest import run_ingest
-    totals = run_ingest(path, incremental=incremental, commit_id=commit or None)
+    try:
+        totals = run_ingest(path, incremental=incremental, commit_id=commit or None)
+    except FileNotFoundError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1)
     typer.echo(f"Revision: {totals['revision_id']}")
     typer.echo(f"Files: {totals['files']} (skipped {totals['skipped']}), "
                f"entities: {totals['entities']}, edges: {totals['edges']}")
     typer.echo(f"DB: {totals['db_path']}")
+    n_parse = len(totals.get("parse_errors") or [])
+    if n_parse:
+        typer.echo(f"Parse errors: {n_parse} ({', '.join(totals['parse_errors'])})")
 
 
 @app.command()
@@ -46,7 +53,10 @@ def query(question: str, db: str = "", k: int = 10,
     from verifyci.interface.commands.query import run_query
     result = run_query(question, db or None, k=k, rerank=rerank)
     for hit in result["results"]:
-        typer.echo(f"{hit['score']:.3f}  {hit['id']}")
+        loc = hit.get("file_path") or hit["id"]
+        if hit.get("line_start") is not None:
+            loc = f"{loc}:{hit['line_start']}-{hit.get('line_end')}"
+        typer.echo(f"{hit['score']:.3f}  {loc}")
 
 
 @app.command()
@@ -75,7 +85,13 @@ def _read_diff(diff: str, diff_file: str) -> str:
     if diff_file:
         if diff_file == "-":
             import sys
-            return sys.stdin.read()
+            # Raw bytes decoded as UTF-8: sys.stdin.read() decodes with
+            # the locale encoding, which mangles or crashes on
+            # non-ASCII diffs under a non-UTF-8 locale.
+            data = sys.stdin.buffer.read()
+            if isinstance(data, bytes):
+                return data.decode("utf-8", errors="replace")
+            return data
         with open(diff_file, encoding="utf-8", errors="replace") as fh:
             return fh.read()
     return diff

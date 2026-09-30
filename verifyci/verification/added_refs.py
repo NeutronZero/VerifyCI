@@ -22,6 +22,8 @@ from verifyci.ingestion.extractor import (
     _include_header,
 )
 from verifyci.ingestion.language import detect_language
+import functools
+import textwrap
 from verifyci.verification.diffmap import iter_added_lines
 
 
@@ -34,7 +36,7 @@ def _bare_callee(node, source: bytes) -> set[str]:
             from verifyci.ingestion.extractor import _text
             names.add(_text(child, source))
             break
-        elif child.type in ("attribute", "scoped_identifier"):
+        elif child.type in ("attribute", "scoped_identifier", "qualified_identifier", "field_expression"):
             from verifyci.ingestion.extractor import _text
             full_attr = _text(child, source).strip()
             names.add(full_attr)
@@ -53,13 +55,13 @@ def _walk(node):
         yield from _walk(child)
 
 
-def extract_added_refs(diff: str | None) -> dict[str, dict[str, set[str]]]:
-    """file -> {"calls": {names}, "imports": {modules}} for added lines.
-
-    Files whose language has no tree-sitter grammar (or no added
-    lines) contribute nothing — absence here is not evidence of
-    absence downstream; the graph-side check still runs.
-    """
+@functools.lru_cache(maxsize=32)
+def extract_added_refs_status(diff: str | None) -> tuple[dict[str, dict[str, set[str]]], bool]:
+    """Like extract_added_refs but also reports whether every fragment
+    parsed cleanly: (refs, parse_ok). parse_ok is False when a fragment
+    raised, produced no tree, or contains ERROR nodes while yielding no
+    refs at all. A partial tree that still yields refs counts as usable
+    (callers decide per-outcome, not per-error)."""
     from verifyci.ingestion.parser import TreeSitterParser
 
     per_file: dict[str, list[str]] = {}
@@ -69,20 +71,25 @@ def extract_added_refs(diff: str | None) -> dict[str, dict[str, set[str]]]:
         per_file.setdefault(file, []).append(content)
 
     refs: dict[str, dict[str, set[str]]] = {}
+    had_error = False
     parser = TreeSitterParser()
     for file, lines in per_file.items():
         language = detect_language(file)
         if language not in ("python", "c", "cpp"):
             continue
         try:
-            parsed = parser.parse(file, "\n".join(lines).encode("utf-8"), language)
+            parsed = parser.parse(file, textwrap.dedent(chr(10).join(lines)).encode("utf-8"), language)
         except ValueError:
             continue
         if parsed.tree is None:
+            had_error = True
             continue
+        root = parsed.tree.root_node
+        if getattr(root, "has_error", False):
+            had_error = True
         calls: set[str] = set()
         imports: set[str] = set()
-        for node in _walk(parsed.tree.root_node):
+        for node in _walk(root):
             if node.type in CALL_NODES:
                 found_names = _bare_callee(node, parsed.source)
                 calls.update(found_names)
@@ -94,4 +101,4 @@ def extract_added_refs(diff: str | None) -> dict[str, dict[str, set[str]]]:
                     imports.add(header)
         if calls or imports:
             refs[file] = {"calls": calls, "imports": imports}
-    return refs
+    return refs, (bool(refs) or not had_error)

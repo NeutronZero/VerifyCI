@@ -82,6 +82,10 @@ class AsyncDAGScheduler(Scheduler):
 
     def __init__(self, ledger: Any = None) -> None:
         self._tasks: dict[str, dict[str, Any]] = {}
+        # Aggregate mirror only: every submitted task gets its own
+        # ledger (see submit). A single ledger shared across tasks
+        # interleaves chains, so per-task heads and persisted offsets
+        # would index the global list.
         self._ledger = ledger
 
     async def submit(self, dag: Any, conversation_id: str = "",
@@ -93,12 +97,14 @@ class AsyncDAGScheduler(Scheduler):
         if not conversation_id:
             conversation_id = dag_dict.get("conversation_id", "") or str(uuid.uuid4())
         task_id = str(uuid.uuid4())
+        from verifyci.memory.ledger import EventLedger
         self._tasks[task_id] = {
             "dag": dag_dict, "status": TaskStatus.PENDING,
             "conversation_id": conversation_id,
             "context": dict(context or {}),
             "decision": None, "error": None, "needs_review": False,
             "executing": False, "handle": None, "ledger_head": None, "persisted_count": 0,
+            "ledger": EventLedger(),
         }
         self._emit("TASK_SUBMITTED", task_id, conversation_id, {"nodes": len(dag_dict["nodes"])})
         self._tasks[task_id]["handle"] = asyncio.create_task(self._execute(task_id))
@@ -113,11 +119,34 @@ class AsyncDAGScheduler(Scheduler):
         return task.get("decision") if task else None
 
     def ledger_head(self, task_id: str) -> Any:
-        """Head hash of the task's ledger at its terminal state (L1
-        tamper-evidence surfacing). None when the task never reached a
-        terminal state or no ledger is attached."""
+        """Head hash of the task's own ledger (L1 tamper-evidence
+        surfacing). Live-read from the per-task ledger so a mid-run
+        head is meaningful; falls back to the terminal pin. None when
+        the task is unknown or its ledger is empty."""
         task = self._tasks.get(task_id)
-        return task.get("ledger_head") if task else None
+        if not task:
+            return None
+        ledger = task.get("ledger")
+        if ledger is not None:
+            try:
+                head = ledger.head_hash()
+                if head is not None:
+                    return head
+            except Exception:  # noqa: BLE001
+                pass
+        return task.get("ledger_head")
+
+    def _pin_head(self, task_id: str) -> None:
+        """Pin the task ledger's head once the run is terminal, whatever
+        path got it there (completed, failed, cancelled, review)."""
+        task = self._tasks.get(task_id)
+        if not task:
+            return
+        try:
+            ledger = task.get("ledger")
+            task["ledger_head"] = ledger.head_hash() if ledger is not None else None
+        except Exception:  # noqa: BLE001
+            task["ledger_head"] = None
 
     async def cancel(self, task_id: str) -> None:
         task = self._tasks.get(task_id)
@@ -130,7 +159,13 @@ class AsyncDAGScheduler(Scheduler):
         if handle is not None and not handle.done():
             handle.cancel()
             await asyncio.gather(handle, return_exceptions=True)
+        # Emit-then-persist-then-pin: a TASK_CANCELLED recorded only in
+        # memory never reaches the audit trail or the pinned head. The
+        # _execute CancelledError path persists what ran before this;
+        # this persists the cancellation itself, then pins over it.
         self._emit("TASK_CANCELLED", task_id, task["conversation_id"], {})
+        await self._persist(task_id)
+        self._pin_head(task_id)
 
     async def resume(self, task_id: str) -> None:
         task = self._tasks.get(task_id)
@@ -176,7 +211,17 @@ class AsyncDAGScheduler(Scheduler):
                             return
                         outcomes = await self._run_level(
                             executor, level, task_id, conversation_id, shared)
-                        for outcome in outcomes:
+                        # Precedence within a level: a verification block
+                        # or review decision must win over error/cancelled
+                        # noise from siblings. Outcomes arrive in node
+                        # order, so a cancelled sibling sorted first used
+                        # to fail the task as "node_error: cancelled" and
+                        # drop the verification decision entirely.
+                        ordered = [o for o in outcomes if o[0] == "block"]
+                        ordered += [o for o in outcomes if o[0] == "review"]
+                        ordered += [o for o in outcomes if o[0] == "error"]
+                        ordered += [o for o in outcomes if o[0] == "ok"]
+                        for outcome in ordered:
                             kind, decision = outcome
                             if kind == "ok":
                                 # Passing gates still produce decisions; the last
@@ -244,11 +289,8 @@ class AsyncDAGScheduler(Scheduler):
             # path got it there (completed, failed, cancelled, review).
             # A second _execute can never run concurrently (resume is
             # guarded), so the head cannot be clobbered mid-flight.
-            if task["status"] in TERMINAL_STATUSES and self._ledger is not None:
-                try:
-                    task["ledger_head"] = self._ledger.head_hash()
-                except Exception:  # noqa: BLE001
-                    task["ledger_head"] = None
+            if task["status"] in TERMINAL_STATUSES:
+                self._pin_head(task_id)
 
     async def _run_level(self, executor, level: list[dict], task_id: str,
                          conversation_id: str, shared: dict) -> list:
@@ -311,6 +353,13 @@ class AsyncDAGScheduler(Scheduler):
         timeout = config.get("timeout", None)
         if timeout is None:
             timeout = shared.get("node_timeout", 300)
+        # Timeout bounds the wait, not the work: asyncio cannot kill a
+        # thread once started, so after a timeout the to_thread worker
+        # may linger until _invoke returns. The timeout is configurable
+        # per node (config "timeout", else shared "node_timeout",
+        # default 300s); the loop never blocks on the lingerer, so a
+        # slow node cannot deadlock the scheduler — but treat node side
+        # effects past the deadline as at-most-once, not cancelled.
         try:
             def _invoke():
                 return asyncio.run(executor.execute_node(node_obj, ctx))
@@ -342,11 +391,12 @@ class AsyncDAGScheduler(Scheduler):
         if not task:
             return
         store = (task.get("context", {}) or {}).get("store")
-        if store is None or self._ledger is None or not hasattr(self._ledger, "save_to_store"):
+        ledger = task.get("ledger")
+        if store is None or ledger is None or not hasattr(ledger, "save_to_store"):
             return
         try:
             persisted = task.get("persisted_count", 0)
-            events = self._ledger.get_events()[persisted:]
+            events = ledger.get_events()[persisted:]
             if not events:
                 return
             if hasattr(store, "batch"):
@@ -363,17 +413,33 @@ class AsyncDAGScheduler(Scheduler):
             traceback.print_exc()
 
     def _emit(self, type: str, task_id: str, conversation_id: str, payload: dict) -> None:
-        if self._ledger is None:
-            return
+        # Append to the task's own ledger; mirror into the shared
+        # ledger when one was provided. The mirror receives the same
+        # Event objects (never re-created), so ids and hashes match for
+        # operators and back-compat readers.
+        task = self._tasks.get(task_id)
+        ledger = task.get("ledger") if task is not None else None
+        if ledger is None:
+            ledger = self._ledger
+            if ledger is None:
+                return
         try:
-            self._ledger.append(
+            event = ledger.append(
                 type=type, payload={"task_id": task_id, **payload},
                 provenance={"source": "scheduler"},
                 task_id=task_id, conversation_id=conversation_id,
             )
         except Exception as e:  # noqa: BLE001
             import traceback
-            task = self._tasks.get(task_id)
             if task is not None:
                 task["emit_error"] = f"{type(e).__name__}: {e}"
             traceback.print_exc()
+            return
+        if self._ledger is not None and self._ledger is not ledger:
+            try:
+                self._ledger.adopt(event)
+            except Exception as e:  # noqa: BLE001
+                import traceback
+                if task is not None:
+                    task["emit_error"] = f"{type(e).__name__}: {e}"
+                traceback.print_exc()

@@ -2,6 +2,7 @@ import json
 import re
 import sqlite3
 import time
+import tomllib
 from pathlib import Path
 
 from verifyci.contracts.edge import Edge, EdgeType
@@ -18,22 +19,28 @@ DEPENDENCY_FILES = {
 
 
 def extract_dependencies(file_path: str, source: str, revision_id: str = "") -> list[Edge]:
-    dep_type = DEPENDENCY_FILES.get(Path(file_path).name)
-    if dep_type is None:
-        return []
+    # Never let one bad manifest abort the batch: the ingest caller loops
+    # manifests without per-manifest guards, so any parse error here must
+    # read as "no dependencies", not raise.
+    try:
+        dep_type = DEPENDENCY_FILES.get(Path(file_path).name)
+        if dep_type is None:
+            return []
 
-    if dep_type == "npm":
-        return _parse_npm(source, file_path, revision_id)
-    if dep_type == "pypi":
-        if Path(file_path).name == "pyproject.toml":
-            return _parse_pyproject_toml(source, file_path, revision_id)
-        return _parse_pypi(source, file_path, revision_id)
-    if dep_type == "cargo":
-        return _parse_cargo(source, file_path, revision_id)
-    if dep_type == "maven":
-        return _parse_maven(source, file_path, revision_id)
-    if dep_type == "go":
-        return _parse_go(source, file_path, revision_id)
+        if dep_type == "npm":
+            return _parse_npm(source, file_path, revision_id)
+        if dep_type == "pypi":
+            if Path(file_path).name == "pyproject.toml":
+                return _parse_pyproject_toml(source, file_path, revision_id)
+            return _parse_pypi(source, file_path, revision_id)
+        if dep_type == "cargo":
+            return _parse_cargo(source, file_path, revision_id)
+        if dep_type == "maven":
+            return _parse_maven(source, file_path, revision_id)
+        if dep_type == "go":
+            return _parse_go(source, file_path, revision_id)
+    except Exception:  # noqa: BLE001
+        return []
     return []
 
 
@@ -58,12 +65,54 @@ def _parse_npm(source: str, file_path: str, revision_id: str) -> list[Edge]:
         data = json.loads(source)
     except json.JSONDecodeError:
         return []
+    if not isinstance(data, dict):
+        # Top-level list (or scalar) has no sections to read.
+        return []
     edges = []
     for section in ("dependencies", "devDependencies"):
-        for name, version in (data.get(section, {}) or {}).items():
+        section_data = data.get(section, {}) or {}
+        if not isinstance(section_data, dict):
+            continue
+        for name, version in section_data.items():
             edges.append(_dep_edge(file_path, "npm", name, str(version), revision_id,
                                    section=section))
     return edges
+
+
+_PEP508_RE = re.compile(
+    r"^([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?\s*"
+    r"([>=<~!]=?|==)?\s*([^\s;#]+)?")
+
+
+def _pypi_spec_name_version(spec: str) -> tuple[str, str] | None:
+    """(package, version) for a requirement string, or None to skip.
+
+    URL/VCS specs (``git+https://...``, ``https://...zip``) are not
+    registry packages: skipped, unless a ``#egg=`` fragment names one.
+    PEP 508 direct references (``name @ url``) keep the name at latest.
+    """
+    spec = spec.strip()
+    if not spec:
+        return None
+    if "://" in spec:
+        egg = re.search(r"#egg=([A-Za-z0-9_.-]+)", spec)
+        if egg:
+            return egg.group(1), "latest"
+        direct = re.match(r"^([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?\s*@\s*\S+", spec)
+        if direct:
+            return direct.group(1), "latest"
+        return None
+    if spec.startswith(("git+", "hg+", "svn+", "bzr+",
+                        "http://", "https://", "ftp://", "file:", ".", "/")):
+        egg = re.search(r"#egg=([A-Za-z0-9_.-]+)", spec)
+        return (egg.group(1), "latest") if egg else None
+    match = _PEP508_RE.match(spec)
+    if not match:
+        return None
+    version = match.group(3) or "latest"
+    if version.startswith("@") or "://" in version:
+        version = "latest"
+    return match.group(1), version
 
 
 def _parse_pypi(source: str, file_path: str, revision_id: str) -> list[Edge]:
@@ -75,12 +124,11 @@ def _parse_pypi(source: str, file_path: str, revision_id: str) -> list[Edge]:
             # directives, not packages. Recursive -r inclusion is out of
             # scope; silently treating them as packages was worse.
             continue
-        match = re.match(
-            r"^([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?\s*"
-            r"([>=<~!]=?|==)?\s*([^\s;#]+)?", line)
-        if match:
-            edges.append(_dep_edge(file_path, "pypi", match.group(1),
-                                   match.group(3) or "latest", revision_id))
+        parsed = _pypi_spec_name_version(line)
+        if parsed is None:
+            continue
+        name, version = parsed
+        edges.append(_dep_edge(file_path, "pypi", name, version, revision_id))
     return edges
 
 
@@ -90,19 +138,67 @@ def _dep_section(header: str) -> bool:
         ("[dependencies.", "[dev-dependencies.", "[workspace.dependencies."))
 
 
+#: Keys inside a dotted Cargo subtable (``[dependencies.serde]``) that are
+#: attributes of the section's package, not packages themselves. Unknown
+#: keys still parse as packages for back-compat.
+_CARGO_DEP_ATTRS = frozenset({
+    "version", "features", "optional", "default-features", "default_features",
+    "git", "branch", "tag", "rev", "path", "registry", "package", "workspace",
+})
+
+
+def _subtable_package(header: str) -> str | None:
+    """Package named by a dotted subtable header, else None.
+
+    ``[dependencies.serde]`` declares serde: only the last dotted
+    component is the package name.
+    """
+    inner = header.strip()
+    if not (inner.startswith("[") and inner.endswith("]")):
+        return None
+    if inner in ("[dependencies]", "[dev-dependencies]",
+                 "[workspace.dependencies]"):
+        return None
+    pkg = inner[1:-1].split(".")[-1].strip().strip("\"'")
+    return pkg or None
+
+
 def _parse_cargo(source: str, file_path: str, revision_id: str) -> list[Edge]:
     edges = []
     in_deps = False
+    subtable_pkg: str | None = None
+    subtable_version = "latest"
+    subtable_saw_attr = False
+
+    def _flush() -> None:
+        nonlocal subtable_pkg, subtable_version, subtable_saw_attr
+        if subtable_pkg is not None and subtable_saw_attr:
+            edges.append(_dep_edge(file_path, "cargo", subtable_pkg,
+                                   subtable_version, revision_id))
+        subtable_pkg, subtable_version, subtable_saw_attr = None, "latest", False
+
     for line in source.splitlines():
         stripped = line.strip()
         if stripped.startswith("["):
+            _flush()
             in_deps = _dep_section(stripped)
+            subtable_pkg = _subtable_package(stripped) if in_deps else None
             continue
         if in_deps:
             match = re.match(r"^([A-Za-z0-9_-]+)\s*=\s*(.*)$", stripped)
             if not match:
                 continue
             name, value = match.group(1), match.group(2).strip()
+            if subtable_pkg is not None and name in _CARGO_DEP_ATTRS:
+                subtable_saw_attr = True
+                if name == "version":
+                    version_match = re.search(r'"([^"]+)"|\'([^\']+)\'', value)
+                    if version_match:
+                        subtable_version = (version_match.group(1)
+                                            or version_match.group(2))
+                    elif value:
+                        subtable_version = value.strip('"\'').strip() or "latest"
+                continue
             if value.startswith("{"):
                 # Inline table: `serde = { version = "1", ... }`.
                 # The old regex captured "{" as the version.
@@ -111,6 +207,7 @@ def _parse_cargo(source: str, file_path: str, revision_id: str) -> list[Edge]:
             else:
                 version = value.strip('"').strip() or "latest"
             edges.append(_dep_edge(file_path, "cargo", name, version, revision_id))
+    _flush()
     return edges
 
 
@@ -221,29 +318,42 @@ class VulnerabilityCache:
         return count
 
 
+def _poetry_version(spec: object) -> str:
+    """Normalize a Poetry version spec (`"^2.28"`, `{version=...}`, `*`)."""
+    if isinstance(spec, dict):
+        spec = spec.get("version", "")
+    if not isinstance(spec, str):
+        return "latest"
+    spec = spec.strip()
+    if not spec or spec == "*":
+        return "latest"
+    cleaned = re.sub(r"^[\^~<>=!\s]+", "", spec)
+    cleaned = re.split(r"[,;\s|]+", cleaned)[0]
+    return cleaned or "latest"
+
+
 def _parse_pyproject_toml(source: str, file_path: str, revision_id: str) -> list[Edge]:
-    import tomllib
     try:
         data = tomllib.loads(source)
     except Exception:
         return []
     edges = []
+    seen = set()
+
+    def _add(pkg: str, version: str) -> None:
+        if pkg and pkg not in seen:
+            seen.add(pkg)
+            edges.append(_dep_edge(file_path, "pypi", pkg, version, revision_id))
+
     project = data.get("project", {}) if isinstance(data, dict) else {}
     deps = project.get("dependencies", []) if isinstance(project, dict) else []
-    seen = set()
-    for dep in deps:
-        if not isinstance(dep, str):
-            continue
-        dep = dep.strip()
-        match = re.match(
-            r"^([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?\s*"
-            r"([>=<~!]=?|==)?\s*([^\s;#]+)?", dep)
-        if match:
-            pkg = match.group(1)
-            if pkg not in seen:
-                seen.add(pkg)
-                edges.append(_dep_edge(file_path, "pypi", pkg,
-                                       match.group(3) or "latest", revision_id))
+    if isinstance(deps, list):
+        for dep in deps:
+            if not isinstance(dep, str):
+                continue
+            parsed = _pypi_spec_name_version(dep)
+            if parsed is not None:
+                _add(*parsed)
     optional_deps = project.get("optional-dependencies", {}) if isinstance(project, dict) else {}
     if isinstance(optional_deps, dict):
         for opt_list in optional_deps.values():
@@ -251,14 +361,16 @@ def _parse_pyproject_toml(source: str, file_path: str, revision_id: str) -> list
                 for dep in opt_list:
                     if not isinstance(dep, str):
                         continue
-                    dep = dep.strip()
-                    match = re.match(
-                        r"^([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?\s*"
-                        r"([>=<~!]=?|==)?\s*([^\s;#]+)?", dep)
-                    if match:
-                        pkg = match.group(1)
-                        if pkg not in seen:
-                            seen.add(pkg)
-                            edges.append(_dep_edge(file_path, "pypi", pkg,
-                                                   match.group(3) or "latest", revision_id))
+                    parsed = _pypi_spec_name_version(dep)
+                    if parsed is not None:
+                        _add(*parsed)
+    tool = data.get("tool", {}) if isinstance(data, dict) else {}
+    poetry = tool.get("poetry", {}) if isinstance(tool, dict) else {}
+    poetry_deps = poetry.get("dependencies", {}) if isinstance(poetry, dict) else {}
+    if isinstance(poetry_deps, dict):
+        for pkg, spec in poetry_deps.items():
+            # `python = "^3.12"` pins the interpreter, not a package.
+            if pkg == "python":
+                continue
+            _add(pkg, _poetry_version(spec))
     return edges

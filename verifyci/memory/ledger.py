@@ -84,6 +84,39 @@ class EventLedger:
             return None
         return event_hash(self._events[-1])
 
+    def adopt(self, event: Event) -> Event:
+        # Adopt an event created by another ledger (aggregate mirrors
+        # share the same Event objects so ids and hashes match).
+        self._events.append(event)
+        return event
+
+
+def verify_task_subchain(all_events: list, task_id: str | None,
+                         expected_head: Optional[str] = None) -> bool:
+    # Task-scoped chain check with continuity. Every event of the task
+    # must link to its immediately preceding *global* event (or carry no
+    # prev hash when it is the first event overall), and the task head
+    # must match when pinned. Checking only consecutive task events
+    # would bless both interleaved forgeries and truncation of a
+    # task's first events (the old verify_subchain weakness: the first
+    # scoped event's link was never checked at all).
+    wanted = task_id or ""
+    task_events = [e for e in all_events if (e.task_id or "") == wanted]
+    if not task_events:
+        return False
+    for idx, event in enumerate(all_events):
+        if (event.task_id or "") != wanted:
+            continue
+        if idx == 0:
+            if event.prev_event_hash is not None:
+                return False
+        elif event.prev_event_hash != event_hash(all_events[idx - 1]):
+            return False
+    if expected_head is not None:
+        if event_hash(task_events[-1]) != expected_head:
+            return False
+    return True
+
 
 def append_anchor(path: str, task_id: str, revision_id: str,
                   head_hash_value: str) -> dict:

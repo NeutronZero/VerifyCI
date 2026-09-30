@@ -23,6 +23,11 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
     from verifyci.graph.builder import GraphBuilder
 
     db = resolve_db(db_path)
+    import os as _query_os
+    if not _query_os.path.exists(db):
+        return {"query": question, "results": [], "methods": [],
+                "evidence": {"entities": 0, "chunks": 0, "provenance": 0},
+                "error": "db_not_found"}
     store = GraphStore(db)
     try:
         # Search the latest revision only: older revisions stay in the DB
@@ -116,8 +121,16 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
             graph_revision=pack_entities[0].revision_id if pack_entities else "",
             blast_radius=blast,
         )
+        hits = []
+        for r in ranked:
+            e = by_id.get(r.id)
+            hits.append({"id": r.id, "score": r.score,
+                         "name": getattr(e, "name", None),
+                         "file_path": getattr(e, "file_path", None),
+                         "line_start": getattr(e, "line_start", None),
+                         "line_end": getattr(e, "line_end", None)})
         return {"query": question,
-                "results": [{"id": r.id, "score": r.score} for r in ranked],
+                "results": hits,
                 "methods": methods,
                 "evidence": {"entities": len(pack.entities), "chunks": len(pack.source_chunks),
                              "provenance": len(pack.provenance)}}

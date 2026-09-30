@@ -283,15 +283,15 @@ def test_same_line_literal_still_fails():
     assert checks[0].passed is False
     assert checks[0].evidence != []
 
-def test_forbid_parse_failure_fails_closed(monkeypatch):
-    # parser exception must fail closed, never vacuous pass
+def test_forbid_parse_failure_is_inconclusive(monkeypatch):
+    # parse exception is inability (INCONCLUSIVE), never silent PASS; true detections still FAIL
     import verifyci.verification.added_refs as ar
     def _boom(diff):
         raise RuntimeError('parse boom')
-    monkeypatch.setattr(ar, 'extract_added_refs', _boom)
+    monkeypatch.setattr(ar, 'extract_added_refs_status', _boom)
     nl = chr(10)
     diff = 'diff --git a/src/app.py b/src/app.py' + nl + '--- a/src/app.py' + nl + '+++ b/src/app.py' + nl + '@@ -1,0 +1,1 @@' + nl + '+    eval(user_input)' + nl
     checks, _ = evaluate_invariants(diff, [_inv('f', 'forbid_call:eval')], graph=None, evidence=[])
-    assert checks[0].passed is False
-    assert checks[0].established is True
-    assert 'fail-closed' in checks[0].explanation
+    assert checks[0].established is False
+    assert "inconclusive" in checks[0].explanation
+    # parse exception is inability (INCONCLUSIVE), not violation (FAIL); true detections still FAIL

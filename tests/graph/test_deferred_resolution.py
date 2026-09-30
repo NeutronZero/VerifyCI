@@ -238,3 +238,12 @@ def test_resolution_is_deterministic():
     })
     assert first.resolution_stats == second.resolution_stats == {
         "resolved": 1, "ambiguous": 0, "missing": 0}
+
+
+def test_c_file_links_header_defined_function():
+    builder, graph, _, _ = _build({
+        "util.h": (b"int shared_add(int a, int b) { return a + b; }\n", "cpp"),
+        "main.c": (b"int main() { return shared_add(1, 2); }\n", "c"),
+    })
+    assert ("main", "shared_add", EdgeType.CALLS) in _links(graph)
+    assert builder.resolution_stats["resolved"] == 1

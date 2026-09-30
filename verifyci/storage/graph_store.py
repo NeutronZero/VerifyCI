@@ -94,6 +94,20 @@ CREATE TABLE IF NOT EXISTS deltas (
 """
 
 
+def _edge_match_key(src_logic: str, dst_logic: str, etype: str,
+                    metadata: dict | None) -> tuple:
+    # Match key for supersession/disappearance. Unresolved references
+    # share one endpoint (dst "") per caller, so the referenced name
+    # (callee/base) is part of the key: without it, removing one call
+    # while another remains reads as continuing and the removed row
+    # stays live forever.
+    if etype in ("CALLS_UNRESOLVED", "INHERITS_UNRESOLVED"):
+        meta = metadata or {}
+        return (src_logic, dst_logic, etype,
+                meta.get("callee") or meta.get("base") or "")
+    return (src_logic, dst_logic, etype)
+
+
 def latest_revision_id(conn, repository_id: str | None = None) -> str:
     """Latest revision id for raw connections, scoped when possible.
 
@@ -215,38 +229,6 @@ class GraphStore:
         ).fetchone()
         return json.loads(row[0]) if row else None
 
-    def close_deleted_file_version(self, file_path: str, live_logical_ids: list[str],
-                                   current_revision_id: str, now: float) -> tuple[int, int]:
-        """Close live rows from older revisions for entities of file_path that
-        no longer exist, plus edges sourced from the deleted entities."""
-        prev = self.conn.execute(
-            "SELECT revision_entity_id, logical_entity_id FROM entities"
-            " WHERE file_path = ? AND revision_id != ? AND valid_until IS NULL",
-            (file_path, current_revision_id),
-        ).fetchall()
-        live = set(live_logical_ids)
-        gone = [(r[0], r[1]) for r in prev if r[1] not in live]
-        gone_ids = [r[0] for r in gone]
-        if gone_ids:
-            self.conn.executemany(
-                "UPDATE entities SET valid_until = ?, t_expired = ? WHERE revision_entity_id = ?",
-                [(now, now, rid) for rid in gone_ids],
-            )
-        n_d = 0
-        if gone_ids:
-            rows = self.conn.execute(
-                "SELECT id, src_entity_id FROM edges WHERE revision_id != ? AND valid_until IS NULL",
-                (current_revision_id,),
-            ).fetchall()
-            ids = [r[0] for r in rows if r[1] in gone_ids]
-            self.conn.executemany(
-                "UPDATE edges SET valid_until = ?, t_expired = ? WHERE id = ?",
-                [(now, now, i) for i in ids],
-            )
-            n_d = len(ids)
-        self._maybe_commit()
-        return len(gone), n_d
-
     def close_disappeared(self, current_revision_id: str, parent_revision_id: str,
                             repository_id: str, now: float) -> tuple[int, int]:
         """Expire entities and edges the new revision no longer contains.
@@ -285,17 +267,23 @@ class GraphStore:
         }
         new_keys = set()
         for r in self.conn.execute(
-                "SELECT src_entity_id, dst_entity_id, type FROM edges"
+                "SELECT src_entity_id, dst_entity_id, type, metadata_json FROM edges"
                 " WHERE revision_id = ?", (current_revision_id,)).fetchall():
-            new_keys.add((entmap.get(r[0], r[0]), entmap.get(r[1], r[1]), r[2]))
+            meta = json.loads(r[3]) if r[3] else {}
+            new_keys.add(_edge_match_key(entmap.get(r[0], r[0]),
+                                         entmap.get(r[1], r[1]), r[2], meta))
         old = self.conn.execute(
-            "SELECT id, src_entity_id, dst_entity_id, type FROM edges"
+            "SELECT id, src_entity_id, dst_entity_id, type, metadata_json FROM edges"
             " WHERE revision_id != ? AND valid_until IS NULL"
             " AND revision_id IN (SELECT revision_id FROM revisions"
             " WHERE repository_id = ?)",
             (current_revision_id, repository_id)).fetchall()
-        gone = [r[0] for r in old
-                if (entmap.get(r[1], r[1]), entmap.get(r[2], r[2]), r[3]) not in new_keys]
+        gone = []
+        for r in old:
+            meta = json.loads(r[4]) if r[4] else {}
+            if _edge_match_key(entmap.get(r[1], r[1]), entmap.get(r[2], r[2]),
+                               r[3], meta) not in new_keys:
+                gone.append(r[0])
         if gone:
             self.conn.executemany(
                 "UPDATE edges SET valid_until = ?, t_expired = ? WHERE id = ?",
@@ -330,34 +318,75 @@ class GraphStore:
         """Close prior live edges superseded by the current revision.
 
         Endpoints embed the revision, so matching is by *logical* identity
-        (raw endpoint strings for external/SBOM endpoints).
+        (raw endpoint strings for external/SBOM endpoints). Candidate
+        loading stays scoped to the new edges' endpoint set (one file's
+        fan-out, in practice): loading the whole repository's entities
+        and live edges on every file made re-ingest quadratic.
         """
-        if repository_id:
-            ent_rows = self.conn.execute(
-                "SELECT revision_entity_id, logical_entity_id FROM entities"
-                " WHERE repository_id = ?", (repository_id,)).fetchall()
-            edge_rows = self.conn.execute(
-                "SELECT id, src_entity_id, dst_entity_id, type FROM edges"
-                " WHERE revision_id != ? AND valid_until IS NULL"
-                " AND revision_id IN (SELECT revision_id FROM revisions WHERE repository_id = ?)",
-                (current_revision_id, repository_id),
-            ).fetchall()
-        else:
-            ent_rows = self.conn.execute(
-                "SELECT revision_entity_id, logical_entity_id FROM entities").fetchall()
-            edge_rows = self.conn.execute(
-                "SELECT id, src_entity_id, dst_entity_id, type FROM edges"
-                " WHERE revision_id != ? AND valid_until IS NULL",
-                (current_revision_id,),
-            ).fetchall()
-        ent = {r[0]: r[1] for r in ent_rows}
+        if not new_edges:
+            return 0
+        ent: dict[str, str] = {}
+        endpoints = sorted({x for e in new_edges
+                            for x in (e.src_entity_id, e.dst_entity_id) if x})
+        for i in range(0, len(endpoints), 500):
+            chunk = endpoints[i:i + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            sql = ("SELECT revision_entity_id, logical_entity_id FROM entities"
+                   f" WHERE revision_entity_id IN ({placeholders})")
+            params: list = list(chunk)
+            if repository_id:
+                sql += " AND repository_id = ?"
+                params.append(repository_id)
+            for r in self.conn.execute(sql, params).fetchall():
+                ent[r[0]] = r[1]
+
+        def _logic(x: str) -> str:
+            return ent.get(x, x)
+
         targets = set()
         for e in new_edges:
             etype = e.type.value if hasattr(e.type, "value") else e.type
-            targets.add((ent.get(e.src_entity_id, e.src_entity_id),
-                         ent.get(e.dst_entity_id, e.dst_entity_id), etype))
-        ids = [r[0] for r in edge_rows
-               if (ent.get(r[1], r[1]), ent.get(r[2], r[2]), r[3]) in targets]
+            targets.add(_edge_match_key(_logic(e.src_entity_id),
+                                        _logic(e.dst_entity_id), etype,
+                                        getattr(e, "metadata", None)))
+        touched = sorted({_logic(x) for x in endpoints})
+        cand_ids: set[str] = set()
+        for i in range(0, len(touched), 500):
+            chunk = touched[i:i + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            sql = ("SELECT revision_entity_id, logical_entity_id FROM entities"
+                   f" WHERE logical_entity_id IN ({placeholders})")
+            params = list(chunk)
+            if repository_id:
+                sql += " AND repository_id = ?"
+                params.append(repository_id)
+            for r in self.conn.execute(sql, params).fetchall():
+                cand_ids.add(r[0])
+                ent[r[0]] = r[1]
+        # External endpoints (manifest paths, SBOM ids, "") have no
+        # entity row; match them verbatim.
+        cand_ids.update(x for x in endpoints if x not in ent)
+        edge_rows: list = []
+        cand = sorted(cand_ids)
+        for i in range(0, len(cand), 500):
+            chunk = cand[i:i + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            sql = ("SELECT id, src_entity_id, dst_entity_id, type, metadata_json"
+                   " FROM edges WHERE revision_id != ? AND valid_until IS NULL"
+                   f" AND (src_entity_id IN ({placeholders})"
+                   f" OR dst_entity_id IN ({placeholders}))")
+            params = [current_revision_id, *chunk, *chunk]
+            if repository_id:
+                sql += (" AND revision_id IN (SELECT revision_id FROM revisions"
+                        " WHERE repository_id = ?)")
+                params.append(repository_id)
+            edge_rows.extend(self.conn.execute(sql, params).fetchall())
+        ids = []
+        for r in edge_rows:
+            meta = json.loads(r[4]) if r[4] else {}
+            if _edge_match_key(ent.get(r[1], r[1]), ent.get(r[2], r[2]),
+                               r[3], meta) in targets:
+                ids.append(r[0])
         if ids:
             for i in range(0, len(ids), 500):
                 chunk = ids[i:i + 500]
@@ -420,13 +449,24 @@ class GraphStore:
         ).fetchone()
         return self._row_to_entity(row) if row else None
 
-    def get_entity_by_name(self, name: str, revision_id: Optional[str] = None) -> Optional[Entity]:
+    def get_entity_by_name(self, name: str, revision_id: Optional[str] = None,
+                           as_of: Optional[float] = None) -> Optional[Entity]:
         # Without a revision this answers "latest live" deterministically —
         # never an arbitrary row across revisions (revision-scoping audit).
+        # With as_of it answers valid-time travel instead, so renamed or
+        # deleted names resolve per timestamp rather than to the live row.
         if revision_id is not None:
             row = self.conn.execute(
                 "SELECT * FROM entities WHERE name = ? AND revision_id = ? LIMIT 1",
                 (name, revision_id),
+            ).fetchone()
+        elif as_of is not None:
+            row = self.conn.execute(
+                "SELECT * FROM entities WHERE name = ?"
+                " AND (valid_from IS NULL OR valid_from <= ?)"
+                " AND (valid_until IS NULL OR valid_until > ?)"
+                " ORDER BY valid_from DESC NULLS LAST LIMIT 1",
+                (name, as_of, as_of),
             ).fetchone()
         else:
             row = self.conn.execute(
@@ -439,7 +479,7 @@ class GraphStore:
     def insert_event(self, event) -> None:
         import json as _json
         self.conn.execute(
-            "INSERT OR REPLACE INTO events VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?,?,?,?)",
             (event.id, event.type, event.timestamp, event.task_id, event.conversation_id,
              _json.dumps(event.payload or {}), _json.dumps(event.provenance or {}),
              event.prev_event_hash,
@@ -448,10 +488,13 @@ class GraphStore:
         self._maybe_commit()
 
     def get_events(self) -> list:
-        # rowid tiebreak: same-tick appends (coarse Windows clocks) must
-        # reload in insertion order, or chain hashes won't reproduce.
+        # rowid order: stable insertion order. Timestamp ordering
+        # re-sorts same-tick appends (coarse Windows clocks) and any
+        # backdated row, so reloaded chains would not reproduce. IGNORE
+        # (not REPLACE) on insert: re-persisting an id must not move or
+        # clobber the stored row.
         rows = self.conn.execute(
-            "SELECT * FROM events ORDER BY timestamp ASC, rowid ASC").fetchall()
+            "SELECT * FROM events ORDER BY rowid ASC").fetchall()
         return [self._row_to_event(r) for r in rows]
 
     def get_entities_by_revision(self, revision_id: str) -> list[Entity]:

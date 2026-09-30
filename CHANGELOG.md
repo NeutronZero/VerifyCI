@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased — re-audit fixes: ingestion, evidence, tamper-evidence
+
+- **Incremental carry-forward scoped.** `DEPENDS_ON` edges carry only
+  when their source manifest is in the carried set; removed/bumped
+  requirements no longer survive as ghosts. `close_deleted_file_version`
+  deleted (proven cross-repo over-close; `close_disappeared` covers it
+  repo-scoped). Unresolved edges keyed with callee name.
+- **Extractor keyed by node span, not `id()`.** `parents` /
+  `decorated_sites` use `(type, start_byte, end_byte)`; qualified
+  lookup walks down pointer/reference declarators, so
+  `Foo* Foo::create()` resolves. C/C++ link as one family.
+- **Manifests hardened.** Cargo dotted subtables, Poetry tables,
+  `name @ url` / egg fragments, URL/VCS skip, non-dict `package.json`
+  tolerated, per-manifest never raises, `tomllib` top-level (3.12+).
+- **Evidence you can trust.** Secret and forbid evidence carry real
+  new-side line numbers; forbid cites only parser-matched lines
+  (`evaluation` no longer cited for `eval`); JSON `"key": "value"`
+  secrets detected. Fragment parse gaps (exceptions, ERROR nodes
+  with zero refs) route to INCONCLUSIVE, never silent PASS or
+  mislabeled FAIL. Diff parsed once per evaluation (lru_cache).
+- **Tamper-evidence repaired.** `verify_task_subchain` checks
+  internal links plus continuity against the global predecessor, so
+  per-task verification is valid and first-event deletion breaks it.
+  One ledger per submitted task (no interleave false-BROKEN, correct
+  per-task heads). Anchor-file given but empty → fail closed.
+  `get_events` ordered by rowid.
+- **Named `asOf` works.** `graph_query` / `_resolve_symbol` consult
+  time-filtered name lookup; revision-id shortcut only when asOf
+  is None.
+- **Prefix-agnostic diffs.** `---`/`+++` pairs before `@@` count as
+  headers under `--no-prefix` / mnemonic prefixes / plain `-u`.
+- **Portability.** Posix logical ids, LF-normalised identity hashing,
+  UTF-8 stdin buffer reads.
+- **HTTP/stats fail closed.** Bytes `hmac` compare, quoted `as_uri`
+  read-only open, missing DB returns `error` (no zero-mask), no DB
+  or directory creation on read paths, ingest rejects missing paths.
+- **Scheduler.** Block/review outcomes take precedence over
+  cancelled-sibling noise; cancel persists before pinning;
+  thread-on-timeout limitation documented. `MetadataStore` commits
+  owned connections.
+- **Small items.** Query prints file:lines, ingest surfaces
+  `parse_errors` count, MCP no longer echoes diffs, reported
+  revision is the one loaded.
+- Suite 437 (was 380), coverage 90% (was 89%), ruff clean.
+
 ## Unreleased — audit fixes: fail-closed verification, packaging, hardening
 
 - **Removal provenance closes the outside-hunk bypass.** `-` lines

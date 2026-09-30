@@ -47,6 +47,10 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
             return {"task": task, "status": "FAILED", "error": "invalid_task_ir",
                     "ledger_head": None}
         db = resolve_db(db_path)
+        import os as _run_os
+        if not _run_os.path.exists(db):
+            return {"task": task, "status": "FAILED", "error": "db_not_found",
+                    "ledger_head": None}
         graph, node_map, entities = load_graph(db)
         ledger = EventLedger()
         store = GraphStore(db)

@@ -18,17 +18,23 @@ def count_table(conn, table: str) -> int:
 def _open_readonly(db: str):
     """Open without creating anything: a stats command must not mkdir,
     schema-write, or materialize a database at a client-chosen path."""
+    from pathlib import Path
     if not os.path.exists(db):
         raise sqlite3.OperationalError(f"no database at {db}")
-    return sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    # Quoted URI: interpolating the raw path breaks on spaces, "#"
+    # (fragment cut), and non-ASCII names.
+    return sqlite3.connect(Path(db).resolve().as_uri() + "?mode=ro", uri=True)
 
 
 def run_stats(db_path: str | None = None) -> dict:
     db = resolve_db(db_path)
     try:
         conn = _open_readonly(db)
-    except sqlite3.Error:
+    except sqlite3.Error as e:
+        # Never zero-mask: a missing/unreadable DB reports an error,
+        # not a clean bill of zeros.
         return {"db_path": db, **{t: 0 for t in TABLES},
+                "error": f"{type(e).__name__}: {e}",
                 "resolution": {"resolved": 0, "ambiguous": 0, "missing": 0}}
     try:
         stats = {}

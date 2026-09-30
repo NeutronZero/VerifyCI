@@ -36,7 +36,15 @@ async def require_auth(request: Request, authorization: str = Header(default="")
     import ipaddress
     token = _api_token()
     if token:
-        if not hmac.compare_digest(authorization, f"Bearer {token}"):
+        # Bytes on both sides: compare_digest(str, str) raises TypeError
+        # on non-ASCII input (a 500); bytes compare in constant time and
+        # any undecodable header simply mismatches (401).
+        try:
+            expected = f"Bearer {token}".encode("utf-8")
+            presented = authorization.encode("utf-8")
+        except (UnicodeEncodeError, AttributeError):
+            raise HTTPException(status_code=401, detail="unauthorized")
+        if not hmac.compare_digest(presented, expected):
             raise HTTPException(status_code=401, detail="unauthorized")
         return
     host = ""

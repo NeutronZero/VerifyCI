@@ -111,6 +111,15 @@ def _make_edge(
     )
 
 
+def _node_key(node) -> tuple[str, int, int]:
+    """Stable node identity: py-tree-sitter wrapper objects are recreated
+    per access (``node.parent`` / ``node.child`` return distinct objects
+    for the same node), so the builtin object identity is unstable and
+    recyclable after GC. ``(type, start_byte, end_byte)`` is stable
+    across wrappers."""
+    return (node.type, node.start_byte, node.end_byte)
+
+
 def _text(node, source: bytes) -> str:
     return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
 
@@ -156,24 +165,45 @@ def _walk_pruned(node):
         yield from _walk_pruned(child)
 
 
+def _find_qualified(node):
+    """First qualified/scoped identifier under a declarator, walking down
+    through ``pointer_declarator`` / ``reference_declarator`` (and
+    ``function_declarator`` etc.) wrappers. Breadth-first in source order:
+    the name's own qualifier is found before anything deeper, and the
+    descent never enters ``parameter_list``, so qualified parameter types
+    (``void f(ns::T x)``) cannot shadow the function name."""
+    from collections import deque
+    queue = deque([node])
+    while queue:
+        cur = queue.popleft()
+        for child in cur.children:
+            if child.type in ("qualified_identifier", "scoped_identifier"):
+                return child
+        for child in cur.children:
+            if child.type in DECLARATOR_TYPES:
+                queue.append(child)
+    return None
+
+
 def _qualified_name(node, source: bytes) -> Optional[tuple[str, str]]:
     """(qualifier, name) for `App::run`-style declarators, else None.
 
     The declarator holds a `qualified_identifier` (this grammar version;
     others emit `scoped_identifier`) whose parts are the scope chain plus
-    the name: `App::run` -> ("App", "run"). A single part (`::run`) or no
+    the name: `App::run` -> ("App", "run"). Pointer/reference returns
+    (`Foo* Foo::create()`) nest it one level down, so the whole
+    declarator spine is searched. A single part (`::run`) or no
     qualified node means "no qualifier here", not "unnamed".
     """
-    for child in node.children:
-        if child.type not in ("qualified_identifier", "scoped_identifier"):
-            continue
-        raw = _qualified_raw(child, source)
-        if not raw:
-            return None
-        parts = raw.lstrip(":").split("::")
-        if len(parts) >= 2:
-            return "::".join(parts[:-1]), parts[-1]
+    found = _find_qualified(node)
+    if found is None:
         return None
+    raw = _qualified_raw(found, source)
+    if not raw:
+        return None
+    parts = raw.lstrip(":").split("::")
+    if len(parts) >= 2:
+        return "::".join(parts[:-1]), parts[-1]
     return None
 
 
@@ -198,6 +228,12 @@ def _scope_name(node, source: bytes, language: str = "python") -> Optional[str]:
                     return _text(child, source)
         return None
     if node.type in DECLARATOR_TYPES:
+        # A qualified name nested anywhere down the declarator spine
+        # (`Foo* Foo::create()`) is the name; without this the recursion
+        # below finds no bare identifier and the entity is dropped.
+        qualified = _qualified_name(node, source)
+        if qualified is not None:
+            return qualified[1]
         for child in node.children:
             if child.type in DECLARATOR_TYPES:
                 found = _scope_name(child, source, language)
@@ -467,9 +503,9 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
     parents = {}
     for _n in _walk(root):
         for _c in _n.children:
-            parents.setdefault(id(_c), _n)
+            parents.setdefault(_node_key(_c), _n)
 
-    decorated_sites: set[int] = set()
+    decorated_sites: set[tuple[str, int, int]] = set()
     for node, stack in _walk_scoped(root, parsed.source, [], parsed.language):
         if node.type not in FUNC_NODES:
             continue
@@ -490,14 +526,14 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
         # Decorators live on the parent decorated_definition, outside
         # the function body — without this, `@app.route(...)` calls
         # are never captured at all.
-        parent = parents.get(id(node))
+        parent = parents.get(_node_key(node))
         if parent is not None and parent.type == "decorated_definition":
             for dec in parent.children:
                 if dec.type != "decorator":
                     continue
                 for site_node in _walk(dec):
                     if site_node.type in CALL_NODES:
-                        decorated_sites.add(id(site_node))
+                        decorated_sites.add(_node_key(site_node))
                         _emit_call(caller, caller_scope, site_node)
 
     # Module- and class-body calls (`if __name__ == "__main__": main()`,
@@ -505,7 +541,7 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
     # Attribute them to the innermost enclosing class, else the module —
     # previously they produced no edge at all.
     for node, stack in _walk_scoped(root, parsed.source, [], parsed.language):
-        if node.type not in CALL_NODES or id(node) in decorated_sites:
+        if node.type not in CALL_NODES or _node_key(node) in decorated_sites:
             continue
         if any(kind == "func" for kind, _ in stack):
             continue  # attributed to the enclosing function above

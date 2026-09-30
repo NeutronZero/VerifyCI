@@ -100,3 +100,53 @@ def test_maven_with_attributes():
 """
     rows = _pkgs("pom.xml", pom)
     assert ("junit:junit", "4.13.2") in rows
+
+
+def test_cargo_subtable_takes_section_package_name():
+    rows = _pkgs("Cargo.toml",
+                 '[dependencies.serde]\nversion = "1.0"\nfeatures = ["derive"]\n')
+    assert ("serde", "1.0") in rows
+    assert not [p for p, _ in rows if p in ("version", "features")]
+
+
+def test_pypi_skips_url_and_vcs_requirements():
+    rows = _pkgs("requirements.txt",
+                 "git+https://github.com/x/y.git\n"
+                 "https://example.com/foo.zip\n"
+                 "requests==2.28\n")
+    assert ("requests", "2.28") in rows
+    assert not [p for p, _ in rows if p in ("git", "https")]
+
+
+def test_pypi_records_egg_fragment():
+    rows = _pkgs("requirements.txt",
+                 "git+https://github.com/x/y.git#egg=legitpkg\n")
+    assert [p for p, _ in rows] == ["legitpkg"]
+
+
+def test_npm_top_level_list_returns_empty():
+    assert _pkgs("package.json", '["a","b"]') == []
+
+
+def test_pyproject_poetry_dependencies():
+    toml = ('[tool.poetry.dependencies]\n'
+            'python = "^3.12"\n'
+            'requests = "^2.28"\n')
+    rows = _pkgs("pyproject.toml", toml)
+    assert ("requests", "2.28") in rows
+    assert not [p for p, _ in rows if p == "python"]
+
+
+def test_bad_manifests_never_raise():
+    cases = [
+        ("package.json", '["a","b"]'),
+        ("package.json", '{"dependencies": ["notadict"]}'),
+        ("requirements.txt", "git+https://github.com/x/y.git"),
+        ("Cargo.toml", "[dependencies.serde]\nversion = \x00\n"),
+        ("pyproject.toml", "not = [valid"),
+        ("pom.xml", "<dependency><groupId>x</groupId>"),
+        ("go.mod", "\x00\x01\x02"),
+    ]
+    for name, source in cases:
+        assert isinstance(
+            extract_dependencies(name, source, "rev"), list)

@@ -42,11 +42,11 @@ def _collect(repo: Path) -> tuple[list[tuple[str, str, bytes]], list[tuple[str, 
             # Manifests first: requirements.txt also matches the .txt
             # ingestible suffix, which used to swallow it silently and
             # drop Python dependencies from the graph.
-            texts.append((str(file.relative_to(repo)), file.read_text(errors="replace")))
+            texts.append((file.relative_to(repo).as_posix(), file.read_text(errors="replace")))
         elif file.suffix.lower() in INGESTIBLE_EXTENSIONS:
             language = detect_language(str(file))
             # Docs have no AST: parsed with tree=None yields a MODULE entity.
-            sources.append((str(file.relative_to(repo)), language, file.read_bytes()))
+            sources.append((file.relative_to(repo).as_posix(), language, file.read_bytes()))
     manifest = [(rel, compute_source_hash(src)) for rel, _, src in sources]
     manifest += [(rel, compute_source_hash(text.encode("utf-8"))) for rel, text in texts]
     return sources, texts, manifest
@@ -82,6 +82,7 @@ def _carry_forward(store, carried_sources, carried_texts, revision_id, now) -> t
                 valid_from=now, valid_until=None, t_created=now, t_expired=None))
             n_e += 1
         old_edges.extend(store.get_edges_by_revision(old_rev))
+    carried_manifests = {rel for rel, _ in carried_texts}
     text_revs = {old_rev for _, old_rev in carried_texts if old_rev}
     for old_rev in text_revs:
         if old_rev not in by_rev:
@@ -91,7 +92,12 @@ def _carry_forward(store, carried_sources, carried_texts, revision_id, now) -> t
     for e in old_edges:
         if e.src_entity_id in id_map and e.dst_entity_id in id_map:
             src, dst = id_map[e.src_entity_id], id_map[e.dst_entity_id]
-        elif e.type.value == "DEPENDS_ON":
+        elif e.type.value == "DEPENDS_ON" and e.src_entity_id in carried_manifests:
+            # Manifest-scoped carry: a changed or removed manifest is
+            # re-extracted fresh (or gone entirely). Resurrecting its
+            # old DEPENDS_ON rows keeps removed requirements live, and
+            # fresh extraction plus disappearance closure already cover
+            # the manifest's current state.
             src, dst = e.src_entity_id, e.dst_entity_id
         elif e.type.value in ("CALLS_UNRESOLVED", "INHERITS_UNRESOLVED") \
                 and e.src_entity_id in id_map:
@@ -136,6 +142,8 @@ def _carry_forward(store, carried_sources, carried_texts, revision_id, now) -> t
 def run_ingest(path: str, incremental: bool = False,
                commit_id: str | None = None) -> dict:
     repo = Path(path)
+    if not repo.is_dir():
+        raise FileNotFoundError(f"no repository directory at {path}")
     db_path = str(repo / ".verifyci" / "verifyci.db")
     store = GraphStore(db_path)
     meta = MetadataStore(db_path, conn=store.conn)
@@ -198,7 +206,6 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
                   "parent_revision_id": revision.parent_revision_id,
                   "db_path": db_path}
         import time as _time
-        closed_at = _time.time()
         for rel, language, source in sources:
             digest = compute_source_hash(source)
             try:
@@ -219,15 +226,16 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
                 store.insert_entity(e)
             for edge in edges:
                 store.insert_edge(edge)
+            # Close stamp captured after parsing: valid_from of the rows
+            # above is the extraction time, so closing with an earlier
+            # stamp opens an as-of gap (neither version visible between
+            # the two stamps). Same-file deletions are covered by the
+            # repo-scoped close_disappeared pass at the end.
+            closed_at = _time.time()
             totals["closed_entities"] += store.close_superseded_entities(
                 [e.logical_entity_id for e in entities], revision.revision_id, closed_at)
             totals["closed_edges"] += store.close_superseded_edges(
                 edges, revision.revision_id, closed_at, repository_id=repo.name)
-            gone_e, gone_d = store.close_deleted_file_version(
-                rel, [e.logical_entity_id for e in entities],
-                revision.revision_id, closed_at)
-            totals["closed_entities"] += gone_e
-            totals["closed_edges"] += gone_d
             meta.upsert_file(str(repo / rel), digest, language, revision.revision_id)
             totals["entities"] += len(entities)
             totals["edges"] += len(edges)
@@ -236,10 +244,12 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
             edges = extract_dependencies(rel, text, revision.revision_id)
             for edge in edges:
                 store.insert_edge(edge)
+            closed_at = _time.time()
             totals["closed_edges"] += store.close_superseded_edges(
                 edges, revision.revision_id, closed_at, repository_id=repo.name)
             totals["edges"] += len(edges)
         if incremental and revision.parent_revision_id:
+            closed_at = _time.time()
             carried_e, carried_d = _carry_forward(
                 store, carried_sources, carried_texts, revision.revision_id, closed_at)
             totals["entities"] += carried_e
@@ -250,6 +260,7 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
         # revision (fresh rows plus carried ones): entities and edges
         # the new tree no longer contains are expired, so name lookups
         # and graph loads stop returning deleted code.
+        closed_at = _time.time()
         gone_e, gone_d = store.close_disappeared(
             revision.revision_id, revision.parent_revision_id or "",
             repo.name, closed_at)

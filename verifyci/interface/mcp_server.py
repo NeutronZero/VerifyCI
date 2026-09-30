@@ -138,13 +138,15 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
     def _resolve_symbol(symbol: str, asOf: float | None = None):
         # Revision id first (what search returns), then logical id,
         # then name — in that order, so chained lookups never miss.
-        if symbol in by_revision_id:
+        # The revision-id shortcut is timeless: with asOf given it is
+        # skipped so the time filter (not the loaded revision) decides.
+        if asOf is None and symbol in by_revision_id:
             return by_revision_id[symbol]
         if store is None:
             return None
         entity = store.get_entity_by_logical(symbol, asOf=asOf)
         if entity is None and hasattr(store, "get_entity_by_name"):
-            entity = store.get_entity_by_name(symbol)
+            entity = store.get_entity_by_name(symbol, as_of=asOf)
         return entity
 
     async def code_definition(symbol: str) -> dict:
@@ -180,7 +182,7 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
 
         with start_agent_span("verify.diff", conversation_id, "verify.diff"):
             if len(diff) > MAX_DIFF_CHARS:
-                return {"diff": diff, "revision_id": revision_id, "status": "FAILED", "error": "diff_too_large"}
+                return {"revision_id": revision_id, "status": "FAILED", "error": "diff_too_large"}
             reasoner = SemiFormalReasoner()
             cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map,
                                    entities=entities or None)
@@ -201,7 +203,13 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                                         on_inconclusive="human_review", on_human_review="block",
                                         require_deterministic_checker=True)
             decision = PolicyEvaluator().evaluate(report, policy)
-            return {"diff": diff, "revision_id": revision_id, "status": decision.status,
+            # Report the revision actually grounding the check (the
+            # loaded entities'), not just the requested one.
+            used_revision = revision_id
+            if entities:
+                used_revision = (getattr(entities[0], "revision_id", "")
+                                 or revision_id)
+            return {"revision_id": used_revision, "status": decision.status,
                     "report_id": report.report_id, "rationale": decision.rationale,
                     "files": files, "changed_entities": changed}
 

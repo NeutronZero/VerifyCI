@@ -12,7 +12,11 @@ class ParsedFile:
 
 
 def compute_source_hash(source: bytes) -> str:
-    return hashlib.sha256(source).hexdigest()
+    # LF-normalised identity hashing: a CRLF checkout (autocrlf) of
+    # identical content must yield the identical revision. Stored
+    # snippets keep raw bytes; only the hash normalises.
+    return hashlib.sha256(
+        source.replace(b"\r\n", b"\n").replace(b"\r", b"\n")).hexdigest()
 
 
 class TreeSitterParser:

@@ -14,7 +14,8 @@ from verifyci.verification.verification_ir import build_semi_check, build_verifi
 def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
                db_path: str | None = None) -> dict:
     db = resolve_db(db_path)
-    graph, node_map, entities = load_graph(db, revision_id or "")
+    graph, node_map, entities, resolved_revision = load_graph(
+        db, revision_id or "", return_revision=True)
     reasoner = SemiFormalReasoner()
     cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map or None,
                            entities=entities or None)
@@ -36,5 +37,5 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
     )
     decision = PolicyEvaluator().evaluate(report, policy)
     return {"report_id": report.report_id, "status": decision.status,
-            "rationale": decision.rationale, "revision_id": revision_id,
+            "rationale": decision.rationale, "revision_id": resolved_revision,
             "files": files, "changed_entities": changed}

@@ -5,6 +5,7 @@ event's payload directly in SQLite. Links-only verification still
 passes (the known last-event flaw); the anchored check fails closed.
 """
 import json
+import os
 import sqlite3
 
 from verifyci.interface.commands.anchor import run_verify_chain
@@ -13,6 +14,11 @@ from verifyci.memory.ledger import EventLedger, append_anchor, read_anchors
 
 
 def _run(db, anchor=None):
+    from verifyci.storage.graph_store import GraphStore
+    if not os.path.exists(db):
+        # run_task fails closed on a missing DB; a fresh schema-only
+        # file is exactly what auto-creation used to provide.
+        GraphStore(db).close()
     return run_task("probe task", diff="", db_path=db,
                     anchor_file=anchor)
 

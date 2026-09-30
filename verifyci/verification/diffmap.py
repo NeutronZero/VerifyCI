@@ -43,6 +43,17 @@ def _is_git_file_header(line: str, marker: str) -> bool:
     )
 
 
+def _positional_header_indices(lines: list[str]) -> set[int]:
+    out: set[int] = set()
+    for i, line in enumerate(lines):
+        if not line.startswith("@@"):
+            continue
+        if i >= 2 and _is_header(lines[i - 1], "+++") and _is_header(lines[i - 2], "---"):
+            out.add(i - 1)
+            out.add(i - 2)
+    return out
+
+
 def parse_diff_files(diff: str | None) -> list[str]:
     if not diff:
         return []
@@ -107,6 +118,52 @@ def iter_added_lines(diff: str | None) -> list[tuple[str | None, str]]:
     return out
 
 
+def iter_added_lines_with_lineno(diff: str | None) -> list[tuple[str | None, int | None, str]]:
+    out: list[tuple[str | None, int | None, str]] = []
+    if not diff:
+        return out
+    current: str | None = None
+    in_hunk = False
+    new_ln = 0
+    for line in _diff_lines(diff):
+        if line.startswith("diff --git "):
+            current, in_hunk = None, False
+            continue
+        if in_hunk and (line.startswith(_HUNK_BODY_PREFIXES) or line == ""):
+            if line.startswith("+"):
+                out.append((current, new_ln, line[1:]))
+                new_ln += 1
+            elif line.startswith(" ") or line == "":
+                new_ln += 1
+            continue
+        in_hunk = False
+        m = _HEAD_RE.match(line)
+        if m:
+            try:
+                new_ln = int(m.group(3))
+            except Exception:
+                new_ln = 0
+            in_hunk = True
+            continue
+        cm = _COMBINED_RE.match(line)
+        if cm or (line.startswith("@@@") and line.rstrip().endswith("@@@")):
+            new_ln = 0
+            in_hunk = True
+            continue
+        if line.startswith("@@"):
+            new_ln = 0
+            in_hunk = True
+            continue
+        if _is_header(line, "+++"):
+            path = _clean(line[4:])
+            current = path
+        elif _is_header(line, "---"):
+            continue
+        elif line.startswith("+"):
+            out.append((current, None, line[1:]))
+    return out
+
+
 def _clean(fragment: str) -> str | None:
     path = fragment.strip().split("\t")[0].strip().strip(chr(34))
     if path in ("-", "/dev/null"):
@@ -144,7 +201,9 @@ def unattributed_removed_lines(diff: str | None) -> list[str]:
         return []
     out: list[str] = []
     in_hunk = False
-    for line in _diff_lines(diff):
+    lines = _diff_lines(diff)
+    positional = _positional_header_indices(lines)
+    for idx, line in enumerate(lines):
         if line.startswith("diff --git "):
             in_hunk = False
             continue
@@ -155,7 +214,7 @@ def unattributed_removed_lines(diff: str | None) -> list[str]:
             if line.startswith(_HUNK_BODY_PREFIXES) or line == "":
                 continue
             in_hunk = False
-        if _is_git_file_header(line, "---") or _is_git_file_header(line, "+++"):
+        if _is_git_file_header(line, "---") or _is_git_file_header(line, "+++") or idx in positional:
             continue
         if line.startswith("\\"):
             continue
@@ -175,7 +234,9 @@ def find_deletion_hunks(diff: str | None) -> list[tuple[int, str]]:
     removed: list[str] = []
     stray_start = 0
     stray_removed: list[str] = []
-    for i, line in enumerate(_diff_lines(diff), 1):
+    all_lines = _diff_lines(diff)
+    positional = _positional_header_indices(all_lines)
+    for i, line in enumerate(all_lines, 1):
         if line.startswith("diff --git "):
             if in_hunk and minus > plus or (hunk_combined and minus > 0):
                 hunks.append((hunk_start, "\n".join(removed)))
@@ -208,7 +269,7 @@ def find_deletion_hunks(diff: str | None) -> list[tuple[int, str]]:
             in_hunk, hunk_start = True, i
             hunk_combined = line.startswith("@@@")
             continue
-        if _is_git_file_header(line, "---") or _is_git_file_header(line, "+++"):
+        if _is_git_file_header(line, "---") or _is_git_file_header(line, "+++") or (i - 1) in positional:
             continue
         if line.startswith("\\"):
             continue
