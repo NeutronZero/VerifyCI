@@ -1,6 +1,8 @@
 import typer
 
-app = typer.Typer(name="aci", help="VerifyCI — Verification-first code intelligence")
+# No hard-coded name: the prog shown in --help follows the invoked
+# console script (`verifyci` or the `aci` alias), not a fixed string.
+app = typer.Typer(help="VerifyCI — Verification-first code intelligence")
 
 
 @app.command()

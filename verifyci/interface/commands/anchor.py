@@ -1,4 +1,4 @@
-"""L2 tamper-evidence verification: `aci verify-chain`.
+"""L2 tamper-evidence verification: `verifyci verify-chain`.
 
 The events table is a global interleaved log — every run appends with a
 fresh ledger, so cross-task links are broken by construction. Chain

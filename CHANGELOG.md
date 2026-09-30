@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — rename: `verifyci` primary, `aci` alias, `VERIFYCI_*` env
+
+- **`verifyci` is the primary console script; `aci` stays installed as an
+  alias to the same app** (`pyproject.toml`). The Typer prog name is no
+  longer hard-coded to `aci`, so `verifyci --help` and `aci --help` each
+  report how they were invoked.
+- **Canonical env prefix `VERIFYCI_*`, legacy `ACI_*` fallback.** New
+  `verifyci/env.py` `get_env()` is the single reader; `ACI_API_TOKEN`
+  (http.py) and `ACI_EMBEDDINGS`/`ACI_OLLAMA_URL` (provider.py) route
+  through it. Precedence is by presence, not truthiness: an explicit
+  `VERIFYCI_API_TOKEN=""` reads as "unset" and is not shadowed by a
+  stale `ACI_*` value. Live probe: `VERIFYCI_API_TOKEN`/`VERIFYCI_EMBEDDINGS`
+  were ignored before, honored now; legacy `ACI_*` still honored.
+- Suite 476 (was 469), ruff clean.
+
 ## Unreleased — one skip classifier for every discovery path
 
 - **Skip rules unified.** New `verifyci/ingestion/ignore.py` is the

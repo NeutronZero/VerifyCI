@@ -12,14 +12,18 @@ verification.
 
 ```bash
 pip install -e ".[dev]"
-aci init ./repo
-aci ingest ./repo
-aci stats
-aci query "where is auth?"
-aci verify-diff "$(git diff)" --db ./repo/.verifyci/verifyci.db
-aci run "ship it" --diff "$(git diff)" --db ./repo/.verifyci/verifyci.db
-aci serve --db ./repo/.verifyci/verifyci.db   # MCP over stdio (or http)
+verifyci init ./repo
+verifyci ingest ./repo
+verifyci stats
+verifyci query "where is auth?"
+verifyci verify-diff "$(git diff)" --db ./repo/.verifyci/verifyci.db
+verifyci run "ship it" --diff "$(git diff)" --db ./repo/.verifyci/verifyci.db
+verifyci serve --db ./repo/.verifyci/verifyci.db   # MCP over stdio (or http)
 ```
+
+`verifyci` is the primary command; the legacy `aci` console script is a
+kept alias for the same app, and environment variables read
+`VERIFYCI_*` first with `ACI_*` as fallback.
 
 ## How verification works
 
@@ -76,7 +80,7 @@ interface (MCP / CLI / HTTP) → verification (semi-formal, blast, invariants, p
 
 Rerank is marked experimental until it beats fused ranking on a held-out
 set (measured 2 lifts / 4 demotions so far). Dense defaults to offline
-hash embeddings (deterministic, no server); `ACI_EMBEDDINGS=ollama[:model]`
+hash embeddings (deterministic, no server); `VERIFYCI_EMBEDDINGS=ollama[:model]` (legacy `ACI_EMBEDDINGS`)
 opts into local Ollama embeddings behind a content-addressed cache, with
 honest fallback to hash when the server is unreachable. Measured on a
 small 5+5 query set (`benchmarks/embedding_eval.py`, needs a live server):
@@ -87,5 +91,5 @@ not the model — is what makes it usable.
 ## Status
 
 V1 walking skeleton. `PLAN.md` is the full plan; `CHANGELOG.md` records what
-each revision proved, including measured numbers and known gaps. 469 tests:
+each revision proved, including measured numbers and known gaps. 476 tests:
 `python -m pytest tests/ -q`.

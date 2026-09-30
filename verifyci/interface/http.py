@@ -1,19 +1,23 @@
 """HTTP surface for VerifyCI.
 
 Trust model, stated plainly: this app has no sessions, no roles, and no
-rate limiting. When `ACI_API_TOKEN` is set, every endpoint except
-`/health` requires `Authorization: Bearer <token>`; when it is unset
-(the local-CLI default), only loopback clients may call protected endpoints (non-loopback without a token gets 401); loopback callers can verify
-diffs, read the code graph, and run tasks. The server binds loopback by
-default — serving on 0.0.0.0 without a token exposes an unauthenticated
-verification oracle and full code-graph readout to the network. Request
-bodies are size-capped so one large diff cannot exhaust the worker.
+rate limiting. When `VERIFYCI_API_TOKEN` (or legacy `ACI_API_TOKEN`) is
+set, every endpoint except `/health` requires `Authorization: Bearer
+<token>`; when it is unset (the local-CLI default), only loopback
+clients may call protected endpoints (non-loopback without a token gets
+401); loopback callers can verify diffs, read the code graph, and run
+tasks. The server binds loopback by default — serving on 0.0.0.0 without
+a token exposes an unauthenticated verification oracle and full
+code-graph readout to the network. Request bodies are size-capped so one
+large diff cannot exhaust the worker.
 """
-import os
+import hmac
+import ipaddress
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from verifyci.env import get_env
 from verifyci.interface.commands.query import run_query
 from verifyci.interface.commands.stats import run_stats
 from verifyci.interface.commands.verify import run_verify
@@ -28,12 +32,10 @@ MAX_K = 1000
 def _api_token() -> str:
     # Read per request so tests and long-lived servers pick up rotation
     # without a restart.
-    return os.environ.get("ACI_API_TOKEN", "")
+    return get_env("API_TOKEN", "")
 
 
 async def require_auth(request: Request, authorization: str = Header(default="")) -> None:
-    import hmac
-    import ipaddress
     token = _api_token()
     if token:
         # Bytes on both sides: compare_digest(str, str) raises TypeError

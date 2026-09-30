@@ -28,7 +28,8 @@ otel-semconv = ["opentelemetry-semantic-conventions>=0.40b0"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0", "ruff>=0.15"]
 
 [project.scripts]
-aci = "verifyci.interface.cli:app"
+verifyci = "verifyci.interface.cli:app"
+aci = "verifyci.interface.cli:app"  # legacy alias; same app, both on PATH
 
 [build-system]
 requires = ["hatchling"]

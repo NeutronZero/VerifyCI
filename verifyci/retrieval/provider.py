@@ -26,7 +26,7 @@ class HashEmbeddingProvider(EmbeddingProvider):
 
     No model, no network. Lexical similarity only — an honest dense baseline
     for environments without an embedding server, and the default used by
-    `aci query` unless an Ollama provider is injected.
+    `verifyci query` unless an Ollama provider is injected.
     """
 
     def __init__(self, dimensions: int = 256):
@@ -172,22 +172,24 @@ class CachedEmbeddingProvider(EmbeddingProvider):
 def default_dense_provider(cache_dir: str | None = None) -> EmbeddingProvider:
     """Select the dense provider from the environment (single call site).
 
-    `ACI_EMBEDDINGS` unset/`hash` → offline trigram hash (default:
-    deterministic, no server). `ollama[:model]` → Ollama wrapped in a
-    content-addressed cache (file under `cache_dir` when given, else
-    memory-only). Unknown specs raise — a misconfigured operator
-    finds out loudly, not via silently wrong results.
-    `ACI_OLLAMA_URL` overrides the server address.
+    `VERIFYCI_EMBEDDINGS` (or legacy `ACI_EMBEDDINGS`) unset/`hash` →
+    offline trigram hash (default: deterministic, no server).
+    `ollama[:model]` → Ollama wrapped in a content-addressed cache (file
+    under `cache_dir` when given, else memory-only). Unknown specs raise
+    — a misconfigured operator finds out loudly, not via silently wrong
+    results. `VERIFYCI_OLLAMA_URL` (or legacy `ACI_OLLAMA_URL`) overrides
+    the server address.
     """
     import os
-    spec = os.environ.get("ACI_EMBEDDINGS", "hash").strip().lower()
+    from verifyci.env import get_env, env_name
+    spec = get_env("EMBEDDINGS", "hash").strip().lower()
     if spec in ("", "hash", "offline"):
         return HashEmbeddingProvider()
     if spec == "ollama" or spec.startswith("ollama:"):
         model = "nomic-embed-text"
         if ":" in spec:
             model = spec.split(":", 1)[1] or model
-        base_url = os.environ.get("ACI_OLLAMA_URL", "http://localhost:11434")
+        base_url = get_env("OLLAMA_URL", "http://localhost:11434")
         base: EmbeddingProvider = OllamaEmbeddingProvider(
             model=model, base_url=base_url)
         if cache_dir:
@@ -195,4 +197,4 @@ def default_dense_provider(cache_dir: str | None = None) -> EmbeddingProvider:
             return CachedEmbeddingProvider(
                 base, os.path.join(cache_dir, f"embedding_cache_{safe}.json"))
         return CachedEmbeddingProvider(base)
-    raise ValueError(f"unknown ACI_EMBEDDINGS={spec!r} (want hash|ollama[:model])")
+    raise ValueError(f"unknown {env_name('EMBEDDINGS')}={spec!r} (want hash|ollama[:model])")
