@@ -35,8 +35,17 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
             probe.close()
     except InfraError as e:
         infra_error = e.kind
-    graph, node_map, entities, resolved_revision = load_graph(
-        db, revision_id or "", return_revision=True)
+    try:
+        graph, node_map, entities, resolved_revision = load_graph(
+            db, revision_id or "", return_revision=True)
+    except InfraError as e:
+        # The probe passed but the load itself failed (locked/corrupt
+        # mid-read, WAL-mode on a sealed mount): same infrastructure
+        # axis, recorded the same way. A concrete FAIL the diff text
+        # already earned (forbidden call, secret) still stands below —
+        # fail-closed outranks a tidy exit code.
+        infra_error = infra_error or e.kind
+        graph, node_map, entities, resolved_revision = None, {}, [], ""
     reasoner = SemiFormalReasoner()
     cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map or None,
                            entities=entities or None)

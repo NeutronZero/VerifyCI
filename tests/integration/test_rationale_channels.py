@@ -25,8 +25,11 @@ class _Payload:
         self.logical_entity_id = "logical:" + eid
         self.name = "func"
         self.file_path = "src/app.py"
-        self.line_start = 10
-        self.line_end = 20
+        # Span covers the diff's changed lines (1-2): the changed-line
+        # coverage rule declines edits outside every span, so the
+        # fixture must place the entity where the diff edits.
+        self.line_start = 1
+        self.line_end = 2
         self.source_hash = "abc123"
 
 

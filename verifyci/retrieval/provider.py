@@ -182,7 +182,12 @@ def default_dense_provider(cache_dir: str | None = None) -> EmbeddingProvider:
     """
     import os
     from verifyci.env import get_env, env_name
-    spec = get_env("EMBEDDINGS", "hash").strip().lower()
+    raw = get_env("EMBEDDINGS", "hash").strip()
+    # Lowercase the SCHEME only (`ollama:MyModel` keeps its model tag
+    # verbatim — Ollama tags are case-sensitive and the old
+    # `.lower()` on the whole spec silently selected the wrong model).
+    scheme, _, model_part = raw.partition(":")
+    spec = scheme.lower() + (":" + model_part if model_part or ":" in raw else "")
     if spec in ("", "hash", "offline"):
         return HashEmbeddingProvider()
     if spec == "ollama" or spec.startswith("ollama:"):

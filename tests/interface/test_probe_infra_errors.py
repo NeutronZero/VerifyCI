@@ -187,17 +187,18 @@ def test_malformed_diff_is_a_verdict_not_infra(tmp_path):
 # ------------------------------------------------- verify-chain separation -
 
 def test_chain_missing_db_stays_fail_closed_no_events():
-    # verify-chain already refuses to masquerade: NO_EVENTS + explicit
-    # db_not_found + exit 1 (closure-pinned). Not migrated to the new
-    # channel; this guard pins that it STAYS fail-closed either way.
+    # verify-chain refuses to masquerade: a missing database is
+    # INFRA_ERROR + exit 3 (the same infrastructure channel as every
+    # other read command), never a chain verdict. Presence without
+    # events stays NO_EVENTS (see below).
     from verifyci.interface.commands.anchor import run_verify_chain
     r = run_verify_chain(str(tmp_path := __import__("pathlib").Path() / "ghost-test.db"),
                          None, None)
-    assert r["status"] == "NO_EVENTS", r
+    assert r["status"] == "INFRA_ERROR", r
     assert r["error"] == "db_not_found"
     rr = CliRunner().invoke(app, ["verify-chain", "--db",
                                   str(tmp_path / "ghost.db")])
-    assert rr.exit_code == 1, rr.output
+    assert rr.exit_code == 3, rr.output
 
 
 def test_chain_empty_db_is_no_events(tmp_path):

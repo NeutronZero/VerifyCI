@@ -81,6 +81,14 @@ class FileDiff:
     hunks: list = field(default_factory=list)
     binary: bool = False
     mode_only: bool = False
+    renamed: bool = False
+    copied: bool = False
+    # Index of the `diff --git`/`diff --cc` line that opened this block
+    # (None for classic header-only blocks). Reconstruction maps each git
+    # line to the block it opened 1:1 instead of zipping two
+    # independently-built lists (a preamble entry used to shift every
+    # later block onto the wrong paths).
+    git_index: int | None = None
     # `+`/`-` lines seen outside any hunk for this file (git mode/index
     # regions, hand-edited diffs). Attributed to the file, counted nowhere.
     stray_added: list = field(default_factory=list)
@@ -110,13 +118,41 @@ def _split_git_paths(line: str) -> tuple[str | None, str | None]:
     """Best-effort (old, new) from a `diff --git a/X b/Y` line. Used only
     as a fallback when no ---/+++ header is present (mode-only/binary).
     Git quotes/escapes paths with spaces when they differ from the a/b
-    defaults; the header path (strip_prefix) remains authoritative."""
+    defaults; the header path (strip_prefix) remains authoritative.
+    `--no-prefix` (and mnemonic prefixes) carry no ` b/` marker: split
+    the remainder on whitespace then, still best-effort."""
     rest = line[len("diff --git "):].strip()
     if " b/" in rest:
         head, _, tail = rest.partition(" b/")
         old = head[2:] if head.startswith("a/") else head
         return _strip_prefix("a/" + old) if old else None, _strip_prefix("b/" + tail)
+    parts = rest.split()
+    if len(parts) == 2:
+        return _strip_prefix(parts[0]), _strip_prefix(parts[1])
     return None, None
+
+
+def _new_file_ahead(lines: list[str], idx: int) -> bool:
+    """True when a header-like `---` line opens a NEW file block rather
+    than a removed `-- ...` content line: it is followed by its `+++`
+    mate (itself followed by a hunk or another file block — never more
+    body, never end of input: a header pair ending the input is
+    content-shaped, and breaking there would split exact-count diffs
+    whose removed `-- x` / added `++ y` lines are the whole hunk), or
+    directly by a new `diff --git/--cc` block. Hand-written/LLM diffs
+    with overstated hunk counts absorb the next file's headers as body
+    without this; exact-count diffs never satisfy it with sides
+    remaining, so valid content is untouched."""
+    if not _is_header(lines[idx], "---"):
+        return False
+    nxt = lines[idx + 1] if idx + 1 < len(lines) else ""
+    if nxt.startswith("diff --git ") or nxt.startswith("diff --cc"):
+        return True
+    if not _is_header(nxt, "+++"):
+        return False
+    nxt2 = lines[idx + 2] if idx + 2 < len(lines) else ""
+    return (_HEAD_RE.match(nxt2) is not None or nxt2.startswith("@@")
+            or nxt2.startswith("diff --git ") or nxt2.startswith("diff --cc"))
 
 
 def _is_boundary(line: str) -> bool:
@@ -157,9 +193,11 @@ def parse_unified_diff(diff: str | None) -> list[FileDiff]:
         if _DIFF_GIT_RE.match(line) or _DIFF_CC_RE.match(line):
             # A new per-file block starts here, period — even without
             # headers (mode-only/binary blocks carry only the --git line;
-            # _reconstruct_git_paths back-fills the path).
-            cur = None
-            _file()
+            # _reconstruct_git_paths back-fills the path). The block
+            # records which git line opened it so reconstruction cannot
+            # misalign when preamble or header-only entries intervene.
+            cur = FileDiff(None, None, git_index=idx)
+            files.append(cur)
             pair_complete = False
             idx += 1
             continue
@@ -171,6 +209,34 @@ def parse_unified_diff(diff: str | None) -> list[FileDiff]:
             _file().mode_only = True
             idx += 1
             continue
+        if line.startswith("rename from "):
+            p = _clean(line[len("rename from "):])
+            if p is not None:
+                _file().old_path = p
+                _file().renamed = True
+            idx += 1
+            continue
+        if line.startswith("rename to "):
+            p = _clean(line[len("rename to "):])
+            if p is not None:
+                _file().new_path = p
+                _file().renamed = True
+            idx += 1
+            continue
+        if line.startswith("copy from "):
+            p = _clean(line[len("copy from "):])
+            if p is not None:
+                _file().old_path = p
+                _file().copied = True
+            idx += 1
+            continue
+        if line.startswith("copy to "):
+            p = _clean(line[len("copy to "):])
+            if p is not None:
+                _file().new_path = p
+                _file().copied = True
+            idx += 1
+            continue
         if line.startswith(("similarity index", "dissimilarity index", "index ",
                             "copy ", "rename ")):
             _file()
@@ -178,18 +244,6 @@ def parse_unified_diff(diff: str | None) -> list[FileDiff]:
             continue
         if _BIN_RE.match(line) or line.startswith("GIT binary patch"):
             _file().binary = True
-            idx += 1
-            continue
-        if line.startswith("rename to "):
-            p = _clean(line[len("rename to "):])
-            if p is not None:
-                _file().new_path = p
-            idx += 1
-            continue
-        if line.startswith("rename from "):
-            p = _clean(line[len("rename from "):])
-            if p is not None:
-                _file().old_path = p
             idx += 1
             continue
         # --- headers define the file's paths. A second complete ---/+++
@@ -232,6 +286,13 @@ def parse_unified_diff(diff: str | None) -> list[FileDiff]:
                 b = lines[idx]
                 if _is_boundary(b):
                     break
+                if _new_file_ahead(lines, idx):
+                    # Overstated counts ran past the hunk into the next
+                    # file's headers: stop and let the `---` line open a
+                    # NEW block (cur=None) instead of corrupting this
+                    # file's paths with content-shaped headers.
+                    cur, pair_complete = None, False
+                    break
                 if b.startswith("\\"):
                     h.lines.append(b)
                     idx += 1
@@ -239,10 +300,16 @@ def parse_unified_diff(diff: str | None) -> list[FileDiff]:
                 if b and b[0] not in " +-\\":
                     break  # not a valid body line: stop, don't absorb
                 if b.startswith("+"):
+                    if new_rem <= 0:
+                        break  # overstated counts: stop, don't absorb
                     new_rem -= 1
                 elif b.startswith("-"):
+                    if old_rem <= 0:
+                        break
                     old_rem -= 1
                 else:
+                    if old_rem <= 0 or new_rem <= 0:
+                        break
                     old_rem -= 1
                     new_rem -= 1
                 # An empty line is context with the space stripped
@@ -283,6 +350,16 @@ def parse_unified_diff(diff: str | None) -> list[FileDiff]:
             f.hunks.append(h)
             continue
         # --- stray +/- outside any hunk (never discarded) --------------
+        if line == "--" or line == "-- ":
+            # format-patch signature separator: end-of-patch marker, not
+            # a removed `--` line (real removals live inside hunks).
+            # Without this every format-patch input trips the removal
+            # tripwire and declines to INCONCLUSIVE on its signature.
+            # Mailbox preamble `+`/`-` lines stay scanned (fail-closed:
+            # pinned preamble-secret behavior), only the separator is
+            # structurally recognizable as non-content.
+            idx += 1
+            continue
         if line.startswith("+"):
             (_file() if cur is not None else preamble).stray_added.append(line[1:])
             idx += 1
@@ -302,13 +379,14 @@ def parse_unified_diff(diff: str | None) -> list[FileDiff]:
 def _reconstruct_git_paths(lines: list[str], files: list[FileDiff]) -> None:
     """A git block without ---/+++ headers (mode-only, binary-only) still
     names its file on the `diff --git` line: back-fill the path so the
-    change reaches verification instead of disappearing."""
-    git_i = [i for i, txt in enumerate(lines)
-             if _DIFF_GIT_RE.match(txt) or _DIFF_CC_RE.match(txt)]
-    for fi, f in enumerate(files):
-        if f.path is not None or fi >= len(git_i):
+    change reaches verification instead of disappearing. Keyed by the
+    git line that opened each block — never by zipped positions, so a
+    preamble or header-only entry cannot shift later blocks onto wrong
+    paths."""
+    for f in files:
+        if f.path is not None or f.git_index is None:
             continue
-        o, n = _split_git_paths(lines[git_i[fi]])
+        o, n = _split_git_paths(lines[f.git_index])
         f.old_path = f.old_path or o
         f.new_path = f.new_path or n
 
@@ -461,22 +539,71 @@ def uninspectable_files(diff: str | None) -> list[str]:
     """Files the diff names whose content it does not carry (binary, or
     header-only with no hunks and no rename target). A verification that
     cannot read the change must not certify it: these force inconclusive
-    rather than a PASS earned by the text-only siblings of a mixed diff."""
+    rather than a PASS earned by the text-only siblings of a mixed diff.
+    Hunk-less renames/copies are the same class: the diff carries no
+    content for the move, so a same-named entity in the base graph must
+    not ground a PASS for it."""
     out: list[str] = []
     for f in parse_unified_diff(diff):
         if f.binary:
             out.append(f.path)
         elif f.mode_only and not f.hunks and not f.stray_added and not f.stray_removed:
             out.append(f.path)
+        elif (f.renamed or f.copied) and not f.hunks and not f.stray_added and not f.stray_removed:
+            out.append(f.path)
     return [p for p in out if p is not None]
 
 
-def seed_entities_for_diff(files: list[str], entities: list, diff: str | None) -> dict[str, list[str]]:
-    hunks = iter_hunks(diff)
-    if not hunks:
-        return map_files_to_entity_ids(files, entities)
+def changed_line_anchor_sets(diff: str | None) -> dict[str, list[set[int]]]:
+    """Old-side anchors per changed LINE, by diff file path.
+
+    A `-` line anchors its own old line. A `+` line anchors the
+    insertion point: both sides (`old_ln`, `old_ln - 1`) for a pure
+    insertion — text added between two old lines touches either side
+    (the A2 tail-insertion geometry) — or the removed lines it
+    replaces (`old_ln - 1`) when it directly follows `-` lines. The
+    coverage veto reads these sets: a changed line is covered when ANY
+    of its anchors sits inside an entity span, so a tail insertion at
+    a function's last line stays covered while a module-constant edit
+    (neither side inside any span) does not."""
+    per_file: dict[str, list[set[int]]] = {}
+    for h in iter_hunks(diff):
+        if h.file is None:
+            continue
+        sets = per_file.setdefault(h.file, [])
+        old_ln = h.old_start
+        prev_minus = False
+        for body in h.lines:
+            if body.startswith("-"):
+                sets.append({old_ln})
+                old_ln += 1
+                prev_minus = True
+            elif body.startswith("\\"):
+                continue
+            elif body.startswith("+"):
+                if prev_minus:
+                    sets.append({old_ln - 1} if old_ln > 1 else {old_ln})
+                else:
+                    s = {old_ln}
+                    if old_ln > 1:
+                        s.add(old_ln - 1)
+                    sets.append(s)
+            else:
+                old_ln += 1
+                prev_minus = False
+    return per_file
+
+
+def changed_anchors_by_file(diff: str | None) -> dict[str, set[int]]:
+    """Old-side line anchors each file's change touches, keyed by the
+    diff's file path: the union of changed_line_anchor_sets plus each
+    hunk's start line (conservative seeding blanket). The union keeps
+    the frozen seeding geometry bit-identical (blast-corpus POSTFIX
+    depends on it); the coverage veto reads the per-line sets
+    directly, where a changed line is covered when ANY anchor lands
+    in-span."""
     per_file: dict[str, set[int]] = {}
-    for h in hunks:
+    for h in iter_hunks(diff):
         if h.file is None:
             continue
         touched = per_file.setdefault(h.file, set())
@@ -488,14 +615,12 @@ def seed_entities_for_diff(files: list[str], entities: list, diff: str | None) -
             elif body.startswith("\\"):
                 continue
             elif body.startswith("+"):
-                # Insertion anchors: text added between old lines
-                # old_ln-1 and old_ln changes their adjacency, so the
-                # entities holding either side conservatively count as
-                # touched. Without this, an insertion-only hunk (no "-"
-                # lines) touched only old_start — typically a blank
-                # line between functions — and grounded nothing: the
-                # frozen B6 tail-insertion gap and C1's C3 miss share
-                # this geometry.
+                # Every insertion anchors BOTH sides (recall over
+                # precision — the A2 tail-insertion geometry). This loop
+                # is the frozen seeding geometry: do not "improve" it
+                # here (blast-corpus POSTFIX depends on it bit for
+                # bit); precise replacement semantics live in
+                # changed_line_anchor_sets, which the veto reads.
                 touched.add(old_ln)
                 if old_ln > 1:
                     touched.add(old_ln - 1)
@@ -503,6 +628,14 @@ def seed_entities_for_diff(files: list[str], entities: list, diff: str | None) -
                 old_ln += 1
         if h.old_start > 0:
             touched.add(h.old_start)
+    return per_file
+
+
+def seed_entities_for_diff(files: list[str], entities: list, diff: str | None) -> dict[str, list[str]]:
+    hunks = iter_hunks(diff)
+    if not hunks:
+        return map_files_to_entity_ids(files, entities)
+    per_file = changed_anchors_by_file(diff)
     mapping: dict[str, list[str]] = {}
     wanted = {normalize_path(f) for f in files}
     for entity in entities:

@@ -192,12 +192,16 @@ def verify_chain(db: str = "",
                   help="Verify only this task's subchain (required to check an anchor)")):
     """Verify the event ledger: links always, pinned head when anchored.
 
-    Exit 0 CHAIN_VALID; exit 1 CHAIN_BROKEN / HEAD_MISMATCH / NO_EVENTS.
+    Exit 0 CHAIN_VALID; exit 1 CHAIN_BROKEN / HEAD_MISMATCH / NO_EVENTS;
+    exit 3 INFRA_ERROR (the database itself unreadable — same channel as
+    every other read command, never a chain verdict).
     """
     from verifyci.interface.commands.anchor import run_verify_chain
     import json
     result = run_verify_chain(db or None, anchor_file or None, task_id or None)
     typer.echo(json.dumps(result, indent=2))
+    if result["status"] == "INFRA_ERROR":
+        raise typer.Exit(code=3)
     if result["status"] != "CHAIN_VALID":
         raise typer.Exit(code=1)
 

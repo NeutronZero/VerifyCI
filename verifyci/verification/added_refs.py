@@ -56,12 +56,15 @@ def _walk(node):
 
 
 @functools.lru_cache(maxsize=32)
-def extract_added_refs_status(diff: str | None) -> tuple[dict[str, dict[str, set[str]]], bool]:
-    """Like extract_added_refs but also reports whether every fragment
-    parsed cleanly: (refs, parse_ok). parse_ok is False when a fragment
+def extract_added_refs_status(diff: str | None) -> tuple[dict[str, dict[str, set[str]]], bool, bool]:
+    """Like extract_added_refs but also reports parse health:
+    (refs, parse_ok, had_error). parse_ok is False when a fragment
     raised, produced no tree, or contains ERROR nodes while yielding no
     refs at all. A partial tree that still yields refs counts as usable
-    (callers decide per-outcome, not per-error)."""
+    (callers decide per-outcome, not per-error) — but had_error stays
+    True so callers can run a lexical fallback for the specific target:
+    error recovery can drop the very call being forbidden while sibling
+    calls survive, which would otherwise read as a clean pass."""
     from verifyci.ingestion.parser import TreeSitterParser
 
     per_file: dict[str, list[str]] = {}
@@ -101,4 +104,4 @@ def extract_added_refs_status(diff: str | None) -> tuple[dict[str, dict[str, set
                     imports.add(header)
         if calls or imports:
             refs[file] = {"calls": calls, "imports": imports}
-    return refs, (bool(refs) or not had_error)
+    return refs, (bool(refs) or not had_error), had_error

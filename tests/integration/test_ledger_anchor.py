@@ -98,7 +98,9 @@ def test_broken_link_reports_chain_broken(tmp_path):
 def test_empty_db_is_no_events_not_valid(tmp_path):
     db = str(tmp_path / "missing.db")
     result = run_verify_chain(db, None, None)
-    assert result["status"] == "NO_EVENTS"
+    # A missing database is infrastructure (INFRA_ERROR, exit 3), not
+    # an empty chain: the gate never ran, so no chain verdict applies.
+    assert result["status"] == "INFRA_ERROR"
     assert result["error"] == "db_not_found"
 
     conn = sqlite3.connect(str(tmp_path / "empty.db"))
@@ -162,5 +164,7 @@ def test_verify_chain_cli_exit_codes(tmp_path):
     runner = CliRunner()
     missing = str(tmp_path / "missing.db")
     result = runner.invoke(app, ["verify-chain", "--db", missing])
-    assert result.exit_code == 1
-    assert "NO_EVENTS" in result.output
+    # Missing database is infrastructure: INFRA_ERROR, exit 3 — the
+    # same channel as every other read command, never a chain verdict.
+    assert result.exit_code == 3
+    assert "INFRA_ERROR" in result.output

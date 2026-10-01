@@ -62,6 +62,11 @@ _SECRET_PATTERNS = (SECRET_RE, UNQUOTED_SECRET_RE, AWS_KEY_RE, PEM_RE, JWT_RE, C
 
 _KEYWORD_RE = re.compile('(?i)' + _KEY)
 
+#: Hot-path prefilter for _has_secret (see above): keyword shapes plus
+#: the fixed prefixes of the four keywordless credential shapes.
+_SECRET_PREFILTER_RE = re.compile(
+    r"(?i)" + _KEY + r"|\bAKIA|-----BEGIN |eyJ[A-Za-z0-9_-]+|://")
+
 def _quoted_hit(text, min_len=3):
     # check quoted literals without regex, no doublequote chars in source
     dq = chr(34)
@@ -128,6 +133,15 @@ def _forbid_evidence(diff, kind, name):
 
 
 def _has_secret(text: str) -> bool:
+    # Cheap superset prefilter before the regex set: every pattern
+    # below needs one of these markers (keyword shapes need _KEY; the
+    # keywordless credential shapes need their fixed prefix), so a
+    # line with none of them can match nothing. A 1 MB line of dense
+    # quotes used to run the bounded-but-large JSON shape at every
+    # quote; now it fails one linear scan. Trigger-only: anything that
+    # passes still runs the full set, so no detection changes.
+    if _SECRET_PREFILTER_RE.search(text) is None:
+        return False
     return any(p.search(text) for p in _SECRET_PATTERNS)
 
 
@@ -266,16 +280,23 @@ def _check_forbid(diff: str, graph: Any, name: str,
     ref_kind = "calls" if edge_type == "CALLS" else "imports"
     human = "call" if edge_type == "CALLS" else "import"
     (violated, examined, violated_files,
-     evaluated) = _graph_search(graph, name, edge_type)
-    if not evaluated:
-        return False, f'graph traversal failed for forbid_{human}:{name} (fail-closed)', True, []
+     evaluated, viol_src) = _graph_search(graph, name, edge_type)
     hit_files, parse_ok = _added_hits(diff, ref_kind, name)
     if hit_files:
         # The base graph cannot see new code: a forbidden call the
         # diff itself introduces is a positive detection, so it
-        # rejects even when the graph side established nothing.
+        # rejects even when the graph side established nothing — and
+        # even when the graph side could not run at all. What the
+        # diff text shows is fail-closed evidence, not infrastructure.
         return False, f'forbidden {human} {name!r} added in {hit_files[0]}', \
             True, _forbid_evidence(diff, ref_kind, name)
+    if not evaluated:
+        # Traversal raised and the diff adds no hit: the checker did
+        # NOT run, so this is inability (established=False ->
+        # INCONCLUSIVE at policy), not a rejection. established=True
+        # here used to FAIL every invariant whenever the graph was
+        # unreadable, masking infrastructure failure as a verdict (B4).
+        return False, f'graph traversal failed for forbid_{human}:{name} (fail-closed)', False, []
     if not parse_ok:
         return True, 'fragment parse incomplete (inconclusive, established=False)', False, []
     if violated and violated_files:
@@ -283,6 +304,22 @@ def _check_forbid(diff: str, graph: Any, name: str,
         if touched and not any(_file_in_set(f, touched) for f in violated_files):
             note = (f'pre-existing violation {name!r} outside touched scope '
                     f'(files: {sorted(violated_files)[:4]}) — not attributed')
+            return True, note, examined > 0, []
+        if touched:
+            # Per-entity scope: the base graph predates the diff, so a
+            # violation in a touched file is only THIS diff's fault when
+            # the diff's changed lines land inside the violating
+            # entity's span. Editing an unrelated line in the same file
+            # (pre-existing call elsewhere in the file) passes with a
+            # note; touching the violating entity itself keeps the
+            # rejection. Spans/entities unattributable -> conservative
+            # FAIL (no scoped exemption without attribution).
+            spans = _entity_spans(graph)
+            anchors = _changed_anchors(diff)
+            if _violation_touched(viol_src, touched, spans, anchors):
+                return False, _coverage_note(examined, edge_type, name), examined > 0, []
+            note = (f'pre-existing violation {name!r} in touched file but '
+                    f'outside the changed entity span — not attributed')
             return True, note, examined > 0, []
     return not violated, _coverage_note(examined, edge_type, name), examined > 0, []
 
@@ -301,10 +338,42 @@ def _added_hits(diff: str, kind: str, name: str) -> tuple[list[str], bool]:
         return [], True
     from verifyci.verification.added_refs import extract_added_refs_status
     try:
-        refs, parse_ok = extract_added_refs_status(diff)
+        refs, parse_ok, had_error = extract_added_refs_status(diff)
     except Exception:  # noqa: BLE001
         return [], False
-    return sorted(f for f, kinds in refs.items() if name in kinds.get(kind, set())), parse_ok
+    hits = sorted(f for f, kinds in refs.items() if name in kinds.get(kind, set()))
+    if had_error and refs and kind == "calls":
+        # Partial recovery can drop the forbidden call while sibling
+        # calls survive (refs non-empty, so parse_ok is True): back the
+        # tree result with a lexical scan for this exact target. Same
+        # bare-name rule as the tree path (`obj.eval(` never flags),
+        # so the pinned stricter-than-graph semantics hold.
+        hits = sorted(set(hits) | set(_lexical_call_hits(diff, name)))
+    return hits, parse_ok
+
+
+def _lexical_call_hits(diff: str, name: str) -> list[str]:
+    """Files whose added lines textually contain a bare `name(` call."""
+    import re
+    from verifyci.ingestion.language import detect_language
+    from verifyci.verification.diffmap import iter_added_lines
+    try:
+        pat = re.compile(r"(?<![\w.])" + re.escape(name) + r"\s*\(")
+        lines = iter_added_lines(diff)
+    except Exception:  # noqa: BLE001
+        return []
+    out = set()
+    for f, content in lines:
+        if f is None:
+            continue
+        try:
+            if detect_language(f) not in ("python", "c", "cpp"):
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        if pat.search(content):
+            out.add(f)
+    return sorted(out)
 
 
 def _coverage_note(examined: int, edge_type: str, name: str) -> str:
@@ -400,8 +469,9 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
         return True, 'diff text scanned', True, []
     return False, f'secret-shaped string in {hits[0]}', True, hits
 def _graph_search(graph: Any, name: str, edge_type: str
-                  ) -> tuple[bool, int, list, bool]:
-    """Return (violation_found, edges_examined, violating_files, evaluated).
+                  ) -> tuple[bool, int, list, bool, list]:
+    """Return (violation_found, edges_examined, violating_files,
+    evaluated, violating_sources).
 
     A broken graph (traversal raises) is NOT "no violation found": it is
     unevaluable, and the caller fails closed. `evaluated=False` is
@@ -414,9 +484,13 @@ def _graph_search(graph: Any, name: str, edge_type: str
     whose endpoints carry no file attribution yields an empty list,
     which conservatively keeps the whole-graph semantics (no scoped
     exemption is granted without attribution).
+
+    violating_sources collects (src_entity_id, src_file) pairs for the
+    per-entity scope check: only a violation whose source entity the
+    diff's changed lines actually land in is this diff's fault.
     """
     if graph is None or not name:
-        return False, 0, [], True
+        return False, 0, [], True, []
     try:
         index = {}
         files = {}
@@ -429,6 +503,7 @@ def _graph_search(graph: Any, name: str, edge_type: str
                     files[eid] = getattr(payload, "file_path", "") or ""
         examined = 0
         viol_files: list[str] = []
+        viol_src: list[tuple] = []
         found = False
         for edge in iter_edge_payloads(graph):
             etype = getattr(getattr(edge, "type", None), "value", getattr(edge, "type", None))
@@ -442,6 +517,7 @@ def _graph_search(graph: Any, name: str, edge_type: str
                 meta = getattr(edge, "metadata", None) or {}
                 if isinstance(meta, dict) and meta.get("callee") == name:
                     found = True
+                    viol_src.append((getattr(edge, "src_entity_id", None), ""))
                 continue
             if etype != edge_type:
                 continue
@@ -449,12 +525,69 @@ def _graph_search(graph: Any, name: str, edge_type: str
             dst = getattr(edge, "dst_entity_id", None)
             if dst is not None and index.get(dst) == name:
                 found = True
-                src_file = files.get(getattr(edge, "src_entity_id", None), "")
+                src = getattr(edge, "src_entity_id", None)
+                src_file = files.get(src, "")
                 if src_file:
                     viol_files.append(src_file)
-        return found, examined, viol_files, True
+                viol_src.append((src, src_file))
+        return found, examined, viol_files, True, viol_src
     except Exception:  # noqa: BLE001
-        return True, 0, [], False
+        return True, 0, [], False, []
+
+
+def _entity_spans(graph: Any) -> dict:
+    """revision_entity_id -> (file_path, line_start, line_end) for graph
+    nodes that carry spans; best-effort, empty on any failure."""
+    spans: dict = {}
+    try:
+        nodes_fn = getattr(graph, "nodes", None)
+        if not callable(nodes_fn):
+            return spans
+        for payload in nodes_fn():
+            eid = getattr(payload, "revision_entity_id", None)
+            if not eid:
+                continue
+            try:
+                s = int(getattr(payload, "line_start", 1) or 1)
+                en = int(getattr(payload, "line_end", s) or s)
+            except (TypeError, ValueError):
+                continue
+            spans[eid] = (getattr(payload, "file_path", "") or "", s, en)
+    except Exception:  # noqa: BLE001, S110
+        pass
+    return spans
+
+
+def _changed_anchors(diff: str) -> dict:
+    """Old-side changed-line anchors by diff file path; empty when the
+    diff is unattributable (whole-graph semantics then apply)."""
+    try:
+        from verifyci.verification.diffmap import changed_anchors_by_file
+        return changed_anchors_by_file(diff)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _violation_touched(viol_src: list, touched: set[str], spans: dict,
+                       anchors: dict) -> bool:
+    """True when some violating source entity's span contains a changed
+    anchor of this diff (suffix-tolerant path match). Missing spans or
+    missing anchors are unattributable -> conservative True (the caller
+    keeps the rejection; no scoped exemption without attribution)."""
+    if not viol_src:
+        return True
+    for src_id, src_file in viol_src:
+        span = spans.get(src_id)
+        if span is None:
+            return True
+        sfile, s, en = span
+        ls = [a for f, a in anchors.items() if _file_in_set(f, {sfile})]
+        if not ls:
+            return True
+        changed = set().union(*ls) if ls else set()
+        if any(s <= ln <= en for ln in changed):
+            return True
+    return False
 
 
 def _diff_files(diff: str) -> set[str]:

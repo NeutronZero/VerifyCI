@@ -53,8 +53,14 @@ def build_semi_check(cert, files: list[str], entities: list,
         opaque = sorted(uninspectable_files(diff))
         if opaque:
             explanation = (f"{explanation}; opaque change (content not in "
-                           f"diff): {', '.join(opaque)}")
-    established = not ambiguous and not suffix_only and not opaque
+                            f"diff): {', '.join(opaque)}")
+    uncovered: list[str] = []
+    if diff is not None:
+        uncovered = sorted(_uncovered_changed_lines(diff, entities or []))
+        if uncovered:
+            explanation = (f"{explanation}; changed lines outside every "
+                           f"entity span: {', '.join(uncovered[:8])}")
+    established = not ambiguous and not suffix_only and not opaque and not uncovered
     return CheckResult(
         check_id="semi_formal",
         passed=cert.certificate_verified,
@@ -68,6 +74,62 @@ def build_semi_check(cert, files: list[str], entities: list,
         # grounding failure read as a rejection.
         certificate=cert,
     )
+
+
+def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
+    """Changed lines no code entity spans: `path:line` items.
+
+    File-level grounding (the certificate seeds a whole file) used to
+    let an edit to a module constant, flag, import, or decorator PASS
+    on the back of unrelated entities in the same file, with blast
+    radius 0. Every changed LINE must have at least one old-side
+    anchor inside some non-MODULE entity span, else the check reports
+    established=False (INCONCLUSIVE at policy — inability, never a
+    pass on unseen code). Per-line (not per-anchor): a tail insertion
+    at a function's last line straddles the span edge by construction
+    (the A2 geometry), so one covered anchor covers the line.
+
+    Decorator adjacency: extractor spans start at `def`/`class`
+    (extractor.py is frozen by the latency guard, so the span fix lives
+    here, not there); an anchor exactly one line above a span start is
+    the decorated definition's decorator, not stray module text.
+    """
+    from verifyci.verification.diffmap import (
+        changed_line_anchor_sets, normalize_path,
+    )
+    spans: dict[str, list[tuple[int, int]]] = {}
+    for e in entities:
+        t = getattr(e, "type", None)
+        if t is not None and str(getattr(t, "value", t)) == "MODULE":
+            continue
+        p = normalize_path(getattr(e, "file_path", "") or "")
+        if not p:
+            continue
+        try:
+            s = int(getattr(e, "line_start", 1) or 1)
+            en = int(getattr(e, "line_end", s) or s)
+        except (TypeError, ValueError):
+            continue
+        spans.setdefault(p, []).append((s, en))
+    out: list[str] = []
+    for f, sets in changed_line_anchor_sets(diff).items():
+        file_spans = spans.get(normalize_path(f), [])
+        for anchors in sets:
+            coverable = sorted(ln for ln in anchors if ln > 0)
+            if not coverable:
+                continue  # positionless content (new-file `+` at old
+                # line 0): nothing to attribute; ungrounded-file and
+                # opaque checks own that case.
+            if any(_anchor_covered(ln, file_spans) for ln in coverable):
+                continue
+            out.append(f"{f}:{coverable[0]}")
+    return out
+
+
+def _anchor_covered(ln: int, file_spans: list[tuple[int, int]]) -> bool:
+    if any(s <= ln <= en for s, en in file_spans):
+        return True
+    return any(s - ln == 1 for s, en in file_spans)
 
 
 def build_verification_report(

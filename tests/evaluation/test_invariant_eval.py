@@ -122,7 +122,10 @@ def test_forbid_call_absent_passes():
 
 def test_forbid_fails_closed_on_broken_graph():
     # A graph whose traversal raises is unevaluable, not clean: the
-    # check must reject (FAIL at policy), never pass vacuously.
+    # check must not pass (fail-closed), and it must report inability
+    # (established=False -> INCONCLUSIVE at policy) rather than wear a
+    # rejection's clothes — the traversal never ran, so FAIL would
+    # mask infrastructure failure as a verdict.
     class _Broken:
         def nodes(self):
             raise RuntimeError("corrupt")
@@ -130,7 +133,7 @@ def test_forbid_fails_closed_on_broken_graph():
     checks, _ = evaluate_invariants("x", [_inv("f", "forbid_call:checkout")],
                                     graph=_Broken())
     assert checks[0].passed is False
-    assert checks[0].established is True
+    assert checks[0].established is False
     assert "fail-closed" in checks[0].explanation
 
 

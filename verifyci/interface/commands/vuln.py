@@ -38,8 +38,8 @@ def run_vuln(db_path: str | None = None, cache_path: str = "./storage/vuln_cache
             # Read-only open: a wrong path is an error, never a silently
             # created empty database (the old RW connect+scan did that).
             kind = getattr(e, "kind", f"cannot_open_db: {type(e).__name__}: {e}")
-            return {"db_path": db, "packages_checked": 0, "findings": [],
-                    "imported": imported, "error": str(kind)}
+            return {"db_path": db, "status": "INFRA_ERROR", "packages_checked": 0,
+                    "findings": [], "imported": imported, "error": str(kind)}
         try:
             # Latest revision only: unfiltered, every superseded row
             # re-scanned, and fixed versions kept flagging. DBs without
@@ -62,8 +62,8 @@ def run_vuln(db_path: str | None = None, cache_path: str = "./storage/vuln_cache
                     " LIMIT 5001"
                 ).fetchall()
         except sqlite3.Error as e:
-            return {"db_path": db, "packages_checked": 0, "findings": [],
-                    "imported": imported,
+            return {"db_path": db, "status": "INFRA_ERROR", "packages_checked": 0,
+                    "findings": [], "imported": imported,
                     "error": f"query_failed: {type(e).__name__}: {e}"}
         finally:
             conn.close()

@@ -130,17 +130,26 @@ def latest_revision_id(conn, repository_id: str | None = None) -> str:
 
     Read-only paths (stats, vuln) must not construct a store — that
     would mkdir and schema-write at client-chosen paths. Same
-    repo-then-global rule as the method form.
+    repo-then-global rule as the method form, with one guard: when a
+    repository IS known (convention-derived) but the ingest lineage
+    holds other repos' rows and none of its own, return "" instead of
+    falling back to global — in a shared DB a renamed or moved
+    checkout must not silently verify against another repository's
+    latest revision. Global fallback applies only when no repository
+    applies at all (custom paths, legacy callers), and the revisions
+    table still answers when the ingest log is empty (legacy/test
+    DBs written without ingest rows).
     """
-    if _has_table(conn, "ingests"):
+    ingests_live = _has_table(conn, "ingests") and conn.execute(
+        "SELECT 1 FROM ingests LIMIT 1").fetchone() is not None
+    if ingests_live:
         if repository_id:
             row = conn.execute(
                 "SELECT revision_id FROM ingests WHERE repository_id = ?"
                 " ORDER BY timestamp DESC, rowid DESC LIMIT 1",
                 (repository_id,),
             ).fetchone()
-            if row:
-                return row[0]
+            return row[0] if row else ""
         row = conn.execute(
             "SELECT revision_id FROM ingests"
             " ORDER BY timestamp DESC, rowid DESC LIMIT 1"
@@ -153,8 +162,7 @@ def latest_revision_id(conn, repository_id: str | None = None) -> str:
             " ORDER BY timestamp DESC LIMIT 1",
             (repository_id,),
         ).fetchone()
-        if row:
-            return row[0]
+        return row[0] if row else ""
     row = conn.execute(
         "SELECT revision_id FROM revisions ORDER BY timestamp DESC LIMIT 1"
     ).fetchone()
@@ -168,8 +176,26 @@ def _has_table(conn, name: str) -> bool:
 
 
 class GraphStore:
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, read_only: bool = False):
         self.db_path = db_path
+        if read_only:
+            # Verification/query readers must never construct a writing
+            # store: mkdir + PRAGMA journal_mode=WAL + schema script are
+            # writes, and on a read-only checkout/CI mount a WAL-mode DB
+            # cannot even be OPENED read-write (no -shm). mode=ro opens
+            # the committed state without touching the file or its
+            # directory; failures surface as sqlite errors for the
+            # caller to classify (InfraError), never as an empty graph.
+            # (WAL + mode=ro works when the -shm/-wal sidecars exist or
+            # the directory is writable; on a sealed read-only mount
+            # the DB must have been checkpointed/closed cleanly.)
+            import sqlite3 as _sqlite3
+            from pathlib import Path as _Path
+            uri = _Path(db_path).resolve().as_uri() + "?mode=ro"
+            self.conn = _sqlite3.connect(uri, uri=True, timeout=2.0)
+            self.conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+            self._batch_depth = 0
+            return
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(db_path)
         # WAL: a long ingest transaction no longer blocks readers —
@@ -177,7 +203,11 @@ class GraphStore:
         # "database is locked" (which, pre-fix, surfaced as a
         # masquerading INCONCLUSIVE). Set BEFORE the schema script:
         # journal_mode is persistent, so a fresh DB keeps it and readers
-        # (open_for_read) can rely on it.
+        # (open_for_read) can rely on it. Deliberate side effect: EVERY
+        # writer construction flips the file header to WAL, including
+        # tests in tmpdirs — there is no "no writes on read paths"
+        # invariant for writers, only for readers (read_only=True,
+        # which skips this pragma entirely).
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
         self.conn.commit()

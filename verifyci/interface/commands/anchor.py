@@ -17,8 +17,12 @@ Verdicts:
   truncated log must never verify against its surviving prefix.
 - NO_EVENTS — nothing recorded (empty DB, missing DB, or no events for
   the task). A wrong `--db` must not read as a clean chain.
+- INFRA_ERROR — the database itself cannot be read (missing path,
+  locked, corrupt). Infrastructure, not a chain verdict: exits 3, the
+  same channel as every other read command.
 """
 import os
+import sqlite3
 
 from verifyci.interface.commands import resolve_db
 from verifyci.contracts.canonical import event_hash
@@ -34,11 +38,23 @@ def run_verify_chain(db_path: str | None = None, anchor_path: str | None = None,
                      task_id: str | None = None) -> dict:
     db = resolve_db(db_path)
     if not os.path.exists(db):
-        return {"db_path": db, "status": "NO_EVENTS", "events": 0,
+        return {"db_path": db, "status": "INFRA_ERROR", "events": 0,
                 "task_id": task_id or "", "error": "db_not_found"}
-    store = GraphStore(db)
+    try:
+        store = GraphStore(db, read_only=True)
+    except (sqlite3.Error, OSError) as e:
+        return {"db_path": db, "status": "INFRA_ERROR", "events": 0,
+                "task_id": task_id or "",
+                "error": f"db_unreadable: {type(e).__name__}: {e}"}
     try:
         ledger = EventLedger.load_from_store(store)
+    except sqlite3.Error as e:
+        # Openable but schema-less file (0-byte, hand-made): sqlite
+        # accepts it as an empty database — nothing was ever recorded.
+        if "no such table" not in str(e):
+            raise
+        return {"db_path": db, "status": "NO_EVENTS", "events": 0,
+                "task_id": task_id or "", "error": "no_events_recorded"}
     finally:
         store.close()
     events = ledger.get_events()

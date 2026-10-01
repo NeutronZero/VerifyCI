@@ -24,7 +24,9 @@ def create_fastmcp_server(db_path: str, name: str = "verifyci"):
     import os as _os
     # Fail closed on a missing path: constructing a GraphStore would
     # mkdir and materialize an empty database at a client-chosen path.
-    store = GraphStore(db) if _os.path.exists(db) else None
+    # Read-only: the server never writes the store (reads for verify /
+    # query tools), so a sealed checkout stays openable.
+    store = GraphStore(db, read_only=True) if _os.path.exists(db) else None
     graph, node_map, entities = load_graph(db)
     if not entities:
         entities = payload_entities(graph)

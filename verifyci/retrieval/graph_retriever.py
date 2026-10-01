@@ -47,10 +47,11 @@ class GraphRetriever:
         if self.graph is None or max_hops <= 0 or not seed_entity_ids:
             return []
 
+        from verifyci.graph.traverse import as_index
         edge_adj = self._adjacency_from_edges()
         if edge_adj is not None:
             seeds = [self.node_map[eid] for eid in seed_entity_ids
-                     if eid in self.node_map]
+                      if eid in self.node_map]
             reverse = {v: k for k, v in self.node_map.items()}
             adj, neighbors = edge_adj, None
             to_id = lambda node: reverse.get(node, str(node))  # noqa: E731
@@ -59,9 +60,17 @@ class GraphRetriever:
             predecessors = getattr(self.graph, "predecessors", None)
             if not (callable(successors) or callable(predecessors)):
                 return []
-            seeds = list(seed_entity_ids)
+            # Hybrid seeds: mapped ids expand by index (rustworkx
+            # successors take indices and yield PAYLOADS, normalized
+            # via as_index exactly like traverse); unmapped ids pass
+            # through verbatim so old id-based adapters keep working.
+            seeds = ([self.node_map[eid] for eid in seed_entity_ids
+                      if eid in self.node_map]
+                     + [eid for eid in seed_entity_ids
+                        if eid not in self.node_map])
             adj, neighbors = None, (successors, predecessors)
-            to_id = str
+            reverse = {v: k for k, v in self.node_map.items()}
+            to_id = lambda node: reverse.get(node, str(node))  # noqa: E731
         if not seeds:
             return []
 
@@ -71,8 +80,17 @@ class GraphRetriever:
         for hop in range(1, max_hops + 1):
             nxt = set()
             for node in frontier:
-                for neighbor in self._expand(adj, neighbors, node):
-                    if neighbor in seed_set or neighbor in distances:
+                for raw in self._expand(adj, neighbors, node):
+                    neighbor = raw
+                    if adj is None:
+                        # Fallback yields PAYLOADS (rustworkx included),
+                        # not indices: normalize exactly like
+                        # traverse.as_index. Raw string ids from
+                        # old id-based adapters pass through verbatim.
+                        neighbor = as_index(raw, self.node_map)
+                        if neighbor is None and isinstance(raw, str):
+                            neighbor = raw
+                    if neighbor is None or neighbor in seed_set or neighbor in distances:
                         continue
                     distances[neighbor] = hop
                     nxt.add(neighbor)

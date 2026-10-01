@@ -59,18 +59,27 @@ def test_B_forbidden_call_introduced_by_diff_fails():
     assert "added in new.py" in checks[0].explanation
 
 
-def test_C_forbidden_call_inside_touched_file_fails():
-    # Violation lives in the very file the diff modifies: graph-side hit
-    # in touched scope -> rejection stands (no scoped exemption). The
-    # modification is a line replacement (equal counts): it touches the
-    # violating file without adding any forbidden reference itself, so
-    # the FAIL can only come from the graph side inside touched scope.
-    # The scoping is file-granular (does the diff name the file holding
-    # the violating edge?), so a clean modification anywhere in
-    # legacy.py keeps the rejection: no scoped exemption for a touched
-    # file.
+def test_C_forbidden_call_outside_changed_entity_passes():
+    # Per-entity scope (not per-file): the violation lives in
+    # legacy_bad (lines 4-5) while the diff only changes lines 1-2.
+    # The base graph predates the diff and the added lines introduce
+    # no forbidden call, so this is a pre-existing violation in a
+    # touched file — not attributed, passes with a note. Touching the
+    # violating entity itself keeps the rejection (see
+    # test_C2_touching_the_violating_entity_still_fails).
     diff = ("diff --git a/legacy.py b/legacy.py\n--- a/legacy.py\n+++ b/legacy.py\n"
             "@@ -1,1 +1,2 @@\n def eval(x):\n+    z = 1\n")
+    checks, _ = evaluate_invariants(diff, [_inv("f", "forbid_call:eval")],
+                                    graph=LEGACY, evidence=[])
+    assert checks[0].passed is True, checks[0].explanation
+    assert "pre-existing" in checks[0].explanation
+
+
+def test_C2_touching_the_violating_entity_still_fails():
+    # Same file, but the changed lines land INSIDE legacy_bad's span:
+    # graph-side hit in the changed entity -> rejection stands.
+    diff = ("diff --git a/legacy.py b/legacy.py\n--- a/legacy.py\n+++ b/legacy.py\n"
+            "@@ -4,2 +4,3 @@\n def legacy_bad():\n     return eval(1)\n+    z = 1\n")
     checks, _ = evaluate_invariants(diff, [_inv("f", "forbid_call:eval")],
                                     graph=LEGACY, evidence=[])
     assert checks[0].passed is False, checks[0].explanation

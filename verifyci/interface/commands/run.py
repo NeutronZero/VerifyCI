@@ -57,7 +57,11 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
             return {"task": task, "status": "INFRA_ERROR", "error": e.kind,
                     "ledger_head": None}
         probe.close()
-        graph, node_map, entities = load_graph(db)
+        try:
+            graph, node_map, entities = load_graph(db)
+        except InfraError as e:
+            return {"task": task, "status": "INFRA_ERROR", "error": e.kind,
+                    "ledger_head": None}
         ledger = EventLedger()
         store = GraphStore(db)
         try:

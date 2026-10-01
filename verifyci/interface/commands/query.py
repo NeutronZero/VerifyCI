@@ -30,7 +30,7 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
                 "evidence": {"entities": 0, "chunks": 0, "provenance": 0},
                 "error": "db_not_found"}
     try:
-        store = GraphStore(db)
+        store = GraphStore(db, read_only=True)
     except sqlite3.Error as e:
         # An unreadable store is infrastructure, not "no hits": the CLI
         # maps the error key to exit 3 instead of a green zero-answer.
