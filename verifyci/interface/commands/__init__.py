@@ -1,6 +1,57 @@
 from pathlib import Path
 
 
+class InfraError(RuntimeError):
+    """Storage could not be opened for reading — NOT a verification
+    verdict. `load_graph` collapses every open failure to an empty graph,
+    which let a missing or locked database masquerade as INCONCLUSIVE
+    (verify), an empty report (query), or exit 0 (stats). The four V1
+    verdict states (PASS/FAIL/HUMAN_REVIEW/INCONCLUSIVE) describe what
+    the gate concluded *about a diff*; this describes the gate itself
+    failing to run. The distinction is the whole point of a fail-closed
+    product: infrastructure must never wear a verdict's clothes."""
+
+    def __init__(self, kind: str, detail: str = ""):
+        self.kind = kind
+        super().__init__(detail or kind)
+
+
+def open_for_read(db: str, timeout: float = 2.0):
+    """Open a store read-only for a query/verify/stats command.
+
+    Raises InfraError('db_not_found') when no database exists at the
+    path and InfraError('db_locked'/'db_unreadable') when one exists
+    but sqlite cannot answer (held by a writer on a legacy
+    rollback-journal DB, or the file is damaged). Never creates, never
+    touches WAL for readers (mode=ro is incompatible with it), and
+    never returns an empty-but-successful store: an unreadable database
+    is an error, not zero facts. The connection is returned open;
+    callers close it."""
+    import os
+    import sqlite3
+    from pathlib import Path
+    if not os.path.exists(db):
+        raise InfraError("db_not_found", db)
+    try:
+        # Resolved URI form: raw paths with "#", spaces, or non-ASCII
+        # characters must survive the URI parser (same discipline as
+        # run_stats' special-char handling).
+        uri = Path(db).resolve().as_uri() + "?mode=ro"
+        conn = sqlite3.connect(uri, uri=True, timeout=timeout)
+        conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    except sqlite3.Error as e:
+        msg = str(e)
+        if "locked" in msg or "busy" in msg:
+            kind = "db_locked"
+        elif ("not a database" in msg or "malformed" in msg
+              or "unable to open" in msg or "disk" in msg):
+            kind = "db_unreadable"
+        else:
+            kind = "db_unreadable"
+        raise InfraError(kind, f"{db}: {msg}")
+    return conn
+
+
 def resolve_db(explicit: str | None = None) -> str:
     if explicit:
         return explicit

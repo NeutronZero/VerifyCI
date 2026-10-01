@@ -47,10 +47,16 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
             return {"task": task, "status": "FAILED", "error": "invalid_task_ir",
                     "ledger_head": None}
         db = resolve_db(db_path)
-        import os as _run_os
-        if not _run_os.path.exists(db):
-            return {"task": task, "status": "FAILED", "error": "db_not_found",
+        # A missing or unreadable DB is infrastructure, not a task that
+        # failed verification: FAILED would exit 1 as if the gate rejected
+        # the work. Report INFRA_ERROR (exit 3) with the same honest key.
+        from verifyci.interface.commands import InfraError, open_for_read
+        try:
+            probe = open_for_read(db)
+        except InfraError as e:
+            return {"task": task, "status": "INFRA_ERROR", "error": e.kind,
                     "ledger_head": None}
+        probe.close()
         graph, node_map, entities = load_graph(db)
         ledger = EventLedger()
         store = GraphStore(db)

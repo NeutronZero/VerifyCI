@@ -322,3 +322,105 @@ def test_git_rename_diff_files():
     files = parse_diff_files(diff)
     assert "new_path.py" in files
     assert "old_path.py" in files
+
+
+# --- A2: insertion-only diff grounding (regression: tail-insertion gap) -----
+#
+# Frozen evidence mechanism 1: a hunk that only ADDS lines names no old-side
+# line, so the pre-fix seeder touched just `old_start` — usually a blank line
+# between functions — and grounded nothing. Result: B6 (blast) and C1's C3
+# each reported changed_entities=[] -> risk 0.0 and missed every dependent.
+# The fix anchors each insertion to the old lines on BOTH sides of it
+# (conservative). These tests pin every geometry the task enumerated.
+
+def _ent(eid, start, end, type_="FUNCTION"):
+    from types import SimpleNamespace
+    return SimpleNamespace(revision_entity_id=eid, name=eid, file_path="src/app.py",
+                           line_start=start, line_end=end, source_hash="h", type=type_)
+
+
+def _app_entities():
+    # MODULE (1-60) is never seedable. Siblings sit in explicit spans with
+    # gaps between them so a mis-grounding is visible.
+    return [
+        _ent("mod", 1, 60, "MODULE"),
+        _ent("prev", 6, 8),        # def prev(): 6..8
+        _ent("top", 10, 12),       # def top(): 10..12
+        _ent("Kls", 20, 27, "CLASS"),
+        _ent("meth", 22, 24, "METHOD"),
+        _ent("nexttop", 30, 32),   # def nexttop(): 30..32
+    ]
+
+
+def _a2_seed(body):
+    # Every case shares the same file header; `body` is the hunk(s). Without
+    # a `+++` header iter_hunks can't attribute lines to a file, which is a
+    # different (already-covered) code path — A2 is about line geometry.
+    from verifyci.verification.diffmap import seed_entities_for_diff
+    diff = ("diff --git a/src/app.py b/src/app.py\n"
+            "--- a/src/app.py\n+++ b/src/app.py\n" + body)
+    return seed_entities_for_diff(["src/app.py"], _app_entities(), diff)
+
+
+def test_a2_insertion_inside_function_grounds_function():
+    mapping = _a2_seed("@@ -11,2 +11,3 @@\n     x = 1\n+    y = 2\n     return x\n")
+    assert mapping.get("src/app.py") == ["top"]
+
+
+def test_a2_insertion_at_function_beginning_grounds_function():
+    mapping = _a2_seed("@@ -10,2 +10,3 @@\n def top():\n+    doc = 1\n     x = 1\n")
+    assert "top" in mapping.get("src/app.py", [])
+
+
+def test_a2_insertion_immediately_before_function_is_not_empty():
+    # Gap between prev(6-8) and top(10): an old_start of 8 on prev's last
+    # line conservatively grounds prev; never silently drops the change.
+    mapping = _a2_seed("@@ -8,1 +8,2 @@\n     return p\n+    # new\n")
+    assert mapping.get("src/app.py") == ["prev"]
+
+
+def test_a2_insertion_after_function_grounds_function():
+    # Insertion on top()'s last line (tail geometry — the frozen B6 shape).
+    mapping = _a2_seed("@@ -12,1 +12,2 @@\n     return x\n+    # tail\n")
+    assert "top" in mapping.get("src/app.py", [])
+
+
+def test_a2_insertion_inside_method_grounds_method():
+    mapping = _a2_seed("@@ -23,2 +23,3 @@\n     a = 1\n+    b = 2\n     return a\n")
+    assert "meth" in mapping.get("src/app.py", [])
+
+
+def test_a2_eof_insertion_grounds_last_entity():
+    # Pure insertion at EOF: old_start at the last entity's final line.
+    mapping = _a2_seed("@@ -32,1 +32,2 @@\n     return n\n+    # eof\n")
+    assert "nexttop" in mapping.get("src/app.py", [])
+
+
+def test_a2_insertion_only_hunk_is_not_unjustified_empty():
+    # The headline defect: an addition-only hunk (0 deletions) that still
+    # carries old-side context lines must ground, not return [].
+    mapping = _a2_seed("@@ -11,1 +11,3 @@\n     x = 1\n+    y = 2\n+    z = 3\n")
+    assert mapping.get("src/app.py") == ["top"]
+
+
+def test_a2_brand_new_file_grounds_no_entity_lines():
+    # A genuinely new file (@@ -0,0 +1,N @@) has no old entities; per-line
+    # seeding yields nothing (correct), and empty changed_entities here is
+    # justified by the file-fallback, NOT the old line-based path.
+    from verifyci.verification.diffmap import map_files_to_entity_ids
+    assert _a2_seed("@@ -0,0 +1,3 @@\n+def brand_new():\n+    pass\n").get(
+        "src/app.py", []) == []
+    # Same file list, no hunks -> whole-file fallback still grounds.
+    assert map_files_to_entity_ids(["src/app.py"], _app_entities())["src/app.py"]
+
+
+def test_a2_mixed_insertion_and_deletion_grounds_function():
+    mapping = _a2_seed("@@ -10,2 +10,3 @@\n def top():\n-    x = 1\n+    x = 2\n+    e = 3\n")
+    assert "top" in mapping.get("src/app.py", [])
+
+
+def test_a2_deletion_and_modification_do_not_regress():
+    assert _a2_seed("@@ -11,2 +11,1 @@\n     x = 1\n-    dead = 1\n").get(
+        "src/app.py") == ["top"]
+    assert _a2_seed("@@ -22,2 +22,2 @@\n class Kls:\n-    a = 1\n").get(
+        "src/app.py") == ["Kls", "meth"]

@@ -11,6 +11,8 @@ removed ``-- comment`` line) or ``+++ i`` (an added ``++ i`` line) is diff
 body name files.
 """
 import re
+from dataclasses import dataclass, field
+from enum import Enum
 
 _HUNK_BODY_PREFIXES = (" ", "+", "-", "\\")
 
@@ -31,136 +33,334 @@ def _is_header(line: str, marker: str) -> bool:
     return line.startswith(marker) and line[len(marker):len(marker) + 1] in (" ", "\t")
 
 
-def _is_git_file_header(line: str, marker: str) -> bool:
+# --------------------------------------------------------------------------
+# Canonical unified-diff parser (A4). One authoritative interpretation.
+#
+# Six earlier entry points (parse_diff_files, iter_added_lines[_with_lineno],
+# unattributed_removed_lines, find_deletion_hunks, iter_hunks) each carried
+# their own state machine and each sniffed hunk termination by line prefix
+# rather than the declared `@@ -a,b +c,d @@` counts. That shared root cause
+# produced the demonstrated defects: a classic (non-git) two-file diff lost
+# its second file (the `--- two.py`/`+++ two.py` headers were swallowed as
+# hunk body and `++ two.py` leaked into the added lines); binary-only and
+# mode-only changes named no file at all and silently vanished from
+# verification; a mixed text+binary diff verified the text half while the
+# binary half disappeared. Every one-sided divergence is now read once, from
+# the declared counts, and the six functions below are thin projections of
+# parse_unified_diff's output.
+#
+# Grounding status is explicit and never optimistic: a file the diff names
+# but whose content is not text (binary) or whose change is metadata-only
+# (mode) is reported with grounding_status so callers route it to
+# inconclusive rather than let it disappear. Ambiguous suffix-only paths are
+# left to find_ambiguous_files (unchanged); nothing here manufactures a PASS.
+# --------------------------------------------------------------------------
+
+class GroundingStatus(Enum):
+    TEXT = "text"          # has hunks with line-level content
+    BINARY = "binary"      # "Binary files ... differ" / "GIT binary patch"
+    MODE_ONLY = "mode_only"  # old mode/new mode, no content hunks
+    EMPTY = "empty"        # named but produced no hunk/content (e.g. header-only)
+
+
+@dataclass
+class Hunk:
+    file: str | None
+    old_start: int
+    old_count: int
+    new_start: int
+    new_count: int
+    lines: list = field(default_factory=list)
+    approximate: bool = False
+
+
+@dataclass
+class FileDiff:
+    old_path: str | None
+    new_path: str | None
+    hunks: list = field(default_factory=list)
+    binary: bool = False
+    mode_only: bool = False
+    # `+`/`-` lines seen outside any hunk for this file (git mode/index
+    # regions, hand-edited diffs). Attributed to the file, counted nowhere.
+    stray_added: list = field(default_factory=list)
+    stray_removed: list = field(default_factory=list)
+
+    @property
+    def path(self) -> str | None:
+        return self.new_path if self.new_path is not None else self.old_path
+
+    @property
+    def grounding_status(self) -> GroundingStatus:
+        if self.binary:
+            return GroundingStatus.BINARY
+        if self.hunks:
+            return GroundingStatus.TEXT
+        if self.mode_only:
+            return GroundingStatus.MODE_ONLY
+        return GroundingStatus.EMPTY
+
+
+_BIN_RE = re.compile(r"^Binary files .* and .* differ")
+_DIFF_GIT_RE = re.compile(r"^diff --git ")
+_DIFF_CC_RE = re.compile(r"^diff --cc[ ]")
+
+
+def _split_git_paths(line: str) -> tuple[str | None, str | None]:
+    """Best-effort (old, new) from a `diff --git a/X b/Y` line. Used only
+    as a fallback when no ---/+++ header is present (mode-only/binary).
+    Git quotes/escapes paths with spaces when they differ from the a/b
+    defaults; the header path (strip_prefix) remains authoritative."""
+    rest = line[len("diff --git "):].strip()
+    if " b/" in rest:
+        head, _, tail = rest.partition(" b/")
+        old = head[2:] if head.startswith("a/") else head
+        return _strip_prefix("a/" + old) if old else None, _strip_prefix("b/" + tail)
+    return None, None
+
+
+def _is_boundary(line: str) -> bool:
+    """A line that ends a hunk body regardless of remaining declared
+    counts: a new file's header or a new hunk. A bare `---`/`+++` is only
+    a boundary when it looks like a file header (space-separated path),
+    never when it is diff *content* (`--- comment` as a removed line)."""
+    return (line.startswith("diff --git ") or line.startswith("diff --cc")
+            or _HEAD_RE.match(line) is not None
+            or _COMBINED_RE.match(line) is not None
+            or line.startswith("@@@"))
+
+
+def _header_path(line: str, marker: str) -> str | None:
     if not _is_header(line, marker):
-        return False
-    rest = line[len(marker):].strip().strip(chr(34)).strip(chr(39))
-    return (
-        rest.startswith("a/")
-        or rest.startswith("b/")
-        or rest.startswith("/dev/null")
-        or rest in ("-", "/dev/null")
-    )
+        return None
+    return _clean(line[len(marker):])
 
 
-def _positional_header_indices(lines: list[str]) -> set[int]:
-    out: set[int] = set()
-    for i, line in enumerate(lines):
-        if not line.startswith("@@"):
+def parse_unified_diff(diff: str | None) -> list[FileDiff]:
+    lines = _diff_lines(diff)
+    files: list[FileDiff] = []
+    cur: FileDiff | None = None
+    pair_complete = False   # cur has seen both --- and +++ header lines
+    preamble = FileDiff(None, None)
+
+    def _file() -> FileDiff:
+        nonlocal cur
+        if cur is None:
+            cur = FileDiff(None, None)
+            files.append(cur)
+        return cur
+
+    idx = 0
+    while idx < len(lines):
+        line = lines[idx]
+        # --- file-level metadata ---------------------------------------
+        if _DIFF_GIT_RE.match(line) or _DIFF_CC_RE.match(line):
+            # A new per-file block starts here, period — even without
+            # headers (mode-only/binary blocks carry only the --git line;
+            # _reconstruct_git_paths back-fills the path).
+            cur = None
+            _file()
+            pair_complete = False
+            idx += 1
             continue
-        if i >= 2 and _is_header(lines[i - 1], "+++") and _is_header(lines[i - 2], "---"):
-            out.add(i - 1)
-            out.add(i - 2)
-    return out
+        if line.startswith("new file mode") or line.startswith("deleted file mode"):
+            _file()
+            idx += 1
+            continue
+        if line.startswith("old mode") or line.startswith("new mode"):
+            _file().mode_only = True
+            idx += 1
+            continue
+        if line.startswith(("similarity index", "dissimilarity index", "index ",
+                            "copy ", "rename ")):
+            _file()
+            idx += 1
+            continue
+        if _BIN_RE.match(line) or line.startswith("GIT binary patch"):
+            _file().binary = True
+            idx += 1
+            continue
+        if line.startswith("rename to "):
+            p = _clean(line[len("rename to "):])
+            if p is not None:
+                _file().new_path = p
+            idx += 1
+            continue
+        if line.startswith("rename from "):
+            p = _clean(line[len("rename from "):])
+            if p is not None:
+                _file().old_path = p
+            idx += 1
+            continue
+        # --- headers define the file's paths. A second complete ---/+++
+        # pair outside a hunk opens a NEW file block (classic unified
+        # diffs carry no `diff --git` line to split on — that swallow was
+        # the h-classic-twofile defect). ---
+        if _is_header(line, "---"):
+            if pair_complete and cur is not None:
+                cur, pair_complete = None, False
+            f = _file()
+            p = _header_path(line, "---")
+            if p is not None:
+                f.old_path = p
+            pair_complete = False
+            idx += 1
+            continue
+        if _is_header(line, "+++"):
+            f = _file()
+            p = _header_path(line, "+++")
+            if p is not None:
+                f.new_path = p
+            pair_complete = True
+            idx += 1
+            continue
+        # --- hunk: consume exactly the declared counts -----------------
+        # A body line MUST start with one of " +-\\" or be empty; anything
+        # else ends the hunk early (git truncation guard). `\ No newline`
+        # markers are body lines that consume neither side's counts.
+        head = _HEAD_RE.match(line)
+        if head:
+            f = _file()
+            old_start = int(head.group(1))
+            old_count = int(head.group(2) if head.group(2) is not None else 1)
+            new_start = int(head.group(3))
+            new_count = int(head.group(4) if head.group(4) is not None else 1)
+            h = Hunk(f.path, old_start, old_count, new_start, new_count, [])
+            idx += 1
+            old_rem, new_rem = old_count, new_count
+            while idx < len(lines) and (old_rem > 0 or new_rem > 0):
+                b = lines[idx]
+                if _is_boundary(b):
+                    break
+                if b.startswith("\\"):
+                    h.lines.append(b)
+                    idx += 1
+                    continue
+                if b and b[0] not in " +-\\":
+                    break  # not a valid body line: stop, don't absorb
+                if b.startswith("+"):
+                    new_rem -= 1
+                elif b.startswith("-"):
+                    old_rem -= 1
+                else:
+                    old_rem -= 1
+                    new_rem -= 1
+                # An empty line is context with the space stripped
+                # (git emits " " as ""); it consumes both counts.
+                h.lines.append(b if b != "" else " ")
+                idx += 1
+            f.hunks.append(h)
+            continue
+        comb = _COMBINED_RE.match(line)
+        if comb or line.startswith("@@"):
+            # combined (@@@) or malformed @@: greedy, approximate — one
+            # side of a merge diff has no single coherent count model, so
+            # consumers treat its lines as unverified (removal.py's
+            # approximate branch); unchanged semantics.
+            f = _file()
+            try:
+                om = re.search(r"-(\d+)", line)
+                nms = re.findall(r"\+(\d+)", line)
+                old_start = int(om.group(1)) if om else 0
+                new_start = int(nms[-1]) if nms else 0
+            except Exception:
+                old_start = new_start = 0
+            h = Hunk(f.path, old_start, 1, new_start, 1, [], approximate=True)
+            idx += 1
+            while idx < len(lines):
+                b = lines[idx]
+                if _is_boundary(b):
+                    break
+                if b.startswith(_HUNK_BODY_PREFIXES) or b == "":
+                    h.lines.append(b)
+                    idx += 1
+                    continue
+                if h.approximate and b.lstrip() != "":
+                    h.lines.append(b)
+                    idx += 1
+                    continue
+                break
+            f.hunks.append(h)
+            continue
+        # --- stray +/- outside any hunk (never discarded) --------------
+        if line.startswith("+"):
+            (_file() if cur is not None else preamble).stray_added.append(line[1:])
+            idx += 1
+            continue
+        if line.startswith("-"):
+            (_file() if cur is not None else preamble).stray_removed.append(line[1:])
+            idx += 1
+            continue
+        idx += 1
+
+    _reconstruct_git_paths(lines, files)
+    if preamble.stray_added or preamble.stray_removed:
+        files.insert(0, preamble)
+    return files
+
+
+def _reconstruct_git_paths(lines: list[str], files: list[FileDiff]) -> None:
+    """A git block without ---/+++ headers (mode-only, binary-only) still
+    names its file on the `diff --git` line: back-fill the path so the
+    change reaches verification instead of disappearing."""
+    git_i = [i for i, txt in enumerate(lines)
+             if _DIFF_GIT_RE.match(txt) or _DIFF_CC_RE.match(txt)]
+    for fi, f in enumerate(files):
+        if f.path is not None or fi >= len(git_i):
+            continue
+        o, n = _split_git_paths(lines[git_i[fi]])
+        f.old_path = f.old_path or o
+        f.new_path = f.new_path or n
 
 
 def parse_diff_files(diff: str | None) -> list[str]:
-    if not diff:
-        return []
-    new_side, old_side = [], []
-    in_hunk = False
-    for line in _diff_lines(diff):
-        if line.startswith("diff --git "):
-            in_hunk = False
-            continue
-        if in_hunk and (line.startswith(_HUNK_BODY_PREFIXES) or line == ""):
-            continue
-        in_hunk = False
-        if line.startswith("@@"):
-            in_hunk = True
-        elif _is_header(line, "+++"):
-            path = _clean(line[4:])
-            if path is not None:
-                new_side.append(path)
-        elif _is_header(line, "---"):
-            path = _clean(line[4:])
-            if path is not None:
-                old_side.append(path)
-        elif line.startswith("rename to "):
-            path = _clean(line[10:])
-            if path is not None:
-                new_side.append(path)
-        elif line.startswith("rename from "):
-            path = _clean(line[12:])
-            if path is not None:
-                old_side.append(path)
-    ordered = []
-    for f in new_side + [p for p in old_side if p not in new_side]:
-        if f not in ordered:
-            ordered.append(f)
+    """Files named by a diff, new-side first — a projection of the
+    canonical parse. Binary and mode-only files are INCLUDED (a real
+    change the diff names), so they can no longer vanish; whether each
+    grounds to entities is the caller's (seed_entities_for_diff maps
+    files that have graph entities; a binary with no entity contributes
+    nothing but is not hidden)."""
+    ordered: list[str] = []
+    for f in parse_unified_diff(diff):
+        for p in (f.new_path, f.old_path):
+            if p is not None and p not in ordered:
+                ordered.append(p)
     return ordered
 
 
 def iter_added_lines(diff: str | None) -> list[tuple[str | None, str]]:
+    """(file, content) for every added line, hunks then strays — the same
+    order the old scanner produced (per file, in diff order)."""
     out: list[tuple[str | None, str]] = []
-    if not diff:
-        return out
-    current: str | None = None
-    in_hunk = False
-    for line in _diff_lines(diff):
-        if line.startswith("diff --git "):
-            current, in_hunk = None, False
-            continue
-        if in_hunk and (line.startswith(_HUNK_BODY_PREFIXES) or line == ""):
-            if line.startswith("+"):
-                out.append((current, line[1:]))
-            continue
-        in_hunk = False
-        if line.startswith("@@"):
-            in_hunk = True
-        elif _is_header(line, "+++"):
-            path = _clean(line[4:])
-            current = path
-        elif _is_header(line, "---"):
-            continue
-        elif line.startswith("+"):
-            out.append((current, line[1:]))
+    for f in parse_unified_diff(diff):
+        for h in f.hunks:
+            for body in h.lines:
+                if body.startswith("+"):
+                    out.append((f.path, body[1:]))
+        for line in f.stray_added:
+            out.append((f.path, line))
     return out
 
 
-def iter_added_lines_with_lineno(diff: str | None) -> list[tuple[str | None, int | None, str]]:
+def iter_added_lines_with_lineno(
+        diff: str | None) -> list[tuple[str | None, int | None, str]]:
+    """(file, new_lineno, content). lineno is None for strays and for the
+    new-side start of an approximate hunk, matching the old scanner."""
     out: list[tuple[str | None, int | None, str]] = []
-    if not diff:
-        return out
-    current: str | None = None
-    in_hunk = False
-    new_ln = 0
-    for line in _diff_lines(diff):
-        if line.startswith("diff --git "):
-            current, in_hunk = None, False
-            continue
-        if in_hunk and (line.startswith(_HUNK_BODY_PREFIXES) or line == ""):
-            if line.startswith("+"):
-                out.append((current, new_ln, line[1:]))
-                new_ln += 1
-            elif line.startswith(" ") or line == "":
-                new_ln += 1
-            continue
-        in_hunk = False
-        m = _HEAD_RE.match(line)
-        if m:
-            try:
-                new_ln = int(m.group(3))
-            except Exception:
-                new_ln = 0
-            in_hunk = True
-            continue
-        cm = _COMBINED_RE.match(line)
-        if cm or (line.startswith("@@@") and line.rstrip().endswith("@@@")):
-            new_ln = 0
-            in_hunk = True
-            continue
-        if line.startswith("@@"):
-            new_ln = 0
-            in_hunk = True
-            continue
-        if _is_header(line, "+++"):
-            path = _clean(line[4:])
-            current = path
-        elif _is_header(line, "---"):
-            continue
-        elif line.startswith("+"):
-            out.append((current, None, line[1:]))
+    for f in parse_unified_diff(diff):
+        for h in f.hunks:
+            new_ln = h.new_start
+            for body in h.lines:
+                if body.startswith("+"):
+                    out.append((f.path, new_ln if h.approximate is False else None,
+                                body[1:]))
+                    new_ln += 1
+                elif body.startswith("-") or body.startswith("\\"):
+                    continue
+                else:
+                    new_ln += 1
+        for line in f.stray_added:
+            out.append((f.path, None, line))
     return out
 
 
@@ -197,153 +397,78 @@ def map_files_to_entity_ids(files: list[str], entities: list) -> dict[str, list[
 
 
 def unattributed_removed_lines(diff: str | None) -> list[str]:
-    if not diff:
-        return []
+    """Removed (`-`) lines that belong to no hunk — git mode/index noise or
+    hand-edited content. A projection of stray_removed; file headers and
+    backslash markers are already consumed by the canonical parse, never
+    strays."""
     out: list[str] = []
-    in_hunk = False
-    lines = _diff_lines(diff)
-    positional = _positional_header_indices(lines)
-    for idx, line in enumerate(lines):
-        if line.startswith("diff --git "):
-            in_hunk = False
-            continue
-        if _HEAD_RE.match(line) or _COMBINED_RE.match(line) or line.startswith("@@@"):
-            in_hunk = True
-            continue
-        if in_hunk:
-            if line.startswith(_HUNK_BODY_PREFIXES) or line == "":
-                continue
-            in_hunk = False
-        if _is_git_file_header(line, "---") or _is_git_file_header(line, "+++") or idx in positional:
-            continue
-        if line.startswith("\\"):
-            continue
-        if line.startswith("-"):
-            out.append(line[1:])
+    for f in parse_unified_diff(diff):
+        out.extend(f.stray_removed)
     return out
 
 
 def find_deletion_hunks(diff: str | None) -> list[tuple[int, str]]:
-    if not diff:
-        return []
-    hunks = []
-    in_hunk = False
-    hunk_combined = False
-    hunk_start = 0
-    minus = plus = 0
-    removed: list[str] = []
-    stray_start = 0
-    stray_removed: list[str] = []
-    all_lines = _diff_lines(diff)
-    positional = _positional_header_indices(all_lines)
-    for i, line in enumerate(all_lines, 1):
-        if line.startswith("diff --git "):
-            if in_hunk and minus > plus or (hunk_combined and minus > 0):
-                hunks.append((hunk_start, "\n".join(removed)))
-            in_hunk, hunk_combined, minus, plus, removed = False, False, 0, 0, []
-            continue
-        if in_hunk and (line.startswith(_HUNK_BODY_PREFIXES) or line == ""
-                        or (hunk_combined and line.lstrip() != "")):
-            if hunk_combined:
-                head2 = line[:2] if len(line) >= 2 else line
-                if "-" in head2:
-                    minus += 1
-                    stripped = line.lstrip()
-                    body = stripped[1:] if stripped.startswith(("-", "+")) else stripped
-                    if body.startswith("-"):
-                        body = body[1:]
-                    removed.append(body)
-                elif "+" in head2:
-                    plus += 1
-            else:
-                if line.startswith("-"):
-                    minus += 1
-                    removed.append(line[1:])
-                elif line.startswith("+"):
-                    plus += 1
-            continue
-        if in_hunk and minus > plus or (hunk_combined and minus > 0):
-            hunks.append((hunk_start, "\n".join(removed)))
-        in_hunk, hunk_combined, minus, plus, removed = False, False, 0, 0, []
-        if line.startswith("@@"):
-            in_hunk, hunk_start = True, i
-            hunk_combined = line.startswith("@@@")
-            continue
-        if _is_git_file_header(line, "---") or _is_git_file_header(line, "+++") or (i - 1) in positional:
-            continue
-        if line.startswith("\\"):
-            continue
-        if line.startswith("-"):
-            if stray_start == 0:
-                stray_start = i
-            stray_removed.append(line[1:])
-    if in_hunk and minus > plus or (hunk_combined and minus > 0):
-        hunks.append((hunk_start, "\n".join(removed)))
-    if stray_removed:
-        hunks.append((stray_start or 0, "\n".join(stray_removed)))
+    """Hunks that net-remove content (more `-` than `+`), plus any stray
+    removal run — the removal-provenance tripwire. One-sided: a
+    modification (`-x`/`+y`, counts equal) is NOT a deletion; a pure
+    addition is not. `(start, text)` keeps the old tuple shape; only
+    `text` and `len()` are consumed downstream, `start` is the grouping
+    key. Approximate (combined `@@@`) hunks flag on any removal, matching
+    the previous scanner's special case."""
+    hunks: list[tuple[int, str]] = []
+    for f in parse_unified_diff(diff):
+        for h in f.hunks:
+            if h.approximate:
+                removed = [b.lstrip()[1:] if b.lstrip()[:1] in "-+" else b.lstrip()
+                           for b in h.lines if b.lstrip().startswith("-")]
+                if removed:
+                    hunks.append((h.old_start, "\n".join(removed)))
+                continue
+            minus = [b[1:] for b in h.lines if b.startswith("-")]
+            plus = sum(1 for b in h.lines if b.startswith("+"))
+            if minus and len(minus) > plus:
+                hunks.append((h.old_start, "\n".join(minus)))
+        if f.stray_removed:
+            hunks.append((0, "\n".join(f.stray_removed)))
     return hunks
 
 
 def iter_hunks(diff: str | None) -> list:
-    from dataclasses import dataclass
+    """Every hunk in file-then-diff order (fields: file, old_start,
+    old_count, new_start, new_count, lines, approximate). Callers that
+    want per-file grouping iterate parse_unified_diff directly."""
+    out = []
+    for f in parse_unified_diff(diff):
+        for h in f.hunks:
+            h.file = f.path
+            out.append(h)
+    return out
 
-    @dataclass
-    class _Hunk:
-        file: str | None
-        old_start: int
-        old_count: int
-        new_start: int
-        new_count: int
-        lines: list
-        approximate: bool = False
 
-    hunks: list = []
-    current: str | None = None
-    open_hunk: _Hunk | None = None
+def diff_grounding_statuses(diff: str | None) -> dict[str, "GroundingStatus"]:
+    """path -> grounding_status for every file the diff names. Binary and
+    mode-only entries let decision points treat an uninspectable change as
+    visible-but-ungroundable rather than absent."""
+    statuses: dict[str, GroundingStatus] = {}
+    for f in parse_unified_diff(diff):
+        p = f.path
+        if p is not None:
+            statuses[normalize_path(p)] = f.grounding_status
+    return statuses
 
-    def flush():
-        nonlocal open_hunk
-        if open_hunk is not None:
-            hunks.append(open_hunk)
-            open_hunk = None
 
-    for line in (_diff_lines(diff) if diff else []):
-        if line.startswith("diff --git "):
-            flush()
-            current = None
-            continue
-        m = _HEAD_RE.match(line)
-        if m:
-            flush()
-            open_hunk = _Hunk(current, int(m.group(1)), int(m.group(2) or 1),
-                              int(m.group(3)), int(m.group(4) or 1), [])
-            continue
-        cm = _COMBINED_RE.match(line)
-        if cm or (line.startswith("@@@") and line.rstrip().endswith("@@@")):
-            flush()
-            try:
-                old_m = re.search(r"-(\d+)", line)
-                new_ms = re.findall(r"\+(\d+)", line)
-                old_start = int(old_m.group(1)) if old_m else 0
-                new_start = int(new_ms[-1]) if new_ms else 0
-            except Exception:
-                old_start = new_start = 0
-            open_hunk = _Hunk(current, old_start, 1, new_start, 1, [],
-                              approximate=True)
-            continue
-        if open_hunk is not None:
-            if line.startswith(_HUNK_BODY_PREFIXES) or line == "":
-                open_hunk.lines.append(line)
-                continue
-            if getattr(open_hunk, "approximate", False) and line.lstrip() != "":
-                open_hunk.lines.append(line)
-                continue
-            flush()
-        if _is_header(line, "+++"):
-            path = _clean(line[4:])
-            current = path
-    flush()
-    return hunks
+def uninspectable_files(diff: str | None) -> list[str]:
+    """Files the diff names whose content it does not carry (binary, or
+    header-only with no hunks and no rename target). A verification that
+    cannot read the change must not certify it: these force inconclusive
+    rather than a PASS earned by the text-only siblings of a mixed diff."""
+    out: list[str] = []
+    for f in parse_unified_diff(diff):
+        if f.binary:
+            out.append(f.path)
+        elif f.mode_only and not f.hunks and not f.stray_added and not f.stray_removed:
+            out.append(f.path)
+    return [p for p in out if p is not None]
 
 
 def seed_entities_for_diff(files: list[str], entities: list, diff: str | None) -> dict[str, list[str]]:
@@ -362,7 +487,19 @@ def seed_entities_for_diff(files: list[str], entities: list, diff: str | None) -
                 old_ln += 1
             elif body.startswith("\\"):
                 continue
-            elif not body.startswith("+"):
+            elif body.startswith("+"):
+                # Insertion anchors: text added between old lines
+                # old_ln-1 and old_ln changes their adjacency, so the
+                # entities holding either side conservatively count as
+                # touched. Without this, an insertion-only hunk (no "-"
+                # lines) touched only old_start — typically a blank
+                # line between functions — and grounded nothing: the
+                # frozen B6 tail-insertion gap and C1's C3 miss share
+                # this geometry.
+                touched.add(old_ln)
+                if old_ln > 1:
+                    touched.add(old_ln - 1)
+            else:
                 old_ln += 1
         if h.old_start > 0:
             touched.add(h.old_start)

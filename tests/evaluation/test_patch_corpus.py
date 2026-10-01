@@ -41,6 +41,29 @@ RECORDED = {
     },
 }
 
+# Re-measurement after the diffmap A2 insertion-anchor repair (correctness
+# campaign). The single verdict change is C3-send-notify PASS ->
+# HUMAN_REVIEW (blast now seeds the tail insertion, so exposure reaches the
+# reviewer as its expected outcome). Effect: patch_equivalence 0.875 -> 1.0,
+# correct_all confusion accepted 6 -> declined 3-side; precision, deterministic
+# catch, semantic false-accept, and false-reject lists all unchanged.
+# results.json keeps the historical first measurement untouched.
+POSTFIX = {
+    "patch_equivalence": 1.0,
+    "verification_precision": 1.0,
+    "deterministic_catch_rate": 1.0,
+    "semantic_false_accept_rate": 1.0,
+    "semantic_decline_rate": 0.0,
+    "false_reject_ids": [],
+    "false_positive_fail_ids": [],
+    "confusion": {
+        "wrong_all": {"caught": 4, "accepted": 4, "declined": 1},
+        "correct_all": {"caught": 0, "accepted": 5, "declined": 3},
+        "wrong_deterministic": {"caught": 4, "accepted": 0, "declined": 0},
+        "wrong_semantic": {"caught": 0, "accepted": 4, "declined": 0},
+    },
+}
+
 
 def _cases():
     return [json.loads(line) for line in
@@ -95,16 +118,23 @@ def test_first_run_outcomes_as_documented():
 @pytest.mark.skipif(os.environ.get("VERIFYCI_PATCH_RERUN") != "1",
                     reason="full re-measure; set VERIFYCI_PATCH_RERUN=1")
 def test_measurement_reproduces_recorded_report():
-    import sys
-    sys.path.insert(0, str(CORPUS))
-    import measure
+    """Re-measure on the CURRENT code. The A2 insertion-anchor repair in
+    diffmap.py changes the C3 verdict: PASS -> HUMAN_REVIEW (exposure now
+    reaches the blast reviewer), lifting patch_equivalence 0.875 -> 1.0 and
+    overall agreement 16/17 -> 17/17, with every other per-case verdict,
+    precision, and the deterministic/semantic breakdown unchanged. The
+    historical results.json record stays pinned to RECORDED; the fresh
+    measurement is pinned to POSTFIX (evidence tracking, not retuning)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("patch_measure", CORPUS / "measure.py")
+    measure = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(measure)
     fresh = measure.compute_metrics(measure.run())
     recorded = _results()["metrics"]
-    for k in RECORDED:
-        if k == "confusion":
-            assert fresh[k] == recorded[k]
-        else:
-            assert fresh[k] == recorded[k], f"rerun drift on {k}"
+    for k in RECORDED:  # historical file untouched
+        assert recorded[k] == RECORDED[k], f"historical record changed on {k}"
+    for k in POSTFIX:  # current code reproduces its documented delta
+        assert fresh[k] == POSTFIX[k], f"rerun drift on {k}: {fresh[k]}"
 
 
 def test_results_hash_pinned():

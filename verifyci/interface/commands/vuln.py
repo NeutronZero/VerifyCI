@@ -31,12 +31,15 @@ def run_vuln(db_path: str | None = None, cache_path: str = "./storage/vuln_cache
         imported = cache.refresh(edges, findings=data)
     findings: list[dict] = []
     try:
+        from verifyci.interface.commands import InfraError, open_for_read
         try:
-            conn = sqlite3.connect(db)
-        except (sqlite3.Error, OSError) as e:
+            conn = open_for_read(db)
+        except (InfraError, sqlite3.Error, OSError) as e:
+            # Read-only open: a wrong path is an error, never a silently
+            # created empty database (the old RW connect+scan did that).
+            kind = getattr(e, "kind", f"cannot_open_db: {type(e).__name__}: {e}")
             return {"db_path": db, "packages_checked": 0, "findings": [],
-                    "imported": imported,
-                    "error": f"cannot_open_db: {type(e).__name__}: {e}"}
+                    "imported": imported, "error": str(kind)}
         try:
             # Latest revision only: unfiltered, every superseded row
             # re-scanned, and fixed versions kept flagging. DBs without

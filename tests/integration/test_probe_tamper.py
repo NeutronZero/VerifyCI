@@ -6,40 +6,127 @@ from verifyci.contracts.canonical import event_hash
 from verifyci.memory.ledger import EventLedger
 
 
-def _ledger_two_tasks():
-    ledger = EventLedger()
-    ledger.append(type="A", payload={}, provenance={}, task_id="t1")
-    ledger.append(type="B", payload={}, provenance={}, task_id="t2")
-    ledger.append(type="C", payload={}, provenance={}, task_id="t2")
-    ledger.append(type="D", payload={}, provenance={}, task_id="t1")
-    return ledger
+def _interleaved_task_ledgers():
+    """Production shape (anchor.py docstring + AsyncDAGScheduler): one
+    ledger per task, persisted into one interleaved events table. A
+    single global ledger cannot express this: its events link to the
+    previous GLOBAL event, which is exactly what the pre-fix
+    verify_task_subchain assumed and what no run_task ever produced."""
+    la, lb = EventLedger(), EventLedger()
+    a1 = la.append(type="A1", payload={}, provenance={}, task_id="A")
+    b1 = lb.append(type="B1", payload={}, provenance={}, task_id="B")
+    a2 = la.append(type="A2", payload={}, provenance={}, task_id="A")
+    b2 = lb.append(type="B2", payload={}, provenance={}, task_id="B")
+    a3 = la.append(type="A3", payload={}, provenance={}, task_id="A")
+    return [a1, b1, a2, b2, a3]  # stored order: interleaved
 
 
 def test_probe_task_subchain_interleaved_valid():
     from verifyci.memory.ledger import verify_task_subchain
-    events = _ledger_two_tasks().get_events()
-    assert verify_task_subchain(events, "t1") is True
-    assert verify_task_subchain(events, "t2") is True
-    head = event_hash([e for e in events if e.task_id == "t2"][-1])
-    assert verify_task_subchain(events, "t2", expected_head=head) is True
-    assert verify_task_subchain(events, "t2", expected_head="deadbeef") is False
+    events = _interleaved_task_ledgers()
+    assert verify_task_subchain(events, "A") is True
+    assert verify_task_subchain(events, "B") is True
+    head = [e for e in events if e.task_id == "B"][-1]
+    from verifyci.contracts.canonical import event_hash
+    head_hash = event_hash(head)
+    assert verify_task_subchain(events, "B", expected_head=head_hash) is True
+    assert verify_task_subchain(events, "B", expected_head="deadbeef") is False
+
+
+def test_probe_task_subchain_single_task():
+    import dataclasses
+    from verifyci.memory.ledger import verify_task_subchain
+    ledger = EventLedger()
+    ledger.append(type="E1", payload={}, provenance={}, task_id="t")
+    ledger.append(type="E2", payload={}, provenance={}, task_id="t")
+    events = ledger.get_events()
+    assert verify_task_subchain(events, "t") is True
+    broken = [events[0], dataclasses.replace(events[1], prev_event_hash="x")]
+    assert verify_task_subchain(broken, "t") is False
+
+
+def test_probe_task_subchain_three_interleaved_tasks():
+    from verifyci.memory.ledger import verify_task_subchain
+    ledgers = {t: EventLedger() for t in "XYZ"}
+    order = ["X", "Y", "Z", "Z", "X", "Y", "X"]
+    events = []
+    for task in order:
+        events.append(ledgers[task].append(type="E", payload={},
+                                           provenance={}, task_id=task))
+    for task in "XYZ":
+        assert verify_task_subchain(events, task) is True, task
+
+
+def test_probe_task_subchain_broken_link_in_a_does_not_break_b():
+    """Unrelated events must not participate: tampering inside chain A
+    changes nothing about chain B's verdict, and vice versa."""
+    import dataclasses
+    from verifyci.memory.ledger import verify_task_subchain
+    events = _interleaved_task_ledgers()
+    idx_a2 = next(i for i, e in enumerate(events)
+                  if e.task_id == "A" and e.type == "A2")
+    tampered_a = list(events)
+    tampered_a[idx_a2] = dataclasses.replace(tampered_a[idx_a2],
+                                             prev_event_hash="forged")
+    assert verify_task_subchain(tampered_a, "A") is False
+    assert verify_task_subchain(tampered_a, "B") is True
+    idx_b2 = next(i for i, e in enumerate(events)
+                  if e.task_id == "B" and e.type == "B2")
+    tampered_b = list(events)
+    tampered_b[idx_b2] = dataclasses.replace(tampered_b[idx_b2],
+                                             prev_event_hash="forged")
+    assert verify_task_subchain(tampered_b, "B") is False
+    assert verify_task_subchain(tampered_b, "A") is True
+
+
+def test_probe_task_subchain_first_event_with_predecessor_fails():
+    """A task's first stored event carrying a prev hash is a truncation/
+    splice signal: the event it referenced was removed or renamed."""
+    import dataclasses
+    from verifyci.contracts.canonical import event_hash
+    from verifyci.memory.ledger import verify_task_subchain
+    events = _interleaved_task_ledgers()
+    a1 = events[0]
+    b1 = next(e for e in events if e.type == "B1")
+    spliced = [dataclasses.replace(a1, prev_event_hash=event_hash(b1))] + events[1:]
+    assert verify_task_subchain(spliced, "A") is False
+
+
+def test_probe_task_subchain_persisted_events(tmp_path):
+    """Integration: two sequential run_task calls sharing one DB. The
+    old global-comparison verifier reported CHAIN_BROKEN for the second
+    task with zero tampering — its first event legitimately links to
+    the previous run's last event, not to global index 0."""
+    from verifyci.interface.commands.anchor import run_verify_chain
+    from verifyci.interface.commands.run import run_task
+    from verifyci.storage.graph_store import GraphStore
+    db = str(tmp_path / "v.db")
+    GraphStore(db).close()
+    r1 = run_task("first task", diff="", db_path=db)
+    r2 = run_task("second task", diff="", db_path=db)
+    assert r1["task_id"] != r2["task_id"]
+    assert run_verify_chain(db, None, r1["task_id"])["status"] == "CHAIN_VALID"
+    assert run_verify_chain(db, None, r2["task_id"])["status"] == "CHAIN_VALID"
+    assert run_verify_chain(db, None, None)["status"] == "CHAIN_VALID"
 
 
 def test_probe_task_subchain_truncation_breaks():
     from verifyci.memory.ledger import verify_task_subchain
-    events = _ledger_two_tasks().get_events()
+    events = _interleaved_task_ledgers()
     truncated = [e for i, e in enumerate(events) if i != 1]
-    assert verify_task_subchain(truncated, "t2") is False
+    assert verify_task_subchain(truncated, "B") is False
 
 
 def test_probe_task_subchain_tampered_link_breaks():
     import dataclasses
     from verifyci.memory.ledger import verify_task_subchain
-    events = _ledger_two_tasks().get_events()
+    events = _interleaved_task_ledgers()
     tampered = list(events)
-    tampered[2] = dataclasses.replace(tampered[2], prev_event_hash="forged")
-    assert verify_task_subchain(tampered, "t2") is False
-    assert verify_task_subchain(tampered, "t1") is False
+    idx_b1 = next(i for i, e in enumerate(events) if e.type == "B2")
+    tampered[idx_b1] = dataclasses.replace(tampered[idx_b1],
+                                           prev_event_hash="forged")
+    assert verify_task_subchain(tampered, "B") is False
+    assert verify_task_subchain(tampered, "A") is True
 
 
 def test_probe_per_task_ledgers_isolated():

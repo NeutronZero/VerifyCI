@@ -85,7 +85,7 @@ class Executor:
                                    entities=graph_entities or None)
 
             checks = [build_semi_check(
-                cert, parse_diff_files(diff), graph_entities)]
+                cert, parse_diff_files(diff), graph_entities, diff=diff)]
 
             blast, blast_check = blast_radius_check(
                 graph=graph, changed_entities=changed, test_entities=tests,

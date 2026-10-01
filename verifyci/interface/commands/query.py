@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 
 from verifyci.contracts.evidence import SourceChunk
 from verifyci.contracts.vector_store import InMemoryVectorStore, VectorRecord
@@ -28,7 +29,14 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
         return {"query": question, "results": [], "methods": [],
                 "evidence": {"entities": 0, "chunks": 0, "provenance": 0},
                 "error": "db_not_found"}
-    store = GraphStore(db)
+    try:
+        store = GraphStore(db)
+    except sqlite3.Error as e:
+        # An unreadable store is infrastructure, not "no hits": the CLI
+        # maps the error key to exit 3 instead of a green zero-answer.
+        return {"query": question, "results": [], "methods": [],
+                "evidence": {"entities": 0, "chunks": 0, "provenance": 0},
+                "error": f"db_unreadable: {e}"}
     try:
         # Search the latest revision only: older revisions stay in the DB
         # for history, but returning superseded rows as answers is wrong.

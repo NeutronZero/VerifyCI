@@ -117,3 +117,60 @@ reproduced → single measurement → misses reported, not tuned → source-free
 proof (git diff + hashes) → opt-in repro guards → thresholds from PLAN.md
 never retrofitted. "515 tests pass" is supporting evidence; the conclusion is
 this document's measured map of what works, what doesn't, and why.
+
+---
+
+## Addendum — V1 correctness repair campaign (post-baseline)
+
+Everything above this line is the **`v1.0-evidence-baseline` record** and
+stays exactly as frozen: the corpora, labels, first-run numbers, and the
+"mechanism 1 not repaired" classification are historically reproducible
+against tag `v1.0-evidence-baseline`. This addendum records a separate,
+later campaign that fixed demonstrated **correctness defects** (not
+tuning), and reports the measured deltas honestly. No frozen corpus,
+label, or threshold was altered; historical `results.json` files are
+byte-unchanged and their guards now dual-pin (historical + post-repair).
+
+Source drift since baseline: yes — this was a correctness campaign, so
+`verifyci/` changed (unlike B1→C3, which measured a frozen tree). Each
+change is guarded by a failing-first test. See CHANGELOG "A1–A8".
+
+Mechanism-1 (blast seeding geometry) is now **repaired**, and the frozen
+corpora re-measured on the repaired code (same cases, same expected
+sets):
+
+| Criterion | Baseline (frozen) | Post-repair re-measure | Mechanism |
+|---|---|---|---|
+| Blast coverage (C2) | 0.8571, B6 gap | **1.0** | A2 insertion-anchor seeding; B6 seeds 2 entities → 6/6 dependents; B5 FP unchanged (disclosed, not tuned) |
+| Patch equivalence (C1) | 0.875, C3 miss | **1.0** | A2 closes C3's tail-insertion; all other verdicts bit-identical |
+| Verification precision (C1) | 1.0 | 1.0 | unchanged; 4/4 FAILs still truly-wrong |
+
+Classification update: criteria 5 (patch equivalence) and 6 (blast
+coverage) move from *measured-unmet* to *measured-met-on-frozen-corpus*.
+This is **still not "established"**: the corpora remain the same small
+synthetic/curated sets (9 blast cases, 8 correct patches); the gates are
+met at a scale too small to establish, exactly as the baseline said.
+Mechanisms 2 (incremental p95), 3 (retrieval), 4 (invariant recall) are
+**untouched** by this campaign — correctness repairs do not address
+them. V1.1 #1 (seeding geometry) is therefore **done**; #2–#5 stand.
+
+New correctness properties established (not previously measured):
+- task-scoped chain verification (A1) — 9 focused + integration tests;
+- canonical single diff parser with binary/mode visibility (A4) — 19
+  tests + a 97-diff golden-snapshot migration proof;
+- infrastructure ≠ verdict (A5) — INFRA_ERROR/exit-3 channel, WAL
+  concurrency, 18 tests; four V1 verdict states unchanged;
+- bitemporal re-ingest integrity (A6) — stamp-preserving upserts;
+- repository identity for `.` (A7); platform hardening (A8): .pio skip,
+  deterministic utf-8-sig manifest reads, PowerShell UTF-16 diffs,
+  recorded corrupt-manifest errors.
+
+P2 (removal provenance) evaluated, NOT implemented: 5.3% of sampled
+functions exceed the snippet cap; a fabricated deep-line removal in a
+truncated function escapes FAIL (reads unverified → INCONCLUSIVE). That
+is consistent with the stated V1 principle "absence of record is not
+contradiction" — it is a capability cap, not a broken contract, so
+compact per-line hashes stay deferred.
+
+Suite at end of campaign, with patch+blast reruns: **597 passed / 1 skipped**
+(default: 595 passed / 3 skipped; 598 collected), ruff clean.

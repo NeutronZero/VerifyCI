@@ -29,6 +29,20 @@ RECORDED = {
     "total_fp": 1,
 }
 
+# Post-repair re-measurement (diffmap A2 insertion-anchor seeding,
+# correctness campaign): the labeled gap CLOSED — B6 now seeds (2 entities,
+# risk 0.45) and its 6 dependents are detected; coverage 7/7 = 1.0. The
+# disclosed B5 context-bleed FP is unchanged (total_fp still 1); seeded
+# cases gained adjacent-line seeds but every seeded recall stays 1.0.
+# results.json keeps the historical first measurement untouched.
+POSTFIX = {
+    "coverage_all": 1.0,
+    "coverage_seeded_only": 1.0,
+    "contract_fn_ids": [],
+    "known_gap_miss_ids": [],
+    "total_fp": 1,
+}
+
 
 def _cases():
     return [json.loads(line) for line in
@@ -86,14 +100,23 @@ def test_zero_impact_and_isolation_hold():
 @pytest.mark.skipif(os.environ.get("VERIFYCI_BLAST_RERUN") != "1",
                     reason="full re-measure; set VERIFYCI_BLAST_RERUN=1")
 def test_measurement_reproduces_recorded_report():
-    import sys
-    sys.path.insert(0, str(CORPUS))
-    import measure
+    """Re-measure on the CURRENT code: it must reproduce the POSTFIX
+    record exactly (the A2 insertion-anchor repair closes the labeled
+    B6 gap; seeded cases and the disclosed B5 FP stay stable). The
+    historical RECORDED baseline stays in results.json untouched —
+    evidence tracking, not expectation retuning: corpus, cases hash,
+    and expected sets are unchanged."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("blast_measure", CORPUS / "measure.py")
+    measure = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(measure)
     rows = measure.collect()  # rerun detection on a fresh ingest
     m = measure.compute_metrics(rows)
+    for k in POSTFIX:
+        assert m[k] == POSTFIX[k], f"rerun drift on {k}: {m[k]} != {POSTFIX[k]}"
     recorded = _results()["metrics"]
     for k in RECORDED:
-        assert m[k] == recorded[k], f"rerun drift on {k}"
+        assert recorded[k] == RECORDED[k], f"historical record changed on {k}"
 
 
 def test_results_hash_pinned():

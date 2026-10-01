@@ -1,5 +1,124 @@
 # Changelog
 
+## Unreleased — V1 correctness repair campaign (A1–A8): four P0 defects fixed, measured deltas reported
+
+All findings verified against the tree before fixing; every fix has a
+failing-first reproduction. No frozen contract changed; no corpus label
+or gate threshold retuned. Full suite 597 passed / 1 skipped (was
+515/3; +82 passed with reruns on 80 net-new collected tests), ruff clean.
+
+- **A1 (P0) task-scoped event chains.** `verify_task_subchain()` compared
+  each task event against the previous GLOBAL event — contradicting the
+  documented V1 contract (per `anchor.py`: the events table is a global
+  interleaved log; cross-task links are broken by construction). Probe
+  on persisted events: two sequential `run_task` calls, zero tampering,
+  second task verified **CHAIN_BROKEN** pre-fix, CHAIN_VALID post-fix.
+  Fix: filter to the task's stored events; first carries no prev hash,
+  each later links to its immediate task predecessor; unrelated events
+  cannot contaminate either direction. Tests: single/two/three
+  interleaved tasks, broken link in A vs B independently, first-event
+  predecessor, persisted two-run integration.
+- **A2 (P0) insertion-only diff grounding.** A hunk with zero `-` lines
+  named no old-side line; seeding touched only `old_start` (a blank
+  line between functions) and grounded nothing. This is exactly the
+  frozen B6/C3 mechanism. Fix: each insertion conservatively anchors
+  the old lines on BOTH sides of it. Delta on the frozen corpora (same
+  labels, same hashes — reported, not retuned): blast coverage
+  **0.8571 → 1.0** (B6 seeds 2 entities, all 6 dependents detected;
+  B5 FP unchanged), patch equivalence **0.875 → 1.0** (C3 reaches its
+  HUMAN_REVIEW expectation; all other verdicts bit-identical). Re-run
+  guards dual-pinned: historical record + POSTFIX re-measurement.
+  10 new regression geometries (inside/before/after/at-beginning
+  function, method, EOF, insertion-only file, mixed, new-file fallback).
+- **A3 (P0) forbid_* scoped to the diff.** The graph-side scan searched
+  the entire base graph: a pre-existing `eval()` in `legacy.py` failed
+  an unrelated diff to `other.py` as a real rejection. Fix preserves
+  every fail-closed property: diff-introduced violations still reject
+  (added-line path untouched); a graph violation is attributed only
+  when its edge's source file is inside the diff's touched files; a
+  diff naming NO files keeps whole-graph semantics (the frozen B1
+  `v2-forbid-direct-call` positive), and out-of-scope violations are
+  named in the explanation rather than hidden. `CALLS_UNRESOLVED`
+  proven unreachable on builder graphs (they live only in `pending`;
+  pinned by test) — branch kept for fake/resolver-emitting graphs.
+  Alias limitation (`e = eval; e(x)`) remains documented, unfixed by
+  design.
+- **A4 (P0) one canonical diff parser.** Six independent state machines
+  each sniffed hunk ends by line prefix instead of the declared
+  `@@ -a,b +c,d @@` counts. Demonstrated defects: classic (non-git)
+  two-file diff LOST its second file (`--- two.py` swallowed as body,
+  `++ two.py` leaked into added lines); binary-only and mode-only
+  changes named no files and vanished; mixed text+binary certified a
+  PASS on the text half while the binary half disappeared. Fix:
+  `parse_unified_diff()` (FileDiff/Hunk/GroundingStatus) consumes exact
+  declared counts; the six public functions are projections;
+  `uninspectable_files` (binary/mode-only) drives
+  `established=False` → a mixed diff routes INCONCLUSIVE, never PASS.
+  Migration proven by golden snapshot over all 97 test+corpus diffs:
+  17 changed, every delta an enumerated fix or a benign
+  malformed-input improvement; corpus diffs and frozen guards
+  byte-stable.
+- **A5 (P1) infrastructure errors cannot masquerade as verdicts.**
+  Reproduced: missing DB and locked DB both returned INCONCLUSIVE
+  ("checks_ran_but_nothing_established") from `verify`; stats/vuln
+  reported errors but exited 0. Fix: `INFRA_ERROR` channel with
+  `error` kind (`db_not_found`/`db_locked`/`db_unreadable`/
+  `revision_not_found`), exit-code map PASS 0 / FAIL 1 / HUMAN_REVIEW 2
+  / INCONCLUSIVE 2 / **INFRA_ERROR 3**; the four verdict states are
+  unchanged. Fail-closed precedence preserved: a secret diff still FAILs
+  on a missing DB (diff-intrinsic detection outranks storage state);
+  INFRA_ERROR only replaces a verdict the gate could not reach. A
+  valid-but-empty DB stays INCONCLUSIVE (readable, grounds nothing —
+  a verdict, not infra). SQLite WAL enabled at store init: readers
+  now get the last-committed snapshot instead of locking (concurrent
+  read-during-ingest test pins it).
+- **A6 (P1) temporal integrity of re-ingest.** Reproduced: ingesting
+  identical content twice rewrote the entity row's `valid_from`/
+  `t_created` (same content → same revision → same
+  `revision_entity_id` → `INSERT OR REPLACE`), destroying as-of
+  history: `get_entity_as_of(T1+ε)` returned None. Fix: entity/edge
+  inserts are stamp-preserving upserts (first observation immutable;
+  only close stamps refresh, which also correctly re-opens a
+  reverted-to revision's rows). Invariant tested for identical,
+  changed, carried, disappeared, and revert-cycle cases;
+  `INGESTION_CONFIG_HASH` determinism pinned.
+- **A7 (P1) repository identity.** `verifyci ingest .` produced
+  `repository_id == ''` (`Path('.').name`), invisible to every
+  repo-scoped lookup. Fix: resolve the repo path at ingest entry —
+  `.` and the absolute path name the same repository; no rename
+  detection added.
+- **A8 (P1) platform hardening.** `.pio` (PlatformIO build/libdeps/
+  framework trees) added to DEFAULT_SKIP_DIRS with rationale and
+  ingestion test. Manifest reads switched to `utf-8-sig` everywhere
+  (ingest + deps): the locale decode made identical bytes hash
+  differently on Windows vs Linux, and a BOM broke `json.loads`.
+  PowerShell UTF-16 patch files (BOM sniff: LE/BE) and UTF-8 BOM
+  diffs now decode whole via `--diff-file`/stdin instead of
+  NUL-garbling; BOM-less exotic bytes keep the fail-closed
+  garble-generates-nothing behavior. A corrupt manifest is now
+  recorded (`manifest_errors` surfaced by ingest/deps, CLI exit 1)
+  instead of silently reading as an empty SBOM. NOT reproduced:
+  `.verifyciignore` matching is already one representation; the
+  Python-version claim does not match the tree (requires-python is
+  already `>=3.12`, consistent with stdlib `tomllib`).
+- **P2 removal provenance (evaluated, NOT implemented).** Measured on
+  1,237 sampled functions: 5.3% exceed the 2,000-char snippet cap;
+  a deep-line removal in a truncated function reads `unverified` →
+  INCONCLUSIVE — honest behavior-preserving, but a fabricated deep-line
+  removal there also escapes FAIL. That is a capability cap on
+  fabrication detection, not a broken contract: "absence of record is
+  not contradiction" routes exactly these cases to INCONCLUSIVE by
+  design. Compact per-line hashes would buy recall at a per-entity
+  storage cost; V1 evidence does not show necessity. Deferred to V1.1
+  with the measurement recorded here.
+
+Suite: 597 passed / 1 skipped, ruff clean, `git diff --check` clean.
+Frozen corpora untouched (cases.jsonl hashes pinned by guards);
+blast + patch re-run guards now dual-pin historical + post-repair
+records; latency guard attributes its reconciliation to off-timed-path
+drift (intent_align A3; WAL pragma + upsert stamps outside the timed
+functions, checked per-method).
+
 ## Unreleased — C3: latency protocol; temporal MET, incremental p95 NOT MET
 
 - **Both PLAN latency gates measured** on a frozen 1000-sample protocol

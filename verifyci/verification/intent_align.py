@@ -237,30 +237,54 @@ def _check_invariant(diff: str, invariant: Invariant, graph: Any, evidence: list
         return bool(evidence), f'evidence items={len(evidence)}', True, []
     if query.startswith("forbid_call:"):
         name = query[len("forbid_call:"):].strip()
-        violated, examined, evaluated = _graph_search(graph, name, "CALLS")
-        if not evaluated:
-            return False, f'graph traversal failed for forbid_call:{name} (fail-closed)', True, []
-        hit_files, parse_ok = _added_hits(diff, "calls", name)
-        if hit_files:
-            # The base graph cannot see new code: a forbidden call the
-            # diff itself introduces is a positive detection, so it
-            # rejects even when the graph side established nothing.
-            return False, f'forbidden call {name!r} added in {hit_files[0]}', True, _forbid_evidence(diff, 'calls', name)
-        if not parse_ok:
-            return True, 'fragment parse incomplete (inconclusive, established=False)', False, []
-        return not violated, _coverage_note(examined, 'CALLS', name), examined > 0, []
+        return _check_forbid(diff, graph, name, "CALLS")
     if query.startswith("forbid_import:"):
         name = query[len("forbid_import:"):].strip()
-        violated, examined, evaluated = _graph_search(graph, name, "IMPORTS")
-        if not evaluated:
-            return False, f'graph traversal failed for forbid_import:{name} (fail-closed)', True, []
-        hit_files, parse_ok = _added_hits(diff, "imports", name)
-        if hit_files:
-            return False, f'forbidden import {name!r} added in {hit_files[0]}', True, _forbid_evidence(diff, 'imports', name)
-        if not parse_ok:
-            return True, 'fragment parse incomplete (inconclusive, established=False)', False, []
-        return not violated, _coverage_note(examined, 'IMPORTS', name), examined > 0, []
+        return _check_forbid(diff, graph, name, "IMPORTS")
     return False, f'unknown query kind (fail-closed): {query[:40]}', True, []
+
+
+def _check_forbid(diff: str, graph: Any, name: str,
+                  edge_type: str) -> tuple[bool, str, bool, list]:
+    """Shared forbid_call/forbid_import evaluation.
+
+    ref_kind is the added_refs bucket key ("calls"/"imports"); human is
+    the word used in the message ("call"/"import").
+
+    Three sources of truth, in order:
+    1. added lines referencing the target -> rejection (the base graph
+       cannot see new code);
+    2. the graph, scoped to files the diff touches: a violation that
+       exists only in files the diff does not name is pre-existing, and
+       pre-existing != introduced — it must not contaminate this diff's
+       verdict (it is reported in the note);
+    3. no diff attribution at all (unparseable/gibberish diff, empty
+       file list) -> the whole-graph scan is all there is, and stays
+       authoritative (this is the frozen B1 `forbid-direct` semantics:
+       an unverifiable diff does not get a scoped pass).
+    """
+    ref_kind = "calls" if edge_type == "CALLS" else "imports"
+    human = "call" if edge_type == "CALLS" else "import"
+    (violated, examined, violated_files,
+     evaluated) = _graph_search(graph, name, edge_type)
+    if not evaluated:
+        return False, f'graph traversal failed for forbid_{human}:{name} (fail-closed)', True, []
+    hit_files, parse_ok = _added_hits(diff, ref_kind, name)
+    if hit_files:
+        # The base graph cannot see new code: a forbidden call the
+        # diff itself introduces is a positive detection, so it
+        # rejects even when the graph side established nothing.
+        return False, f'forbidden {human} {name!r} added in {hit_files[0]}', \
+            True, _forbid_evidence(diff, ref_kind, name)
+    if not parse_ok:
+        return True, 'fragment parse incomplete (inconclusive, established=False)', False, []
+    if violated and violated_files:
+        touched = _diff_files(diff)
+        if touched and not any(_file_in_set(f, touched) for f in violated_files):
+            note = (f'pre-existing violation {name!r} outside touched scope '
+                    f'(files: {sorted(violated_files)[:4]}) — not attributed')
+            return True, note, examined > 0, []
+    return not violated, _coverage_note(examined, edge_type, name), examined > 0, []
 
 
 def _added_hits(diff: str, kind: str, name: str) -> tuple[list[str], bool]:
@@ -375,39 +399,79 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
     if not hits:
         return True, 'diff text scanned', True, []
     return False, f'secret-shaped string in {hits[0]}', True, hits
-def _graph_search(graph: Any, name: str, edge_type: str) -> tuple[bool, int, bool]:
-    """Return (violation_found, edges_examined, evaluated).
+def _graph_search(graph: Any, name: str, edge_type: str
+                  ) -> tuple[bool, int, list, bool]:
+    """Return (violation_found, edges_examined, violating_files, evaluated).
 
     A broken graph (traversal raises) is NOT "no violation found": it is
     unevaluable, and the caller fails closed. `evaluated=False` is
     distinct from "zero edges examined" (graph=None or no name), which
     stays inability → INCONCLUSIVE.
+
+    violating_files collects the file_path of each violating edge's
+    source entity so the caller can distinguish a violation inside this
+    diff's touched files from a pre-existing one elsewhere. An edge
+    whose endpoints carry no file attribution yields an empty list,
+    which conservatively keeps the whole-graph semantics (no scoped
+    exemption is granted without attribution).
     """
     if graph is None or not name:
-        return False, 0, True
+        return False, 0, [], True
     try:
         index = {}
+        files = {}
         nodes_fn = getattr(graph, "nodes", None)
         if callable(nodes_fn):
             for payload in nodes_fn():
                 eid = getattr(payload, "revision_entity_id", None)
                 if eid:
                     index[eid] = getattr(payload, "name", "")
+                    files[eid] = getattr(payload, "file_path", "") or ""
         examined = 0
+        viol_files: list[str] = []
+        found = False
         for edge in iter_edge_payloads(graph):
             etype = getattr(getattr(edge, "type", None), "value", getattr(edge, "type", None))
             if edge_type == "CALLS" and etype == "CALLS_UNRESOLVED":
+                # Reachable only for graphs that link unresolved edges
+                # (builder-linked graphs never do — see
+                # test_calls_unresolved_is_unreachable_on_builder_graphs);
+                # kept for fake/resolver-emitting graphs, and metadata
+                # carries no file, so an unresolved hit is unattributed.
                 examined += 1
                 meta = getattr(edge, "metadata", None) or {}
                 if isinstance(meta, dict) and meta.get("callee") == name:
-                    return True, examined, True
+                    found = True
                 continue
             if etype != edge_type:
                 continue
             examined += 1
             dst = getattr(edge, "dst_entity_id", None)
             if dst is not None and index.get(dst) == name:
-                return True, examined, True
-        return False, examined, True
+                found = True
+                src_file = files.get(getattr(edge, "src_entity_id", None), "")
+                if src_file:
+                    viol_files.append(src_file)
+        return found, examined, viol_files, True
     except Exception:  # noqa: BLE001
-        return True, 0, False
+        return True, 0, [], False
+
+
+def _diff_files(diff: str) -> set[str]:
+    """Files this diff names, normalized; empty when unattributable."""
+    if not diff:
+        return set()
+    from verifyci.verification.diffmap import normalize_path, parse_diff_files
+    try:
+        return {normalize_path(f) for f in parse_diff_files(diff)}
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _file_in_set(entity_file: str, wanted: set[str]) -> bool:
+    from verifyci.verification.diffmap import normalize_path
+    f = normalize_path(entity_file)
+    for w in wanted:
+        if f == w or f.endswith("/" + w) or w.endswith("/" + f):
+            return True
+    return False

@@ -93,24 +93,31 @@ class EventLedger:
 
 def verify_task_subchain(all_events: list, task_id: str | None,
                          expected_head: Optional[str] = None) -> bool:
-    # Task-scoped chain check with continuity. Every event of the task
-    # must link to its immediately preceding *global* event (or carry no
-    # prev hash when it is the first event overall), and the task head
-    # must match when pinned. Checking only consecutive task events
-    # would bless both interleaved forgeries and truncation of a
-    # task's first events (the old verify_subchain weakness: the first
-    # scoped event's link was never checked at all).
+    """Task-scoped chain check: unrelated events must not participate.
+
+    The events table is a global interleaved log written by per-task
+    ledgers (see `anchor.py`), so a task event's `prev_event_hash`
+    references its predecessor *within the task*, never the previous
+    global event. Hence:
+    - the first stored event of the task must carry no prev hash;
+    - every later task event must reference the immediately preceding
+      event of the same task, in stored order;
+    - events of other tasks are filtered out entirely, so tampering in
+      one chain can neither break another chain nor be hidden by it.
+
+    Truncation is still caught: dropping a task's first event leaves
+    its successor with a non-None prev hash; dropping the last breaks
+    the pinned head. A forged event inserted mid-chain breaks the next
+    link because the real successor's prev names the original.
+    """
     wanted = task_id or ""
     task_events = [e for e in all_events if (e.task_id or "") == wanted]
     if not task_events:
         return False
-    for idx, event in enumerate(all_events):
-        if (event.task_id or "") != wanted:
-            continue
-        if idx == 0:
-            if event.prev_event_hash is not None:
-                return False
-        elif event.prev_event_hash != event_hash(all_events[idx - 1]):
+    if task_events[0].prev_event_hash is not None:
+        return False
+    for i in range(1, len(task_events)):
+        if task_events[i].prev_event_hash != event_hash(task_events[i - 1]):
             return False
     if expected_head is not None:
         if event_hash(task_events[-1]) != expected_head:

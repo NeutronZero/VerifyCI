@@ -29,7 +29,7 @@ kept alias for the same app, and environment variables read
 
 ```
 diff --git a/src/app.py ...
-  ↓  parse_diff_files → map onto graph entities (diffmap)
+  ↓  parse_unified_diff (canonical) → files/hunks/status → map onto graph entities (diffmap)
 premises (per changed file) → traces (call-flow paths from changed entities)
   → evidence (file + lines + source hash) → deterministic checks
   → Certificate → PolicyEvaluator → Decision
@@ -45,6 +45,18 @@ Grounding rules (no exceptions):
   diff was something the graph could reason about, so routine commits
   touching docs or config alongside code read `INCONCLUSIVE`
   (declined, routed to human review — not blocked) rather than `PASS`.
+- A change whose **content the diff does not carry** (a binary file, or
+  a mode-only change) is never hidden and never laundered: it is
+  named, classified, and forces `INCONCLUSIVE` — a mixed text+binary
+  commit cannot PASS on its text half alone.
+- **Infrastructure is not a verdict.** A missing, locked, or corrupt
+  database — or a requested revision that does not exist — is reported
+  as `INFRA_ERROR` (CLI exit 3), distinct from the four verification
+  states (PASS 0, FAIL 1, HUMAN_REVIEW/INCONCLUSIVE 2). Diff-intrinsic
+  detections (a secret or forbidden call the patch itself adds) still
+  FAIL even when storage is broken: fail-closed outranks the
+  bookkeeping. The store runs in SQLite WAL mode so a concurrent
+  reader sees the last committed graph instead of failing.
 - Every `-` line must have existed where claimed: removed lines are
   checked against stored base-revision snippets at the hunk's old-side
   offsets. A removal contradicting the stored record is `FAIL`
@@ -57,6 +69,13 @@ Grounding rules (no exceptions):
   non-empty traces and evidence.
 - Invariant checkers fail closed: `secrets_scan`, `provenance_check`,
   `forbid_call:<name>`, `forbid_import:<module>`. Unknown queries fail.
+  A `forbid_*` graph violation is attributed only when it lies in a file
+  the diff touches: a call that already existed in the base is a
+  pre-existing condition, not a new one, and does not fail an unrelated
+  diff (it is named in the explanation, not hidden). A diff that names
+  no files keeps whole-graph semantics. These are deterministic
+  invariant/lint checks, not a security boundary — `e = eval; e(x)`
+  aliases evade them by design.
   `secrets_scan` covers quoted assignments, long unquoted values, AWS
   keys, PEM blocks, JWTs, credentialed URLs, JSON-colon values, and
   multiline/continuation literals. Labeled-set recall: **6/9 (0.67)** on
@@ -83,6 +102,12 @@ Grounding rules (no exceptions):
   miss is a blast-exposure hunk-shape gap, reported not retuned). Synthetic
   stand-ins for agent output; a real recorded-LLM corpus remains the
   follow-on.
+  *(Post-baseline correctness repair: the one C1 miss — the blast-exposure
+  tail-insertion hunk-shape gap — is a fixed **seeding defect** (A2), not
+  a retuned threshold; re-measured on the identical frozen cases
+  patch equivalence 8/8 = 1.0, precision unchanged 1.0. The 8-correct-
+  patch synthetic set still does not **establish** the >0.90 gate. See
+  V1_EVIDENCE.md addendum.)*
 - Blast-radius coverage measured on a frozen topology corpus
   (`benchmarks/blast_corpus/`, expected sets hand-derived before
   detection): traversal is **exact (1.0)** on every seeded hunk — direct,
@@ -96,6 +121,12 @@ Grounding rules (no exceptions):
   6/7 = **0.857** (the 7th being the pre-labeled gap); the corpus is too
   small to *establish* the >0.90 gate, and no traversal defect was found
   on any normally-seeded change.
+  *(Post-baseline correctness repair: that gap was a **seeding defect**
+  (A2 insertion-anchor grounding), not a traversal one — exactly as
+  diagnosed here. Re-measured on the identical frozen cases, coverage is
+  7/7 = 1.0 and the labeled gap closes; the disclosed B5 context-bleed FP
+  is unchanged. Still not **established**: same 9-case corpus. See
+  V1_EVIDENCE.md addendum.)*
 - Latency measured on a frozen 1000-sample protocol
   (`benchmarks/latency/`, sources sha-pinned, environment recorded).
   **Temporal query: MET** at the PLAN's 10K-edge scale — median 0.044ms,
@@ -136,6 +167,7 @@ historical smoke, never the evidence set.
 ## Status
 
 V1 walking skeleton. `PLAN.md` is the full plan; `CHANGELOG.md` records what
-each revision proved, including measured numbers and known gaps. 515 tests:
-`python -m pytest tests/ -q` (three re-measure guards skip unless
-`VERIFYCI_PATCH_RERUN=1` / `VERIFYCI_BLAST_RERUN=1` / `VERIFYCI_LATENCY_RERUN=1`).
+each revision proved, including measured numbers and known gaps. 598 tests
+collected: default `python -m pytest tests/ -q` is 595 passed / 3 skipped;
+with patch+blast re-measure guards it is 597 passed / 1 skipped
+(`VERIFYCI_PATCH_RERUN=1` / `VERIFYCI_BLAST_RERUN=1`).

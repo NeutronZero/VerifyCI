@@ -172,6 +172,13 @@ class GraphStore:
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(db_path)
+        # WAL: a long ingest transaction no longer blocks readers —
+        # verify/stats/query see the last committed revision instead of
+        # "database is locked" (which, pre-fix, surfaced as a
+        # masquerading INCONCLUSIVE). Set BEFORE the schema script:
+        # journal_mode is persistent, so a fresh DB keeps it and readers
+        # (open_for_read) can rely on it.
+        self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
         self.conn.commit()
         self._batch_depth = 0
@@ -456,8 +463,23 @@ class GraphStore:
         return len(ids)
 
     def insert_entity(self, entity: Entity):
+        # A recorded revision-fact is immutable: revision_entity_id keys
+        # (repository, logical, revision), so re-ingesting the same
+        # content yields the SAME id. INSERT OR REPLACE used to rewrite
+        # valid_from/t_created to the newest observation, which destroyed
+        # the ability to query the previously ingested state as-of an
+        # earlier transaction time (bitemporal invariant, V1 Phase 1
+        # gate). ON CONFLICT keeps the first-observation stamps and
+        # refreshes only the close stamps: valid_until/t_expired come
+        # from the incoming row (None on a fresh observation, which
+        # re-opens a row that a supersede had closed — the revert cycle
+        # A->B->A asserts A current again). Content-derived fields cannot
+        # differ under the same id: the revision hash fixes them.
         self.conn.execute(
-            "INSERT OR REPLACE INTO entities VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO entities VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(revision_entity_id) DO UPDATE SET"
+            "   valid_until = excluded.valid_until,"
+            "   t_expired   = excluded.t_expired",
             (entity.revision_entity_id, entity.logical_entity_id, entity.repository_id,
              entity.revision_id, entity.type.value, entity.name, entity.file_path,
              entity.line_start, entity.line_end, entity.language, entity.source_hash,
@@ -467,8 +489,15 @@ class GraphStore:
         self._maybe_commit()
 
     def insert_edge(self, edge: Edge):
+        # Same discipline as insert_entity: edge ids embed the revision
+        # (and the referenced name for unresolved refs), so a re-ingest
+        # of identical content re-observes the identical fact. Keep the
+        # first valid_from/t_created/observed_at; re-open on re-assertion.
         self.conn.execute(
-            "INSERT OR REPLACE INTO edges VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO edges VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(id) DO UPDATE SET"
+            "   valid_until = excluded.valid_until,"
+            "   t_expired   = excluded.t_expired",
             (edge.id, edge.revision_id, edge.src_entity_id, edge.dst_entity_id,
              edge.type.value, edge.subtype.value if edge.subtype else None,
              edge.valid_from, edge.valid_until, edge.observed_at, edge.source_commit,

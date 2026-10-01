@@ -89,13 +89,21 @@ def test_revise_command_is_gone():
 
 
 def test_verify_diff_cli_exit_codes(tmp_path):
-    # CI gating: PASS 0, FAIL 1, INCONCLUSIVE 2.
+    # CI gating: PASS 0, FAIL 1, INCONCLUSIVE 2, INFRA_ERROR 3.
+    # (The missing-DB case used to read as INCONCLUSIVE/2 — a broken
+    # gate wearing a verdict's clothes; the A5 fix moved it to 3, so
+    # this test now pins the valid-empty DB for the 2 case.)
     from typer.testing import CliRunner
     from verifyci.interface.cli import app
+    from verifyci.storage.graph_store import GraphStore
     runner = CliRunner()
     db = str(tmp_path / "v.db")
+    GraphStore(db).close()  # readable, just empty: a verdict, not infra
     empty = runner.invoke(app, ["verify-diff", "", "--db", db])
     assert empty.exit_code == 2
+    missing = runner.invoke(app, ["verify-diff", "", "--db",
+                                  str(tmp_path / "ghost.db")])
+    assert missing.exit_code == 3, missing.output
     secret = ('diff --git a/s.py b/s.py\n--- a/s.py\n+++ b/s.py\n'
               '@@ -1,0 +1,1 @@\n+password = "hunter2hunter2"\n')
     out = runner.invoke(app, ["verify-diff", secret, "--db", db])

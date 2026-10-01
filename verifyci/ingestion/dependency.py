@@ -18,20 +18,26 @@ DEPENDENCY_FILES = {
 }
 
 
-def extract_dependencies(file_path: str, source: str, revision_id: str = "") -> list[Edge]:
+def extract_dependencies(file_path: str, source: str, revision_id: str = "",
+                         errors: list | None = None) -> list[Edge]:
     # Never let one bad manifest abort the batch: the ingest caller loops
     # manifests without per-manifest guards, so any parse error here must
-    # read as "no dependencies", not raise.
+    # read as "no dependencies", not raise. Silence is still hiding:
+    # `[]` from a corrupt package.json is indistinguishable from an
+    # honestly empty one, and a dependency graph missing every package
+    # the manifest named reads as a clean SBOM. When an `errors` list is
+    # provided (ingest, deps), the failure is recorded there as explicit
+    # per-file evidence instead of a missing-facts black hole.
     try:
         dep_type = DEPENDENCY_FILES.get(Path(file_path).name)
         if dep_type is None:
             return []
 
         if dep_type == "npm":
-            return _parse_npm(source, file_path, revision_id)
+            return _parse_npm(source, file_path, revision_id, errors)
         if dep_type == "pypi":
             if Path(file_path).name == "pyproject.toml":
-                return _parse_pyproject_toml(source, file_path, revision_id)
+                return _parse_pyproject_toml(source, file_path, revision_id, errors)
             return _parse_pypi(source, file_path, revision_id)
         if dep_type == "cargo":
             return _parse_cargo(source, file_path, revision_id)
@@ -39,7 +45,9 @@ def extract_dependencies(file_path: str, source: str, revision_id: str = "") -> 
             return _parse_maven(source, file_path, revision_id)
         if dep_type == "go":
             return _parse_go(source, file_path, revision_id)
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        if errors is not None:
+            errors.append(f"{file_path}: {type(e).__name__}: {e}")
         return []
     return []
 
@@ -60,10 +68,16 @@ def _dep_edge(file_path: str, ecosystem: str, name: str, version: str,
     )
 
 
-def _parse_npm(source: str, file_path: str, revision_id: str) -> list[Edge]:
+def _parse_npm(source: str, file_path: str, revision_id: str,
+               errors: list | None = None) -> list[Edge]:
     try:
         data = json.loads(source)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        # Syntax damage (not JSON at all) is different from a valid
+        # document that simply declares no dependencies: the former is
+        # recorded, the latter is an honest empty graph.
+        if errors is not None:
+            errors.append(f"{file_path}: JSONDecodeError: {e}")
         return []
     if not isinstance(data, dict):
         # Top-level list (or scalar) has no sections to read.
@@ -332,10 +346,13 @@ def _poetry_version(spec: object) -> str:
     return cleaned or "latest"
 
 
-def _parse_pyproject_toml(source: str, file_path: str, revision_id: str) -> list[Edge]:
+def _parse_pyproject_toml(source: str, file_path: str, revision_id: str,
+                          errors: list | None = None) -> list[Edge]:
     try:
         data = tomllib.loads(source)
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        if errors is not None:
+            errors.append(f"{file_path}: TOMLDecodeError: {e}")
         return []
     edges = []
     seen = set()

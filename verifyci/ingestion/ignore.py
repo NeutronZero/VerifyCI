@@ -19,6 +19,11 @@ from pathlib import Path
 from typing import Iterator
 
 #: Directory names never walked, whatever the repo (unambiguous markers).
+#: `.pio` covers PlatformIO's entire build surface (`.pio/build`,
+#: `.pio/libdeps`, framework/library clones): generated code and
+#: third-party sources that must never be ingested as project source —
+#: on embedded repos it is by volume the largest non-source tree, and
+#: unlike ambiguous names (`build`, `dist`) it is never a package name.
 DEFAULT_SKIP_DIRS = frozenset({
     ".git", ".hg", ".svn",
     "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
@@ -26,6 +31,7 @@ DEFAULT_SKIP_DIRS = frozenset({
     "node_modules",
     ".verifyci",
     ".idea", ".vscode",
+    ".pio",
 })
 
 IGNORE_FILE = ".verifyciignore"

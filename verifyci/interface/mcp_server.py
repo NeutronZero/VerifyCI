@@ -212,7 +212,7 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
             cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map,
                                    entities=entities or None)
             files = parse_diff_files(diff)
-            checks = [build_semi_check(cert, files, entities or [])]
+            checks = [build_semi_check(cert, files, entities or [], diff=diff)]
             mapping = seed_entities_for_diff(files, entities or [], diff)
             changed = sorted({eid for eids in mapping.values() for eid in eids})
             blast, blast_check = blast_radius_check(

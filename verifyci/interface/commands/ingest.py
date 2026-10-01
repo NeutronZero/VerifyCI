@@ -12,6 +12,23 @@ from verifyci.storage.revision import create_revision
 MANIFESTS = ("package.json", "requirements.txt", "Cargo.toml", "pom.xml", "go.mod", "pyproject.toml")
 
 
+def _read_manifest_text(file: Path) -> str:
+    """Deterministic manifest text: utf-8-sig on EVERY platform.
+
+    read_text(errors='replace') without an explicit encoding decodes
+    with the locale — cp1252 on Windows, utf-8 on Linux — so identical
+    manifest bytes produced different source hashes on different
+    machines, splitting revision identity across platforms (a
+    non-deterministic ingest is an unsound one). utf-8-sig also strips
+    a leading BOM, which made json.loads reject a valid package.json.
+    errors='replace' stays as the last guard so one damaged manifest
+    never aborts the whole batch (the never-raise contract of
+    extract_dependencies); a manifest that was not valid UTF-8 is rare
+    enough not to warrant a reporting channel in V1.
+    """
+    return file.read_text(encoding="utf-8-sig", errors="replace")
+
+
 def _collect(repo: Path) -> tuple[list[tuple[str, str, bytes]], list[tuple[str, str]], list[tuple[str, str]]]:
     """Pass 1 (no parsing): gather source files + dependency manifests.
 
@@ -27,7 +44,7 @@ def _collect(repo: Path) -> tuple[list[tuple[str, str, bytes]], list[tuple[str, 
             # Manifests first: requirements.txt also matches the .txt
             # ingestible suffix, which used to swallow it silently and
             # drop Python dependencies from the graph.
-            texts.append((rel, file.read_text(errors="replace")))
+            texts.append((rel, _read_manifest_text(file)))
         elif file.suffix.lower() in INGESTIBLE_EXTENSIONS:
             language = detect_language(str(file))
             # Docs have no AST: parsed with tree=None yields a MODULE entity.
@@ -126,7 +143,13 @@ def _carry_forward(store, carried_sources, carried_texts, revision_id, now) -> t
 
 def run_ingest(path: str, incremental: bool = False,
                commit_id: str | None = None) -> dict:
-    repo = Path(path)
+    # Resolved identity: `ingest .` produced `Path('.').name == ''` as the
+    # repository_id — an empty string that made every repo-scoped lookup
+    # (latest_ingest_id, resolve_repository, close_disappeared) bind
+    # nothing, so a repo ingested via `.` was invisible to its own
+    # queries. Resolving first makes `.` name the directory it IS, and
+    # makes `ingest .` and `ingest C:\...\repo` agree on one identity.
+    repo = Path(path).resolve()
     if not repo.is_dir():
         raise FileNotFoundError(f"no repository directory at {path}")
     db_path = str(repo / ".verifyci" / "verifyci.db")
@@ -212,7 +235,7 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
                   "skipped": collected - len(sources) - len(texts),
                   "skipped_dirs": skipped_dir_names(repo),
                   "closed_entities": 0, "closed_edges": 0,
-                  "parse_errors": [],
+                  "parse_errors": [], "manifest_errors": [],
                   "revision_id": revision.revision_id,
                   "parent_revision_id": prev_revision_id,
                   "db_path": db_path}
@@ -222,6 +245,10 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
             try:
                 parsed = parser.parse(rel, source, language)
             except ValueError:
+                # Only grammar-less languages (docs, unknown) reach here:
+                # a missing python/c/cpp grammar raises ImportError and
+                # aborts the run loudly, never silently. tree=None is the
+                # expected MODULE-only shape for docs.
                 from verifyci.ingestion.parser import ParsedFile
                 parsed = ParsedFile(file_path=rel, source=source, source_hash=digest,
                                     language=language, tree=None)
@@ -252,7 +279,8 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
             totals["edges"] += len(edges)
             totals["files"] += 1
         for rel, text in texts:
-            edges = extract_dependencies(rel, text, revision.revision_id)
+            edges = extract_dependencies(rel, text, revision.revision_id,
+                                         errors=totals["manifest_errors"])
             for edge in edges:
                 store.insert_edge(edge)
             closed_at = _time.time()
