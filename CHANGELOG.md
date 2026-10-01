@@ -1,10 +1,50 @@
 # Changelog
 
-## Unreleased — V1 correctness repair campaign (A1–A8): four P0 defects fixed, measured deltas reported
+## [v1.0.2-correctness] - 2026-10-01 — Post-review correctness hardening & empirical remeasurement (4cec781)
+
+Complete correctness release endpoint (incorporates 7343c6d and 4cec781).
+Follows `v1.0.1-correctness` (084994b). All second-order review findings
+resolved and fresh remeasurements executed on all frozen benchmark suites.
+Full test suite: **618 passed / 0 skipped** with all three rerun guards
+(`VERIFYCI_PATCH_RERUN=1`, `VERIFYCI_BLAST_RERUN=1`, `VERIFYCI_LATENCY_RERUN=1`);
+default `pytest -q`: **615 passed / 3 skipped** (618 collected), ruff clean.
+
+- **Changed-line coverage veto (`_uncovered_changed_lines`).** Edits outside
+  every code entity span (module-level constants, flags, stray statements)
+  fail to establish (`established=False` → INCONCLUSIVE) rather than laundering
+  into PASS on unrelated entity grounding. Decorator line adjacency supported.
+- **Canonical diff parser edge cases.** Stray preambles before `diff --git`
+  do not displace mode-only file paths; format-patch `-- ` signature
+  separators stripped; `--no-prefix` renames and copies read correctly;
+  hunkless renames classified as uninspectable; exact declared counts
+  lookahead protects against overrun file swallowing.
+- **Per-entity forbid scope checking.** Graph-side `forbid_*` violations are
+  checked against the specific entity span modified by the diff
+  (`_violation_touched`), preventing whole-file over-attribution. Lexical
+  fallback catches syntax-unbalanced added lines.
+- **Read-only GraphStore safety.** Read-only connections (`read_only=True`)
+  skip `PRAGMA journal_mode=WAL` to prevent journal mode modification on
+  read mounts; `latest_revision_id` scoped to repository never falls back to
+  foreign repos in shared DBs.
+- **Typed infrastructure errors.** Infrastructure errors in `verify-chain`,
+  `query`, and `run` route cleanly to exit code 3 (`INFRA_ERROR`). Pinned
+  `run_task` when `load_graph` raises `InfraError` (4cec781).
+- **Post-release benchmark remeasurement on `4cec781`:**
+  - C1 Patch equivalence: **1.0 (8/8)** (preserved post-A2 repair).
+  - C2 Blast coverage: **1.0 (7/7 non-empty)** (preserved post-A2 repair).
+  - Invariant recall: **16/18 = 0.889**, precision: **1.00** (preserved; zero drift).
+  - Retrieval: Recall@5 **0.6707**, nDCG@10 delta **+3.84 pts** (preserved; bit-for-bit identical on 62 queries).
+  - Temporal query latency: **0.019 ms median / 0.054 ms p99** at 10K edges (preserved with margin).
+  - Incremental parse warm median: **35.7 µs** (met); p95: **4.25 ms** (unmet); p99: **5.11 ms** (unmet).
+  - Replay equivalence: **44/44 (100%)** (preserved).
+  - Local-only guarantee: zero cloud (preserved).
+  - Finding: No regression was observed in the remeasured criteria or frozen benchmark results, without changing the measured results on the frozen benchmark suites.
+
+## [v1.0.1-correctness] - 2026-10-01 — V1 correctness repair campaign (A1–A8) (084994b)
 
 All findings verified against the tree before fixing; every fix has a
 failing-first reproduction. No frozen contract changed; no corpus label
-or gate threshold retuned. Full suite 597 passed / 1 skipped (was
+or gate threshold retuned. Suite at tag: 597 passed / 1 skipped (was
 515/3; +82 passed with reruns on 80 net-new collected tests), ruff clean.
 
 - **A1 (P0) task-scoped event chains.** `verify_task_subchain()` compared

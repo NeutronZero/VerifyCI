@@ -172,5 +172,43 @@ is consistent with the stated V1 principle "absence of record is not
 contradiction" — it is a capability cap, not a broken contract, so
 compact per-line hashes stay deferred.
 
-Suite at end of campaign, with patch+blast reruns: **597 passed / 1 skipped**
+Suite at initial v1.0.1 tag (`084994b`): **597 passed / 1 skipped**
 (default: 595 passed / 3 skipped; 598 collected), ruff clean.
+
+---
+
+## Addendum 2 — V1.0.2 post-review hardening & empirical remeasurement (`4cec781`)
+
+Tagged as `v1.0.2-correctness` at `4cec781` (following commits `7343c6d` and `4cec781`).
+Captures second-order review hardening across diff attribution, coverage vetoes, and infrastructure separation, followed by a fresh full remeasurement across all benchmark suites.
+
+### Post-review hardening items:
+- **Changed-line coverage veto:** `_uncovered_changed_lines` ensures edits outside every code entity span (module-level constants, stray statements) yield `established=False -> INCONCLUSIVE` rather than laundering into `PASS` on unrelated entity grounding. Decorator line adjacency supported.
+- **Canonical diff parser edge cases:** Stray preambles before `diff --git` do not displace mode-only file paths; format-patch `-- ` signature separators stripped; `--no-prefix` renames and copies read correctly; hunkless renames classified as uninspectable; exact declared counts lookahead protects against overrun file swallowing.
+- **Per-entity forbid scope checking:** Graph-side `forbid_*` violations are attributed only when the diff's changed anchors intersect the span of the violating source entity (`_violation_touched`), preventing whole-file over-attribution. Lexical fallback catches syntax-unbalanced added lines.
+- **Read-only GraphStore safety:** Read-only connections (`read_only=True`) skip `PRAGMA journal_mode=WAL` to prevent journal mode modification on read mounts; `latest_revision_id` scoped to repository never falls back to foreign repos in shared DBs.
+- **Infrastructure channel separation:** Typed `InfraError` propagation across `verify-chain`, `query`, `run`, and MCP interfaces, routing cleanly to exit code 3 (`INFRA_ERROR`).
+
+### Fresh V1.0.2 remeasurement (at `4cec781`):
+
+| Benchmark / Metric | Plan Gate | Historical Baseline (`5cb1aa4`) | V1.0.2 Re-Measurement (`4cec781`) | Classification |
+|---|:---:|:---:|:---:|:---:|
+| **Patch Equivalence (C1)** | $>0.90$ | 0.875 (7/8) | **1.00 (8/8)** | Improved *(intended A2 repair)* |
+| **Verification Precision (C1)** | $>0.85$ | 1.00 (4/4) | **1.00 (4/4)** | Unchanged |
+| **Semantic False-Accept (C1)** | Scope doc | 1.00 (4/4) | **1.00 (4/4)** | Unchanged *(V1 scope limit)* |
+| **Blast Coverage (C2)** | $>0.90$ | 0.8571 (6/7) | **1.00 (7/7)** | Improved *(intended A2 repair)* |
+| **Invariant Recall (B1 v2)** | $\ge 0.90$ | 0.889 (16/18) | **0.889 (16/18)** | Unchanged *(gate unmet)* |
+| **Invariant Precision (B1 v2)** | $\ge 0.85$ | 1.00 (16/16) | **1.00 (16/16)** | Unchanged |
+| **Retrieval Recall@5 (B2)** | $>0.80$ | 0.6707 | **0.6707** | Unchanged *(gate unmet)* |
+| **Retrieval nDCG@10 Delta (B2)** | $+5\text{--}15$ pts | +3.84 pts (+0.0384) | **+3.84 pts (+0.0384)** | Unchanged *(gate unmet)* |
+| **Temporal Query Latency** | $<200\text{ ms}$ | 0.042 ms med / 0.080 ms p99 | **0.019 ms med / 0.054 ms p99** | Unchanged *(met on host)* |
+| **Incremental Parse Warm Median**| $<0.2\text{ ms}$ | 33 µs | **35.7 µs** | Unchanged *(met)* |
+| **Incremental Parse Tail (p95)**| $<1.0\text{ ms}$ | 3.85 ms | **4.25 ms** | Unchanged *(gate unmet)* |
+| **Incremental Parse Tail (p99)**| $<5.0\text{ ms}$ | 4.27 ms | **5.11 ms** | Unchanged *(gate unmet)* |
+| **Replay Equivalence** | 100% | 44/44 (100%) | **44/44 (100%)** | Unchanged |
+| **Local-Only Guarantee** | Zero cloud | Verified | **Verified** | Unchanged |
+
+**Empirical Conclusion:** No regression was observed in the remeasured criteria or frozen benchmark results, without changing the measured results on the frozen benchmark suites. All historical limitations (Retrieval $<0.80$ gate, Invariant recall $16/18$, Incremental p95 $>1\text{ ms}$, 2,000-char snippet truncation) remain preserved as empirical facts for the V1.1 campaign.
+
+Suite at `v1.0.2-correctness` (`4cec781`): **618 passed / 0 skipped** with all three rerun guards (`VERIFYCI_PATCH_RERUN=1`, `VERIFYCI_BLAST_RERUN=1`, `VERIFYCI_LATENCY_RERUN=1`); default: **615 passed / 3 skipped** (618 collected), ruff clean.
+

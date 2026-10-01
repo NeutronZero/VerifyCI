@@ -49,6 +49,10 @@ Grounding rules (no exceptions):
   a mode-only change) is never hidden and never laundered: it is
   named, classified, and forces `INCONCLUSIVE` — a mixed text+binary
   commit cannot PASS on its text half alone.
+- **Every changed line must land inside a code entity span:** an edit outside
+  every entity span (module-level constants, flags, stray statements)
+  forces `INCONCLUSIVE` (inability, `established=False`) rather than laundering
+  into `PASS` on unrelated entity grounding in the same file.
 - **Infrastructure is not a verdict.** A missing, locked, or corrupt
   database — or a requested revision that does not exist — is reported
   as `INFRA_ERROR` (CLI exit 3), distinct from the four verification
@@ -167,7 +171,8 @@ historical smoke, never the evidence set.
 ## Status
 
 V1 walking skeleton. `PLAN.md` is the full plan; `CHANGELOG.md` records what
-each revision proved, including measured numbers and known gaps. 598 tests
-collected: default `python -m pytest tests/ -q` is 595 passed / 3 skipped;
-with patch+blast re-measure guards it is 597 passed / 1 skipped
-(`VERIFYCI_PATCH_RERUN=1` / `VERIFYCI_BLAST_RERUN=1`).
+each revision proved, including measured numbers and known gaps. 618 tests
+collected: default `python -m pytest tests/ -q` is 615 passed / 3 skipped;
+with all three re-measure guards it is 618 passed / 0 skipped
+(`VERIFYCI_PATCH_RERUN=1` / `VERIFYCI_BLAST_RERUN=1` / `VERIFYCI_LATENCY_RERUN=1`).
+Locked release endpoint: `v1.0.2-correctness`.
