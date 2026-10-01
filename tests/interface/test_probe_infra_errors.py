@@ -63,6 +63,21 @@ def test_run_missing_db_is_infra_error(tmp_path):
     assert not os.path.exists(db), "a read command must not create the DB"
 
 
+def test_run_load_failure_after_probe_is_infra_error(tmp_path, monkeypatch):
+    # The probe passed (valid DB) but the graph load itself fails
+    # (locked mid-read, WAL-mode on a sealed mount): run_task must
+    # report INFRA_ERROR, never FAILED-as-verdict.
+    from verifyci.interface.commands import InfraError
+    import verifyci.interface.commands.run as run_mod
+    db = _valid_empty_db(tmp_path)
+    def _boom(_db):
+        raise InfraError("db_locked", "held by a writer")
+    monkeypatch.setattr(run_mod, "load_graph", _boom)
+    r = run_mod.run_task("t", db_path=db)
+    assert r["status"] == "INFRA_ERROR", r
+    assert r["error"] == "db_locked", r
+
+
 def test_run_missing_db_cli_exit_3(tmp_path):
     runner = CliRunner()
     r = runner.invoke(app, ["run", "t", "--db", str(tmp_path / "ghost.db")])
