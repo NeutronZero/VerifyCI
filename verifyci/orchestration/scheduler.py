@@ -347,6 +347,7 @@ class AsyncDAGScheduler(Scheduler):
             changed_entities=config.get("changed_entities", shared.get("changed_entities", [])),
             test_entities=shared.get("test_entities", []),
             invariants=config.get("invariants", shared.get("invariants", [])),
+            waivers=config.get("waivers", shared.get("waivers", [])),
             vuln_cache=shared.get("vuln_cache"),
             dependency_graph=shared.get("dependency_graph"),
         )

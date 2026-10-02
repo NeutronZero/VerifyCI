@@ -3,7 +3,7 @@ import asyncio
 from verifyci.contracts.scheduler import TERMINAL_STATUSES
 from verifyci.interface.commands import resolve_db
 from verifyci.interface.commands.graph_loader import load_graph
-from verifyci.verification.config import load_repo_invariants
+from verifyci.verification.config import load_repo_invariants, load_repo_waivers
 from verifyci.memory.ledger import EventLedger
 from verifyci.orchestration.compiler.validation import validate_task_ir
 from verifyci.orchestration.intent import build_intent_package
@@ -49,6 +49,7 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
         db = resolve_db(db_path)
         try:
             repo_invariants = load_repo_invariants(db)
+            repo_waivers = load_repo_waivers(db)
         except ValueError:
             return {"task": task, "task_id": "", "status": "FAILED", "error": "invalid_invariants_config",
                     "decision": "FAIL", "rationale": "invalid_invariants_config", "ledger_head": None}
@@ -78,6 +79,7 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
                 # evaluated twice with conflicting blocking flags.
                 "invariants": _dedupe_invariants(
                     intent.invariants + repo_invariants),
+                "waivers": list(repo_waivers),
                 "diff": diff, "store": store,
             }
             task_id = await scheduler.submit(task_ir, context=context)

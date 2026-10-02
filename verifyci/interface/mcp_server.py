@@ -276,6 +276,7 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
             context = {
                 "graph": graph, "node_map": node_map, "entities": entities,
                 "invariants": _dedupe_invariants(intent.invariants + _repo_invariants),
+                "waivers": list(_repo_waivers),
                 "diff": diff, "store": store,
             }
             task_id = await scheduler.submit(task_ir, conversation_id=conversation_id,
