@@ -84,7 +84,7 @@ def stats(db: str = "", _auth: None = Depends(require_auth)):
 
 
 @app.get("/search")
-def search(q: str, k: int = Query(default=10, le=MAX_K),
+def search(q: str, k: int = Query(default=10, ge=1, le=MAX_K),
            _auth: None = Depends(require_auth)):
     return run_query(q, None, k=k)
 

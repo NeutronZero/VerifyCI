@@ -262,6 +262,33 @@ def test_concurrent_read_during_ingest_transaction(tmp_path):
             n = ro.execute("SELECT count(*) FROM revisions").fetchone()[0]
         finally:
             ro.close()
-        assert n == 1, "commit invisible to a later reader"
+            assert n == 1, "commit invisible to a later reader"
     finally:
         writer.close()
+
+
+# --------------------------------------- unexpected crash -> exit 3 ---
+
+def test_verify_diff_unexpected_exception_cli_exit_3(tmp_path, monkeypatch):
+    # A crash inside run_verify is infrastructure (the gate never ran),
+    # not a verdict: exit 3, never exit 1. Deliberate typer.Exit codes
+    # raised for real statuses must pass through untouched (pinned below
+    # by every other CLI test in this file).
+    import verifyci.interface.commands.verify as verify_mod
+    def _boom(*a, **k):
+        raise RuntimeError("simulated crash")
+    monkeypatch.setattr(verify_mod, "run_verify", _boom)
+    r = CliRunner().invoke(app, ["verify-diff", DIFF, "--db",
+                                 str(tmp_path / "ghost.db")])
+    assert r.exit_code == 3, r.output
+    assert "internal failure" in r.output
+
+
+def test_query_unexpected_exception_cli_exit_3(tmp_path, monkeypatch):
+    import verifyci.interface.commands.query as query_mod
+    def _boom(*a, **k):
+        raise RuntimeError("simulated crash")
+    monkeypatch.setattr(query_mod, "run_query", _boom)
+    r = CliRunner().invoke(app, ["query", "where?", "--db",
+                                 str(tmp_path / "ghost.db")])
+    assert r.exit_code == 3, r.output

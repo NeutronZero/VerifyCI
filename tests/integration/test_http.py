@@ -18,6 +18,20 @@ def test_search_rejects_huge_k(monkeypatch):
     assert r.status_code == 422
 
 
+def test_search_rejects_nonpositive_k(monkeypatch):
+    # Negative/zero k slices from the end or empties results downstream;
+    # the boundary rejects it with 422 before any retrieval runs.
+    monkeypatch.setenv('ACI_API_TOKEN', 's3cret')
+    c = _client()
+    for bad in ("0", "-1"):
+        r = c.get('/search', params={'q': 'x', 'k': bad},
+                  headers={'Authorization': 'Bearer s3cret'})
+        assert r.status_code == 422, bad
+    r = c.get('/search', params={'q': 'x', 'k': '1'},
+              headers={'Authorization': 'Bearer s3cret'})
+    assert r.status_code != 422
+
+
 def test_verify_rejects_oversize_diff(monkeypatch):
     monkeypatch.setenv('ACI_API_TOKEN', 's3cret')
     r = _client().post('/verify/diff', json={'diff': 'x' * (MAX_DIFF_CHARS + 1)}, headers={'Authorization': 'Bearer s3cret'})

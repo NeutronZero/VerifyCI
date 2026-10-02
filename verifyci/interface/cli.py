@@ -1,3 +1,5 @@
+import functools
+
 import typer
 
 # No hard-coded name: the prog shown in --help follows the invoked
@@ -5,7 +7,27 @@ import typer
 app = typer.Typer(help="VerifyCI — Verification-first code intelligence")
 
 
+def _infra_exit(fn):
+    """CI gate honesty: an UNEXPECTED exception means the gate never ran,
+    so it exits 3 (infrastructure), never 1 (which CI reads as verdict
+    FAIL) — the verdict/infra conflation the exit-code ladder exists to
+    avoid. Deliberate `typer.Exit` codes raised inside pass through
+    untouched; only the fall-through crash path is remapped."""
+    @functools.wraps(fn)
+    def _wrapped(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except typer.Exit:
+            raise
+        except Exception as e:  # noqa: BLE001
+            typer.echo(
+                f"error: internal failure ({type(e).__name__}): {e}", err=True)
+            raise typer.Exit(code=3)
+    return _wrapped
+
+
 @app.command()
+@_infra_exit
 def init(path: str):
     from verifyci.interface.commands.init import run_init
     db_path = run_init(path)
@@ -13,6 +35,7 @@ def init(path: str):
 
 
 @app.command()
+@_infra_exit
 def ingest(path: str, incremental: bool = False,
            commit: str = typer.Option("", "--commit", "-c",
             help="Record the commit hash this graph state was ingested from")):
@@ -43,6 +66,7 @@ def ingest(path: str, incremental: bool = False,
 
 
 @app.command()
+@_infra_exit
 def stats(db: str = ""):
     from verifyci.interface.commands.stats import run_stats
     result = run_stats(db or None)
@@ -66,6 +90,7 @@ def stats(db: str = ""):
 
 
 @app.command()
+@_infra_exit
 def query(question: str, db: str = "", k: int = 10,
           rerank: bool = typer.Option(False, "--rerank",
             help="Opt-in overlap rerank; off by default (measured net-negative)")):
@@ -85,6 +110,7 @@ def query(question: str, db: str = "", k: int = 10,
 
 
 @app.command()
+@_infra_exit
 def deps(path: str = "."):
     from verifyci.interface.commands.deps import run_deps
     import json
@@ -92,6 +118,7 @@ def deps(path: str = "."):
 
 
 @app.command(name="vuln")
+@_infra_exit
 def vuln(db: str = "", cache: str = "./storage/vuln_cache.db", import_file: str = ""):
     from verifyci.interface.commands.vuln import run_vuln
     import json
@@ -156,6 +183,7 @@ def _exit_for_status(status: str) -> None:
 
 
 @app.command(name="verify-diff")
+@_infra_exit
 def verify_diff(diff: str = typer.Argument("", help="Unified diff (or use --diff-file)"),
                 diff_file: str = typer.Option("", "--diff-file",
                  help="Read the diff from a file (or - for stdin) instead of argv"),
@@ -169,6 +197,7 @@ def verify_diff(diff: str = typer.Argument("", help="Unified diff (or use --diff
 
 
 @app.command()
+@_infra_exit
 def run(task: str, diff: str = typer.Option("", "--diff", "-d",
          help="Unified diff verified at each gate step"),
          diff_file: str = typer.Option("", "--diff-file",
@@ -185,6 +214,7 @@ def run(task: str, diff: str = typer.Option("", "--diff", "-d",
 
 
 @app.command(name="verify-chain")
+@_infra_exit
 def verify_chain(db: str = "",
                  anchor_file: str = typer.Option("", "--anchor-file",
                   help="JSONL anchor log: latest matching head is verified, not just links"),
@@ -207,6 +237,7 @@ def verify_chain(db: str = "",
 
 
 @app.command()
+@_infra_exit
 def evaluate():
     from verifyci.interface.commands.evaluate import run_evaluate
     import json
