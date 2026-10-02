@@ -1,6 +1,28 @@
 # Changelog
 
-## Unreleased — external review fixes (docs, INI fragments, HTTP params, coverage)
+## Unreleased — grounded rejections fail; waivers honored on all paths
+
+- **Certificate rejections now FAIL at policy.** `_is_inability` treated
+  any unverified certificate as inability, so every code-path rejection
+  (guard removal, fabricated deletion, invalid config) collapsed to
+  INCONCLUSIVE — the `_derive_conclusion` fail branches were
+  verdict-dead. A failed check on established content with conclusion
+  "fail" is now a real rejection; inconclusive conclusions and
+  unestablished checks still decline. Grounding vetoes untouched
+  (suffix/opaque/uncovered still INCONCLUSIVE). Frozen corpus guards
+  re-measured green: verdicts on all frozen cases bit-identical except
+  the newly-correct rejections.
+- **Waivers honored on scheduler paths.** `run`, MCP `task.run`, and the
+  executor dropped `waivers.yaml`; only verify paths saw it. Waivers now
+  flow run context → scheduler node context → reasoner. Pinned by
+  verify/run parity tests (unwaived class-3 FAILs both paths, waived
+  PASSes both, invalid config FAILs, ungrounded still declines,
+  malformed waivers fail closed).
+- **Small items.** `evaluate` command documented as smoke, not the
+  frozen evaluation protocol; `MetadataStore` construction closes owned
+  connections on schema failure (same half-open class); executor drops
+  a dead result-diff lookup. `EventLedger.append(type=)` intentionally
+  unchanged (mirrors the frozen `Event` field; builtin never invoked).
 
 - **Certificate contract documents the fast paths.** The `Certificate`
   docstring still required non-empty traces + evidence for
@@ -27,8 +49,9 @@
   83%→99%), `test_semi_formal_units` (semi_formal 84%→100%).
   Remaining misses are proven-unreachable defensive branches, each
   marked with a NOTE (triple-quote `elif`s after the `bare>=3` gate;
-  no-overlap deletion verdict; empty AST body). Suite 859 passed /
-  3 skipped default, total coverage 94%, ruff clean; new files
+  no-overlap deletion verdict; empty AST body). Suite 873 passed /
+  0 skipped with all three rerun guards (870 passed / 3 skipped
+  default), total coverage 94%, ruff clean, zero warnings; new files
   ruff-format clean (repo-wide format stays unenforced, pre-existing
   files untouched).
 - **Scheduler `_emit` shadowed `type`.** The parameter name hid the
