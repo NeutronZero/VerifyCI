@@ -134,9 +134,16 @@ class Certificate:
     '''
     certificate_verified is True if and only if:
     - all deterministic checks passed and checked_by non-empty
-    - execution traces non-empty
-    - evidence non-empty
     - conclusion result is pass
+    - on the CODE_CORE path: execution traces non-empty and evidence
+      non-empty (grounded entities existed to trace and cite)
+    - on the non-code fast paths (documentation / valid configuration /
+      test-suite-only / ancillary): traces and evidence are empty BY
+      CONSTRUCTION — there are no code entities to trace or cite, so
+      verified reflects the partition policy check alone. Such
+      certificates never yield a CLI PASS on their own: the
+      provenance_check invariant fails on empty evidence, routing the
+      end-to-end verdict to HUMAN_REVIEW (exit 2, same as INCONCLUSIVE).
     '''
     certificate_id: str
     premises: list["Premise"]

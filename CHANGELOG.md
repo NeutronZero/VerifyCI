@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased — external review fixes (docs, INI fragments, HTTP params, coverage)
+
+- **Certificate contract documents the fast paths.** The `Certificate`
+  docstring still required non-empty traces + evidence for
+  `certificate_verified`, but partition fast paths (docs / valid config /
+  test-only) verify with both empty by construction. Docstring now states
+  the CODE_CORE vs fast-path conditions; README grounding rules and suite
+  counts updated to match (760 collected on this branch; end-to-end
+  non-code verdicts remain HUMAN_REVIEW, exit 2). No behavior changed.
+- **Headerless INI fragments decline instead of rejecting.**
+  `_validate_configuration_diff` parsed hunk new-side lines as standalone
+  documents, so a valid one-line addition under a distant `[section]`
+  failed as `configuration_schema_invalid`. Fragments with no section
+  header in-hunk now read `inconclusive` (`headerless_ini_fragment`,
+  same skip in `_derive_conclusion` as multi-hunk JSON); a header in-hunk
+  keeps fail-closed rejection. Pinned by 3 tests.
+- **HTTP surface parity.** `GET /search` accepts `db`; `POST /task/run`
+  accepts `diff`/`db` and forwards them to `run_task` (both were silently
+  dropped). Pinned by 2 failing-first tests.
+- **Coverage.** New `test_blast_impact` (retrieval impact helpers
+  56%→100%), `test_fastmcp_transport` (transport 67%→98%, caps +
+  honest-error passthroughs), `test_deletion_units` (deletion 83%→99%;
+  guard/waiver/signature/witness units), `test_scheduler_edges`
+  (scheduler 83%→100%), `test_intent_align_units` (intent_align
+  83%→99%), `test_semi_formal_units` (semi_formal 84%→100%).
+  Remaining misses are proven-unreachable defensive branches, each
+  marked with a NOTE (triple-quote `elif`s after the `bare>=3` gate;
+  no-overlap deletion verdict; empty AST body). Suite 859 passed /
+  3 skipped default, total coverage 94%, ruff clean; new files
+  ruff-format clean (repo-wide format stays unenforced, pre-existing
+  files untouched).
+- **Scheduler `_emit` shadowed `type`.** The parameter name hid the
+  builtin inside all three except handlers, so any emit failure raised
+  uncaught `TypeError` instead of recording `emit_error`. Renamed to
+  `event_type`; pinned by 2 failing-first tests.
+- **No leaked connections, no warnings.** `GraphStore.__init__` and
+  `open_for_read` closed their connection before raising on
+  locked/corrupt stores (each leaked one sqlite connection per failed
+  probe, warning at GC); two tests built raw DBs with a non-closing
+  `with sqlite3.connect(...)` context and now close explicitly. Pinned
+  by 2 failing-first tests (recorded warnings + forced collection).
+  Typer's import-time click deprecations filtered narrowly in
+  `pyproject.toml` (third-party, unfixable in-repo). Suite runs with
+  **zero warnings** (was 11: 9 ResourceWarning + 2 DeprecationWarning).
+
 ## [v1.0.2-correctness] - 2026-10-01 — Post-review correctness hardening & empirical remeasurement (4cec781)
 
 Complete correctness release endpoint (incorporates 7343c6d and 4cec781).

@@ -867,6 +867,23 @@ agent-patch equivalence, verification precision, blast coverage, and
 latency gates remain unmeasured. **V1 is implementation-complete, not
 empirically validated.**
 
+### V1.1 branch additions (unreleased)
+
+- Diff path partitioning (`verification/partition.py`): CODE_CORE /
+  TEST_SUITE / DOCUMENTATION / CONFIGURATION / ANCILLARY. Non-code
+  fast paths earn a passing certificate but route to HUMAN_REVIEW
+  end-to-end (provenance requires evidence). See the `Certificate`
+  contract docstring.
+- Three-class deletion verification (`verification/deletion.py`) with
+  Class-3 guard-removal waivers (`SignedIntentWaiver`, deny-by-default
+  crypto in `contracts/verification_ir.py`).
+- Execution witnesses (`verification/witness.py`); snippet-completeness
+  records (`EntitySnippetRecord`, additive — frozen `Entity` untouched).
+- H1/H2/H3 measurement campaigns under `benchmarks/` (retrieval
+  +3.84pts repro, invariant recall 1.0 combined, incremental p95 still
+  unmet); H4-A real-LLM sourcing record
+  (`benchmarks/patch_real/SOURCING.md`).
+
 ### Included in V1
 - Contracts with logical/revision entity IDs
 - Canonical event serialization (tested contract)
