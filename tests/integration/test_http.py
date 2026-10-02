@@ -102,6 +102,32 @@ def test_revise_command_is_gone():
     assert runner.invoke(app, ["revise", "--commit", "abc"]).exit_code != 0
 
 
+def test_search_accepts_db_param(monkeypatch):
+    # /search used to ignore the repo DB entirely (always the default);
+    # a missing explicit DB must surface db_not_found, not default hits.
+    monkeypatch.setenv('ACI_API_TOKEN', 's3cret')
+    r = _client().get('/search', params={'q': 'x', 'db': '/nonexistent/ghost.db'},
+                      headers={'Authorization': 'Bearer s3cret'})
+    assert r.status_code == 200
+    assert r.json()["error"] == "db_not_found"
+
+
+def test_task_run_forwards_diff_and_db(monkeypatch):
+    # /task/run used to drop diff/db on the floor (bare run_task(task)).
+    # A task with a secret diff must FAIL the gate, proving the diff
+    # reached verification; an unreadable DB must report INFRA_ERROR.
+    monkeypatch.setenv('ACI_API_TOKEN', 's3cret')
+    c = _client()
+    secret_diff = ('diff --git a/s.py b/s.py\n--- a/s.py\n+++ b/s.py\n'
+                   '@@ -1,0 +1,1 @@\n+password = "hunter2hunter2"\n')
+    r = c.post('/task/run', json={'task': 't', 'diff': secret_diff, 'db': '/nonexistent/ghost.db'},
+               headers={'Authorization': 'Bearer s3cret'})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "INFRA_ERROR", body
+    assert body["error"] == "db_not_found", body
+
+
 def test_verify_diff_cli_exit_codes(tmp_path):
     # CI gating: PASS 0, FAIL 1, INCONCLUSIVE 2, INFRA_ERROR 3.
     # (The missing-DB case used to read as INCONCLUSIVE/2 — a broken
