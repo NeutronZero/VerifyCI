@@ -24,13 +24,13 @@ def _policy():
     )
 
 
-def _certified(verified: bool):
+def _certified(verified: bool, conclusion: str = "x"):
     from verifyci.contracts.verification_ir import (
         Certificate, Conclusion,
     )
     return Certificate(
         certificate_id="c", premises=[], evidence=[], execution_traces=[],
-        conclusion=Conclusion(result="x", reasoning="x"), confidence=1.0,
+        conclusion=Conclusion(result=conclusion, reasoning="x"), confidence=1.0,
         generated_by="t", checked_by=[], verification_method="t",
         certificate_verified=verified, timestamp=0.0,
     )
@@ -71,6 +71,34 @@ def test_table_rejection():
 def test_table_inability():
     d = _decide([_check(passed=False, blocking=True, certificate=_certified(False))])
     assert (d.status, d.rationale) == ("INCONCLUSIVE", "checks_ran_but_nothing_established")
+
+
+def test_table_rejected_conclusion_on_established_content_fails():
+    # A checker that ran against grounded content and concluded "fail"
+    # (class-3 removal, fabricated deletion, invalid config) is a real
+    # rejection even though its certificate is unverified — verified
+    # requires all checks to pass, so a rejecting cert is unverified
+    # by construction. Reading that as inability used to route every
+    # code-path rejection to INCONCLUSIVE.
+    d = _decide([_check(passed=False, blocking=True,
+                        certificate=_certified(False, "fail"))])
+    assert (d.status, d.rationale) == ("FAIL", "blocking_check_failed")
+
+
+def test_table_rejected_conclusion_without_grounding_declines():
+    # Same rejection without established content (suffix-only grounding,
+    # opaque files, uncovered lines) still declines: no scoped
+    # exemption-free rejection without attribution.
+    d = _decide([_check(passed=False, blocking=True, established=False,
+                        certificate=_certified(False, "fail"))])
+    assert (d.status, d.rationale) == ("INCONCLUSIVE", "checks_ran_but_nothing_established")
+
+
+def test_table_rejected_conclusion_non_blocking_reviews():
+    d = _decide([_check(passed=True),
+                 _check(passed=False, blocking=False,
+                        certificate=_certified(False, "fail"))])
+    assert (d.status, d.rationale) == ("HUMAN_REVIEW", "non_blocking_failures")
 
 
 def test_table_all_pass():
