@@ -364,8 +364,14 @@ def test_c2_malformed_invariants_yaml_structured_fail_run_verify(tmp_path):
     import sqlite3
     from verifyci.interface.commands.verify import run_verify
     db = tmp_path / "verifyci.db"
-    with sqlite3.connect(db) as conn:
+    # NOTE: `with sqlite3.connect(...)` commits but does NOT close —
+    # the dangling connection warned at GC. Close explicitly.
+    conn = sqlite3.connect(db)
+    try:
         conn.execute("CREATE TABLE schema_version (version INT)")
+        conn.commit()
+    finally:
+        conn.close()
     (tmp_path / "invariants.yaml").write_text("invariants:\n  - bad : : yaml\n", encoding="utf-8")
     diff = "diff --git a/src/app.py b/src/app.py\n+x = 1\n"
     res = run_verify(diff, db_path=str(db))
@@ -377,8 +383,12 @@ def test_c2_malformed_invariants_yaml_structured_failed_run_task(tmp_path):
     import sqlite3
     from verifyci.interface.commands.run import run_task
     db = tmp_path / "verifyci.db"
-    with sqlite3.connect(db) as conn:
+    conn = sqlite3.connect(db)
+    try:
         conn.execute("CREATE TABLE schema_version (version INT)")
+        conn.commit()
+    finally:
+        conn.close()
     (tmp_path / "invariants.yaml").write_text("invariants:\n  - bad : : yaml\n", encoding="utf-8")
     res = run_task("do test task", db_path=str(db))
     assert res["status"] == "FAILED"
