@@ -579,6 +579,12 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
                 if len(bare.strip()) >= 3:
                     found = True
                     why = 'multiline-triple'
+                # NOTE (defensive, intentionally untested): the two elifs
+                # below are unreachable — any content carrying a 3+ quoted
+                # run or a secret shape has >=3 non-triple chars, so the
+                # bare>=3 branch above always fires first (a quoted run
+                # needs 2 quotes + 3 inner chars; a secret shape is longer
+                # still). Kept as fail-closed belt-and-braces.
                 elif _quoted_hit(content, 3):
                     found = True
                     why = 'multiline-triple'

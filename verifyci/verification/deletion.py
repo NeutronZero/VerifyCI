@@ -100,6 +100,9 @@ def _parse_params_from_def(def_line: str) -> list[tuple[str, bool]] | None:
         if not stmt.endswith(":"):
             stmt += ":"
         mod = ast.parse(stmt + "\n    pass\n")
+        # NOTE (defensive): `not mod.body` is unreachable — stmt is never
+        # empty here (":" at minimum, which raises above), and any valid
+        # parse has a body. Kept so a future parser change fails safe.
         if not mod.body:
             return None
         fn = mod.body[0]
@@ -356,6 +359,12 @@ def verify_deletion_hunks(
                 if not (getattr(e, "line_end", 1) < hunk.old_start or getattr(e, "line_start", 1) > h_end)
             ]
 
+            # NOTE (defensive): the no-overlap verdict below is unreachable
+            # in practice — provenance-verified implies an entity contains
+            # the removed line, which intersects the hunk window by
+            # construction (pure insertions skip earlier for lack of `-`
+            # lines). Kept so unattributable deletions decline rather
+            # than pass if the geometry ever changes.
             if not overlapping_entities:
                 verdicts.append(DeletionHunkVerdict(
                     file_path=f.path,
