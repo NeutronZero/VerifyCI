@@ -214,6 +214,58 @@ def test_configuration_only_diff_validates_schema():
     assert cert_invalid.certificate_verified is False
 
 
+def test_headerless_ini_fragment_declines_not_rejects():
+    # A hunk far from any [section] header carries only `key = value`
+    # lines: validity indeterminate → inconclusive, never fail.
+    diff = (
+        "diff --git a/setup.cfg b/setup.cfg\n"
+        "--- a/setup.cfg\n"
+        "+++ b/setup.cfg\n"
+        "@@ -50,1 +50,2 @@\n"
+        " timeout = 30\n"
+        "+retries = 5\n"
+    )
+    reasoner = SemiFormalReasoner()
+    cert = reasoner.verify(diff=diff, graph=None, entities=None)
+    assert cert.conclusion.result == "inconclusive"
+    assert "headerless_ini_fragment" in cert.conclusion.reasoning
+    assert cert.certificate_verified is False
+
+
+def test_ini_with_header_still_rejects_garbage():
+    # A section header in-hunk makes the fragment a standalone document:
+    # genuine syntax errors still fail.
+    diff = (
+        "diff --git a/setup.cfg b/setup.cfg\n"
+        "--- a/setup.cfg\n"
+        "+++ b/setup.cfg\n"
+        "@@ -1,1 +1,3 @@\n"
+        "+[tool:pytest]\n"
+        "+timeout = 30\n"
+        "+[tool:pytest]\n"
+    )
+    reasoner = SemiFormalReasoner()
+    cert = reasoner.verify(diff=diff, graph=None, entities=None)
+    assert cert.conclusion.result == "fail"
+    assert cert.certificate_verified is False
+
+
+def test_valid_full_ini_diff_passes():
+    diff = (
+        "diff --git a/setup.cfg b/setup.cfg\n"
+        "--- a/setup.cfg\n"
+        "+++ b/setup.cfg\n"
+        "@@ -1,2 +1,3 @@\n"
+        " [tool:pytest]\n"
+        " timeout = 30\n"
+        "+retries = 5\n"
+    )
+    reasoner = SemiFormalReasoner()
+    cert = reasoner.verify(diff=diff, graph=None, entities=None)
+    assert cert.conclusion.result == "pass"
+    assert cert.certificate_verified is True
+
+
 # ---------------------------------------------------------------------------
 # 6. Mixed Diff with All Partitions
 # ---------------------------------------------------------------------------

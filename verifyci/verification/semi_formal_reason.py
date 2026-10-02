@@ -104,10 +104,19 @@ def _validate_configuration_diff(diff_str: str, config_files: list[str]) -> tupl
                         return "fail", f"{f.path}: {e}"
         elif p_lower.endswith((".ini", ".cfg")):
             import configparser
+            import re
             try:
                 cp = configparser.ConfigParser()
                 cp.read_string(content)
             except Exception as e:
+                if (isinstance(e, configparser.MissingSectionHeaderError)
+                        and not re.search(r"(?m)^\s*\[", content)):
+                    # A hunk far from any [section] header carries only
+                    # `key = value` lines: not a standalone INI document,
+                    # so validity is indeterminate. Decline (inconclusive),
+                    # don't reject a valid change for lacking context the
+                    # diff never contained.
+                    return "inconclusive", f"{f.path}: headerless_ini_fragment ({e})"
                 return "fail", f"{f.path}: {e}"
     return "pass", ""
 
@@ -592,6 +601,8 @@ class SemiFormalReasoner:
             if not c.passed and c.checker_id == "configuration_schema_validation":
                 if "multi_hunk_json_configuration" in getattr(c, "detail", ""):
                     continue
+                if "headerless_ini_fragment" in getattr(c, "detail", ""):
+                    continue
                 return Conclusion(result="fail", reasoning=f"configuration_schema_invalid: {c.detail}")
             if not c.passed and c.checker_id == "deletion_verification":
                 if "class_3" in getattr(c, "detail", "") or "without_waiver" in getattr(c, "detail", ""):
@@ -604,6 +615,10 @@ class SemiFormalReasoner:
                    if c.checker_id == "seeds_grounded" and not c.passed), "")
         if sg:
             reasoning += f" ({sg})"
+        cfg = next((c.detail for c in det_checks
+                    if c.checker_id == "configuration_schema_validation" and not c.passed), "")
+        if cfg:
+            reasoning += f" ({cfg})"
         dv = next((c for c in det_checks
                    if c.checker_id in ("deletion_verification", "no_deletion_hunks") and not c.passed), None)
         if dv:
