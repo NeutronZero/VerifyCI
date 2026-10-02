@@ -30,19 +30,22 @@ def build_semi_check(cert, files: list[str], entities: list,
         find_ambiguous_files, map_files_to_entity_ids, normalize_path,
         uninspectable_files,
     )
+    from verifyci.verification.partition import classify_path, FilePartition
+
     explanation = cert.conclusion.reasoning
-    ambiguous = find_ambiguous_files(files, entities or [])
+    code_files = [f for f in files if classify_path(f) == FilePartition.CODE_CORE]
+    ambiguous = find_ambiguous_files(code_files, entities or [])
     if ambiguous:
         details = ", ".join(f"{f} ({len(p)} paths)" for f, p in sorted(ambiguous.items()))
         explanation = f"{explanation}; suffix-ambiguous grounding: {details}"
     ent_paths = {normalize_path(getattr(e, "file_path", "") or "")
                  for e in entities or []}
     try:
-        mapping = map_files_to_entity_ids(files, entities or [])
+        mapping = map_files_to_entity_ids(code_files, entities or [])
     except Exception:  # noqa: BLE001
         mapping = {}
     suffix_only = sorted(
-        f for f in files
+        f for f in code_files
         if mapping.get(f) and normalize_path(f) not in ent_paths
     )
     if suffix_only:
@@ -97,6 +100,8 @@ def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
     from verifyci.verification.diffmap import (
         changed_line_anchor_sets, normalize_path,
     )
+    from verifyci.verification.partition import classify_path, FilePartition
+
     spans: dict[str, list[tuple[int, int]]] = {}
     for e in entities:
         t = getattr(e, "type", None)
@@ -113,6 +118,8 @@ def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
         spans.setdefault(p, []).append((s, en))
     out: list[str] = []
     for f, sets in changed_line_anchor_sets(diff).items():
+        if classify_path(f) != FilePartition.CODE_CORE:
+            continue
         file_spans = spans.get(normalize_path(f), [])
         for anchors in sets:
             coverable = sorted(ln for ln in anchors if ln > 0)

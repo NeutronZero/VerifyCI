@@ -1,7 +1,7 @@
 import time
 from typing import Optional
 
-from verifyci.contracts.entity import Entity, EntityType
+from verifyci.contracts.entity import Entity, EntitySnippetRecord, EntityType
 from verifyci.contracts.edge import Edge, EdgeType, CPGEdgeSubtype
 from verifyci.contracts.identity import compute_logical_entity_id, compute_revision_entity_id
 from verifyci.ingestion.parser import ParsedFile
@@ -27,6 +27,8 @@ def _make_entity(
     line_start: int, line_end: int, now: float, scope: str = "",
     snippet: str = "", identity_scope: Optional[str] = None,
     qualified_name: str = "",
+    snippet_is_complete: bool = True,
+    snippet_truncated_at_line: Optional[int] = None,
 ) -> Entity:
     # identity_scope pins the logical id: namespace entries are filtered
     # out of it, so wrapping code in `namespace ns {}` renames nothing
@@ -41,6 +43,10 @@ def _make_entity(
         metadata["qualified_name"] = qualified_name
     if snippet:
         metadata["snippet"] = snippet
+        metadata["snippet_is_complete"] = snippet_is_complete
+        if snippet_truncated_at_line is not None:
+            metadata["snippet_truncated_at_line"] = snippet_truncated_at_line
+        metadata["snippet_char_count"] = len(snippet)
     return Entity(
         repository_id=repository_id,
         logical_entity_id=logical_id,
@@ -135,15 +141,68 @@ def _split_source_lines(source: bytes) -> list[str]:
             for line in source.decode("utf-8", errors="replace").split("\n")]
 
 
+def _source_snippet_record(
+    source: bytes, line_start: int, line_end: int, limit: int = 2000
+) -> EntitySnippetRecord:
+    """Citeable source fragment record stored at ingest time. Truncates
+    strictly at a newline boundary when exceeding limit."""
+    try:
+        if line_start <= 0 and line_end <= 0:
+            return EntitySnippetRecord(
+                lines=(),
+                is_complete=True,
+                truncated_at_line=None,
+                char_count=0,
+                encoding="utf-8",
+            )
+        lines = _split_source_lines(source)
+        eff_start = max(1, line_start)
+        if eff_start > line_end or eff_start > len(lines):
+            return EntitySnippetRecord(
+                lines=(),
+                is_complete=True,
+                truncated_at_line=None,
+                char_count=0,
+                encoding="utf-8",
+            )
+        start_idx = eff_start - 1
+        end_idx = max(0, line_end)
+        span_lines = lines[start_idx:end_idx]
+        span = line_end - eff_start + 1
+
+        kept_lines: list[str] = []
+        current_len = 0
+        for line in span_lines:
+            add_len = len(line) + (1 if kept_lines else 0)
+            if current_len + add_len <= limit:
+                kept_lines.append(line)
+                current_len += add_len
+            else:
+                break
+
+        is_complete = len(kept_lines) == span
+        truncated_at_line = None if is_complete else (eff_start + len(kept_lines))
+        return EntitySnippetRecord(
+            lines=kept_lines,
+            is_complete=is_complete,
+            truncated_at_line=truncated_at_line,
+            char_count=current_len,
+            encoding="utf-8",
+        )
+    except Exception:  # noqa: BLE001, S110
+        return EntitySnippetRecord(
+            lines=(),
+            is_complete=False,
+            truncated_at_line=max(1, line_start) if line_start > 0 else None,
+            char_count=0,
+            encoding="utf-8",
+        )
+
+
 def _source_snippet(source: bytes, line_start: int, line_end: int, limit: int = 2000) -> str:
     """Citeable source fragment stored at ingest time, so evidence never
     depends on the working tree still containing the file."""
-    try:
-        lines = _split_source_lines(source)
-        fragment = "\n".join(lines[max(0, line_start - 1):line_end])
-    except Exception:  # noqa: BLE001, S110
-        return ""
-    return fragment[:limit]
+    return _source_snippet_record(source, line_start, line_end, limit=limit).text
 
 
 def _walk(node):
@@ -389,13 +448,16 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
             qualified_name = "::".join(qparts + [name])
         line_start = node.start_point[0] + 1
         line_end = node.end_point[0] + 1
+        snip_rec = _source_snippet_record(parsed.source, line_start, line_end)
         entities.append(_make_entity(
             repository_id, revision_id, parsed.file_path, name, entity_type,
             parsed.language, parsed.source_hash,
             line_start, line_end, now, scope,
-            snippet=_source_snippet(parsed.source, line_start, line_end),
+            snippet=snip_rec.text,
             identity_scope=identity_scope,
             qualified_name=qualified_name,
+            snippet_is_complete=snip_rec.is_complete,
+            snippet_truncated_at_line=snip_rec.truncated_at_line,
         ))
         if entity_type in (EntityType.FUNCTION, EntityType.METHOD):
             param_scope = f"{identity_scope}.{name}" if identity_scope else name

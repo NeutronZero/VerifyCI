@@ -21,6 +21,115 @@ class VerificationCheck:
 
 
 @dataclass(frozen=True)
+class ExecutionWitness:
+    witness_id: str
+    test_file: str
+    test_function: Optional[str] = None
+    target_entity_id: Optional[str] = None
+    target_file: Optional[str] = None
+    is_general_regression: bool = False
+    association_method: str = "general_regression"
+
+
+@dataclass(frozen=True)
+class SignedIntentWaiver:
+    waiver_id: str
+    target: str
+    signer: str
+    signature: str
+    reason: str = ""
+    valid: bool = True
+    algorithm: str = "hmac-sha256"
+    key_id: str = ""
+
+    def canonical_bytes(self) -> bytes:
+        """Canonical message payload for signing and verification.
+
+        Exact format: UTF-8 encoding of "{waiver_id}:{target}:{signer}:{reason}".
+        """
+        return f"{self.waiver_id}:{self.target}:{self.signer}:{self.reason}".encode("utf-8")
+
+    def verify_signature(self, key: str | bytes | None = None,
+                         allow_bearer: bool | None = None) -> bool:
+        """Cryptographically verify the waiver signature.
+
+        Primitives:
+        - algorithm='hmac-sha256':
+          Symmetric HMAC-SHA256 over canonical_bytes().
+          Key: shared secret string from `key` argument or VERIFYCI_WAIVER_KEYS.
+          Encoding: lowercase hex string.
+        - algorithm='ed25519':
+          Asymmetric Ed25519 signature over canonical_bytes().
+          Key: Ed25519 public key bytes or hex string from `key` or VERIFYCI_WAIVER_PUBLIC_KEYS.
+          Encoding: lowercase hex string or raw bytes.
+
+        Deny by default: when no key/secret is configured AND no explicit
+        `key` is passed, verification FAILS — an unverifiable waiver
+        suppresses nothing. The old unauthenticated bearer-token fallback
+        (any non-empty signature accepted) is available ONLY via explicit
+        opt-in: `allow_bearer=True` or VERIFYCI_WAIVER_ALLOW_UNAUTHENTICATED=1,
+        which emits a RuntimeWarning every time it accepts. Bearer mode
+        exists for air-gapped/manual workflows, never as a silent default:
+        anyone able to write waivers.yaml could otherwise suppress
+        guard-removal FAILs with a made-up signature.
+        """
+        import hashlib
+        import hmac
+        import os
+        import warnings
+
+        if not self.valid or not self.signature:
+            return False
+
+        alg = (self.algorithm or "hmac-sha256").lower()
+
+        if alg == "hmac-sha256":
+            trusted_key = key or os.getenv("VERIFYCI_WAIVER_KEYS")
+            if not trusted_key:
+                return self._bearer_fallback(allow_bearer, warnings)
+            if isinstance(trusted_key, str):
+                key_bytes = trusted_key.encode("utf-8")
+            else:
+                key_bytes = bytes(trusted_key)
+            expected = hmac.new(key_bytes, self.canonical_bytes(), hashlib.sha256).hexdigest()
+            return hmac.compare_digest(self.signature.lower(), expected.lower())
+
+        if alg == "ed25519":
+            trusted_pubkey = key or os.getenv("VERIFYCI_WAIVER_PUBLIC_KEYS")
+            if not trusted_pubkey:
+                return self._bearer_fallback(allow_bearer, warnings)
+            try:
+                from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+                if isinstance(trusted_pubkey, str):
+                    pub_bytes = bytes.fromhex(trusted_pubkey)
+                else:
+                    pub_bytes = bytes(trusted_pubkey)
+                pub = Ed25519PublicKey.from_public_bytes(pub_bytes)
+                sig_bytes = bytes.fromhex(self.signature) if isinstance(self.signature, str) else self.signature
+                pub.verify(sig_bytes, self.canonical_bytes())
+                return True
+            except Exception:
+                return False
+
+        return False
+
+    def _bearer_fallback(self, allow_bearer: bool | None, warnings) -> bool:
+        """Explicit-opt-in-only unauthenticated acceptance. Deny otherwise."""
+        import os
+        if allow_bearer is None:
+            allow_bearer = os.getenv("VERIFYCI_WAIVER_ALLOW_UNAUTHENTICATED", "") == "1"
+        if not allow_bearer:
+            return False
+        warnings.warn(
+            f"waiver {self.waiver_id!r} accepted WITHOUT cryptographic "
+            f"verification (bearer fallback opted in) — anyone able to write "
+            f"waivers.yaml can suppress guard-removal failures",
+            RuntimeWarning, stacklevel=4,
+        )
+        return True
+
+
+@dataclass(frozen=True)
 class Certificate:
     '''
     certificate_verified is True if and only if:
@@ -40,6 +149,8 @@ class Certificate:
     verification_method: str
     certificate_verified: bool
     timestamp: float
+    witnesses: tuple[ExecutionWitness, ...] = ()
+    waivers: tuple[SignedIntentWaiver, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -146,6 +257,8 @@ class Invariant:
     rule: str
     compiled_query: str
     blocking: bool
+    target_scope: str = "global_strict"
+    test_allowlist_patterns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

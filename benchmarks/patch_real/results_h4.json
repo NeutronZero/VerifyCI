@@ -1,0 +1,408 @@
+{
+  "protocol": "benchmarks/patch_real/config.json (frozen)",
+  "protocol_sha256": "d4b05c1cdfe32e535575fa5038d4d69351749975aee24740768f6e6597f67146",
+  "cases_sha256": "5e50316bbaaf4ef296b65cfd3a5bc51bb41c7d8856321d4ed77c1957715816ce",
+  "provenance_limitation": "Checker-aware authoring limitation explicitly preserved.",
+  "execution_failures": [],
+  "gates": {
+    "patch_equivalence_ge_0.90": false,
+    "verification_precision_ge_0.85": true
+  },
+  "metrics": {
+    "counts": {
+      "INCONCLUSIVE": 16,
+      "HUMAN_REVIEW": 3,
+      "FAIL": 1
+    },
+    "patch_equivalence": 0.0,
+    "overall_agreement": 0.0,
+    "verification_precision": 1.0,
+    "deterministic_catch_rate": null,
+    "semantic_false_accept_rate": 0.0,
+    "semantic_decline_rate": 0.9,
+    "binary_classification": {
+      "TP": 1,
+      "TN": 10,
+      "FP": 0,
+      "FN": 9,
+      "precision": 1.0,
+      "recall": 0.1,
+      "specificity": 1.0,
+      "false_accept_rate": 0.9,
+      "false_reject_rate": 0.0
+    },
+    "false_reject_ids": [],
+    "false_positive_fail_ids": [],
+    "confusion": {
+      "wrong_all": {
+        "caught": 1,
+        "accepted": 0,
+        "declined": 9,
+        "error": 0
+      },
+      "correct_all": {
+        "caught": 0,
+        "accepted": 0,
+        "declined": 10,
+        "error": 0
+      },
+      "wrong_deterministic": {
+        "caught": 0,
+        "accepted": 0,
+        "declined": 0,
+        "error": 0
+      },
+      "wrong_semantic": {
+        "caught": 1,
+        "accepted": 0,
+        "declined": 9,
+        "error": 0
+      }
+    },
+    "n_correct": 10,
+    "n_wrong": 10,
+    "n_fail": 1
+  },
+  "verdicts": [
+    {
+      "id": "REAL-01-correct",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 1493.38,
+      "provenance": {
+        "commit": "7343c6d",
+        "parent": "084994b",
+        "base_tree": "084994b",
+        "type": "commit_diff",
+        "test_probe": "tests/verification/test_probe_combined_review_fixes.py",
+        "execution_evidence": "18 passed at 7343c6d; failed at 084994b (preambles, signature separator, and coverage veto)"
+      }
+    },
+    {
+      "id": "REAL-01-wrong",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 1648.62,
+      "provenance": {
+        "commit": "7343c6d",
+        "parent": "084994b",
+        "base_tree": "7343c6d",
+        "type": "mechanical_revert",
+        "test_probe": "tests/verification/test_probe_combined_review_fixes.py",
+        "execution_evidence": "Revert reintroduces bug verified by tests/verification/test_probe_combined_review_fixes.py"
+      }
+    },
+    {
+      "id": "REAL-02-correct",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 1904.96,
+      "provenance": {
+        "commit": "084994b",
+        "parent": "5cb1aa4",
+        "base_tree": "5cb1aa4",
+        "type": "commit_diff",
+        "test_probe": "tests/ingestion/test_probe_a8_platform.py",
+        "execution_evidence": "7 passed at 084994b; 7 failed at 5cb1aa4 (A8 platformio skip & locale decoding)"
+      }
+    },
+    {
+      "id": "REAL-02-wrong",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 3024.42,
+      "provenance": {
+        "commit": "084994b",
+        "parent": "5cb1aa4",
+        "base_tree": "084994b",
+        "type": "mechanical_revert",
+        "test_probe": "tests/ingestion/test_probe_a8_platform.py",
+        "execution_evidence": "Revert reintroduces bug verified by tests/ingestion/test_probe_a8_platform.py"
+      }
+    },
+    {
+      "id": "REAL-03-correct",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 1709.13,
+      "provenance": {
+        "commit": "ae171cb",
+        "parent": "1aba78f",
+        "base_tree": "1aba78f",
+        "type": "commit_diff",
+        "test_probe": "tests/retrieval/test_graph_retriever.py",
+        "execution_evidence": "5 passed at ae171cb; 5 failed at 1aba78f (semantic-edge expansion in both directions)"
+      }
+    },
+    {
+      "id": "REAL-03-wrong",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 2073.71,
+      "provenance": {
+        "commit": "ae171cb",
+        "parent": "1aba78f",
+        "base_tree": "ae171cb",
+        "type": "mechanical_revert",
+        "test_probe": "tests/retrieval/test_graph_retriever.py",
+        "execution_evidence": "Revert reintroduces bug verified by tests/retrieval/test_graph_retriever.py"
+      }
+    },
+    {
+      "id": "REAL-04-correct",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 1567.51,
+      "provenance": {
+        "commit": "1aba78f",
+        "parent": "8ea8f11",
+        "base_tree": "8ea8f11",
+        "type": "commit_diff",
+        "test_probe": "tests/interface/test_env_prefix.py",
+        "execution_evidence": "7 passed at 1aba78f; error at 8ea8f11 (env fallback & prefix resolution)"
+      }
+    },
+    {
+      "id": "REAL-04-wrong",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 1521.12,
+      "provenance": {
+        "commit": "1aba78f",
+        "parent": "8ea8f11",
+        "base_tree": "1aba78f",
+        "type": "mechanical_revert",
+        "test_probe": "tests/interface/test_env_prefix.py",
+        "execution_evidence": "Revert reintroduces bug verified by tests/interface/test_env_prefix.py"
+      }
+    },
+    {
+      "id": "REAL-05-correct",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 1543.62,
+      "provenance": {
+        "commit": "8ea8f11",
+        "parent": "c1e91ca",
+        "base_tree": "c1e91ca",
+        "type": "commit_diff",
+        "test_probe": "tests/integration/test_skip_consistency.py",
+        "execution_evidence": "6 passed at 8ea8f11; error at c1e91ca (pyvenv.cfg marker & skip consistency)"
+      }
+    },
+    {
+      "id": "REAL-05-wrong",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 1718.32,
+      "provenance": {
+        "commit": "8ea8f11",
+        "parent": "c1e91ca",
+        "base_tree": "8ea8f11",
+        "type": "mechanical_revert",
+        "test_probe": "tests/integration/test_skip_consistency.py",
+        "execution_evidence": "Revert reintroduces bug verified by tests/integration/test_skip_consistency.py"
+      }
+    },
+    {
+      "id": "REAL-06-correct",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "HUMAN_REVIEW",
+      "rationale": "non_blocking_failures",
+      "elapsed_ms": 1584.57,
+      "provenance": {
+        "commit": "c1e91ca",
+        "parent": "9486efb",
+        "base_tree": "9486efb",
+        "type": "commit_diff",
+        "test_probe": "tests/storage/test_revision_identity.py",
+        "execution_evidence": "12 passed at c1e91ca; error at 9486efb (content hash identity independent of commit/parent)"
+      }
+    },
+    {
+      "id": "REAL-06-wrong",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 1548.46,
+      "provenance": {
+        "commit": "c1e91ca",
+        "parent": "9486efb",
+        "base_tree": "c1e91ca",
+        "type": "mechanical_revert",
+        "test_probe": "tests/storage/test_revision_identity.py",
+        "execution_evidence": "Revert reintroduces bug verified by tests/storage/test_revision_identity.py"
+      }
+    },
+    {
+      "id": "REAL-07-correct",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 1610.36,
+      "provenance": {
+        "commit": "9486efb",
+        "parent": "c247d30",
+        "base_tree": "c247d30",
+        "type": "commit_diff",
+        "test_probe": "tests/orchestration/test_planner_gating.py",
+        "execution_evidence": "7 passed at 9486efb; 3 failed at c247d30 (single-gate planner execution)"
+      }
+    },
+    {
+      "id": "REAL-07-wrong",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 1874.82,
+      "provenance": {
+        "commit": "9486efb",
+        "parent": "c247d30",
+        "base_tree": "9486efb",
+        "type": "mechanical_revert",
+        "test_probe": "tests/orchestration/test_planner_gating.py",
+        "execution_evidence": "Revert reintroduces bug verified by tests/orchestration/test_planner_gating.py"
+      }
+    },
+    {
+      "id": "REAL-08-correct",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "HUMAN_REVIEW",
+      "rationale": "non_blocking_failures",
+      "elapsed_ms": 1438.26,
+      "provenance": {
+        "commit": "c247d30",
+        "parent": "fdd495c",
+        "base_tree": "fdd495c",
+        "type": "commit_diff",
+        "test_probe": "tests/verification/test_suffix_grounding.py",
+        "execution_evidence": "3 passed at c247d30; 2 failed at fdd495c (suffix-only grounding declines to inconclusive)"
+      }
+    },
+    {
+      "id": "REAL-08-wrong",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "PASS",
+      "status": "HUMAN_REVIEW",
+      "rationale": "non_blocking_failures",
+      "elapsed_ms": 1556.84,
+      "provenance": {
+        "commit": "c247d30",
+        "parent": "fdd495c",
+        "base_tree": "c247d30",
+        "type": "mechanical_revert",
+        "test_probe": "tests/verification/test_suffix_grounding.py",
+        "execution_evidence": "Revert reintroduces bug verified by tests/verification/test_suffix_grounding.py"
+      }
+    },
+    {
+      "id": "REAL-09-correct",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 2099.28,
+      "provenance": {
+        "commit": "fdd495c",
+        "parent": "563db16",
+        "base_tree": "563db16",
+        "type": "commit_diff",
+        "test_probe": "tests/ingestion/test_dependencies.py",
+        "execution_evidence": "14 passed at fdd495c; 6 failed at 563db16 (cargo subtable, pypi egg fragments, requirement skips)"
+      }
+    },
+    {
+      "id": "REAL-09-wrong",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 2886.2,
+      "provenance": {
+        "commit": "fdd495c",
+        "parent": "563db16",
+        "base_tree": "fdd495c",
+        "type": "mechanical_revert",
+        "test_probe": "tests/ingestion/test_dependencies.py",
+        "execution_evidence": "Revert reintroduces bug verified by tests/ingestion/test_dependencies.py"
+      }
+    },
+    {
+      "id": "REAL-10-correct",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established",
+      "elapsed_ms": 5300.97,
+      "provenance": {
+        "commit": "563db16",
+        "parent": "d3056c8",
+        "base_tree": "d3056c8",
+        "type": "commit_diff",
+        "test_probe": "tests/integration/test_rationale_channels.py",
+        "execution_evidence": "4 passed at 563db16; 4 failed at d3056c8 (rationale channel structuring)"
+      }
+    },
+    {
+      "id": "REAL-10-wrong",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "PASS",
+      "status": "FAIL",
+      "rationale": "blocking_check_failed",
+      "elapsed_ms": 5207.97,
+      "provenance": {
+        "commit": "563db16",
+        "parent": "d3056c8",
+        "base_tree": "563db16",
+        "type": "mechanical_revert",
+        "test_probe": "tests/integration/test_rationale_channels.py",
+        "execution_evidence": "Revert reintroduces bug verified by tests/integration/test_rationale_channels.py"
+      }
+    }
+  ]
+}

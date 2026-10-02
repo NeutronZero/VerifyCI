@@ -1,0 +1,46 @@
+{
+  "campaign": "H2-B isolated + final combined passes",
+  "frozen_reference": "v1.0.2-correctness",
+  "frozen_labels_sha256_reverified": "e17d65878ccc53305d6c581525524c573fa7fa1615cf2ea29bdf077e38e39011",
+  "v102_baseline": {
+    "recall": 0.8888888888888888,
+    "precision": 1.0,
+    "coverage": 1.0
+  },
+  "h2_b": {
+    "measured": {
+      "recall": 0.9444444444444444,
+      "precision": 1.0,
+      "coverage": 1.0
+    },
+    "gate": {
+      "recall_ge_090": true,
+      "precision_is_100": true,
+      "coverage_is_100": true
+    },
+    "classification": "IMPROVED",
+    "scope_notes": [
+      "H2-C not implemented (short-secret residual still missed).",
+      "added_refs lexical path untouched (out of scope).",
+      "No thresholds tuned; single pass."
+    ]
+  },
+  "final": {
+    "measured": {
+      "recall": 1.0,
+      "precision": 1.0,
+      "coverage": 1.0
+    },
+    "gate": {
+      "recall_ge_090": true,
+      "precision_is_100": true,
+      "coverage_is_100": true
+    },
+    "classification": "IMPROVED",
+    "scope_notes": [
+      "Combined B+C state; B and C never measured combined before this pass.",
+      "added_refs lexical path untouched (out of scope).",
+      "No thresholds tuned; single pass."
+    ]
+  }
+}

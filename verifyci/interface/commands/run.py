@@ -47,6 +47,11 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
             return {"task": task, "status": "FAILED", "error": "invalid_task_ir",
                     "ledger_head": None}
         db = resolve_db(db_path)
+        try:
+            repo_invariants = load_repo_invariants(db)
+        except ValueError:
+            return {"task": task, "task_id": "", "status": "FAILED", "error": "invalid_invariants_config",
+                    "decision": "FAIL", "rationale": "invalid_invariants_config", "ledger_head": None}
         # A missing or unreadable DB is infrastructure, not a task that
         # failed verification: FAILED would exit 1 as if the gate rejected
         # the work. Report INFRA_ERROR (exit 3) with the same honest key.
@@ -72,7 +77,7 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
                 # extend them. Dedupe by query so the defaults are not
                 # evaluated twice with conflicting blocking flags.
                 "invariants": _dedupe_invariants(
-                    intent.invariants + load_repo_invariants(db)),
+                    intent.invariants + repo_invariants),
                 "diff": diff, "store": store,
             }
             task_id = await scheduler.submit(task_ir, context=context)

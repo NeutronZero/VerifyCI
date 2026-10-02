@@ -96,8 +96,15 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
         _rid = getattr(_e, "revision_entity_id", None)
         if _rid and _rid not in by_revision_id:
             by_revision_id[_rid] = _e
-    from verifyci.verification.config import load_repo_invariants
-    _repo_invariants = load_repo_invariants(getattr(store, "db_path", None))
+    from verifyci.verification.config import load_repo_invariants, load_repo_waivers
+    _repo_invariants_err: str | None = None
+    try:
+        _repo_invariants = load_repo_invariants(getattr(store, "db_path", None))
+        _repo_waivers = load_repo_waivers(getattr(store, "db_path", None))
+    except ValueError:
+        _repo_invariants = []
+        _repo_waivers = []
+        _repo_invariants_err = "invalid_invariants_config"
 
     async def code_search(query: str, k: int = 10, conversation_id: str = "",
                         rerank: bool = False) -> dict:
@@ -206,11 +213,20 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
         from verifyci.verification.verification_ir import build_semi_check, build_verification_report
 
         with start_agent_span("verify.diff", conversation_id, "verify.diff"):
+            if _repo_invariants_err:
+                return {
+                    "revision_id": revision_id,
+                    "status": "FAIL",
+                    "report_id": "",
+                    "rationale": "invalid_invariants_config",
+                    "files": parse_diff_files(diff),
+                    "changed_entities": [],
+                }
             if len(diff) > MAX_DIFF_CHARS:
                 return {"revision_id": revision_id, "status": "FAILED", "error": "diff_too_large"}
             reasoner = SemiFormalReasoner()
             cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map,
-                                   entities=entities or None)
+                                   entities=entities or None, waivers=_repo_waivers)
             files = parse_diff_files(diff)
             checks = [build_semi_check(cert, files, entities or [], diff=diff)]
             mapping = seed_entities_for_diff(files, entities or [], diff)
@@ -244,6 +260,8 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
         from verifyci.orchestration.planner import Planner
 
         with start_agent_span("task.run", conversation_id, "task.run"):
+            if _repo_invariants_err:
+                return {"task": task, "status": "FAILED", "error": "invalid_invariants_config", "ledger_head": None}
             if len(diff) > MAX_TASK_DIFF_CHARS:
                 return {"task": task, "status": "FAILED", "error": "diff_too_large", "ledger_head": None}
             if len(task) > MAX_TASK_DIFF_CHARS:
