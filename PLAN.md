@@ -78,13 +78,17 @@ verifyci/contracts/
 import hashlib
 
 def compute_logical_entity_id(
-    repository_id: str, file_path: str, name: str, type: EntityType
+    repository_id: str, file_path: str, name: str, type: EntityType,
+    scope: str = "",
 ) -> str:
     """
-    Stable across revisions. A rename or move yields a new logical identity.
+    Stable across revisions. Scope is the dotted parent scope (methods
+    need it: a method `login` on `AuthService` must hash differently
+    from a top-level `login`; added as a V1 correction, see
+    contracts/README.md). A rename or move yields a new logical identity.
     Rename detection is deferred to V1.2. Do not add heuristics before then.
     """
-    payload = f"{repository_id}\x1f{file_path}\x1f{name}\x1f{type.value}"
+    payload = f"{repository_id}\x1f{file_path}\x1f{scope}\x1f{name}\x1f{type.value}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 def compute_revision_entity_id(logical_entity_id: str, revision_id: str) -> str:
@@ -541,10 +545,12 @@ verifyci/ingestion/
 ```
 verifyci/graph/
 ├── builder.py
-├── temporal.py
-├── serializer.py
-└── stats.py
+└── traverse.py
 ```
+(As built: the planned `temporal.py` / `serializer.py` / `stats.py`
+split was consolidated — temporal queries live in
+`storage/graph_store.py`, traversal in `graph/traverse.py`, stats in
+`interface/commands/stats.py`.)
 
 ### Week 2: Persistence + CLI
 
@@ -954,14 +960,10 @@ verifyci/
 │   │   ├── language.py
 │   │   ├── incremental.py
 │   │   └── dependency.py
-│   ├── codeintel/
-│   │   ├── scip_adapter.py
-│   │   └── lsp_adapter.py
+│   ├── codeintel/          # not built in V1 (no SCIP/LSP adapters)
 │   ├── graph/
 │   │   ├── builder.py
-│   │   ├── temporal.py
-│   │   ├── serializer.py
-│   │   └── stats.py
+│   │   └── traverse.py     # (temporal/serializer/stats consolidated, see Day 5 note)
 │   ├── retrieval/
 │   │   ├── dense.py
 │   │   ├── sparse.py

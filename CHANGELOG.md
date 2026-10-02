@@ -1,6 +1,22 @@
 # Changelog
 
-## Unreleased — grounded rejections fail; waivers honored on all paths
+## Unreleased — ingest recursion guard; naming and doc corrections
+
+- **Pathological nesting no longer aborts ingest.** 2000-deep nesting
+  exhausts the recursive extractor (tree-sitter caps with ERROR nodes,
+  then extraction blows the Python stack), killing the whole run. One
+  hostile file is now recorded in `parse_errors` and falls back to
+  MODULE-only, same as the unparseable shape. Pinned failing-first with
+  real deep input.
+- **Corrections.** `get_nearest_anchor` renamed `get_latest_anchor`
+  (`ReplayEngine`) / `get_anchor` (`SnapshotStore`, exact lookup) —
+  recency was never proximity. OTel agent version `"1.0.0"` corrected
+  to the package `"0.1.0"`. `language.py` comment, PLAN identity
+  snippet (5-part scope form), and PLAN graph/codeintel trees updated
+  to the as-built state. `INGESTION_CONFIG_HASH` documents its
+  single-config invariant. Splat params (`*args`) pinned as a known
+  extractor gap (PARAMETER rows gate nothing; extractor.py is
+  frozen-pinned — a repair needs the dated-exception process).
 
 - **Certificate rejections now FAIL at policy.** `_is_inability` treated
   any unverified certificate as inability, so every code-path rejection

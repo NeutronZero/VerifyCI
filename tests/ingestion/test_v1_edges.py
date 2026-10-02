@@ -173,6 +173,23 @@ def test_multi_import_statement_emits_all_modules():
     assert imports == ["os", "sys"]
 
 
+def test_splat_params_are_a_known_gap():
+    # `*args` / `**kwargs` names live in splat-pattern nodes, not bare
+    # identifiers, so variadics emit no PARAMETER entities. Documented,
+    # not fixed: PARAMETER rows never seed traversal or gate anything,
+    # and extractor.py is frozen-pinned by the latency guard — a repair
+    # would go through the dated-exception process with a re-measure
+    # decision. Revisit only with evidence that params matter.
+    from verifyci.contracts.entity import EntityType
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
+    parsed = TreeSitterParser().parse(
+        "x.py", b"def f(a, *args, b=1, **kwargs):\n    pass\n", "python")
+    params = [e.name for e in extract_entities(parsed, "r", "rev")
+              if e.type == EntityType.PARAMETER]
+    assert params == ["a", "b"]
+
+
 def test_typedef_names_new_type():
     from verifyci.contracts.entity import EntityType
     from verifyci.ingestion.extractor import extract_entities

@@ -21,6 +21,11 @@ from typing import Optional
 from verifyci.contracts.revision import Revision
 
 INGESTION_CONFIG_HASH = hashlib.sha256(b"v1_default").hexdigest()
+# INVARIANT: exactly one ingestion configuration exists, so a constant is
+# exact. If a second config ever appears (options threading into
+# create_revision callers), this MUST become a real hash of the active
+# config — otherwise two different configs over identical trees would
+# share one revision_id and poison each other's graphs.
 
 
 def canonical_manifest(

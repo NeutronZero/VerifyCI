@@ -18,7 +18,7 @@ def start_agent_span(name: str, conversation_id: str, operation: str):
             GenAiConversationId.KEY: conversation_id,
             GenAiAgentName.KEY: "VerifyCI",
             GenAiAgentDescription.KEY: "Verification-first code intelligence",
-            GenAiAgentVersion.KEY: "1.0.0",
+            GenAiAgentVersion.KEY: "0.1.0",  # must match pyproject.toml version
             GenAiOperationName.KEY: operation,
         },
     )

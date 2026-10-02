@@ -80,7 +80,7 @@ def test_snapshot_round_trip(threshold):
         if snap is not None:
             last = snap
     assert last is not None
-    assert store.get_nearest_anchor(last.revision_id).state == last.state
+    assert store.get_anchor(last.revision_id).state == last.state
 
 
 def test_ledger_store_round_trip(tmp_path):
@@ -117,7 +117,7 @@ def test_delta_chain_multi_hop():
     assert engine.replay("rev1", "rev4").state == {"a": 1, "b": 2, "c": 3, "d": 4}
 
 
-def test_nearest_anchor_fallback():
+def test_latest_anchor_fallback():
     engine = ReplayEngine()
     engine.add_anchor("rev1", {"a": 1})
     engine.add_delta("rev1", "rev2", {"b": 2})
