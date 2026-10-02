@@ -258,8 +258,21 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
                 # possibly misleading graph. Record it; the MODULE-only
                 # fallback still grounds the file.
                 totals["parse_errors"].append(rel)
-            entities = extract_entities(parsed, repo.name, revision.revision_id)
-            edges = extract_edges(parsed, entities, revision.revision_id)
+            try:
+                entities = extract_entities(parsed, repo.name, revision.revision_id)
+                edges = extract_edges(parsed, entities, revision.revision_id)
+            except RecursionError:
+                # Pathological nesting (generated files hit tree-sitter's
+                # depth cap AND exhaust the recursive walker): one hostile
+                # file must not abort the whole ingest. Record it and fall
+                # back to MODULE-only, same as the unparseable shape above.
+                from verifyci.ingestion.parser import ParsedFile as _ParsedFile
+                if rel not in totals["parse_errors"]:
+                    totals["parse_errors"].append(rel)
+                parsed = _ParsedFile(file_path=rel, source=source, source_hash=digest,
+                                     language=language, tree=None)
+                entities = extract_entities(parsed, repo.name, revision.revision_id)
+                edges = []
             for e in entities:
                 store.insert_entity(e)
             for edge in edges:

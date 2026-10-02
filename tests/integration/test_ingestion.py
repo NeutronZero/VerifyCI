@@ -89,3 +89,26 @@ def test_collect_includes_markerless_venv_named_dir(tmp_path):
     (tmp_path / "venv" / "junk.py").write_text("x = 1\n")
     sources, _, _ = _collect(tmp_path)
     assert any("venv" in rel for rel, _, _ in sources)
+
+
+def test_pathological_nesting_falls_back_to_module(tmp_path):
+    # 2000-deep nesting exhausts the recursive walker (tree-sitter caps
+    # with ERROR nodes first, then extraction blows the Python stack):
+    # one hostile file must be recorded and skipped, never abort the run.
+    import pytest
+    from verifyci.interface.commands.ingest import run_ingest
+    lines = []
+    for i in range(2000):
+        lines.append("    " * i + f"def f{i}():")
+    lines.append("    " * 2000 + "pass")
+    (tmp_path / "deep.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (tmp_path / "ok.py").write_text("def ok():\n    return 1\n", encoding="utf-8")
+    totals = run_ingest(str(tmp_path))
+    assert any("deep.py" in p for p in totals["parse_errors"])
+    assert totals["files"] == 2
+    with pytest.raises(RecursionError):
+        from verifyci.ingestion.extractor import extract_entities
+        from verifyci.ingestion.parser import TreeSitterParser
+        src = ("\n".join(lines) + "\n").encode()
+        extract_entities(TreeSitterParser().parse("deep.py", src, "python"),
+                         "r", "rev")
