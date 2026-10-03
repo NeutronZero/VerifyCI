@@ -181,3 +181,16 @@ collected on the v1.1 branch: default `python -m pytest tests/ -q` is 757 passed
 with all three re-measure guards it is 760 passed / 0 skipped
 (`VERIFYCI_PATCH_RERUN=1` / `VERIFYCI_BLAST_RERUN=1` / `VERIFYCI_LATENCY_RERUN=1`).
 Locked release endpoint: `v1.0.2-correctness` (618 tests there).
+
+## Known limits
+
+Measured on Linux v6.6 (`LINUX_TEST.md`): extraction and query work at
+intra-file scale up to ~50K LOC / ~40 files (`kernel/sched/`), but the stored
+call graph has no cross-file CALLS edges and resolution falls below usability
+(5.7%) by ~110K LOC (`net/ipv4/`) — treat cross-file reasoning as unsupported,
+and any PASS on a large codebase as intra-file evidence only. On 10 real
+kernel patches the gate reached a verdict on 4 and escalated 6 (five on
+saturated blast radius); per-patch parent-revision ingest is required for
+honest verdicts. On C, `has_error` is not parse-health signal (macro idiom
+fires it on nearly every file); macro invocations with braces
+(`for_each_x(y) {`) additionally extract as phantom FUNCTION entities.
