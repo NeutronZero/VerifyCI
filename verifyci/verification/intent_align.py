@@ -513,12 +513,15 @@ def _added_hits(diff: str, kind: str, name: str) -> tuple[list[str], bool]:
     except Exception:  # noqa: BLE001
         return [], False
     hits = sorted(f for f, kinds in refs.items() if name in kinds.get(kind, set()))
-    if had_error and refs and kind == "calls":
-        # Partial recovery can drop the forbidden call while sibling
-        # calls survive (refs non-empty, so parse_ok is True): back the
-        # tree result with a lexical scan for this exact target. Same
-        # bare-name rule as the tree path (`obj.eval(` never flags),
-        # so the pinned stricter-than-graph semantics hold.
+    if kind == "calls" and parse_ok:
+        # The tree path is strictly-stricter (bare callees, imports via
+        # grammar), so always back it with the lexical scan for this exact
+        # target — but only when the fragments actually parsed: on
+        # inability (parse_ok=False) the pinned contract is INCONCLUSIVE,
+        # never a lexical verdict. Same bare-name rule as the tree path
+        # (`obj.eval(` never flags). Also the only forbid coverage for
+        # lines no grammar can reach: JS/TS sources, CI workflows,
+        # package.json scripts, Dockerfiles.
         hits = sorted(set(hits) | set(_lexical_call_hits(diff, name)))
     return hits, parse_ok
 
@@ -533,10 +536,12 @@ def _unexamined_forbid_files(diff: str | None) -> list[str]:
     """Added-line files no forbid checker can examine.
 
     A file is unexamined when its language is uncovered AND its partition is
-    not exempt. DOCUMENTATION and CONFIGURATION stay exempt (prose and
-    manifests cannot carry executable calls); everything else — including
-    unknown paths, which classify fail-closed as CODE_CORE — vetoes
-    establishment when it carries added lines.
+    not exempt. DOCUMENTATION and CONFIGURATION are exempt from the veto:
+    the lexical checker still scans their added lines (CI workflows and
+    manifest scripts can carry shell-out text), so an exempt file is
+    examined there even though no grammar can parse it. Everything else —
+    including unknown paths, which classify fail-closed as CODE_CORE —
+    vetoes establishment when it carries added lines.
     """
     from verifyci.ingestion.language import detect_language
     from verifyci.verification.diffmap import iter_added_lines
@@ -544,7 +549,9 @@ def _unexamined_forbid_files(diff: str | None) -> list[str]:
     try:
         lines = iter_added_lines(diff)
     except Exception:  # noqa: BLE001
-        return []
+        # Inability is not absence: a parser regression must veto, never
+        # silently pass (mirrors _added_hits' parse_ok polarity).
+        return ["<diff-parse-error>"]
     out = set()
     for f, _content in lines:
         if f is None:
@@ -566,23 +573,36 @@ def _unexamined_forbid_files(diff: str | None) -> list[str]:
 
 
 def _lexical_call_hits(diff: str, name: str) -> list[str]:
-    """Files whose added lines textually contain a bare `name(` call."""
+    """Files whose added lines textually contain a bare `name(` call.
+
+    Python/C/C++ matches on covered files are expected to arrive via the
+    tree path first; this scan additionally covers lines no grammar can
+    reach — JS/TS sources, CI YAML, package.json `scripts`, Makefiles —
+    where forbidden text (e.g. `curl | sh`, `eval(`) is a real shell-out.
+    Partition exemption is deliberately not consulted: a docs file can
+    still smuggle executable lines, and skipping it here would recreate
+    the silent-clean the forbid path exists to avoid.
+    """
     import re
-    from verifyci.ingestion.language import detect_language
     from verifyci.verification.diffmap import iter_added_lines
     try:
         pat = re.compile(r"(?<![\w.])" + re.escape(name) + r"\s*\(")
         lines = iter_added_lines(diff)
     except Exception:  # noqa: BLE001
         return []
+    # Definition-shaped lines (`def eval(`, `function eval(`, `int eval(`)
+    # bind the name, they do not call it — the contract test pins that.
+    # Conservative matching: a line that starts (after @decorator / async /
+    # function/def/class/proc/sub keyword) binds, so a forbidden name late
+    # on the same line still flags.
+    def_start = re.compile(
+        r"^\s*(?:@\w+\s*)*(?:async\s+)?(?:def|function|fn|func|proc|class|sub)\b"
+    )
     out = set()
     for f, content in lines:
         if f is None:
             continue
-        try:
-            if detect_language(f) not in ("python", "c", "cpp"):
-                continue
-        except Exception:  # noqa: BLE001
+        if def_start.search(content):
             continue
         if pat.search(content):
             out.add(f)

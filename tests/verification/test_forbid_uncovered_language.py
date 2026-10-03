@@ -68,22 +68,68 @@ DIFF_PY_VIOLATION = """diff --git a/verifyci/core.py b/verifyci/core.py
 """
 
 
-def test_js_forbid_evasion_is_unestablished():
-    """eval( added in an uncovered-language file must not pass established."""
+def test_js_forbid_evasion_is_now_a_hit():
+    """The lexical scan catches what the tree never could: eval( in .js fails closed."""
     results, _ = evaluate_invariants(DIFF_JS_EVASION, [_rule()], _graph_with_call())
     assert len(results) == 1
-    assert results[0].passed is True  # no violation found anywhere examined
-    assert results[0].established is False  # but app.js was never examined
+    assert results[0].passed is False
+    assert results[0].established is True
     assert "app.js" in results[0].explanation
 
 
+def test_js_benign_addition_vetoes_absence():
+    """.js with no forbidden name stays unestablished — scanned, never clean-by-extension."""
+    diff = DIFF_JS_EVASION.replace("eval(userInput);", "console.log(userInput);")
+    results, _ = evaluate_invariants(diff, [_rule()], _graph_with_call())
+    assert len(results) == 1
+    assert results[0].passed is True
+    assert results[0].established is False
+    assert "app.js" in results[0].explanation
+
+
+readme_only = DIFF_DOCS_AND_CLEAN_CODE.split("diff --git a/verifyci/")[0]
+
+
 def test_docs_touching_diff_stays_established():
-    """Exempt partitions (docs) never veto establishment."""
-    results, _ = evaluate_invariants(
-        DIFF_DOCS_AND_CLEAN_CODE, [_rule()], _graph_with_call())
+    """Exempt partitions (docs) never veto establishment, and clean docs scan clean."""
+    diff = readme_only.replace("eval(userInput);", "usage note")
+    results, _ = evaluate_invariants(diff, [_rule()], _graph_with_call())
     assert len(results) == 1
     assert results[0].passed is True
     assert results[0].established is True
+
+
+def test_eval_in_markdown_is_now_a_hit():
+    """Docs/config carve-out can't launder executable text anymore."""
+    results, _ = evaluate_invariants(readme_only, [_rule()], _graph_with_call())
+    assert len(results) == 1
+    assert results[0].passed is False
+    assert "README.md" in results[0].explanation
+
+
+def test_preinstall_eval_detected():
+    """CI/manifest text is lexically covered: no silent pass on script hooks."""
+    diff = """diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -1,2 +1,3 @@
+ {
++  "scripts": {"preinstall": "eval(x)"}
+ }
+"""
+    results, _ = evaluate_invariants(diff, [_rule()], _graph_with_call())
+    assert len(results) == 1
+    assert results[0].passed is False
+    assert "package.json" in results[0].explanation
+
+
+def test_jsrx_symlink_style_path_still_classified():
+    """detect_language robustness: unknown path stays uncovered, never silently exempt."""
+    results, _ = evaluate_invariants(
+        "diff --git a/Dockerfile b/Dockerfile\n--- a/Dockerfile\n+++ b/Dockerfile\n@@ -1,2 +1,2 @@\n+RUN eval `x`\n",
+        [_rule()], _graph_with_call())
+    assert results[0].passed is True  # `eval HOST x` is not `eval(`
+    assert results[0].established is False
 
 
 def test_covered_violation_still_fails():

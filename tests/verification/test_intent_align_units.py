@@ -240,7 +240,7 @@ def test_added_hits_empty_inputs():
 
 def test_lexical_hits_skips_non_code_and_unscoped():
     d = _diff("README.md", "eval(x)")
-    assert _lexical_call_hits(d, "eval") == []
+    assert _lexical_call_hits(d, "eval") == ["README.md"]  # exempt partition, not exempt scan
     d = "+eval(1)\n" + _diff("src/a.py", "y = 2")
     assert _lexical_call_hits(d, "eval") == []  # preamble hit is unscoped
     d = _diff("src/a.py", "result = eval(user_input)")
@@ -257,13 +257,15 @@ def test_lexical_hits_entry_error_is_empty(monkeypatch):
 
 
 def test_lexical_hits_language_error_skips(monkeypatch):
+    # The scan no longer language-gates; a broken detector must not
+    # silently widen the hit set — only suppress itself.
     import verifyci.ingestion.language as lang
 
     monkeypatch.setattr(
         lang, "detect_language", lambda f: (_ for _ in ()).throw(RuntimeError("x"))
     )
     d = _diff("src/a.py", "result = eval(user_input)")
-    assert _lexical_call_hits(d, "eval") == []
+    assert _lexical_call_hits(d, "eval") == ["src/a.py"]
 
 
 # --- graph search helpers ----------------------------------------------------
