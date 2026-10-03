@@ -53,7 +53,9 @@ collapse; extraction still yields 426 functions with 19/20 sampled spans exact.
 One DB per patch, ingested at `<sha>^`, so removal verification compares against
 the true base. (An earlier single-shared-DB variant was discarded as mis-set-up:
 its base postdated the patches. Its numbers are not reported here.)
-Result: **4 PASS / 5 HUMAN_REVIEW / 1 INCONCLUSIVE / 0 FAIL**; verify 0.4–0.6 s
+Result: **4 PASS / 5 HUMAN_REVIEW / 1 INCONCLUSIVE / 0 FAIL** — the gate reached
+a verdict on **4 of 10** and declined on 6 (criterion: ≥ 3 decisive — clears,
+but the 6 declines are the finding, not the 4 verdicts). Verify 0.4–0.6 s
 per patch, ~5 s parent ingest each. Zero false rejections of merged upstream fixes.
 
 | Patch | Type | Verdict | Mechanism |
@@ -71,8 +73,11 @@ per patch, ~5 s parent ingest each. Zero false rejections of merged upstream fix
 
 H1/H5 shape confirmed end to end: the reasoner passes real fixes, removal
 verification works against a true parent, and saturated blast radius (H5)
-routes to a human rather than failing — HUMAN_REVIEW is the fail-closed
-behavior working as designed. The lone INCONCLUSIVE is the CLASS_2 pattern:
+routes to a human rather than failing — but HUMAN_REVIEW is an escalation,
+not a verdict. On 10 historical kernel patches the gate concluded on 4 and
+declined on 6, five of the six on blast saturation alone. That ratio is the
+Tier 4 finding: verdict capacity is narrow, escalation capacity is doing the
+work. The lone INCONCLUSIVE is the CLASS_2 pattern:
 a behavior-preserving-ish optimization the tool cannot establish without an
 execution witness. The `pick_eevdf`→`__pick_eevdf` rename passes against its
 parent; renames decline only when the base has moved underneath them.
@@ -110,7 +115,9 @@ precise — V1-worthy.
 - H1 extractor: MIXED — attributes fine, macro idiom degrades spans/edges, not counts.
 - H2 resolution: STRONGER THAN EXPECTED — stored cross-file CALLS = 0 at all tiers.
 - H3 scale: PASS with margin (109K LOC in 10 s, 36.7 MB vs 30 min / 500 MB budget).
-- H4 verification: PASS (4 PASS ≥ 3 decisive; 0 false FAILs on merged fixes).
+- H4 verification: PASS on count (4/10 decisive ≥ 3; 0 false FAILs), but the
+  substantive result is 6/10 declined — verdict capacity narrow, escalation
+  carrying the load.
 - H5 blast saturation: CONFIRMED (5/10 HUMAN_REVIEW via saturated blast).
 - Tier 1: 3/4 (fails only "no parse_errors on core.c"). Tier 2: FAIL (5.7% < 10%).
   Tier 3: no crash ✓, fails floor 9.6% < 10%. Tier 4: PASS.
@@ -123,8 +130,20 @@ resolves 5.7% — its cross-file graph is effectively single-file for verificati
 purposes, and Linux kernel networking is outside the tool's usable envelope for
 cross-file reasoning. **Cross-file call-graph claims are not supported at any
 tested tier** (no persisted cross-file CALLS; resolution is load-time only).
-The verification gate is decisive on small real patches (4 PASS, 0 false FAILs)
-iff the DB predates the patch; saturated blast radius routes to HUMAN_REVIEW
-rather than failing; renames and optimizations without witnesses decline.
+The verification gate is decisive on small real patches (4 verdicts in 10,
+0 false FAILs) iff the DB predates the patch; saturated blast radius routes to
+HUMAN_REVIEW rather than failing; renames and optimizations without witnesses
+decline.
+On C, `has_error` is not a parse-health signal. 194 of 195 ERROR nodes in
+`kernel/sched/core.c` are one macro-boilerplate idiom (storage-class/section
+macros, declaration macros, call-site macros, lock annotations,
+preprocessor-split declarations); the flag fires on essentially every real
+kernel file. Extraction accuracy is unaffected (19/20 recall on hand-checked
+functions in a file carrying a whole-file ERROR span). Treat `has_error` as
+raw debug data, not as a per-file health flag — the "76% of files with ERRORs"
+number above is not a defect. (A C-tolerant gating change —
+`has_error AND zero_entities` — exists as unmerged WIP on branch
+`wip/c-tolerant-parse-errors`, with tests; this report's numbers use the
+unmodified `9be1fb4` behavior.)
 Macro-invocation entities (~2.4% pollution, 204 phantom edges in Tier 1) are the
 largest known extraction defect and are filterable by node shape.
