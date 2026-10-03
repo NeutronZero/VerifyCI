@@ -143,7 +143,8 @@ functions in a file carrying a whole-file ERROR span). Treat `has_error` as
 raw debug data, not as a per-file health flag — the "76% of files with ERRORs"
 number above is not a defect. (A C-tolerant gating change —
 `has_error AND zero_entities` — exists as unmerged WIP on branch
-`wip/c-tolerant-parse-errors`, with tests; this report's numbers use the
+`wip/c-tolerant-parse-errors` (created 2026-10-03, based at `9be1fb4`),
+with tests; this report's numbers use the
 unmodified `9be1fb4` behavior.)
 Macro-invocation entities (~2.4% pollution, 204 phantom edges in Tier 1) are the
 largest known extraction defect and are filterable by node shape.
