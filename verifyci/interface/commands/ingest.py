@@ -54,6 +54,42 @@ def _collect(repo: Path) -> tuple[list[tuple[str, str, bytes]], list[tuple[str, 
     return sources, texts, manifest
 
 
+#: Languages where tree-sitter routinely produces ERROR nodes on valid,
+#: idiomatic source, so `has_error` alone says nothing about whether
+#: extraction succeeded. For these, a parse error is only reported when the
+#: imperfect parse also yielded no entities. Python is deliberately absent:
+#: its grammar does not emit whole-file ERROR spans on valid input, so there
+#: `has_error` remains a trustworthy standalone signal.
+_C_TOLERANT_LANGUAGES = frozenset({"c", "cpp"})
+
+
+def _degraded_parse(language: str, has_error: bool, entities: list) -> bool:
+    """True when a file should count as a parse error.
+
+    C/C++: only `has_error AND no code entity extracted`. kernel/sched/core.c
+    has 263 error nodes and still extracts 426 functions, so reporting the
+    former as a failure made a healthy file look broken.
+    Everything else: `has_error` alone, unchanged from before.
+
+    The bar is "no code entity", not "no entity": extract_entities always
+    emits a MODULE row to ground the file, so `not entities` is unreachable
+    and would silently disable the gate entirely. MODULE-only is exactly
+    the degenerate shape the tree-is-None fallback produces.
+    """
+    if not has_error:
+        return False
+    if language in _C_TOLERANT_LANGUAGES:
+        return not any(_is_code_entity(e) for e in entities)
+    return True
+
+
+def _is_code_entity(entity) -> bool:
+    t = getattr(entity, "type", None)
+    if t is None:
+        return True
+    return str(getattr(t, "value", t)) != "MODULE"
+
+
 def _meta_rev(meta, repo, rel):
     record = meta.get_file(str(repo / rel))
     return record[4] if record else ""
@@ -236,6 +272,7 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
                   "skipped_dirs": skipped_dir_names(repo),
                   "closed_entities": 0, "closed_edges": 0,
                   "parse_errors": [], "manifest_errors": [],
+                  "partial_parses": [], "zero_entity_files": 0,
                   "revision_id": revision.revision_id,
                   "parent_revision_id": prev_revision_id,
                   "db_path": db_path}
@@ -252,12 +289,20 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
                 from verifyci.ingestion.parser import ParsedFile
                 parsed = ParsedFile(file_path=rel, source=source, source_hash=digest,
                                     language=language, tree=None)
-            if parsed.tree is not None and getattr(
-                    parsed.tree.root_node, "has_error", False):
-                # A file that parses with ERROR nodes yields a partial,
-                # possibly misleading graph. Record it; the MODULE-only
-                # fallback still grounds the file.
-                totals["parse_errors"].append(rel)
+            has_error = (parsed.tree is not None
+                         and getattr(parsed.tree.root_node, "has_error", False))
+            if has_error:
+                # Raw signal, kept as data: tree-sitter produced ERROR or
+                # MISSING nodes somewhere in this file. On C this fires on
+                # almost every real file — kernel/sched/core.c carries 263
+                # error nodes (one spanning the entire file) and still
+                # extracts 426 functions at 100% recall on hand-checked
+                # definitions. Reporting it as a parse error made a healthy
+                # file look broken. For C/C++ only, defer the judgement to
+                # `entities_extracted` below; Python's grammar does not
+                # produce whole-file ERROR spans on valid input, so its
+                # has_error remains a usable signal.
+                totals["partial_parses"].append(rel)
             try:
                 entities = extract_entities(parsed, repo.name, revision.revision_id)
                 edges = extract_edges(parsed, entities, revision.revision_id)
@@ -269,10 +314,23 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
                 from verifyci.ingestion.parser import ParsedFile as _ParsedFile
                 if rel not in totals["parse_errors"]:
                     totals["parse_errors"].append(rel)
+                    totals["zero_entity_files"] += 1
                 parsed = _ParsedFile(file_path=rel, source=source, source_hash=digest,
                                      language=language, tree=None)
                 entities = extract_entities(parsed, repo.name, revision.revision_id)
                 edges = []
+            if _degraded_parse(language, has_error, entities):
+                # has_error AND nothing to show for it. Either way the file
+                # contributed no graph, so it belongs in parse_errors —
+                # the count an operator can act on.
+                totals["parse_errors"].append(rel)
+                if not any(_is_code_entity(e) for e in entities):
+                    totals["zero_entity_files"] += 1
+            elif has_error:
+                # Parsed imperfectly but still yielded entities. For C this
+                # is the overwhelmingly common case and is healthy; the
+                # file is listed under partial_parses, not parse_errors.
+                pass
             for e in entities:
                 store.insert_entity(e)
             for edge in edges:

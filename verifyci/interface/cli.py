@@ -55,6 +55,16 @@ def ingest(path: str, incremental: bool = False,
     n_parse = len(totals.get("parse_errors") or [])
     if n_parse:
         typer.echo(f"Parse errors: {n_parse} ({', '.join(totals['parse_errors'])})")
+    partial = totals.get("partial_parses") or []
+    n_partial = len(partial)
+    if n_partial:
+        # Raw tree-sitter diagnostics, reported separately because they no
+        # longer imply failure: on C most files carry ERROR nodes and still
+        # extract fine. The distribution is the actionable number.
+        zero = totals.get("zero_entity_files", 0)
+        typer.echo(f"Partial parses (tree-sitter ERROR nodes, extraction "
+                   f"succeeded): {n_partial}, of which {zero} yielded no "
+                   f"code entities")
     n_manifest = len(totals.get("manifest_errors") or [])
     if n_manifest:
         # A manifest that failed to parse yielded no dependency edges:
