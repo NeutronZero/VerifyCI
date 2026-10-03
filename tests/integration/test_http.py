@@ -18,6 +18,20 @@ def test_search_rejects_huge_k(monkeypatch):
     assert r.status_code == 422
 
 
+def test_search_rejects_nonpositive_k(monkeypatch):
+    # Negative/zero k slices from the end or empties results downstream;
+    # the boundary rejects it with 422 before any retrieval runs.
+    monkeypatch.setenv('ACI_API_TOKEN', 's3cret')
+    c = _client()
+    for bad in ("0", "-1"):
+        r = c.get('/search', params={'q': 'x', 'k': bad},
+                  headers={'Authorization': 'Bearer s3cret'})
+        assert r.status_code == 422, bad
+    r = c.get('/search', params={'q': 'x', 'k': '1'},
+              headers={'Authorization': 'Bearer s3cret'})
+    assert r.status_code != 422
+
+
 def test_verify_rejects_oversize_diff(monkeypatch):
     monkeypatch.setenv('ACI_API_TOKEN', 's3cret')
     r = _client().post('/verify/diff', json={'diff': 'x' * (MAX_DIFF_CHARS + 1)}, headers={'Authorization': 'Bearer s3cret'})
@@ -86,6 +100,32 @@ def test_revise_command_is_gone():
     runner = CliRunner()
     assert "revise" not in runner.invoke(app, ["--help"]).output
     assert runner.invoke(app, ["revise", "--commit", "abc"]).exit_code != 0
+
+
+def test_search_accepts_db_param(monkeypatch):
+    # /search used to ignore the repo DB entirely (always the default);
+    # a missing explicit DB must surface db_not_found, not default hits.
+    monkeypatch.setenv('ACI_API_TOKEN', 's3cret')
+    r = _client().get('/search', params={'q': 'x', 'db': '/nonexistent/ghost.db'},
+                      headers={'Authorization': 'Bearer s3cret'})
+    assert r.status_code == 200
+    assert r.json()["error"] == "db_not_found"
+
+
+def test_task_run_forwards_diff_and_db(monkeypatch):
+    # /task/run used to drop diff/db on the floor (bare run_task(task)).
+    # A task with a secret diff must FAIL the gate, proving the diff
+    # reached verification; an unreadable DB must report INFRA_ERROR.
+    monkeypatch.setenv('ACI_API_TOKEN', 's3cret')
+    c = _client()
+    secret_diff = ('diff --git a/s.py b/s.py\n--- a/s.py\n+++ b/s.py\n'
+                   '@@ -1,0 +1,1 @@\n+password = "hunter2hunter2"\n')
+    r = c.post('/task/run', json={'task': 't', 'diff': secret_diff, 'db': '/nonexistent/ghost.db'},
+               headers={'Authorization': 'Bearer s3cret'})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "INFRA_ERROR", body
+    assert body["error"] == "db_not_found", body
 
 
 def test_verify_diff_cli_exit_codes(tmp_path):

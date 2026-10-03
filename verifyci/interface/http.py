@@ -71,6 +71,8 @@ class VerifyRequest(BaseModel):
 
 class TaskRequest(BaseModel):
     task: str = Field(max_length=MAX_TASK_CHARS)
+    diff: str = Field(default="", max_length=MAX_DIFF_CHARS)
+    db: str = ""
 
 
 @app.get("/health")
@@ -84,9 +86,9 @@ def stats(db: str = "", _auth: None = Depends(require_auth)):
 
 
 @app.get("/search")
-def search(q: str, k: int = Query(default=10, le=MAX_K),
+def search(q: str, k: int = Query(default=10, ge=1, le=MAX_K), db: str = "",
            _auth: None = Depends(require_auth)):
-    return run_query(q, None, k=k)
+    return run_query(q, db or None, k=k)
 
 
 @app.post("/verify/diff")
@@ -97,4 +99,4 @@ def verify(req: VerifyRequest, _auth: None = Depends(require_auth)):
 @app.post("/task/run")
 def task_run(req: TaskRequest, _auth: None = Depends(require_auth)):
     from verifyci.interface.commands.run import run_task
-    return run_task(req.task)
+    return run_task(req.task, diff=req.diff, db_path=req.db or None)

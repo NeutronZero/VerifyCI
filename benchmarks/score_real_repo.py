@@ -14,7 +14,6 @@ from verifyci.contracts.entity import EntityType
 from verifyci.ingestion.extractor import extract_entities
 from verifyci.ingestion.parser import TreeSitterParser
 
-TARGET = Path(r"C:\Users\satya\AppData\Local\Temp\opencode\graphrag-target")
 F = EntityType.FUNCTION
 M = EntityType.METHOD
 C = EntityType.CLASS
@@ -107,11 +106,11 @@ SCORED = {EntityType.FUNCTION, EntityType.METHOD, EntityType.CLASS}
 def run_benchmark():
     import os
     target_str = os.environ.get("VERIFYCI_GRAPHRAG_TARGET")
-    target = Path(target_str) if target_str else TARGET
+    if not target_str:
+        sys.exit("VERIFYCI_GRAPHRAG_TARGET environment variable is required to run this benchmark.")
+    target = Path(target_str)
     if not target.exists() or not any((target / rel).exists() for rel in GROUND_TRUTH):
-        print(f"Benchmark skipped: TARGET directory {target} does not exist.")
-        print("Set VERIFYCI_GRAPHRAG_TARGET environment variable to point to target repo.")
-        return 0.0, 0.0
+        sys.exit(f"Benchmark target directory {target} does not exist or missing files.")
     parser = TreeSitterParser()
     tp = fp = fn = 0
     for rel, truth in GROUND_TRUTH.items():

@@ -10,16 +10,24 @@ class MetadataStore:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
             conn = sqlite3.connect(db_path)
         self.conn = conn
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS file_metadata (
-                file_path TEXT PRIMARY KEY,
-                source_hash TEXT NOT NULL,
-                language TEXT,
-                last_ingested REAL,
-                revision_id TEXT
-            )
-        """)
-        self.conn.commit()
+        try:
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS file_metadata (
+                    file_path TEXT PRIMARY KEY,
+                    source_hash TEXT NOT NULL,
+                    language TEXT,
+                    last_ingested REAL,
+                    revision_id TEXT
+                )
+            """)
+            self.conn.commit()
+        except BaseException:
+            # Same half-open guarantee as GraphStore/open_for_read: a
+            # failed schema setup must not leak an owned connection the
+            # caller never receives.
+            if self._owns_conn:
+                self.conn.close()
+            raise
 
     def upsert_file(self, file_path: str, source_hash: str, language: str, revision_id: str):
         # The ingest caller runs inside GraphStore.batch() with a shared

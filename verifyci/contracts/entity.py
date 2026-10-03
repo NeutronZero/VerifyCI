@@ -20,6 +20,33 @@ class GraphType(Enum):
 
 
 @dataclass(frozen=True)
+class EntitySnippetRecord:
+    lines: tuple[str, ...]
+    is_complete: bool  # True ONLY if snippet encompasses 100% of entity span
+    truncated_at_line: Optional[int]  # 1-based line where truncation occurred, if any
+    char_count: int
+    encoding: str = "utf-8"
+
+    def __init__(
+        self,
+        lines: tuple[str, ...] | list[str],
+        is_complete: bool,
+        truncated_at_line: Optional[int],
+        char_count: int,
+        encoding: str = "utf-8",
+    ):
+        object.__setattr__(self, "lines", tuple(lines))
+        object.__setattr__(self, "is_complete", is_complete)
+        object.__setattr__(self, "truncated_at_line", truncated_at_line)
+        object.__setattr__(self, "char_count", char_count)
+        object.__setattr__(self, "encoding", encoding)
+
+    @property
+    def text(self) -> str:
+        return "\n".join(self.lines)
+
+
+@dataclass(frozen=True)
 class Entity:
     """
     Temporal fields:

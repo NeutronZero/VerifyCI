@@ -62,9 +62,11 @@ class Executor:
 
             graph = _get(context, "graph", None)
             node_config = _get(node, "config", {}) or {}
+            # NOTE: result carries no diff (freshly constructed above) —
+            # the verified content comes from the node config, then the
+            # shared task context. Do not re-add a result-diff lookup.
             diff = (
-                _get(result, "diff", None)
-                or (node_config.get("diff") if isinstance(node_config, dict) else _get(node_config, "diff", None))
+                (node_config.get("diff") if isinstance(node_config, dict) else _get(node_config, "diff", None))
                 or _get(context, "diff", "")
                 or ""
             )
@@ -82,7 +84,8 @@ class Executor:
 
             reasoner = SemiFormalReasoner()
             cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map,
-                                   entities=graph_entities or None)
+                                   entities=graph_entities or None,
+                                   waivers=list(_get(context, "waivers", []) or []))
 
             checks = [build_semi_check(
                 cert, parse_diff_files(diff), graph_entities, diff=diff)]

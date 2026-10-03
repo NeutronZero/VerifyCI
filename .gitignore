@@ -11,3 +11,4 @@ benchmarks/beir/__pycache__/
 .ruff_cache/
 .coverage
 *.tmp
+opencode.json

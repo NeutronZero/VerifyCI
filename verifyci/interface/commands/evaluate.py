@@ -1,3 +1,14 @@
+"""Smoke self-check command (NOT the evaluation protocol).
+
+`run_evaluate` exercises a synthetic ledger, a toy replay, and empty
+invariants so operators can confirm the machinery loads and links.
+It measures NOTHING about verification quality: retrieval gates,
+patch equivalence, blast coverage, invariant recall, and latency are
+established exclusively by the frozen corpora under benchmarks/ plus
+their opt-in re-measure guards
+(VERIFYCI_PATCH_RERUN / VERIFYCI_BLAST_RERUN / VERIFYCI_LATENCY_RERUN).
+A green `verifyci evaluate` must never be cited as gate evidence.
+"""
 from verifyci.memory.ledger import EventLedger
 from verifyci.memory.replay import ReplayEngine
 from verifyci.verification.intent_align import evaluate_invariants

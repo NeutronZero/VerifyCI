@@ -24,7 +24,7 @@ class ReplayEngine:
 
         anchor = self._anchors.get(from_revision)
         if anchor is None:
-            nearest = self.get_nearest_anchor(from_revision)
+            nearest = self.get_latest_anchor(from_revision)
             anchor = nearest
         if anchor is None:
             return ProjectionState(
@@ -57,7 +57,12 @@ class ReplayEngine:
             timestamp=time.time(),
         )
 
-    def get_nearest_anchor(self, revision_id: str):
+    def get_latest_anchor(self, revision_id: str):
+        """Latest stored anchor (insertion order), used when no anchor
+        exists for the requested revision. Named for what it is: this is
+        recency, not revision proximity — replay then walks forward from
+        whatever the anchor actually holds (see `current` reassignment).
+        """
         if revision_id in self._anchors:
             return self._anchors[revision_id]
         anchors = list(self._anchors.values())

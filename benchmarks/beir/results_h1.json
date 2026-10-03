@@ -1,0 +1,85 @@
+{
+  "campaign": "H1-B/C/D single measurement pass",
+  "frozen_reference": "v1.0.2-correctness",
+  "frozen_hashes_reverified": true,
+  "model": "nomic-embed-text",
+  "rrf_k": 60,
+  "production_rrf": true,
+  "scratch_cache": "embedding_cache_h1_nomic_embed_text.json",
+  "frozen_cache_untouched": true,
+  "queries": 62,
+  "variants": {
+    "control": {
+      "dense": {
+        "ndcg": 0.6219642456212527,
+        "recall": 0.6465053763440861
+      },
+      "hybrid": {
+        "ndcg": 0.6603443467936309,
+        "recall": 0.6706989247311829
+      },
+      "delta_ndcg": 0.03838010117237811,
+      "vs_baseline": {
+        "hybrid_recall": 0.0,
+        "hybrid_ndcg": 0.0,
+        "delta_ndcg": 0.0,
+        "dense_recall": 0.0,
+        "dense_ndcg": 0.0
+      }
+    },
+    "b": {
+      "dense": {
+        "ndcg": 0.6750496701375662,
+        "recall": 0.6639784946236559
+      },
+      "hybrid": {
+        "ndcg": 0.6726829321424976,
+        "recall": 0.6639784946236559
+      },
+      "delta_ndcg": -0.0023667379950685907,
+      "vs_baseline": {
+        "hybrid_recall": -0.006720430107526987,
+        "hybrid_ndcg": 0.012338585348866782,
+        "delta_ndcg": -0.0407468391674467,
+        "dense_recall": 0.017473118279569766,
+        "dense_ndcg": 0.053085424516313484
+      }
+    },
+    "c": {
+      "dense": {
+        "ndcg": 0.6968721623570399,
+        "recall": 0.6935483870967742
+      },
+      "hybrid": {
+        "ndcg": 0.6966480826629529,
+        "recall": 0.6908602150537635
+      },
+      "delta_ndcg": -0.00022407969408699824,
+      "vs_baseline": {
+        "hybrid_recall": 0.020161290322580627,
+        "hybrid_ndcg": 0.03630373586932201,
+        "delta_ndcg": -0.03860418086646511,
+        "dense_recall": 0.04704301075268813,
+        "dense_ndcg": 0.07490791673578712
+      }
+    },
+    "d": {
+      "dense": {
+        "ndcg": 0.7240391006592948,
+        "recall": 0.6922043010752688
+      },
+      "hybrid": {
+        "ndcg": 0.6926030835879453,
+        "recall": 0.6827956989247312
+      },
+      "delta_ndcg": -0.031436017071349465,
+      "vs_baseline": {
+        "hybrid_recall": 0.012096774193548376,
+        "hybrid_ndcg": 0.03225873679431446,
+        "delta_ndcg": -0.06981611824372758,
+        "dense_recall": 0.045698924731182644,
+        "dense_ndcg": 0.10207485503804203
+      }
+    }
+  }
+}

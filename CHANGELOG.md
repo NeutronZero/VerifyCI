@@ -1,5 +1,89 @@
 # Changelog
 
+## Unreleased — ingest recursion guard; naming and doc corrections
+
+- **Pathological nesting no longer aborts ingest.** 2000-deep nesting
+  exhausts the recursive extractor (tree-sitter caps with ERROR nodes,
+  then extraction blows the Python stack), killing the whole run. One
+  hostile file is now recorded in `parse_errors` and falls back to
+  MODULE-only, same as the unparseable shape. Pinned failing-first with
+  real deep input.
+- **Corrections.** `get_nearest_anchor` renamed `get_latest_anchor`
+  (`ReplayEngine`) / `get_anchor` (`SnapshotStore`, exact lookup) —
+  recency was never proximity. OTel agent version `"1.0.0"` corrected
+  to the package `"0.1.0"`. `language.py` comment, PLAN identity
+  snippet (5-part scope form), and PLAN graph/codeintel trees updated
+  to the as-built state. `INGESTION_CONFIG_HASH` documents its
+  single-config invariant. Splat params (`*args`) pinned as a known
+  extractor gap (PARAMETER rows gate nothing; extractor.py is
+  frozen-pinned — a repair needs the dated-exception process).
+
+- **Certificate rejections now FAIL at policy.** `_is_inability` treated
+  any unverified certificate as inability, so every code-path rejection
+  (guard removal, fabricated deletion, invalid config) collapsed to
+  INCONCLUSIVE — the `_derive_conclusion` fail branches were
+  verdict-dead. A failed check on established content with conclusion
+  "fail" is now a real rejection; inconclusive conclusions and
+  unestablished checks still decline. Grounding vetoes untouched
+  (suffix/opaque/uncovered still INCONCLUSIVE). Frozen corpus guards
+  re-measured green: verdicts on all frozen cases bit-identical except
+  the newly-correct rejections.
+- **Waivers honored on scheduler paths.** `run`, MCP `task.run`, and the
+  executor dropped `waivers.yaml`; only verify paths saw it. Waivers now
+  flow run context → scheduler node context → reasoner. Pinned by
+  verify/run parity tests (unwaived class-3 FAILs both paths, waived
+  PASSes both, invalid config FAILs, ungrounded still declines,
+  malformed waivers fail closed).
+- **Small items.** `evaluate` command documented as smoke, not the
+  frozen evaluation protocol; `MetadataStore` construction closes owned
+  connections on schema failure (same half-open class); executor drops
+  a dead result-diff lookup. `EventLedger.append(type=)` intentionally
+  unchanged (mirrors the frozen `Event` field; builtin never invoked).
+
+- **Certificate contract documents the fast paths.** The `Certificate`
+  docstring still required non-empty traces + evidence for
+  `certificate_verified`, but partition fast paths (docs / valid config /
+  test-only) verify with both empty by construction. Docstring now states
+  the CODE_CORE vs fast-path conditions; README grounding rules and suite
+  counts updated to match (760 collected on this branch; end-to-end
+  non-code verdicts remain HUMAN_REVIEW, exit 2). No behavior changed.
+- **Headerless INI fragments decline instead of rejecting.**
+  `_validate_configuration_diff` parsed hunk new-side lines as standalone
+  documents, so a valid one-line addition under a distant `[section]`
+  failed as `configuration_schema_invalid`. Fragments with no section
+  header in-hunk now read `inconclusive` (`headerless_ini_fragment`,
+  same skip in `_derive_conclusion` as multi-hunk JSON); a header in-hunk
+  keeps fail-closed rejection. Pinned by 3 tests.
+- **HTTP surface parity.** `GET /search` accepts `db`; `POST /task/run`
+  accepts `diff`/`db` and forwards them to `run_task` (both were silently
+  dropped). Pinned by 2 failing-first tests.
+- **Coverage.** New `test_blast_impact` (retrieval impact helpers
+  56%→100%), `test_fastmcp_transport` (transport 67%→98%, caps +
+  honest-error passthroughs), `test_deletion_units` (deletion 83%→99%;
+  guard/waiver/signature/witness units), `test_scheduler_edges`
+  (scheduler 83%→100%), `test_intent_align_units` (intent_align
+  83%→99%), `test_semi_formal_units` (semi_formal 84%→100%).
+  Remaining misses are proven-unreachable defensive branches, each
+  marked with a NOTE (triple-quote `elif`s after the `bare>=3` gate;
+  no-overlap deletion verdict; empty AST body). Suite 873 passed /
+  0 skipped with all three rerun guards (870 passed / 3 skipped
+  default), total coverage 94%, ruff clean, zero warnings; new files
+  ruff-format clean (repo-wide format stays unenforced, pre-existing
+  files untouched).
+- **Scheduler `_emit` shadowed `type`.** The parameter name hid the
+  builtin inside all three except handlers, so any emit failure raised
+  uncaught `TypeError` instead of recording `emit_error`. Renamed to
+  `event_type`; pinned by 2 failing-first tests.
+- **No leaked connections, no warnings.** `GraphStore.__init__` and
+  `open_for_read` closed their connection before raising on
+  locked/corrupt stores (each leaked one sqlite connection per failed
+  probe, warning at GC); two tests built raw DBs with a non-closing
+  `with sqlite3.connect(...)` context and now close explicitly. Pinned
+  by 2 failing-first tests (recorded warnings + forced collection).
+  Typer's import-time click deprecations filtered narrowly in
+  `pyproject.toml` (third-party, unfixable in-repo). Suite runs with
+  **zero warnings** (was 11: 9 ResourceWarning + 2 DeprecationWarning).
+
 ## [v1.0.2-correctness] - 2026-10-01 — Post-review correctness hardening & empirical remeasurement (4cec781)
 
 Complete correctness release endpoint (incorporates 7343c6d and 4cec781).

@@ -41,15 +41,24 @@ RECORDED = {
     },
 }
 
-# Re-measurement after the diffmap A2 insertion-anchor repair (correctness
-# campaign). The single verdict change is C3-send-notify PASS ->
-# HUMAN_REVIEW (blast now seeds the tail insertion, so exposure reaches the
-# reviewer as its expected outcome). Effect: patch_equivalence 0.875 -> 1.0,
-# correct_all confusion accepted 6 -> declined 3-side; precision, deterministic
-# catch, semantic false-accept, and false-reject lists all unchanged.
+# Re-measurement after diffmap A2 repair and documentation fast-path.
+# C3-send-notify PASS -> HUMAN_REVIEW (blast exposure).
+# C6-readme-doc INCONCLUSIVE -> HUMAN_REVIEW (docs fast path passes, but
+# non-blocking provenance check on empty evidence yields HUMAN_REVIEW).
+# Net patch_equivalence is 7/8 = 0.875; precision, deterministic catch,
+# semantic false-accept, and false-reject lists all unchanged.
 # results.json keeps the historical first measurement untouched.
+#
+# DECISION (2026-10-02, review): docs-only diffs are intentionally
+# verify-on-ungrounded here because docs aren't code — no CPG entity can
+# ever ground a README change, so demanding grounding would make every
+# docs edit INCONCLUSIVE forever without conveying information. The
+# containment is `on_human_review=block`: the certificate-level pass
+# never becomes a gate PASS; a human must still look. If that
+# containment ever weakens (warn policy, direct certificate consumers),
+# this decision must be revisited — silent acceptance is not permitted.
 POSTFIX = {
-    "patch_equivalence": 1.0,
+    "patch_equivalence": 0.875,
     "verification_precision": 1.0,
     "deterministic_catch_rate": 1.0,
     "semantic_false_accept_rate": 1.0,
@@ -142,3 +151,22 @@ def test_results_hash_pinned():
     sha = hashlib.sha256(data).hexdigest()
     assert _results()["frozen"]["cases_sha256"] == sha[:16], \
         "frozen corpus changed without re-measuring"
+
+
+def test_c6_readme_doc_routes_to_human_review():
+    """Documents fast-path routing: docs-only diff passes semi-formal reasoning,
+    but empty evidence fails non-blocking provenance check -> HUMAN_REVIEW."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("patch_measure", CORPUS / "measure.py")
+    measure = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(measure)
+    work, db = measure._ingest_base()
+    try:
+        from verifyci.interface.commands.verify import run_verify
+        c6 = [c for c in measure.load_cases() if c["id"] == "C6-readme-doc"][0]
+        r = run_verify(c6["diff"], db_path=db)
+        assert r["status"] == "HUMAN_REVIEW"
+        assert r["rationale"] == "non_blocking_failures"
+    finally:
+        import shutil
+        shutil.rmtree(work.parent, ignore_errors=True)

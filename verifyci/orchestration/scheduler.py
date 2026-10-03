@@ -347,6 +347,7 @@ class AsyncDAGScheduler(Scheduler):
             changed_entities=config.get("changed_entities", shared.get("changed_entities", [])),
             test_entities=shared.get("test_entities", []),
             invariants=config.get("invariants", shared.get("invariants", [])),
+            waivers=config.get("waivers", shared.get("waivers", [])),
             vuln_cache=shared.get("vuln_cache"),
             dependency_graph=shared.get("dependency_graph"),
         )
@@ -412,11 +413,15 @@ class AsyncDAGScheduler(Scheduler):
             task["persist_error"] = f"{type(e).__name__}: {e}"
             traceback.print_exc()
 
-    def _emit(self, type: str, task_id: str, conversation_id: str, payload: dict) -> None:
+    def _emit(self, event_type: str, task_id: str, conversation_id: str, payload: dict) -> None:
         # Append to the task's own ledger; mirror into the shared
         # ledger when one was provided. The mirror receives the same
         # Event objects (never re-created), so ids and hashes match for
         # operators and back-compat readers.
+        # NOTE: the first parameter is deliberately NOT named `type`:
+        # it would shadow the builtin inside the except handlers below,
+        # turning every emit failure into an uncaught TypeError instead
+        # of a recorded emit_error.
         task = self._tasks.get(task_id)
         ledger = task.get("ledger") if task is not None else None
         if ledger is None:
@@ -425,7 +430,7 @@ class AsyncDAGScheduler(Scheduler):
                 return
         try:
             event = ledger.append(
-                type=type, payload={"task_id": task_id, **payload},
+                type=event_type, payload={"task_id": task_id, **payload},
                 provenance={"source": "scheduler"},
                 task_id=task_id, conversation_id=conversation_id,
             )

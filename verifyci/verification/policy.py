@@ -105,13 +105,25 @@ class PolicyEvaluator:
 
 
 def _is_inability(check) -> bool:
-    """Inability (route to INCONCLUSIVE), as opposed to rejection (FAIL):
-    an unverified certificate (ungroundable diff), or a check that ran
-    against nothing (established=False, e.g. zero relevant edges)."""
+    """Inability (route to INCONCLUSIVE), as opposed to rejection (FAIL).
+
+    A failed check that ran against established content and concluded
+    rejection (certificate conclusion "fail") is a real rejection:
+    `certificate_verified` requires every check to pass, so a
+    rejecting certificate is unverified by construction — reading that
+    as inability collapsed every code-path rejection (guard removal,
+    fabricated deletion, invalid config) into INCONCLUSIVE. Only an
+    inconclusive conclusion (nothing grounded) or an unestablished
+    check (ran against nothing) declines to INCONCLUSIVE.
+    """
     cert = getattr(check, "certificate", None)
-    if cert is not None and not getattr(cert, "certificate_verified", False):
-        return True
-    return not getattr(check, "established", True)
+    if cert is None:
+        return not getattr(check, "established", True)
+    if getattr(cert, "certificate_verified", False):
+        return False
+    if getattr(getattr(cert, "conclusion", None), "result", "") == "fail":
+        return not getattr(check, "established", True)
+    return True
 
 
 def _executed_deterministic(report: VerificationReport) -> bool:

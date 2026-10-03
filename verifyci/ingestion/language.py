@@ -17,8 +17,12 @@ LANGUAGE_BY_EXT = {
 }
 
 #: Extensions the ingester parses. Single source of truth shared by ingest
-#: collection and verification grounding (a changed file outside this set
-#: is legitimately ungroundable and must not veto a diff).
+#: collection and benchmark collection. NOTE: this set does NOT decide
+#: verification grounding anymore — since the C2 fail-closed repair, every
+#: named-but-ungrounded file vetoes a PASS regardless of extension (a clean
+#: `.py` hunk does not launder `Dockerfile`/CI/`.env` content). An extension
+#: missing here means "no entities extracted" (ungrounded → INCONCLUSIVE),
+#: never "exempt from the gate".
 INGESTIBLE_EXTENSIONS = frozenset(LANGUAGE_BY_EXT)
 
 

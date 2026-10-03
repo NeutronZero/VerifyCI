@@ -19,12 +19,50 @@ cannot mismatch). Three outcomes per removed line:
   hunk at all. Absence of record is not contradiction: unverified routes
   to inability (established=False -> INCONCLUSIVE), never FAIL.
 """
+import unicodedata
+
+from verifyci.contracts.entity import EntitySnippetRecord
 from verifyci.contracts.verification_ir import CheckResult
 from verifyci.verification.diffmap import (
     iter_hunks,
     normalize_path,
     unattributed_removed_lines,
 )
+
+
+def _normalize_line(text: str) -> str:
+    return unicodedata.normalize("NFC", text)
+
+
+def _repair_mojibake(text: str) -> str | None:
+    """Attempt cp1252 -> utf-8 repair.
+
+    Residual risk:
+    Accepts decode(cp1252) -> encode(utf-8) in either direction in `_lines_match`.
+    If a removed diff line L1 happens to be a cp1252-misdecoded form of a distinct
+    line L2 in the snippet record, the two lines will match. This heuristic tolerates
+    Windows/PowerShell console encoding corruptions, but creates a rare residual risk
+    of false-verified removal provenance if distinct lines coincide under mojibake
+    inversion.
+    """
+    try:
+        return text.encode("cp1252").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return None
+
+
+def _lines_match(line_a: str, line_b: str) -> bool:
+    norm_a = _normalize_line(line_a)
+    norm_b = _normalize_line(line_b)
+    if norm_a == norm_b:
+        return True
+    rep_a = _repair_mojibake(norm_a)
+    if rep_a is not None and _normalize_line(rep_a) == norm_b:
+        return True
+    rep_b = _repair_mojibake(norm_b)
+    if rep_b is not None and _normalize_line(rep_b) == norm_a:
+        return True
+    return False
 
 
 def _is_code(entity) -> bool:
@@ -34,13 +72,61 @@ def _is_code(entity) -> bool:
     return str(getattr(t, "value", t)) != "MODULE"
 
 
-def _snippet_lines(entity) -> list[str] | None:
+def _snippet_record(entity) -> EntitySnippetRecord | None:
     from verifyci.ingestion.extractor import _split_source_lines
+
     meta = getattr(entity, "metadata", None) or {}
     snippet = meta.get("snippet")
     if not snippet:
         return None
-    return _split_source_lines(str(snippet).encode("utf-8", errors="replace"))
+
+    raw_lines = _split_source_lines(str(snippet).encode("utf-8", errors="replace"))
+    start = getattr(entity, "line_start", 1) or 1
+    end = getattr(entity, "line_end", start) or start
+    span = end - start + 1
+
+    if "snippet_is_complete" in meta:
+        is_complete = bool(meta["snippet_is_complete"])
+        truncated_at_line = meta.get("snippet_truncated_at_line")
+        return EntitySnippetRecord(
+            lines=raw_lines,
+            is_complete=is_complete,
+            truncated_at_line=truncated_at_line,
+            char_count=len(snippet),
+            encoding="utf-8",
+        )
+
+    # Legacy fallback for entities without explicit completeness metadata:
+    if len(raw_lines) < span:
+        return EntitySnippetRecord(
+            lines=raw_lines,
+            is_complete=False,
+            truncated_at_line=start + len(raw_lines),
+            char_count=len(snippet),
+            encoding="utf-8",
+        )
+
+    if len(str(snippet)) >= 2000:
+        return EntitySnippetRecord(
+            lines=raw_lines,
+            is_complete=False,
+            truncated_at_line=end,
+            char_count=len(snippet),
+            encoding="utf-8",
+        )
+
+    return EntitySnippetRecord(
+        lines=raw_lines,
+        is_complete=True,
+        truncated_at_line=None,
+        char_count=len(snippet),
+        encoding="utf-8",
+    )
+
+
+def _snippet_lines(entity) -> list[str] | None:
+    rec = _snippet_record(entity)
+    return rec.lines if rec else None
 
 
 def removal_provenance_check(diff: str | None, entities: list) -> CheckResult:
@@ -145,7 +231,15 @@ def removal_provenance_check(diff: str | None, entities: list) -> CheckResult:
 
 def _classify_removed(file: str | None, old_ln: int, content: str,
                        candidates: list) -> str:
-    """One removed line: verified / fabricated / unverified."""
+    """One removed line: verified / fabricated / unverified.
+
+    According to Contract 3:
+    - verified: inside a code entity whose stored snippet covers the line,
+      content equal at that offset (with NFC normalization and mojibake resilience).
+    - fabricated: inside an entity with is_complete == True, content differs.
+    - unverified: outside all entities, inside a truncated snippet at or beyond
+      truncation, or in incomplete/missing entities.
+    """
     if not file:
         return "unverified"
     complete_hits = 0
@@ -154,15 +248,19 @@ def _classify_removed(file: str | None, old_ln: int, content: str,
         end = getattr(entity, "line_end", start) or start
         if not (start <= old_ln <= end):
             continue
-        lines = _snippet_lines(entity)
-        if not lines:
+        rec = _snippet_record(entity)
+        if not rec:
             continue
-        span = end - start + 1
-        if len(lines) < span:
-            continue
-        complete_hits += 1
-        if 0 <= old_ln - start < len(lines) and lines[old_ln - start] == content:
+
+        offset = old_ln - start
+        if 0 <= offset < len(rec.lines) and _lines_match(rec.lines[offset], content):
             return "verified"
+
+        # Check if this entity's snippet is complete:
+        # If is_complete is False, it cannot claim fabrication.
+        if rec.is_complete:
+            complete_hits += 1
+
     if complete_hits:
         return "fabricated"
     return "unverified"

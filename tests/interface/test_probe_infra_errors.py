@@ -168,6 +168,63 @@ def test_verify_unknown_revision_is_infra_error(tmp_path):
     assert r["error"] == "revision_not_found"
 
 
+# --------------------------------------- no leaked connections on failure ---
+
+def _assert_no_resource_warnings(fn):
+    """Run fn (which must raise) and assert finalization is silent.
+
+    The failed call's traceback keeps the frame — and any leaked
+    connection — alive, so catch without `as`, drop all refs, then
+    force collection inside the recording block. (Trap for future leak
+    tests: `pytest.raises` holds the exception the same way, so a
+    warnings-as-errors check inside it never fires — the leak is
+    invisible until the last reference is dropped, and the test
+    harness is often the thing holding it.)
+    """
+    import gc
+    import warnings
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always", ResourceWarning)
+        try:
+            fn()
+        except Exception:
+            pass
+        gc.collect()
+    stragglers = [w for w in rec if issubclass(w.category, ResourceWarning)]
+    assert stragglers == [], [str(w.message) for w in stragglers]
+
+
+def test_probe_failure_leaves_no_open_connection(tmp_path):
+    # open_for_read must close the connection it probed with even when
+    # the probe query itself fails: locked/corrupt stores used to leak
+    # one sqlite connection per call, surfacing as ResourceWarning at GC.
+    import pytest
+    from verifyci.interface.commands import InfraError, open_for_read
+    db = str(tmp_path / "corrupt.db")
+    with open(db, "wb") as fh:
+        fh.write(b"x" * 4096)
+    with pytest.raises(InfraError):
+        open_for_read(db)
+    _assert_no_resource_warnings(lambda: open_for_read(db))
+
+
+def test_graph_store_failed_construction_leaves_no_open_connection(tmp_path, monkeypatch):
+    # Same guarantee for both constructor paths: read-only open of a
+    # corrupt file, and a writer whose schema script fails.
+    import pytest
+    import verifyci.storage.graph_store as gs
+    corrupt = str(tmp_path / "corrupt.db")
+    with open(corrupt, "wb") as fh:
+        fh.write(b"x" * 4096)
+    with pytest.raises(Exception):
+        gs.GraphStore(corrupt, read_only=True)
+    _assert_no_resource_warnings(lambda: gs.GraphStore(corrupt, read_only=True))
+    monkeypatch.setattr(gs, "SCHEMA", "THIS IS NOT SQL;")
+    with pytest.raises(Exception):
+        gs.GraphStore(str(tmp_path / "w.db"))
+    _assert_no_resource_warnings(lambda: gs.GraphStore(str(tmp_path / "w.db")))
+
+
 # -------------------------------------------- NOT infrastructure (guards) --
 
 def test_valid_empty_db_stays_a_verdict(tmp_path):
@@ -262,6 +319,33 @@ def test_concurrent_read_during_ingest_transaction(tmp_path):
             n = ro.execute("SELECT count(*) FROM revisions").fetchone()[0]
         finally:
             ro.close()
-        assert n == 1, "commit invisible to a later reader"
+            assert n == 1, "commit invisible to a later reader"
     finally:
         writer.close()
+
+
+# --------------------------------------- unexpected crash -> exit 3 ---
+
+def test_verify_diff_unexpected_exception_cli_exit_3(tmp_path, monkeypatch):
+    # A crash inside run_verify is infrastructure (the gate never ran),
+    # not a verdict: exit 3, never exit 1. Deliberate typer.Exit codes
+    # raised for real statuses must pass through untouched (pinned below
+    # by every other CLI test in this file).
+    import verifyci.interface.commands.verify as verify_mod
+    def _boom(*a, **k):
+        raise RuntimeError("simulated crash")
+    monkeypatch.setattr(verify_mod, "run_verify", _boom)
+    r = CliRunner().invoke(app, ["verify-diff", DIFF, "--db",
+                                 str(tmp_path / "ghost.db")])
+    assert r.exit_code == 3, r.output
+    assert "internal failure" in r.output
+
+
+def test_query_unexpected_exception_cli_exit_3(tmp_path, monkeypatch):
+    import verifyci.interface.commands.query as query_mod
+    def _boom(*a, **k):
+        raise RuntimeError("simulated crash")
+    monkeypatch.setattr(query_mod, "run_query", _boom)
+    r = CliRunner().invoke(app, ["query", "where?", "--db",
+                                 str(tmp_path / "ghost.db")])
+    assert r.exit_code == 3, r.output

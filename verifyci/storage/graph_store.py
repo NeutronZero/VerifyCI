@@ -193,7 +193,14 @@ class GraphStore:
             from pathlib import Path as _Path
             uri = _Path(db_path).resolve().as_uri() + "?mode=ro"
             self.conn = _sqlite3.connect(uri, uri=True, timeout=2.0)
-            self.conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+            try:
+                self.conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+            except BaseException:
+                # Construction failed after connecting (locked/corrupt):
+                # the half-open connection must not leak to GC — and the
+                # caller never receives a store to close.
+                self.conn.close()
+                raise
             self._batch_depth = 0
             return
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -208,9 +215,14 @@ class GraphStore:
         # tests in tmpdirs — there is no "no writes on read paths"
         # invariant for writers, only for readers (read_only=True,
         # which skips this pragma entirely).
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.executescript(SCHEMA)
-        self.conn.commit()
+        try:
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.executescript(SCHEMA)
+            self.conn.commit()
+        except BaseException:
+            # Same half-open guarantee as the read-only path above.
+            self.conn.close()
+            raise
         self._batch_depth = 0
 
     from contextlib import contextmanager as _cm

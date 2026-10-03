@@ -2,7 +2,7 @@ from verifyci.contracts.verification_ir import VerificationPolicy
 from verifyci.interface.commands import InfraError, open_for_read, resolve_db
 from verifyci.interface.commands.graph_loader import load_graph
 from verifyci.verification.blast_radius import blast_radius_check
-from verifyci.verification.config import load_repo_invariants
+from verifyci.verification.config import load_repo_invariants, load_repo_waivers
 from verifyci.verification.diffmap import parse_diff_files, seed_entities_for_diff
 from verifyci.verification.intent_align import evaluate_invariants
 from verifyci.verification.policy import PolicyEvaluator
@@ -46,9 +46,22 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
         # fail-closed outranks a tidy exit code.
         infra_error = infra_error or e.kind
         graph, node_map, entities, resolved_revision = None, {}, [], ""
+    try:
+        invariants = load_repo_invariants(db)
+        waivers = load_repo_waivers(db)
+    except ValueError:
+        files = parse_diff_files(diff)
+        return {
+            "report_id": "",
+            "status": "FAIL",
+            "rationale": "invalid_invariants_config",
+            "revision_id": resolved_revision,
+            "files": files,
+            "changed_entities": [],
+        }
     reasoner = SemiFormalReasoner()
     cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map or None,
-                           entities=entities or None)
+                           entities=entities or None, waivers=waivers)
     files = parse_diff_files(diff)
     checks = [build_semi_check(cert, files, entities, diff=diff)]
     mapping = seed_entities_for_diff(files, entities, diff)
@@ -58,7 +71,7 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
     checks.append(blast_check)
     checks.append(removal_provenance_check(diff, entities or []))
     inv_checks, _metrics = evaluate_invariants(
-        diff, load_repo_invariants(db), graph, evidence=list(cert.evidence))
+        diff, invariants, graph, evidence=list(cert.evidence))
     checks.extend(inv_checks)
     report = build_verification_report(task_id=task_id, policy_id="default", checks=checks, blast_radius=blast)
     policy = VerificationPolicy(

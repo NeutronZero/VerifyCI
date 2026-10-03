@@ -38,6 +38,13 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
 testpaths = ["tests"]
+filterwarnings = [
+    # Third-party import-time noise: typer re-exports click utilities
+    # deprecated in click 8.x. Unfixable in-repo (no repo code involved);
+    # matched narrowly by message so genuine DeprecationWarnings still show.
+    "ignore:'click\\.utils\\.get_binary_stream' is deprecated:DeprecationWarning",
+    "ignore:'click\\.utils\\.get_text_stream' is deprecated:DeprecationWarning",
+]
 
 [tool.ruff]
 exclude = ["samples/"]

@@ -1,0 +1,32 @@
+{
+  "campaign": "H3-C final measurement (hoisted parse binding)",
+  "frozen_reference": "v1.0.2-correctness",
+  "h3a_reproduction": {
+    "median_us": 34.4,
+    "p95_us": 4167.9,
+    "p99_us": 6324.8,
+    "temporal_p99_ms": 0.0622
+  },
+  "v102_baseline": {
+    "median_us": 35.7,
+    "p95_us": 4250.0,
+    "p99_us": 5110.0
+  },
+  "measured": {
+    "median_us": 39.4,
+    "p95_us": 4583.0,
+    "p99_us": 6346.4,
+    "cold_ms": 5.657,
+    "temporal_p99_ms": 0.139,
+    "gates": {
+      "incremental_median_lt_0.2ms": true,
+      "incremental_p95_lt_1ms": false,
+      "incremental_p99_lt_5ms": false,
+      "temporal_p99_lt_200ms": true,
+      "incremental_gate_established_this_host": false,
+      "temporal_gate_established_this_host": true
+    }
+  },
+  "p95_move_vs_h3a": 0.0996,
+  "classification": "NEUTRAL"
+}

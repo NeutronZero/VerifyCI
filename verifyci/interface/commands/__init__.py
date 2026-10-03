@@ -40,7 +40,13 @@ def open_for_read(db: str, timeout: float = 2.0):
         # run_stats' special-char handling).
         uri = Path(db).resolve().as_uri() + "?mode=ro"
         conn = sqlite3.connect(uri, uri=True, timeout=timeout)
-        conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        try:
+            conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        except BaseException:
+            # A failed probe must not leak its connection: locked/corrupt
+            # stores raised here on every infra-error path and warned at GC.
+            conn.close()
+            raise
     except sqlite3.Error as e:
         msg = str(e)
         if "locked" in msg or "busy" in msg:

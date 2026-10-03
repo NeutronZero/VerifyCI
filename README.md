@@ -37,14 +37,19 @@ premises (per changed file) → traces (call-flow paths from changed entities)
 
 Grounding rules (no exceptions):
 
-- A diff naming no files, or only files absent from the graph, is
-  `INCONCLUSIVE` — never `PASS`. Every named file must ground,
+- A diff naming no files, or only CODE_CORE files absent from the graph, is
+  `INCONCLUSIVE` — never `PASS`. Every CODE_CORE file must ground,
   regardless of extension: a clean `.py` hunk does not launder
   unverified content (`Dockerfile`, CI workflows, `.env`) in the same
-  diff into a `PASS`. Stated plainly: `PASS` means every file in the
-  diff was something the graph could reason about, so routine commits
-  touching docs or config alongside code read `INCONCLUSIVE`
-  (declined, routed to human review — not blocked) rather than `PASS`.
+  diff into a `PASS`.
+- Diffs with no CODE_CORE files take partition fast paths (docs-only,
+  valid-config-only, test-only): the certificate passes, but the
+  end-to-end verdict is still `HUMAN_REVIEW` — never CLI `PASS`. The
+  provenance check requires non-empty evidence, which fast paths carry
+  none of by construction. Stated plainly: CLI `PASS` means grounded
+  code entities plus evidence, so routine commits touching docs or
+  config alongside code read `HUMAN_REVIEW`/`INCONCLUSIVE`
+  (declined, routed to human review — not blocked, exit 2) rather than `PASS`.
 - A change whose **content the diff does not carry** (a binary file, or
   a mode-only change) is never hidden and never laundered: it is
   named, classified, and forces `INCONCLUSIVE` — a mixed text+binary
@@ -171,8 +176,21 @@ historical smoke, never the evidence set.
 ## Status
 
 V1 walking skeleton. `PLAN.md` is the full plan; `CHANGELOG.md` records what
-each revision proved, including measured numbers and known gaps. 618 tests
-collected: default `python -m pytest tests/ -q` is 615 passed / 3 skipped;
-with all three re-measure guards it is 618 passed / 0 skipped
+each revision proved, including measured numbers and known gaps. 760 tests
+collected on the v1.1 branch: default `python -m pytest tests/ -q` is 757 passed / 3 skipped;
+with all three re-measure guards it is 760 passed / 0 skipped
 (`VERIFYCI_PATCH_RERUN=1` / `VERIFYCI_BLAST_RERUN=1` / `VERIFYCI_LATENCY_RERUN=1`).
-Locked release endpoint: `v1.0.2-correctness`.
+Locked release endpoint: `v1.0.2-correctness` (618 tests there).
+
+## Known limits
+
+Measured on Linux v6.6 (`LINUX_TEST.md`): extraction and query work at
+intra-file scale up to ~50K LOC / ~40 files (`kernel/sched/`), but the stored
+call graph has no cross-file CALLS edges and resolution falls below usability
+(5.7%) by ~110K LOC (`net/ipv4/`) — treat cross-file reasoning as unsupported,
+and any PASS on a large codebase as intra-file evidence only. On 10 real
+kernel patches the gate reached a verdict on 4 and escalated 6 (five on
+saturated blast radius); per-patch parent-revision ingest is required for
+honest verdicts. On C, `has_error` is not parse-health signal (macro idiom
+fires it on nearly every file); macro invocations with braces
+(`for_each_x(y) {`) additionally extract as phantom FUNCTION entities.

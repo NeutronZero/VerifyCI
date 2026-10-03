@@ -24,5 +24,8 @@ class SnapshotStore:
             return snapshot
         return None
 
-    def get_nearest_anchor(self, revision_id: str) -> Optional[ProjectionState]:
+    def get_anchor(self, revision_id: str) -> Optional[ProjectionState]:
+        """Exact lookup (not nearest): None when no snapshot exists for
+        this revision. Previously misnamed `get_nearest_anchor`; renamed
+        to match the behavior ReplayEngine.get_latest_anchor documents."""
         return self._snapshots.get(revision_id)

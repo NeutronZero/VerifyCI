@@ -217,24 +217,23 @@ def test_module_only_grounding_is_inconclusive():
 
 def test_unmapped_files_veto_code():
     # A clean .py hunk must not launder unverified content (Dockerfile,
-    # CI workflows, .env, changelogs outside the graph) in the same diff
-    # into a PASS. Any named-but-ungrounded file is inability, never a
-    # free pass — the grounding rule has no per-extension exceptions.
+    # CI workflows, .env) in the same diff into a PASS. Any named-but-ungrounded
+    # file in CODE_CORE is inability, never a free pass.
     from verifyci.verification.diffmap import parse_diff_files
     diff = (
-        "diff --git a/CHANGES.rst b/CHANGES.rst\n"
-        "--- a/CHANGES.rst\n"
-        "+++ b/CHANGES.rst\n"
+        "diff --git a/.env b/.env\n"
+        "--- a/.env\n"
+        "+++ b/.env\n"
         "diff --git a/src/app.py b/src/app.py\n"
         "--- a/src/app.py\n"
         "+++ b/src/app.py\n"
     )
-    assert parse_diff_files(diff) == ["CHANGES.rst", "src/app.py"]
+    assert parse_diff_files(diff) == [".env", "src/app.py"]
     graph = FakeGraph([_payload("e1")])
     cert = SemiFormalReasoner().verify(diff, graph)
     assert cert.certificate_verified is False
     assert cert.conclusion.result == "inconclusive"
-    assert "CHANGES.rst" in cert.conclusion.reasoning
+    assert ".env" in cert.conclusion.reasoning
 
 
 def test_only_dockerfile_diff_is_inconclusive():

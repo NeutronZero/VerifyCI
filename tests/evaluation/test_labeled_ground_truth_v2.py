@@ -106,8 +106,13 @@ def test_v2_labels_are_frozen_and_bounded():
 
 
 def test_v2_target_not_established_documented():
-    # The >=0.90 V1 gate is NOT met at 16/18, and this corpus size would
-    # not establish it even if met. Pinned so the number cannot be
-    # quietly repackaged as a passed gate.
+    # Landing record (was: gate NOT met at 16/18). H2-B recovered the
+    # relative-import residual (17/18), H2-C the short-secret residual
+    # (18/18), precision 1.00 throughout — see benchmarks/invariants/
+    # results_h2.json (final). The V1 >=0.90 rule is now MET on this
+    # corpus, but the standing caveat remains: a 26-case corpus cannot
+    # ESTABLISH the gate, so this stays measured-not-established. Kept
+    # so the number cannot be quietly repackaged as a passed gate.
     metrics = score_labeled(load_v2_cases())
-    assert metrics.detection_recall < 0.90
+    assert metrics.detection_recall == 18 / 18
+    assert metrics.detection_precision == 1.0
