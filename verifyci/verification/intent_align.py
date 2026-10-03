@@ -449,6 +449,16 @@ def _check_forbid(diff: str, graph: Any, name: str,
         # diff text shows is fail-closed evidence, not infrastructure.
         return False, f'forbidden {human} {name!r} added in {hit_files[0]}', \
             True, ev
+    unexamined = _unexamined_forbid_files(diff)
+    if unexamined:
+        # No hit, but added lines exist in files no checker can read
+        # (uncovered language, non-exempt partition): absence is not
+        # established. Docs/configs stay exempt — prose and manifests
+        # cannot carry executable calls, and vetoing on them would
+        # decline every docs-touching diff.
+        return True, (f'added lines in files outside covered languages '
+                      f'(unexamined={unexamined}) — absence not established'), \
+            False, []
     if not evaluated:
         # Traversal raised and the diff adds no hit: the checker did
         # NOT run, so this is inability (established=False ->
@@ -509,6 +519,48 @@ def _added_hits(diff: str, kind: str, name: str) -> tuple[list[str], bool]:
         # so the pinned stricter-than-graph semantics hold.
         hits = sorted(set(hits) | set(_lexical_call_hits(diff, name)))
     return hits, parse_ok
+
+
+# Languages the forbid checkers (tree + lexical) can examine. Mirrors the
+# gate in added_refs.extract_added_refs_status; files outside this set are
+# unexaminable, never implicitly clean.
+_FORBID_COVERED_LANGUAGES = frozenset({"python", "c", "cpp"})
+
+
+def _unexamined_forbid_files(diff: str | None) -> list[str]:
+    """Added-line files no forbid checker can examine.
+
+    A file is unexamined when its language is uncovered AND its partition is
+    not exempt. DOCUMENTATION and CONFIGURATION stay exempt (prose and
+    manifests cannot carry executable calls); everything else — including
+    unknown paths, which classify fail-closed as CODE_CORE — vetoes
+    establishment when it carries added lines.
+    """
+    from verifyci.ingestion.language import detect_language
+    from verifyci.verification.diffmap import iter_added_lines
+    from verifyci.verification.partition import FilePartition, classify_path
+    try:
+        lines = iter_added_lines(diff)
+    except Exception:  # noqa: BLE001
+        return []
+    out = set()
+    for f, _content in lines:
+        if f is None:
+            continue
+        try:
+            lang = detect_language(f)
+        except Exception:  # noqa: BLE001
+            lang = "unknown"
+        if lang in _FORBID_COVERED_LANGUAGES:
+            continue
+        try:
+            part = classify_path(f)
+        except Exception:  # noqa: BLE001
+            part = FilePartition.CODE_CORE
+        if part in (FilePartition.DOCUMENTATION, FilePartition.CONFIGURATION):
+            continue
+        out.add(f)
+    return sorted(out)
 
 
 def _lexical_call_hits(diff: str, name: str) -> list[str]:
