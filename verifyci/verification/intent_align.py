@@ -450,15 +450,6 @@ def _check_forbid(diff: str, graph: Any, name: str,
         return False, f'forbidden {human} {name!r} added in {hit_files[0]}', \
             True, ev
     unexamined = _unexamined_forbid_files(diff)
-    if unexamined:
-        # No hit, but added lines exist in files no checker can read
-        # (uncovered language, non-exempt partition): absence is not
-        # established. Docs/configs stay exempt — prose and manifests
-        # cannot carry executable calls, and vetoing on them would
-        # decline every docs-touching diff.
-        return True, (f'added lines in files outside covered languages '
-                      f'(unexamined={unexamined}) — absence not established'), \
-            False, []
     if not evaluated:
         # Traversal raised and the diff adds no hit: the checker did
         # NOT run, so this is inability (established=False ->
@@ -490,6 +481,17 @@ def _check_forbid(diff: str, graph: Any, name: str,
             note = (f'pre-existing violation {name!r} in touched file but '
                     f'outside the changed entity span — not attributed')
             return True, note, examined > 0, []
+    if unexamined:
+        # No hit, and the graph never produced a confident rejection: added
+        # lines in files no checker can read (uncovered language, non-exempt
+        # partition) make absence unestablished. Reached only after the
+        # rejection path above, so a graph-established FAIL cannot be
+        # vetoed by a stray hunk into app.js in the same diff. Docs/configs
+        # stay exempt: prose and manifests can't carry parsed calls, and
+        # vetoing on them would decline every docs-touching diff.
+        return True, (f'added lines in files outside covered languages '
+                      f'(unexamined={unexamined}) — absence not established'), \
+            False, []
     return not violated, _coverage_note(examined, edge_type, name), examined > 0, []
 
 

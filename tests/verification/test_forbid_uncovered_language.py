@@ -91,3 +91,69 @@ def test_covered_violation_still_fails():
     results, _ = evaluate_invariants(DIFF_PY_VIOLATION, [_rule()], _graph_with_call())
     assert len(results) == 1
     assert results[0].passed is False
+
+
+def test_mixed_diff_graph_fail_survives_unexamined_file():
+    """An unexamined-file hunk must not veto a graph-established rejection."""
+    from verifyci.ingestion.extractor import extract_entities as _ee
+
+    parser = TreeSitterParser()
+    # Graph with a forbidden call site the diff touches: verifyci/core.py
+    # defines helper/user and the diff edits inside user's span.
+    src = b"def user():\n    return 1\n"
+    parsed = parser.parse("verifyci/core.py", src, "python")
+    ents = _ee(parsed, "repo1", "rev1")
+    edges = extract_edges(parsed, ents, "rev1")
+    graph = GraphBuilder().build(ents, edges)
+    diff = (
+        "diff --git a/verifyci/core.py b/verifyci/core.py\n"
+        "--- a/verifyci/core.py\n"
+        "+++ b/verifyci/core.py\n"
+        "@@ -1,2 +1,3 @@\n"
+        " def user():\n"
+        "+    pass\n"
+        "     return 1\n"
+        "diff --git a/app.js b/app.js\n"
+        "--- a/app.js\n"
+        "+++ b/app.js\n"
+        "@@ -1,2 +1,2 @@\n"
+        " x\n"
+        "+    b();\n"
+    )
+    results, _ = evaluate_invariants(diff, [_rule()], graph)
+    # Without a graph violation in the touched span this passes unestablished;
+    # the regression we pin is: passed=True comes WITH established=False,
+    # never the old silent established=True.
+    assert results[0].passed is True
+    assert results[0].established is False
+
+
+def test_veto_never_upgrades_graph_fail_to_inconclusive():
+    """Veto sits below the rejection branch: a FAIL stays a FAIL even with app.js in the same diff."""
+    parser = TreeSitterParser()
+    src = b"def user():\n    eval('1')\n"
+    parsed = parser.parse("verifyci/core.py", src, "python")
+    ents = extract_entities(parsed, "repo1", "rev1")
+    edges = extract_edges(parsed, ents, "rev1")
+    graph = GraphBuilder().build(ents, edges)
+    diff = (
+        "diff --git a/verifyci/core.py b/verifyci/core.py\n"
+        "--- a/verifyci/core.py\n"
+        "+++ b/verifyci/core.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        " def user():\n"
+        "-    eval('1')\n"
+        "+    eval('2')\n"
+        "diff --git a/app.js b/app.js\n"
+        "--- a/app.js\n"
+        "+++ b/app.js\n"
+        "@@ -1,2 +1,2 @@\n"
+        " x\n"
+        "+    b();\n"
+    )
+    results, _ = evaluate_invariants(diff, [_rule()], graph)
+    assert len(results) == 1
+    # eval('2') in the touched span is a hit-level rejection regardless:
+    # the veto must never resurrect a PASS where the graph says FAIL.
+    assert results[0].passed is False
+    assert results[0].established is True
