@@ -10,11 +10,8 @@ def verify_evidence_coverage(evidence_pack: EvidencePack) -> bool:
             return False
     entities = evidence_pack.entities or []
     if entities:
-        hashes = {getattr(e, 'source_hash', None) for e in entities}
-        files = {getattr(e, 'file_path', None) for e in entities}
+        pairs = {(getattr(e, 'file_path', None), getattr(e, 'source_hash', None)) for e in entities}
         for chunk in chunks:
-            if chunk.source_hash not in hashes:
-                return False
-            if chunk.file_path not in files:
+            if (chunk.file_path, chunk.source_hash) not in pairs:
                 return False
     return True

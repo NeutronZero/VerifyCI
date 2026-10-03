@@ -624,8 +624,17 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
         for child in entities:
             if parent.revision_entity_id == child.revision_entity_id:
                 continue
+            if child.type == EntityType.MODULE:
+                continue
             if parent.file_path == child.file_path:
-                if parent.line_start <= child.line_start and parent.line_end >= child.line_end:
+                if (parent.type in (EntityType.FUNCTION, EntityType.METHOD)
+                        and child.type == EntityType.PARAMETER):
+                    parent_scope = f"{scope_of(parent)}.{parent.name}" if scope_of(parent) else parent.name
+                    if scope_of(child) == parent_scope:
+                        edges.append(_make_edge(
+                            revision_id, parent.revision_entity_id, child.revision_entity_id,
+                            EdgeType.CONTAINS, CPGEdgeSubtype.CONTAINS, now))
+                elif parent.line_start <= child.line_start and parent.line_end >= child.line_end:
                     if parent.type == EntityType.MODULE or (
                         parent.line_start != child.line_start or parent.line_end != child.line_end
                     ):

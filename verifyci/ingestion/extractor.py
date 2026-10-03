@@ -418,9 +418,10 @@ def _classify_node(node, language: str, stack: Optional[list[tuple[str, str]]] =
 
 def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -> list[Entity]:
     now = time.time()
+    num_lines = max(1, len(parsed.source.splitlines()))
     module = _make_entity(
         repository_id, revision_id, parsed.file_path, parsed.file_path,
-        EntityType.MODULE, parsed.language, parsed.source_hash, 1, 1, now,
+        EntityType.MODULE, parsed.language, parsed.source_hash, 1, num_lines, now,
     )
     entities = [module]
     if parsed.tree is None:
@@ -488,10 +489,11 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
             header = _include_header(node, parsed.source)
             if header and header not in seen_imports:
                 seen_imports.add(header)
+                line_end = node.end_point[0] if (node.end_point[1] == 0 and node.end_point[0] > node.start_point[0]) else node.end_point[0] + 1
                 entities.append(_make_entity(
                     repository_id, revision_id, parsed.file_path, header,
                     EntityType.IMPORT, parsed.language, parsed.source_hash,
-                    node.start_point[0] + 1, node.end_point[0] + 1, now,
+                    node.start_point[0] + 1, line_end, now,
                 ))
     return entities
 
@@ -686,8 +688,17 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
         for child in entities:
             if parent.revision_entity_id == child.revision_entity_id:
                 continue
+            if child.type == EntityType.MODULE:
+                continue
             if parent.file_path == child.file_path:
-                if parent.line_start <= child.line_start and parent.line_end >= child.line_end:
+                if (parent.type in (EntityType.FUNCTION, EntityType.METHOD)
+                        and child.type == EntityType.PARAMETER):
+                    parent_scope = f"{scope_of(parent)}.{parent.name}" if scope_of(parent) else parent.name
+                    if scope_of(child) == parent_scope:
+                        edges.append(_make_edge(
+                            revision_id, parent.revision_entity_id, child.revision_entity_id,
+                            EdgeType.CONTAINS, CPGEdgeSubtype.CONTAINS, now))
+                elif parent.line_start <= child.line_start and parent.line_end >= child.line_end:
                     if parent.type == EntityType.MODULE or (
                         parent.line_start != child.line_start or parent.line_end != child.line_end
                     ):

@@ -62,9 +62,12 @@ def _is_guard_line(line: str) -> bool:
 
 def _is_guard_preserved_in_additions(added_lines: list[str]) -> bool:
     for line in added_lines:
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
         if _is_guard_line(line):
             return True
-        if re.search(r"\b(raise\s+\w+|assert\b)", line):
+        if re.search(r"\b(raise\s+\w+|assert\b)", stripped):
             return True
     return False
 
@@ -81,11 +84,8 @@ def _matches_waiver(
         t = w.target.strip()
         if not t:
             continue  # empty target must not match everything
-        # No wildcard, no bidirectional matching: `t in gl` only (target
-        # names the file or the guard text, one direction). `gl in t`
-        # let a long target swallow arbitrary guard lines, and `*`
-        # waived everything — both fail open for a deny bypass.
-        if t in norm_file or norm_file.endswith(t):
+        norm_t = normalize_path(t)
+        if norm_file == norm_t or norm_file.endswith("/" + norm_t.lstrip("/")):
             return w
         for gl in removed_guard_lines:
             if t in gl:
@@ -107,11 +107,15 @@ def _parse_params_from_def(def_line: str) -> list[tuple[str, bool]] | None:
             return None
         fn = mod.body[0]
         if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            pos_args = [a.arg for a in fn.args.args]
+            pos_args = [a.arg for a in getattr(fn.args, "posonlyargs", [])] + [a.arg for a in fn.args.args]
             num_defaults = len(fn.args.defaults)
             num_req = len(pos_args) - num_defaults
             defaults_flags = [False] * num_req + [True] * num_defaults
-            return list(zip(pos_args, defaults_flags, strict=False))
+            params = list(zip(pos_args, defaults_flags, strict=False))
+            # Also capture keyword-only arguments
+            for arg, default in zip(fn.args.kwonlyargs, fn.args.kw_defaults, strict=False):
+                params.append((arg.arg, default is not None))
+            return params
     except Exception:
         pass
     return None
@@ -128,8 +132,8 @@ def _check_signature_compatibility(old_def_line: str, new_def_line: str) -> tupl
     old_req = [name for name, has_def in old_params if not has_def]
     new_req = [name for name, has_def in new_params if not has_def]
 
-    if len(new_req) > len(old_params):
-        return False, f"new_signature_requires_more_args:{len(new_req)}>{len(old_params)}"
+    if len(new_req) > len(old_req):
+        return False, f"new_signature_requires_more_args:{len(new_req)}>{len(old_req)}"
 
     for i, (old_name, _) in enumerate(old_params):
         if i < len(new_params):
@@ -272,7 +276,7 @@ def verify_deletion_hunks(
                 continue
             is_net_deletion = (len(minus_lines) > len(plus_lines)) or (hunk.old_count > hunk.new_count)
             guard_lines = [ml for ml in minus_lines if _is_guard_line(ml)]
-            old_defs = [ml for ml in minus_lines if ml.strip().startswith("def ") or ml.strip().startswith("class ")]
+            old_defs = [ml for ml in minus_lines if ml.strip().startswith(("def ", "async def ", "class "))]
 
             if not is_net_deletion and not guard_lines and not old_defs:
                 continue
@@ -328,9 +332,9 @@ def verify_deletion_hunks(
                     # env the moment it is set — it never un-sets itself).
                     # Readers of this verdict must see the posture, not
                     # just the waiver id; backfilling it later is expensive.
-                    import os as _os
-                    _posture = ("keyed" if (_os.getenv("VERIFYCI_WAIVER_KEYS")
-                                            or _os.getenv("VERIFYCI_WAIVER_PUBLIC_KEYS"))
+                    from verifyci.env import get_env as _get_env
+                    _posture = ("keyed" if (_get_env("WAIVER_KEYS")
+                                            or _get_env("WAIVER_PUBLIC_KEYS"))
                                 else "bearer-opt-in")
                     verdicts.append(DeletionHunkVerdict(
                         file_path=f.path,
@@ -421,8 +425,8 @@ def verify_deletion_hunks(
                 enclosing = overlapping_entities[0]
                 # Enclosing entity continuity check
                 # Check if declaration line was replaced by non-def or unrelated code
-                old_defs = [ml for ml in minus_lines if ml.strip().startswith("def ") or ml.strip().startswith("class ")]
-                new_defs = [pl for pl in plus_lines if pl.strip().startswith("def ") or pl.strip().startswith("class ")]
+                old_defs = [ml for ml in minus_lines if ml.strip().startswith(("def ", "async def ", "class "))]
+                new_defs = [pl for pl in plus_lines if pl.strip().startswith(("def ", "async def ", "class "))]
 
                 if old_defs and not new_defs:
                     verdicts.append(DeletionHunkVerdict(

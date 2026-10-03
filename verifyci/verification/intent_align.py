@@ -162,9 +162,29 @@ def _is_secret_carve_out(content: str, opener: str | None = None, fname: str | N
     if re.search(r'\br["\'](?:\(\?[aiLmsux]|\\[bBwWsSdD]|\^|\.\*)', content):
         return True
 
-    quoted_vals = re.findall(r'["\']([^"\']+)["\']', content)
-    for q in quoted_vals:
-        if q.startswith(("/", "./", "../", "\\", "c:\\", "C:\\", "/sys/", "/etc/", "/dev/", "/tmp/", "/proc/")):
+    # Never carve out unambiguous high-signal credential shapes
+    if any(p.search(content) for p in (AWS_KEY_RE, PEM_RE, JWT_RE, CONN_STR_RE)):
+        return False
+
+    path_prefixes = ("/", "./", "../", "\\", "c:\\", "C:\\", "/sys/", "/etc/", "/dev/", "/tmp/", "/proc/")
+
+    # Path carve-out: only carve out when all secret assignments have path values
+    sec_matches = list(SECRET_RE.finditer(content))
+    if sec_matches:
+        all_are_paths = True
+        for sm in sec_matches:
+            m_text = sm.group(0)
+            split_char = "=" if "=" in m_text else ":"
+            val = m_text.split(split_char, 1)[-1].strip().strip("\"'")
+            if not val.startswith(path_prefixes):
+                all_are_paths = False
+                break
+        if all_are_paths:
+            return True
+    elif not (UNQUOTED_SECRET_RE.search(content) or SHORT_UNQUOTED_SECRET_RE.search(content) or JSON_SECRET_RE.search(content)):
+        # If no secret assignment pattern matched, check if any quoted value is a path
+        quoted_vals = re.findall(r'["\']([^"\']+)["\']', content)
+        if any(q.startswith(path_prefixes) for q in quoted_vals):
             return True
 
     # Test fixture diffs in python code — strictly scoped to TEST_SUITE files.
@@ -302,9 +322,9 @@ def _filter_allowlisted_secret_hits(
     from verifyci.verification.diffmap import iter_added_lines_with_lineno
 
     compiled_pats = [re.compile(p) for p in allowlist_patterns]
-    line_map: dict[tuple[str | None, int | None], str] = {}
+    line_map: dict[tuple[str | None, int | None], list[str]] = {}
     for f, lno, content in iter_added_lines_with_lineno(diff):
-        line_map[(f, lno)] = content
+        line_map.setdefault((f, lno), []).append(content)
 
     surviving = []
     for hit in hits:
@@ -320,8 +340,8 @@ def _filter_allowlisted_secret_hits(
             surviving.append(hit)
             continue
 
-        content = line_map.get((fname, lno), "")
-        if any(pat.search(content) or pat.search(hit) for pat in compiled_pats):
+        contents = line_map.get((fname, lno), [])
+        if any(pat.search(c) or pat.search(hit) for pat in compiled_pats for c in (contents or [""])):
             continue
 
         surviving.append(hit)
@@ -340,9 +360,9 @@ def _filter_allowlisted_forbid_hits(
     from verifyci.verification.diffmap import iter_added_lines_with_lineno
 
     compiled_pats = [re.compile(p) for p in allowlist_patterns]
-    line_map: dict[tuple[str | None, int | None], str] = {}
+    line_map: dict[tuple[str | None, int | None], list[str]] = {}
     for f, lno, content in iter_added_lines_with_lineno(diff):
-        line_map[(f, lno)] = content
+        line_map.setdefault((f, lno), []).append(content)
 
     surviving_ev = []
     for item in ev:
@@ -358,8 +378,8 @@ def _filter_allowlisted_forbid_hits(
             surviving_ev.append(item)
             continue
 
-        content = line_map.get((fname, lno), "")
-        if any(pat.search(content) or pat.search(item) for pat in compiled_pats):
+        contents = line_map.get((fname, lno), [])
+        if any(pat.search(c) or pat.search(item) for pat in compiled_pats for c in (contents or [""])):
             continue
 
         surviving_ev.append(item)

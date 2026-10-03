@@ -139,6 +139,7 @@ def vuln(db: str = "", cache: str = "./storage/vuln_cache.db", import_file: str 
 
 
 @app.command(name="vuln-refresh")
+@_infra_exit
 def vuln_refresh(db: str = "", cache: str = "./storage/vuln_cache.db", import_file: str = ""):
     vuln(db, cache, import_file)
 
@@ -187,7 +188,7 @@ def _exit_for_status(status: str) -> None:
     exit differently from a gate that declined to conclude."""
     if status == "PASS" or status == "COMPLETED":
         return
-    if status == "INFRA_ERROR":
+    if status in ("INFRA_ERROR", "TIMEOUT"):
         raise typer.Exit(code=3)
     raise typer.Exit(code=1 if status in ("FAIL", "FAILED") else 2)
 

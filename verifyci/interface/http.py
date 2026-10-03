@@ -82,21 +82,31 @@ def health():
 
 @app.get("/stats")
 def stats(db: str = "", _auth: None = Depends(require_auth)):
-    return run_stats(db or None)
+    return run_stats(_sanitize_db(db))
 
 
 @app.get("/search")
 def search(q: str, k: int = Query(default=10, ge=1, le=MAX_K), db: str = "",
            _auth: None = Depends(require_auth)):
-    return run_query(q, db or None, k=k)
+    return run_query(q, _sanitize_db(db), k=k)
+
+
+def _sanitize_db(db: str) -> str | None:
+    if not db:
+        return None
+    from pathlib import Path
+    p = Path(db)
+    if "\x00" in db or ".." in p.parts:
+        raise HTTPException(status_code=400, detail="invalid_db_path")
+    return str(p)
 
 
 @app.post("/verify/diff")
 def verify(req: VerifyRequest, _auth: None = Depends(require_auth)):
-    return run_verify(req.diff, req.revision_id, req.task_id)
+    return run_verify(req.diff, req.revision_id, req.task_id, db_path=_sanitize_db(getattr(req, "db", "")))
 
 
 @app.post("/task/run")
 def task_run(req: TaskRequest, _auth: None = Depends(require_auth)):
     from verifyci.interface.commands.run import run_task
-    return run_task(req.task, diff=req.diff, db_path=req.db or None)
+    return run_task(req.task, diff=req.diff, db_path=_sanitize_db(req.db))

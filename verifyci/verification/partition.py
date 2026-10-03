@@ -131,7 +131,7 @@ class PartitionedDiff:
 
     def raw_diff_for_partitions(self, partitions: set[FilePartition] | tuple[FilePartition, ...] | list[FilePartition]) -> str:
         """Return the verbatim diff text for files across the specified partitions."""
-        return "".join(self.raw_diff_by_partition.get(p, "") for p in partitions)
+        return "".join(self.raw_diff_by_partition.get(p, "") for p in sorted(partitions, key=lambda x: x.value))
 
 
 def _extract_file_diff_texts(raw: str, parsed_files: list[FileDiff]) -> list[str]:
@@ -146,7 +146,7 @@ def _extract_file_diff_texts(raw: str, parsed_files: list[FileDiff]) -> list[str
         if f.git_index is not None:
             starts.append(f.git_index)
             line_idx = f.git_index + 1
-        elif i == 0 and f.old_path is None:
+        elif i == 0 and f.old_path is None and f.new_path is None:
             # Preamble block: starts at line 0, do not search headers
             starts.append(0)
             line_idx = 0
@@ -156,6 +156,15 @@ def _extract_file_diff_texts(raw: str, parsed_files: list[FileDiff]) -> list[str
                 for idx in range(line_idx, len(lines)):
                     if _is_header(lines[idx], "---") and _header_path(lines[idx], "---") == f.old_path:
                         found = idx
+                        break
+            if found is None and f.new_path is not None:
+                for idx in range(line_idx, len(lines)):
+                    if _is_header(lines[idx], "+++") and _header_path(lines[idx], "+++") == f.new_path:
+                        # Include previous --- line if present (e.g. --- /dev/null)
+                        if idx > 0 and _is_header(lines[idx - 1], "---"):
+                            found = idx - 1
+                        else:
+                            found = idx
                         break
             if found is None:
                 found = line_idx

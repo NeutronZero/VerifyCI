@@ -36,19 +36,37 @@ class ReplayEngine:
 
         state = dict(anchor.state)
         current = anchor.revision_id  # resume from the anchor actually used
-        visited = set()
 
-        while current != to_revision and current not in visited:
-            visited.add(current)
-            next_delta = None
-            for from_rev, to_rev, delta in self._deltas:
-                if from_rev == current:
-                    next_delta = (to_rev, delta)
-                    break
-            if next_delta is None:
+        from collections import deque
+        queue = deque([(current, [])])
+        seen = {current}
+        path_deltas = None
+        while queue:
+            node, path = queue.popleft()
+            if node == to_revision:
+                path_deltas = path
                 break
-            current, delta = next_delta
-            state.update(delta)
+            for f_rev, t_rev, delta in self._deltas:
+                if f_rev == node and t_rev not in seen:
+                    seen.add(t_rev)
+                    queue.append((t_rev, path + [delta]))
+
+        if path_deltas is not None:
+            for delta in path_deltas:
+                state.update(delta)
+        else:
+            visited = set()
+            while current != to_revision and current not in visited:
+                visited.add(current)
+                next_delta = None
+                for from_rev, to_rev, delta in self._deltas:
+                    if from_rev == current:
+                        next_delta = (to_rev, delta)
+                        break
+                if next_delta is None:
+                    break
+                current, delta = next_delta
+                state.update(delta)
 
         return ProjectionState(
             projection_id=f"replay_{from_revision}_{to_revision}",

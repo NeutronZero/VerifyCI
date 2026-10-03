@@ -25,7 +25,11 @@ class _Counting(HashEmbeddingProvider):
 
 
 def _run(coro):
-    return asyncio.new_event_loop().run_until_complete(coro)
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def test_cache_dedupes_within_and_across_calls(tmp_path):

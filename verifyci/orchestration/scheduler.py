@@ -315,17 +315,19 @@ class AsyncDAGScheduler(Scheduler):
                     results[idx] = ("error", (level[idx].get("step_id", "unknown"), f"{type(exc).__name__}: {exc}"))
                 else:
                     results[idx] = t.result()
-                kind = results[idx][0]
-                if kind in ("block", "error"):
-                    for other in pending:
-                        other.cancel()
-                    if pending:
-                        await asyncio.gather(*pending, return_exceptions=True)
-                    for other in pending:
-                        oidx = task_to_idx[other]
-                        if results[oidx] is None:
-                            results[oidx] = ("error", (level[oidx].get("step_id", "unknown"), "cancelled"))
-                    return results
+
+            has_terminating = any(results[task_to_idx[t]][0] in ("block", "error")
+                                  for t in done if results[task_to_idx[t]] is not None)
+            if has_terminating:
+                for other in pending:
+                    other.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+                for other in pending:
+                    oidx = task_to_idx[other]
+                    if results[oidx] is None:
+                        results[oidx] = ("error", (level[oidx].get("step_id", "unknown"), "cancelled"))
+                return results
         return results
 
     async def _run_node(self, executor, node: dict, task_id: str,

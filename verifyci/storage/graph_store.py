@@ -607,12 +607,23 @@ class GraphStore:
 
     def insert_event(self, event) -> None:
         import json as _json
+        att = getattr(event, "attestation", None)
+        if att is not None:
+            import dataclasses
+            if dataclasses.is_dataclass(att):
+                att_json = _json.dumps(dataclasses.asdict(att))
+            elif hasattr(att, "__dict__"):
+                att_json = _json.dumps(att.__dict__)
+            else:
+                att_json = _json.dumps(att)
+        else:
+            att_json = None
         self.conn.execute(
             "INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?,?,?,?)",
             (event.id, event.type, event.timestamp, event.task_id, event.conversation_id,
              _json.dumps(event.payload or {}), _json.dumps(event.provenance or {}),
              event.prev_event_hash,
-             _json.dumps(event.attestation) if getattr(event, "attestation", None) else None),
+             att_json),
         )
         self._maybe_commit()
 
@@ -640,6 +651,12 @@ class GraphStore:
 
     def close(self):
         self.conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
     @staticmethod
     def _row_to_entity(row) -> Entity:

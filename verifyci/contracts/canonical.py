@@ -1,13 +1,13 @@
 import hashlib
 import json
-from dataclasses import asdict
 from typing import Any
 
 CANONICAL_EXCLUDED_FIELDS = {"attestation"}
 
 
 def canonical_event_bytes(event: Any) -> bytes:
-    d = asdict(event)
+    from verifyci.contracts.jsonio import to_json_dict
+    d = to_json_dict(event) if not isinstance(event, dict) else dict(event)
     for field_name in CANONICAL_EXCLUDED_FIELDS:
         d.pop(field_name, None)
     return json.dumps(

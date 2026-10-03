@@ -122,11 +122,15 @@ def _split_git_paths(line: str) -> tuple[str | None, str | None]:
     `--no-prefix` (and mnemonic prefixes) carry no ` b/` marker: split
     the remainder on whitespace then, still best-effort."""
     rest = line[len("diff --git "):].strip()
-    if " b/" in rest:
+    if " b/" in rest and not rest.startswith('"'):
         head, _, tail = rest.partition(" b/")
         old = head[2:] if head.startswith("a/") else head
         return _strip_prefix("a/" + old) if old else None, _strip_prefix("b/" + tail)
-    parts = rest.split()
+    import shlex
+    try:
+        parts = shlex.split(rest)
+    except Exception:
+        parts = rest.split()
     if len(parts) == 2:
         return _strip_prefix(parts[0]), _strip_prefix(parts[1])
     return None, None
@@ -450,7 +454,7 @@ def _clean(fragment: str) -> str | None:
 
 
 def _strip_prefix(path: str) -> str:
-    for prefix in ("b/", "a/"):
+    for prefix in ("b/", "a/", "b\\", "a\\"):
         if path.startswith(prefix):
             return path[len(prefix):]
     return path
@@ -607,6 +611,9 @@ def changed_anchors_by_file(diff: str | None) -> dict[str, set[int]]:
         if h.file is None:
             continue
         touched = per_file.setdefault(h.file, set())
+        norm_key = normalize_path(h.file)
+        if norm_key != h.file:
+            per_file[norm_key] = touched
         old_ln = h.old_start
         for body in h.lines:
             if body.startswith("-"):

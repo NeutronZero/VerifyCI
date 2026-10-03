@@ -75,7 +75,6 @@ class SignedIntentWaiver:
         """
         import hashlib
         import hmac
-        import os
         import warnings
 
         if not self.valid or not self.signature:
@@ -83,8 +82,9 @@ class SignedIntentWaiver:
 
         alg = (self.algorithm or "hmac-sha256").lower()
 
+        from verifyci.env import get_env as _get_env
         if alg == "hmac-sha256":
-            trusted_key = key or os.getenv("VERIFYCI_WAIVER_KEYS")
+            trusted_key = key or _get_env("WAIVER_KEYS")
             if not trusted_key:
                 return self._bearer_fallback(allow_bearer, warnings)
             if isinstance(trusted_key, str):
@@ -95,7 +95,7 @@ class SignedIntentWaiver:
             return hmac.compare_digest(self.signature.lower(), expected.lower())
 
         if alg == "ed25519":
-            trusted_pubkey = key or os.getenv("VERIFYCI_WAIVER_PUBLIC_KEYS")
+            trusted_pubkey = key or _get_env("WAIVER_PUBLIC_KEYS")
             if not trusted_pubkey:
                 return self._bearer_fallback(allow_bearer, warnings)
             try:
@@ -115,9 +115,9 @@ class SignedIntentWaiver:
 
     def _bearer_fallback(self, allow_bearer: bool | None, warnings) -> bool:
         """Explicit-opt-in-only unauthenticated acceptance. Deny otherwise."""
-        import os
+        from verifyci.env import get_env as _get_env
         if allow_bearer is None:
-            allow_bearer = os.getenv("VERIFYCI_WAIVER_ALLOW_UNAUTHENTICATED", "") == "1"
+            allow_bearer = _get_env("WAIVER_ALLOW_UNAUTHENTICATED", "") == "1"
         if not allow_bearer:
             return False
         warnings.warn(

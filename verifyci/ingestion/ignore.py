@@ -67,13 +67,13 @@ def _name_matches(name: str, patterns: list[str]) -> bool:
 
 def _rel_matches(rel_posix: str, patterns: list[str]) -> bool:
     for pat in patterns:
-        p = pat.rstrip("/")
-        if "/" not in p and "*" not in p:
+        if "/" not in pat and "*" not in pat:
             continue
+        p = pat.strip("/")
         if fnmatch.fnmatchcase(rel_posix, p):
             return True
-        # `docs/` also prunes everything beneath docs.
-        if fnmatch.fnmatchcase(rel_posix, p + "/**"):
+        # `docs/` or `/docs` also prunes everything beneath docs.
+        if fnmatch.fnmatchcase(rel_posix, p + "/*") or fnmatch.fnmatchcase(rel_posix, p + "/**"):
             return True
     return False
 

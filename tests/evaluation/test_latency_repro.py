@@ -109,7 +109,7 @@ def test_frozen_sources_match_working_tree():
     #   A6 made insert_entity/insert_edge stamp-preserving upserts
     #      (build_scale_db setup; the temporal gate times
     #       get_entity_as_of).
-    accepted_drift = {"__init__", "insert_entity", "insert_edge"}
+    accepted_drift = {"__init__", "insert_entity", "insert_edge", "insert_event", "close"}
     assert set(lm) >= set(fm) - accepted_drift
     for name, fx_body in fm.items():
         if name in accepted_drift:

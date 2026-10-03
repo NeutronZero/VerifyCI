@@ -147,9 +147,10 @@ def _parse_pypi(source: str, file_path: str, revision_id: str) -> list[Edge]:
 
 
 def _dep_section(header: str) -> bool:
-    return header in ("[dependencies]", "[dev-dependencies]",
-                      "[workspace.dependencies]") or header.startswith(
-        ("[dependencies.", "[dev-dependencies.", "[workspace.dependencies."))
+    h = header.strip()
+    return (h in ("[dependencies]", "[dev-dependencies]", "[build-dependencies]", "[workspace.dependencies]")
+            or (h.startswith(("[dependencies.", "[dev-dependencies.", "[build-dependencies.",
+                              "[workspace.dependencies.", "[target.")) and "dependencies" in h))
 
 
 #: Keys inside a dotted Cargo subtable (``[dependencies.serde]``) that are
@@ -170,10 +171,14 @@ def _subtable_package(header: str) -> str | None:
     inner = header.strip()
     if not (inner.startswith("[") and inner.endswith("]")):
         return None
-    if inner in ("[dependencies]", "[dev-dependencies]",
-                 "[workspace.dependencies]"):
+    content = inner[1:-1].strip()
+    if (content in ("dependencies", "dev-dependencies", "build-dependencies",
+                    "workspace.dependencies")
+            or any(content.endswith("." + s) for s in ("dependencies", "dev-dependencies", "build-dependencies"))):
         return None
-    pkg = inner[1:-1].split(".")[-1].strip().strip("\"'")
+    if "." not in content:
+        return None
+    pkg = content.split(".")[-1].strip().strip("\"'")
     return pkg or None
 
 
@@ -296,6 +301,15 @@ class VulnerabilityCache:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def __del__(self):
+        self.close()
 
     def lookup(self, edge: Edge) -> list[dict]:
         pkg = edge.metadata.get("package", "")

@@ -96,7 +96,7 @@ def _meta_rev(meta, repo, rel):
     return record[4] if record else ""
 
 
-def _carry_forward(store, carried_sources, carried_texts, revision_id, now) -> tuple[int, int]:
+def _carry_forward(store, carried_sources, carried_texts, revision_id, now, repository_id: str | None = None) -> tuple[int, int]:
     """Copy unchanged files' entities/edges into a new revision (re-keyed),
     so incremental revisions stay complete. Returns (entities, edges)."""
     import dataclasses
@@ -156,7 +156,13 @@ def _carry_forward(store, carried_sources, carried_texts, revision_id, now) -> t
             # below keeps only the first and drops the rest.
             meta = e.metadata or {}
             extra = "_" + (meta.get("callee") or meta.get("base") or "")
-        eid = f"edge_{revision_id[:12]}_{src}_{dst}_{etype}_{subtype}{extra}"
+        site_suffix = ""
+        orig_id = getattr(e, "id", "")
+        if orig_id:
+            last_part = orig_id.rsplit("_", 1)[-1]
+            if ":" in last_part:
+                site_suffix = "_" + last_part
+        eid = f"edge_{revision_id[:12]}_{src}_{dst}_{etype}_{subtype}{extra}{site_suffix}"
         if eid in seen:
             continue
         seen.add(eid)
@@ -174,7 +180,7 @@ def _carry_forward(store, carried_sources, carried_texts, revision_id, now) -> t
              if e.revision_entity_id in carried_ids],
             revision_id, now)
     if new_edges:
-        store.close_superseded_edges(new_edges, revision_id, now)
+        store.close_superseded_edges(new_edges, revision_id, now, repository_id=repository_id)
     return n_e, n_d
 
 
@@ -363,7 +369,8 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
         if incremental and lineage_prev:
             closed_at = _time.time()
             carried_e, carried_d = _carry_forward(
-                store, carried_sources, carried_texts, revision.revision_id, closed_at)
+                store, carried_sources, carried_texts, revision.revision_id, closed_at,
+                repository_id=repo.name)
             totals["entities"] += carried_e
             totals["edges"] += carried_d
             totals["carried_entities"] = carried_e

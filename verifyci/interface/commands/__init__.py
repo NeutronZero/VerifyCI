@@ -80,7 +80,7 @@ def resolve_repository(db_path: str | None) -> str | None:
     """
     if not db_path:
         return None
-    parts = Path(db_path).as_posix().split("/")
+    parts = Path(db_path).resolve().as_posix().split("/")
     if ".verifyci" not in parts:
         return None
     idx = len(parts) - 1 - parts[::-1].index(".verifyci")

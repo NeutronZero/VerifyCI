@@ -7,6 +7,8 @@ def rrf_fusion_with_scores(
     graph_results: list[SearchResult],
     k: int = 60,
 ) -> list[tuple[str, float]]:
+    if k <= 0:
+        k = 60
     scores = {}
     for rank, result in enumerate(dense_results):
         scores[result.id] = scores.get(result.id, 0) + 1.0 / (k + rank + 1)

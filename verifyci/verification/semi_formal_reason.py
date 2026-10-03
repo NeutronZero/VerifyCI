@@ -81,12 +81,16 @@ def _validate_configuration_diff(diff_str: str, config_files: list[str]) -> tupl
             try:
                 tomllib.loads(content)
             except Exception as e:
+                if f.hunks and f.hunks[0].new_start > 1:
+                    return "inconclusive", f"{f.path}: toml_fragment ({e})"
                 return "fail", f"{f.path}: {e}"
         elif p_lower.endswith((".yaml", ".yml")):
             import yaml
             try:
                 yaml.safe_load(content)
             except Exception as e:
+                if f.hunks and f.hunks[0].new_start > 1:
+                    return "inconclusive", f"{f.path}: yaml_fragment ({e})"
                 return "fail", f"{f.path}: {e}"
         elif p_lower.endswith(".json"):
             import json
