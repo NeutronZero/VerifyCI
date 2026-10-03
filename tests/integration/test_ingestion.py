@@ -117,8 +117,8 @@ def test_pathological_nesting_falls_back_to_module(tmp_path):
 def test_c_has_error_alone_is_not_a_parse_error(tmp_path):
     """tree-sitter-c emits ERROR nodes on idiomatic kernel C.
 
-    kernel/sched/core.c carries 263 error nodes — one spanning the entire
-    file — and still extracts 426 functions at full recall. Reporting
+    kernel/sched/core.c carries 263 error-or-missing nodes (195 ERROR +
+    68 MISSING) — one ERROR span covering the entire file — and still extracts 426 functions at full recall. Reporting
     `has_error` as a parse error made a healthy file look broken, so for
     C/C++ only `has_error AND zero entities` counts as a parse error.
     """

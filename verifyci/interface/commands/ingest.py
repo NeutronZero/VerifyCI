@@ -67,8 +67,9 @@ def _degraded_parse(language: str, has_error: bool, entities: list) -> bool:
     """True when a file should count as a parse error.
 
     C/C++: only `has_error AND no code entity extracted`. kernel/sched/core.c
-    has 263 error nodes and still extracts 426 functions, so reporting the
-    former as a failure made a healthy file look broken.
+    carries 263 error-or-missing nodes (195 ERROR + 68 MISSING) and still
+    extracts 426 functions, so reporting the former as a failure made a
+    healthy file look broken.
     Everything else: `has_error` alone, unchanged from before.
 
     The bar is "no code entity", not "no entity": extract_entities always
@@ -295,7 +296,8 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
                 # Raw signal, kept as data: tree-sitter produced ERROR or
                 # MISSING nodes somewhere in this file. On C this fires on
                 # almost every real file — kernel/sched/core.c carries 263
-                # error nodes (one spanning the entire file) and still
+                # error-or-missing nodes (195 ERROR + 68 MISSING, one ERROR
+                # span covering the entire file) and still
                 # extracts 426 functions at 100% recall on hand-checked
                 # definitions. Reporting it as a parse error made a healthy
                 # file look broken. For C/C++ only, defer the judgement to
