@@ -102,6 +102,7 @@ def _matches_waiver(
             continue
 
         # V-11: Exact symbol token match (prevent loose substring false matches like "auth" in "require_auth")
+        # Why token form: catches guard shapes like `from auth import ...` without matching `authenticate`.
         pat = re.compile(r"(?<![\w.])" + re.escape(t) + r"(?![\w])")
         for gl in removed_guard_lines:
             if pat.search(gl) or gl.strip() == t:
