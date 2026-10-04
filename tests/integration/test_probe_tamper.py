@@ -1,4 +1,4 @@
-﻿"""PROBES item 2: tamper-evidence (subchain continuity, per-task ledgers,
+"""PROBES item 2: tamper-evidence (subchain continuity, per-task ledgers,
 fail-closed anchors, insertion-order events, cancel persistence)."""
 import asyncio
 
@@ -238,7 +238,7 @@ def test_probe_cancel_event_persisted_and_pinned():
     from verifyci.storage.graph_store import GraphStore
 
     async def slow(self, node, ctx):
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(0.4)
         from verifyci.contracts.task_ir import NodeResult
         return NodeResult(step_id="s1", status="COMPLETED", output=None)
 

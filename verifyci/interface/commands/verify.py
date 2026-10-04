@@ -35,30 +35,35 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
             probe.close()
     except InfraError as e:
         infra_error = e.kind
-    try:
-        graph, node_map, entities, resolved_revision = load_graph(
-            db, revision_id or "", return_revision=True)
-    except InfraError as e:
-        # The probe passed but the load itself failed (locked/corrupt
-        # mid-read, WAL-mode on a sealed mount): same infrastructure
-        # axis, recorded the same way. A concrete FAIL the diff text
-        # already earned (forbidden call, secret) still stands below —
-        # fail-closed outranks a tidy exit code.
-        infra_error = infra_error or e.kind
+    if infra_error and infra_error in ("db_not_found", "db_locked", "db_unreadable"):
         graph, node_map, entities, resolved_revision = None, {}, [], ""
-    try:
-        invariants = load_repo_invariants(db)
-        waivers = load_repo_waivers(db)
-    except ValueError:
-        files = parse_diff_files(diff)
-        return {
-            "report_id": "",
-            "status": "FAIL",
-            "rationale": "invalid_invariants_config",
-            "revision_id": resolved_revision,
-            "files": files,
-            "changed_entities": [],
-        }
+        invariants = []
+        waivers = []
+    else:
+        try:
+            graph, node_map, entities, resolved_revision = load_graph(
+                db, revision_id or "", return_revision=True)
+        except InfraError as e:
+            # The probe passed but the load itself failed (locked/corrupt
+            # mid-read, WAL-mode on a sealed mount): same infrastructure
+            # axis, recorded the same way. A concrete FAIL the diff text
+            # already earned (forbidden call, secret) still stands below —
+            # fail-closed outranks a tidy exit code.
+            infra_error = infra_error or e.kind
+            graph, node_map, entities, resolved_revision = None, {}, [], ""
+        try:
+            invariants = load_repo_invariants(db)
+            waivers = load_repo_waivers(db)
+        except ValueError:
+            files = parse_diff_files(diff)
+            return {
+                "report_id": "",
+                "status": "FAIL",
+                "rationale": "invalid_invariants_config",
+                "revision_id": resolved_revision,
+                "files": files,
+                "changed_entities": [],
+            }
     reasoner = SemiFormalReasoner()
     cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map or None,
                            entities=entities or None, waivers=waivers)

@@ -16,7 +16,7 @@ class InfraError(RuntimeError):
         super().__init__(detail or kind)
 
 
-def open_for_read(db: str, timeout: float = 2.0):
+def open_for_read(db: str, timeout: float = 0.5):
     """Open a store read-only for a query/verify/stats command.
 
     Raises InfraError('db_not_found') when no database exists at the

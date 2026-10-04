@@ -85,8 +85,9 @@ def test_chunked_superseded_entities_large_batch(tmp_path):
 
     # Insert 1200 entities (exceeds default SQLite 999 parameter limit)
     ids = [f"log_{i}" for i in range(1200)]
-    for i, lid in enumerate(ids):
-        db.insert_entity(Entity("repo", lid, f"rev_{i}", EntityType.VARIABLE, f"v_{i}", "x.py", 1, 1, "py", "h", "r1", valid_from=now, t_created=now))
+    with db.batch():
+        for i, lid in enumerate(ids):
+            db.insert_entity(Entity("repo", lid, f"rev_{i}", EntityType.VARIABLE, f"v_{i}", "x.py", 1, 1, "py", "h", "r1", valid_from=now, t_created=now))
 
     db.insert_revision(Revision("r2", "repo", "c2", "r1", "h2", now + 5, "cfg"))
     closed = db.close_superseded_entities(ids, "r2", now + 5)
