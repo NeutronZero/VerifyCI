@@ -52,7 +52,10 @@ def _make_entity(
         metadata["snippet_is_complete"] = snippet_is_complete
         if snippet_truncated_at_line is not None:
             metadata["snippet_truncated_at_line"] = snippet_truncated_at_line
-        metadata["snippet_char_count"] = len(snippet)
+        if slices:
+            metadata["snippet_char_count"] = len(snippet) + sum(len(s) for s in slices)
+        else:
+            metadata["snippet_char_count"] = len(snippet)
     if slices:
         metadata["slices"] = list(slices)
     if accessor:
@@ -224,8 +227,16 @@ def _walk(node):
 
 
 def _is_arrow_func_decl(node) -> bool:
-    if node.type == "variable_declarator":
-        val = node.child_by_field_name("value")
+    if node.type in ("variable_declarator", "field_definition", "public_field_definition", "pair", "assignment_expression"):
+        val = node.child_by_field_name("value") or node.child_by_field_name("right")
+        if not val:
+            for c in node.children:
+                if c.type in ("arrow_function", "function_expression"):
+                    val = c
+                    break
+        return bool(val and val.type in ("arrow_function", "function_expression"))
+    if node.type == "export_default_declaration":
+        val = node.child_by_field_name("value") or node.child_by_field_name("declaration")
         if not val:
             for c in node.children:
                 if c.type in ("arrow_function", "function_expression"):
@@ -367,7 +378,7 @@ def _qualified_raw(node, source: bytes) -> Optional[str]:
     parts = [
         _text(c, source) for c in node.children
         if c.type in ("identifier", "type_identifier", "namespace_identifier",
-                      "field_identifier", "destructor_name")
+                      "field_identifier", "destructor_name", "operator_name")
     ]
     if not parts:
         return None
@@ -415,8 +426,8 @@ def _walk_scoped(node, source: bytes, stack: list[tuple[str, str]],
         kind = "class"
     elif node.type in ("function_definition", "function_declaration", "generator_function_declaration", "method_definition"):
         kind = "func"
-    elif node.type == "variable_declarator":
-        val = node.child_by_field_name("value")
+    elif node.type in ("variable_declarator", "field_definition", "public_field_definition", "pair", "assignment_expression"):
+        val = node.child_by_field_name("value") or node.child_by_field_name("right")
         if not val:
             for c in node.children:
                 if c.type in ("arrow_function", "function_expression"):
@@ -448,10 +459,24 @@ def _classify_node(node, language: str, stack: Optional[list[tuple[str, str]]] =
             return EntityType.CLASS
     elif language in ("c", "cpp"):
         if node.type == "function_definition":
-            # `void App::run() {}` at namespace scope is a method of App,
-            # not a free function: the qualifier is the scope the AST
-            # stack cannot see.
-            if qualified_scope or (stack and stack[-1][0] == "class"):
+            # Distinguish real function definition from statement-position macro with braces
+            # (e.g. for_each_clamp_id(clamp_id) { ... } promoted by tree-sitter).
+            # Real definition has function_declarator before compound_statement.
+            has_func_decl = any(
+                c.type == "function_declarator"
+                for c in _walk(node)
+                if c.type != "compound_statement"
+            )
+            if not has_func_decl:
+                return None
+            has_type = bool(node.child_by_field_name("type"))
+            in_class = bool(qualified_scope or (stack and stack[-1][0] in ("class", "struct")))
+            if not has_type and not in_class:
+                decl = node.child_by_field_name("declarator")
+                is_ctor_dtor = any(c.type in ("qualified_identifier", "destructor_name") for c in _walk(decl)) if decl else False
+                if not is_ctor_dtor:
+                    return None
+            if qualified_scope or (stack and stack[-1][0] in ("class", "struct")):
                 return EntityType.METHOD
             return EntityType.FUNCTION
         if node.type in ("class_specifier", "struct_specifier"):
@@ -472,15 +497,25 @@ def _classify_node(node, language: str, stack: Optional[list[tuple[str, str]]] =
             return EntityType.CLASS
         if node.type in ("interface_declaration", "type_alias_declaration"):
             return EntityType.TYPE
-        if node.type == "variable_declarator":
-            val = node.child_by_field_name("value")
+        if node.type in ("variable_declarator", "field_definition", "public_field_definition", "pair", "assignment_expression"):
+            val = node.child_by_field_name("value") or node.child_by_field_name("right")
             if not val:
                 for c in node.children:
                     if c.type in ("arrow_function", "function_expression"):
                         val = c
                         break
             if val and val.type in ("arrow_function", "function_expression"):
-                return EntityType.METHOD if stack and stack[-1][0] == "class" else EntityType.FUNCTION
+                return EntityType.METHOD if (stack and stack[-1][0] == "class") or node.type in ("field_definition", "public_field_definition") else EntityType.FUNCTION
+            return None
+        if node.type == "export_default_declaration":
+            val = node.child_by_field_name("value") or node.child_by_field_name("declaration")
+            if not val:
+                for c in node.children:
+                    if c.type in ("arrow_function", "function_expression"):
+                        val = c
+                        break
+            if val and val.type in ("arrow_function", "function_expression"):
+                return EntityType.FUNCTION
             return None
     return None
 
@@ -509,7 +544,8 @@ def _extract_param_types(node, source: bytes) -> list[str]:
         for c in p.children:
             if c.type == "type_qualifier" and "const" in _text(c, source):
                 is_const = True
-            elif c.type in ("primitive_type", "type_identifier", "sized_type_specifier"):
+            elif c.type in ("primitive_type", "type_identifier", "sized_type_specifier",
+                            "struct_specifier", "qualified_identifier", "scoped_type_identifier"):
                 t_str = _text(c, source).strip()
                 if "const" in t_str.split():
                     is_const = True
@@ -591,11 +627,8 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
                 idx = next(i for i, s in enumerate(sibs) if _node_key(s) == _node_key(node))
                 j = idx - 1
                 while j >= 0 and sibs[j].type == "decorator":
-                    if sibs[j].end_point[0] + 1 == line_start - 1:
-                        line_start = sibs[j].start_point[0] + 1
-                        j -= 1
-                    else:
-                        break
+                    line_start = sibs[j].start_point[0] + 1
+                    j -= 1
             except (StopIteration, IndexError):
                 pass
         else:
@@ -609,11 +642,13 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
             if len(raw_slices) > 1:
                 snippet_text = raw_slices[0]
                 slices = raw_slices[1:]
+                all_text = "".join(raw_slices)
+                all_lines = _split_source_lines(all_text.encode("utf-8", errors="replace"))
                 snip_rec = EntitySnippetRecord(
-                    lines=snip_rec.lines,
+                    lines=all_lines,
                     is_complete=True,
                     truncated_at_line=None,
-                    char_count=snip_rec.char_count,
+                    char_count=len(all_text),
                     encoding="utf-8",
                     slices=tuple(slices),
                 )
@@ -676,6 +711,37 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
                         EntityType.IMPORT, parsed.language, parsed.source_hash,
                         node.start_point[0] + 1, node.end_point[0] + 1, now,
                     ))
+        elif node.type == "export_statement" and parsed.language in ("typescript", "tsx", "javascript"):
+            # `export { a } from "baz"; export * from "qux";`
+            for child in node.children:
+                if child.type == "string":
+                    mod = _text(child, parsed.source).strip("\"' `")
+                    if mod and mod not in seen_imports:
+                        seen_imports.add(mod)
+                        entities.append(_make_entity(
+                            repository_id, revision_id, parsed.file_path, mod,
+                            EntityType.IMPORT, parsed.language, parsed.source_hash,
+                            node.start_point[0] + 1, node.end_point[0] + 1, now,
+                        ))
+        elif node.type == "call_expression" and parsed.language in ("typescript", "tsx", "javascript"):
+            # `const x = require("foo");` or `const y = await import("bar");`
+            fn_node = node.child_by_field_name("function") or (node.children[0] if node.children else None)
+            if fn_node:
+                fn_name = _text(fn_node, parsed.source).strip()
+                if fn_name in ("require", "import"):
+                    args_node = node.child_by_field_name("arguments")
+                    if args_node:
+                        for arg in args_node.children:
+                            if arg.type == "string":
+                                mod = _text(arg, parsed.source).strip("\"' `")
+                                if mod and mod not in seen_imports:
+                                    seen_imports.add(mod)
+                                    entities.append(_make_entity(
+                                        repository_id, revision_id, parsed.file_path, mod,
+                                        EntityType.IMPORT, parsed.language, parsed.source_hash,
+                                        node.start_point[0] + 1, node.end_point[0] + 1, now,
+                                    ))
+                                break
         elif node.type == "preproc_include" and parsed.language in ("c", "cpp"):
             # `#include <flask.h>` / `#include "util.h"`: without this,
             # C/C++ translation units have no IMPORT entities and
@@ -917,19 +983,22 @@ def _extract_params(node, source: bytes, language: str = "python") -> list[str]:
         return params
     elif language in ("typescript", "tsx", "javascript"):
         for child in _walk(node):
+            if child != node and child.type in ("function_declaration", "method_definition", "arrow_function", "function_expression"):
+                continue
             if child.type == "formal_parameters":
                 for p in child.children:
+                    if p.type in (",", "(", ")"):
+                        continue
+                    pattern = p
                     if p.type in ("required_parameter", "optional_parameter"):
-                        for desc in p.children:
-                            if desc.type == "identifier":
-                                text = _text(desc, source)
-                                if text not in params:
-                                    params.append(text)
-                                break
-                    elif p.type == "identifier":
-                        text = _text(p, source)
-                        if text not in params:
-                            params.append(text)
+                        pattern = p.child_by_field_name("pattern") or (p.children[0] if p.children else p)
+                    for n in _walk(pattern):
+                        if n.type in ("type_annotation", "type_identifier", "predefined_type"):
+                            continue
+                        if n.type in ("identifier", "shorthand_property_identifier_pattern"):
+                            text = _text(n, source)
+                            if text and text not in params and text != "...":
+                                params.append(text)
         return params
     for child in node.children:
         if child.type == "parameters":
@@ -938,12 +1007,27 @@ def _extract_params(node, source: bytes, language: str = "python") -> list[str]:
                     text = _text(part, source)
                     if text not in params:
                         params.append(text)
+                elif part.type in ("list_splat_pattern", "dictionary_splat_pattern"):
+                    for sub in part.children:
+                        if sub.type == "identifier":
+                            text = _text(sub, source)
+                            if text not in params:
+                                params.append(text)
+                            break
                 elif part.type in ("typed_parameter", "default_parameter", "typed_default_parameter"):
                     for sub in part.children:
                         if sub.type == "identifier":
                             text = _text(sub, source)
                             if text not in params:
                                 params.append(text)
+                            break
+                        elif sub.type in ("list_splat_pattern", "dictionary_splat_pattern"):
+                            for id_node in sub.children:
+                                if id_node.type == "identifier":
+                                    text = _text(id_node, source)
+                                    if text not in params:
+                                        params.append(text)
+                                    break
                             break
     return params
 

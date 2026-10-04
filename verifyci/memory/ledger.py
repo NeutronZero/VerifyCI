@@ -58,7 +58,11 @@ class EventLedger:
                 return False
         return True
 
-    def verify_subchain(self, expected_head: Optional[str] = None) -> bool:
+    def verify_subchain(self, expected_head: Optional[str] = None,
+                        expected_genesis: Optional[str] = None) -> bool:
+        if expected_genesis is not None:
+            if not self._events or self._events[0].prev_event_hash != expected_genesis:
+                return False
         for i in range(1, len(self._events)):
             expected_hash = event_hash(self._events[i - 1])
             if self._events[i].prev_event_hash != expected_hash:

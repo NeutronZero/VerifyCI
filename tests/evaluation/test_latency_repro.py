@@ -114,7 +114,7 @@ def test_frozen_sources_match_working_tree():
     #      gate calls get_entity_as_of only — measure.py has no
     #      get_entities_by_revision call site).
     accepted_drift = {"__init__", "insert_entity", "insert_edge", "insert_event", "close",
-                      "get_entities_by_revision"}
+                      "get_entities_by_revision", "get_edges_by_revision"}
     assert set(lm) >= set(fm) - accepted_drift
     for name, fx_body in fm.items():
         if name in accepted_drift:

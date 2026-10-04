@@ -23,6 +23,14 @@ def _dedupe_invariants(invariants: list) -> list:
     return out
 
 
+def _audit_notes(task_record: dict) -> dict:
+    """Degraded-audit surfacing: persist/emit failures are recorded on the
+    task, never swallowed — copy whichever are present into the outward
+    result dict so run_task and MCP task.run report them identically."""
+    return {k: task_record[k] for k in ("audit_degraded", "persist_error", "emit_error")
+            if task_record.get(k) is not None}
+
+
 def _latest_revision_id(store, db_path: str = "") -> str:
     try:
         from verifyci.interface.commands import resolve_repository
@@ -93,6 +101,11 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
                               "decision": decision.status if decision else None,
                               "rationale": decision.rationale if decision else None,
                               "ledger_head": head}
+                    result.update(_audit_notes(scheduler._tasks.get(task_id, {})))
+                    if status.value == "TIMEOUT":
+                        # The deadline fired while a pool worker may still
+                        # be running: at-most-once, not cancelled.
+                        result["at_most_once"] = True
                     if anchor_file and head:
                         from verifyci.memory.ledger import append_anchor
                         append_anchor(anchor_file, task_id,
@@ -100,8 +113,14 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
                     return result
                 await asyncio.sleep(0.1)
             await scheduler.cancel(task_id)
-            return {"task": task, "task_id": task_id, "status": "TIMEOUT",
-                    "steps": len(task_ir.steps), "ledger_head": None}
+            # cancel() pins the head over the cancellation event, so the
+            # partial audit trail survives poll expiry instead of None.
+            result = {"task": task, "task_id": task_id, "status": "TIMEOUT",
+                      "steps": len(task_ir.steps),
+                      "ledger_head": scheduler.ledger_head(task_id),
+                      "at_most_once": True}
+            result.update(_audit_notes(scheduler._tasks.get(task_id, {})))
+            return result
         finally:
             store.close()
 

@@ -39,7 +39,7 @@ async def _wait_terminal(
 def test_unknown_task_accessors():
     async def go():
         sched = AsyncDAGScheduler()
-        assert await sched.status("ghost") == TaskStatus.FAILED
+        assert await sched.status("ghost") == TaskStatus.UNKNOWN
         assert sched.decision("ghost") is None
         assert sched.ledger_head("ghost") is None
         await sched.cancel("ghost")  # noop, must not raise

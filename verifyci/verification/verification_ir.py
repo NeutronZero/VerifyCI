@@ -28,7 +28,7 @@ def build_semi_check(cert, files: list[str], entities: list,
     """
     from verifyci.verification.diffmap import (
         find_ambiguous_files, map_files_to_entity_ids, normalize_path,
-        uninspectable_files,
+        uninspectable_files, files_with_stray_lines,
     )
     from verifyci.verification.partition import classify_path, FilePartition
 
@@ -63,7 +63,17 @@ def build_semi_check(cert, files: list[str], entities: list,
         if uncovered:
             explanation = (f"{explanation}; changed lines outside every "
                            f"entity span: {', '.join(uncovered[:8])}")
-    established = not ambiguous and not suffix_only and not opaque and not uncovered
+    stray_uncovered: list[str] = []
+    if diff is not None:
+        stray_uncovered = sorted(
+            f for f in files_with_stray_lines(diff)
+            if classify_path(f) == FilePartition.CODE_CORE
+        )
+        if stray_uncovered:
+            explanation = (f"{explanation}; unpositioned change outside any "
+                           f"hunk (stray +/- lines): {', '.join(stray_uncovered)}")
+    established = (not ambiguous and not suffix_only and not opaque
+                   and not uncovered and not stray_uncovered)
     return CheckResult(
         check_id="semi_formal",
         passed=cert.certificate_verified,
@@ -94,11 +104,17 @@ def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
 
     Decorator adjacency: extractor spans start at `def`/`class`
     (extractor.py is frozen by the latency guard, so the span fix lives
-    here, not there); an anchor exactly one line above a span start is
-    the decorated definition's decorator, not stray module text.
+    here, not there); a changed line exactly one line above a span start
+    is the decorated definition's decorator — but ONLY when the changed
+    line itself is a decorator (`@...`). Any other line one above a span
+    (a module constant, flag, or stray statement) is uncovered.
+
+    Duplicate `path:line` anchors collapse preserving order: a
+    replacement pair (`-` then `+`) anchors the same old line twice but
+    reports one uncovered item.
     """
     from verifyci.verification.diffmap import (
-        changed_line_anchor_sets, normalize_path,
+        iter_hunks, normalize_path,
     )
     from verifyci.verification.partition import classify_path, FilePartition
 
@@ -117,26 +133,60 @@ def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
             continue
         spans.setdefault(p, []).append((s, en))
     out: list[str] = []
-    for f, sets in changed_line_anchor_sets(diff).items():
-        if classify_path(f) != FilePartition.CODE_CORE:
+    seen: set[str] = set()
+    # Same anchor geometry as changed_line_anchor_sets (a `-` line anchors
+    # its own old line; a `+` anchors the insertion point), recomputed
+    # here so the adjacency grace can see the changed line's content.
+    for h in iter_hunks(diff):
+        if h.file is None:
             continue
-        file_spans = spans.get(normalize_path(f), [])
-        for anchors in sets:
+        if classify_path(h.file) != FilePartition.CODE_CORE:
+            continue
+        file_spans = spans.get(normalize_path(h.file), [])
+        old_ln = h.old_start
+        prev_minus = False
+        for body in h.lines:
+            if body.startswith("\\"):
+                continue
+            if body.startswith("-"):
+                anchors = {old_ln}
+                content = body[1:]
+                old_ln += 1
+                prev_minus = True
+            elif body.startswith("+"):
+                if prev_minus:
+                    anchors = {old_ln - 1} if old_ln > 1 else {old_ln}
+                else:
+                    anchors = {old_ln}
+                    if old_ln > 1:
+                        anchors.add(old_ln - 1)
+                content = body[1:]
+            else:
+                old_ln += 1
+                prev_minus = False
+                continue
             coverable = sorted(ln for ln in anchors if ln > 0)
             if not coverable:
                 continue  # positionless content (new-file `+` at old
                 # line 0): nothing to attribute; ungrounded-file and
                 # opaque checks own that case.
-            if any(_anchor_covered(ln, file_spans) for ln in coverable):
+            if any(_anchor_covered(ln, file_spans, content) for ln in coverable):
                 continue
-            out.append(f"{f}:{coverable[0]}")
+            key = f"{h.file}:{coverable[0]}"
+            if key not in seen:
+                seen.add(key)
+                out.append(key)
     return out
 
 
-def _anchor_covered(ln: int, file_spans: list[tuple[int, int]]) -> bool:
+def _anchor_covered(ln: int, file_spans: list[tuple[int, int]], content: str = "") -> bool:
     if any(s <= ln <= en for s, en in file_spans):
         return True
-    return any(s - ln == 1 for s, en in file_spans)
+    # One line above a span start is only the decorator when the changed
+    # line is itself a decorator line.
+    if content.lstrip().startswith("@"):
+        return any(s - ln == 1 for s, en in file_spans)
+    return False
 
 
 def build_verification_report(

@@ -44,10 +44,15 @@ class DeletionHunkVerdict:
 
 _ASSERT_RE = re.compile(r"^\s*assert\b")
 _GUARD_KEYWORD_RE = re.compile(
-    r"\b(raise\s+(PermissionError|AuthenticationError|SecurityError|Unauthorized|Forbidden)|"
+    r"\b(raise\s+(PermissionError|PermissionDenied|AuthenticationError|NotAuthenticated|SecurityError|Unauthorized|Forbidden)|"
     r"check_permission|verify_token|validate_credentials|"
-    r"require_auth|login_required|permission_required)\b|"
-    r"@(?:require_auth|login_required|permission_required|guard)\b"
+    r"require_auth|login_required|permission_required|"
+    r"denied|unauthori\w*|unauthen\w*|forbidden|PermissionDenied|NotAuthenticated|"
+    r"abort\s*\(\s*40[13]|status\s*\(\s*40[13]|return\s+40[13]|"
+    r"throw)\b|"
+    r"@(?:require_auth|login_required|permission_required|guard)\b|"
+    r"!\s*auth\w*",
+    re.IGNORECASE,
 )
 
 
@@ -60,14 +65,83 @@ def _is_guard_line(line: str) -> bool:
     return False
 
 
-def _is_guard_preserved_in_additions(added_lines: list[str]) -> bool:
+def _guard_identity(line: str) -> str | None:
+    """Normalized guard predicate for one line (C-1 same-guard comparison).
+
+    `raise PermissionError` -> `raise:permissionerror`, `abort(403)` ->
+    `abort:403`, `@require_auth` -> `deco:require_auth`, `assert x` ->
+    `assert`, `check_permission(u)` -> `kw:check_permission`. Two lines
+    share a predicate only when the callee/exception/status code matches:
+    swapping one guard for another (`PermissionError` -> `ValueError`)
+    is a NEW guard, not preservation. None for non-guard lines.
+    """
+    s = line.strip()
+    if not s or s.startswith("#"):
+        return None
+    m = re.search(r"\braise\s+([\w.]+)", s)
+    if m:
+        return "raise:" + m.group(1).split(".")[-1].lower()
+    m = re.search(r"\babort\s*\(\s*(\d+)", s, re.IGNORECASE)
+    if m:
+        return "abort:" + m.group(1)
+    m = re.search(r"\bstatus\s*\(\s*(\d+)", s, re.IGNORECASE)
+    if m:
+        return "status:" + m.group(1)
+    m = re.search(r"\breturn\b[^#]*\b(40[13])\b", s)
+    if m:
+        return "return:" + m.group(1)
+    m = re.search(r"\bthrow\s+([\w.]+)", s, re.IGNORECASE)
+    if m:
+        return "throw:" + m.group(1).split(".")[-1].lower()
+    if re.search(r"\bthrow\b", s, re.IGNORECASE):
+        return "throw"
+    m = re.search(r"@([\w.]+)", s)
+    if m and _is_guard_line(line):
+        return "deco:" + m.group(1).split(".")[-1].lower()
+    if re.match(r"assert\b", s):
+        return "assert"
+    m = _GUARD_KEYWORD_RE.search(s)
+    if m:
+        return "kw:" + m.group(0).strip().lower()
+    if re.search(r"\bassert\b", s):
+        return "assert"
+    return None
+
+
+def _is_guard_preserved_in_additions(
+    added_lines: list[str],
+    removed_guard_lines: list[str] | None = None,
+) -> bool:
+    """True when the additions preserve the removed guard predicate.
+
+    With `removed_guard_lines` (the Class-3 call site): the SAME guard
+    must reappear — normalized callee/exception/code equality via
+    `_guard_identity`. Any-`raise` no longer counts: replacing
+    `raise PermissionError` with `raise ValueError` fails closed.
+    Without it (legacy single-arg callers): any guard or any
+    raise/assert counts, preserving the previously pinned behavior.
+    """
+    if removed_guard_lines is None:
+        for line in added_lines:
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if _is_guard_line(line):
+                return True
+            if re.search(r"\b(raise\s+\w+|assert\b)", stripped):
+                return True
+        return False
+    removed_keys = {
+        _guard_identity(gl) or ("raw:" + gl.strip().lower())
+        for gl in removed_guard_lines
+    }
+    if not removed_keys:
+        return False
     for line in added_lines:
-        stripped = line.strip()
-        if stripped.startswith("#"):
+        if line.strip().startswith("#"):
             continue
-        if _is_guard_line(line):
-            return True
-        if re.search(r"\b(raise\s+\w+|assert\b)", stripped):
+        key = _guard_identity(line) or ("raw:" + line.strip().lower())
+        if key in removed_keys:
             return True
     return False
 
@@ -110,11 +184,14 @@ def _matches_waiver(
         t = w.target.strip()
         if not t:
             continue  # empty target must not match everything
-        # V-11: Match exact file target
-        norm_t = normalize_path(t)
-        if norm_file == norm_t or norm_file.endswith("/" + norm_t.lstrip("/")):
-            return w
-
+        # Class-3 waiver contract: a bare file target (`src/foo.py`)
+        # would waive EVERY guard removed file-wide, so it never matches
+        # here (fail closed). Waive with a `file:symbol` target (below)
+        # or a symbol / exact-guard-line target (after).
+        if ":" not in t:
+            norm_t = normalize_path(t)
+            if norm_file == norm_t or norm_file.endswith("/" + norm_t.lstrip("/")):
+                continue  # file-only target waives nothing file-wide
         # V-11: Match qualified file:symbol target
         if ":" in t:
             f_part, s_part = t.split(":", 1)
@@ -369,7 +446,7 @@ def verify_deletion_hunks(
 
             # Provenance is 100% verified! Now evaluate deletion semantics.
             # 1. Class 3 check: Guard / assertion removal without waiver
-            if guard_lines and not _is_guard_preserved_in_additions(plus_lines):
+            if guard_lines and not _is_guard_preserved_in_additions(plus_lines, guard_lines):
                 matched_waiver = _matches_waiver(guard_lines, f.path, waivers)
                 if matched_waiver:
                     # Record WHICH trust posture waived this: keys configured

@@ -1,10 +1,22 @@
 import asyncio
+import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any
 
 from verifyci.contracts.scheduler import (
     ExecutableDAG, Scheduler, TERMINAL_STATUSES, TaskStatus,
+)
+
+# Bounded worker pool for node execution. asyncio.to_thread uses the
+# loop's default executor (unbounded for our purposes and shared with
+# unrelated work); an explicit pool caps lingering-thread pileup when
+# nodes block past their deadline, and gives the linger a name in
+# thread dumps.
+_NODE_POOL = ThreadPoolExecutor(
+    max_workers=min(32, (os.cpu_count() or 1) + 4),
+    thread_name_prefix="verifyci-node",
 )
 
 
@@ -112,7 +124,10 @@ class AsyncDAGScheduler(Scheduler):
 
     async def status(self, task_id: str) -> TaskStatus:
         task = self._tasks.get(task_id)
-        return task["status"] if task else TaskStatus.FAILED
+        # An unknown id is UNKNOWN, never FAILED: FAILED claims a run
+        # happened and rejected the work, which would exit a CI gate as
+        # a verdict on nothing. Callers map UNKNOWN to the infra channel.
+        return task["status"] if task else TaskStatus.UNKNOWN
 
     def decision(self, task_id: str) -> Any:
         task = self._tasks.get(task_id)
@@ -219,6 +234,7 @@ class AsyncDAGScheduler(Scheduler):
                         # drop the verification decision entirely.
                         ordered = [o for o in outcomes if o[0] == "block"]
                         ordered += [o for o in outcomes if o[0] == "review"]
+                        ordered += [o for o in outcomes if o[0] == "timeout"]
                         ordered += [o for o in outcomes if o[0] == "error"]
                         ordered += [o for o in outcomes if o[0] == "ok"]
                         for outcome in ordered:
@@ -247,6 +263,22 @@ class AsyncDAGScheduler(Scheduler):
                                     review_status = "INCONCLUSIVE"
                                 elif review_status is None:
                                     review_status = "HUMAN_REVIEW"
+                            if kind == "timeout":
+                                # A node that outran its deadline is TIMEOUT
+                                # (exit 3 infrastructure), never FAILED: the
+                                # gate did not reject the work, it never got
+                                # to conclude. The lingered worker may still
+                                # finish past the deadline, so node effects
+                                # are at-most-once — surfaced on the result
+                                # dict by run_task / task.run, not cancelled.
+                                step_id, error = decision
+                                task["status"] = TaskStatus.TIMEOUT
+                                task["error"] = f"{step_id}: {error}"
+                                self._emit("TASK_TIMEOUT", task_id, conversation_id,
+                                           {"reason": "node_timeout", "step_id": step_id,
+                                            "error": error})
+                                await self._persist(task_id)
+                                return
                             if kind == "error":
                                 step_id, error = decision
                                 task["status"] = TaskStatus.FAILED
@@ -316,7 +348,7 @@ class AsyncDAGScheduler(Scheduler):
                 else:
                     results[idx] = t.result()
 
-            has_terminating = any(results[task_to_idx[t]][0] in ("block", "error")
+            has_terminating = any(results[task_to_idx[t]][0] in ("block", "timeout", "error")
                                   for t in done if results[task_to_idx[t]] is not None)
             if has_terminating:
                 for other in pending:
@@ -357,12 +389,15 @@ class AsyncDAGScheduler(Scheduler):
         if timeout is None:
             timeout = shared.get("node_timeout", 300)
         # Timeout bounds the wait, not the work: asyncio cannot kill a
-        # thread once started, so after a timeout the to_thread worker
-        # may linger until _invoke returns. The timeout is configurable
-        # per node (config "timeout", else shared "node_timeout",
-        # default 300s); the loop never blocks on the lingerer, so a
-        # slow node cannot deadlock the scheduler — but treat node side
-        # effects past the deadline as at-most-once, not cancelled.
+        # thread once started, so after a timeout the pool worker may
+        # linger until _invoke returns. The pool is bounded (_NODE_POOL)
+        # so lingerers pile up only to max_workers; the timeout is
+        # configurable per node (config "timeout", else shared
+        # "node_timeout", default 300s); the loop never blocks on the
+        # lingerer, so a slow node cannot deadlock the scheduler — but
+        # treat node side effects past the deadline as at-most-once,
+        # not cancelled (surfaced as "at_most_once": True on TIMEOUT
+        # result dicts).
         try:
             def _invoke():
                 return asyncio.run(executor.execute_node(node_obj, ctx))

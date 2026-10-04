@@ -33,8 +33,16 @@ class GraphBuilder:
         self._allow_external = allow_external
         self.resolution_stats: dict[str, int] = {}
 
-    def build(self, entities: list[Entity], edges: list[Edge]):
+    def build(self, entities: list[Entity], edges: list[Edge],
+              now: float | None = None):
         import rustworkx as rx
+        import time as _time
+
+        # One timestamp per build: resolved edges stamped per-link with
+        # time.time() each got distinct valid_from values, so identical
+        # builds never agreed on edge intervals.
+        if now is None:
+            now = _time.time()
 
         self._graph = rx.PyDiGraph()
         self._node_map = {}
@@ -62,10 +70,10 @@ class GraphBuilder:
             if src_idx is not None and dst_idx is not None:
                 self._graph.add_edge(src_idx, dst_idx, edge)
 
-        self._resolve_deferred(pending)
+        self._resolve_deferred(pending, now)
         return self._graph
 
-    def _resolve_deferred(self, pending: list[Edge]) -> None:
+    def _resolve_deferred(self, pending: list[Edge], now: float) -> None:
         """Link references extraction could not resolve intra-file.
 
         Policy, stated plainly: exactly one eligible entity with the
@@ -80,6 +88,10 @@ class GraphBuilder:
         """
         by_lang: dict[str, str] = {}
         by_name: dict[str, list[str]] = {}
+        # Qualified-name index built once per build: matching every
+        # `ns::Base` reference against every node was O(pending x nodes).
+        qual_index: dict[str, list[str]] = {}
+        top_index: dict[str, list[str]] = {}
         for eid, idx in self._node_map.items():
             payload = self._graph[idx]
             if not hasattr(payload, "type") or not hasattr(payload, "name"):
@@ -88,6 +100,13 @@ class GraphBuilder:
                                 EntityType.PARAMETER):
                 continue
             by_name.setdefault(payload.name, []).append(eid)
+            if payload.type in _BASE_TARGET_TYPES:
+                qualified = (getattr(payload, "metadata", None) or {}).get(
+                    "qualified_name")
+                if qualified:
+                    qual_index.setdefault(qualified, []).append(eid)
+                else:
+                    top_index.setdefault(payload.name, []).append(eid)
             language = getattr(payload, "language", "") or ""
             if language:
                 by_lang[eid] = language
@@ -116,11 +135,12 @@ class GraphBuilder:
                     self.resolution_stats["ambiguous" if candidates else "missing"] += 1
                     continue
                 self._link_resolved(edge, src_idx, candidates[0],
-                                    EdgeType.CALLS, CPGEdgeSubtype.CALLS_DIRECT)
+                                    EdgeType.CALLS, CPGEdgeSubtype.CALLS_DIRECT,
+                                    now)
             elif edge.type == EdgeType.INHERITS_UNRESOLVED:
                 name = (edge.metadata or {}).get("base", "")
                 if "::" in name:
-                    candidates = self._match_qualified(name)
+                    candidates = self._match_qualified(name, qual_index, top_index)
                 else:
                     candidates = [e for e in by_name.get(name, [])
                                   if self._graph[self._node_map[e]].type in _BASE_TARGET_TYPES]
@@ -128,9 +148,11 @@ class GraphBuilder:
                     self.resolution_stats["ambiguous" if candidates else "missing"] += 1
                     continue
                 self._link_resolved(edge, src_idx, candidates[0],
-                                    EdgeType.INHERITS, CPGEdgeSubtype.INHERITS)
+                                    EdgeType.INHERITS, CPGEdgeSubtype.INHERITS,
+                                    now)
 
-    def _match_qualified(self, name: str) -> list[str]:
+    def _match_qualified(self, name: str, qual_index: dict | None = None,
+                         top_index: dict | None = None) -> list[str]:
         """Match a qualified reference (`ns::Base`, `::Global`) against
         canonical `metadata["qualified_name"]` values.
 
@@ -143,6 +165,11 @@ class GraphBuilder:
         bare = name.lstrip(":") if anchored else name
         if not bare:
             return []
+        if qual_index is not None:
+            if anchored:
+                return list(qual_index.get(bare, ())) + list(
+                    (top_index or {}).get(bare, ()))
+            return list(qual_index.get(name, ()))
         matches = []
         for eid, idx in self._node_map.items():
             payload = self._graph[idx]
@@ -159,10 +186,9 @@ class GraphBuilder:
         return matches
 
     def _link_resolved(self, unresolved: Edge, src_idx: int, dst_eid: str,
-                       edge_type: EdgeType, subtype: CPGEdgeSubtype) -> None:
-        import time as _time
+                       edge_type: EdgeType, subtype: CPGEdgeSubtype,
+                       now: float) -> None:
         dst_idx = self._node_map[dst_eid]
-        now = _time.time()
         self._graph.add_edge(src_idx, dst_idx, Edge(
             id=f"{unresolved.id}__{dst_eid}",
             revision_id=unresolved.revision_id,

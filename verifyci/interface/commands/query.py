@@ -78,7 +78,8 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
             "SELECT revision_entity_id, name, file_path FROM entities WHERE revision_id = ?",
             (rev,),
         ).fetchall() if rev else []
-        texts = {rid: f"{name} {fpath}" for rid, name, fpath in rows}
+        from verifyci.retrieval.representation import build_doc_text
+        texts = {rid: build_doc_text(name, fpath) for rid, name, fpath in rows}
 
         bm25 = BM25Retriever()
         for rid, text in texts.items():
@@ -102,12 +103,26 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
 
         builder = GraphBuilder()
         entities = [store._row_to_entity(r) for r in store.conn.execute(
-            "SELECT * FROM entities WHERE revision_id = ?", (rev,)).fetchall()] if rev else []
+            "SELECT * FROM entities WHERE revision_id = ? AND valid_until IS NULL", (rev,)).fetchall()] if rev else []
         edges = [store._row_to_edge(r) for r in store.conn.execute(
-            "SELECT * FROM edges WHERE revision_id = ?", (rev,)).fetchall()] if rev else []
+            "SELECT * FROM edges WHERE revision_id = ? AND valid_until IS NULL", (rev,)).fetchall()] if rev else []
         graph = builder.build(entities, edges) if entities else None
         node_map = builder.get_node_map()
-        seeds = [h.id for h in sparse_hits[:3]]
+        seeds: list[str] = []
+        for d, s in zip(dense_hits, sparse_hits):
+            for sid in (s.id, d.id):
+                if sid not in seeds:
+                    seeds.append(sid)
+                if len(seeds) >= 3:
+                    break
+            if len(seeds) >= 3:
+                break
+        if len(seeds) < 3:
+            for h in sparse_hits + dense_hits:
+                if h.id not in seeds:
+                    seeds.append(h.id)
+                if len(seeds) >= 3:
+                    break
         graph_hits = GraphRetriever(graph, node_map).retrieve(seeds) if graph is not None else []
 
         fused = rrf_fusion_with_scores(dense_hits, sparse_hits, graph_hits)

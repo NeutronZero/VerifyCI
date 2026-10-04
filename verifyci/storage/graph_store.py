@@ -260,6 +260,11 @@ class GraphStore:
             return
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(db_path)
+        # Foreign keys are per-connection in SQLite (default OFF): the
+        # writer must opt in or revision/ingest links go unchecked.
+        # Reader connections stay untouched; the v1->v2 migration still
+        # toggles explicitly around its table rebuild.
+        self.conn.execute("PRAGMA foreign_keys=ON")
         # WAL: a long ingest transaction no longer blocks readers —
         # verify/stats/query see the last committed revision instead of
         # "database is locked" (which, pre-fix, surfaced as a
@@ -723,9 +728,88 @@ class GraphStore:
 
     def get_edges_by_revision(self, revision_id: str) -> list[Edge]:
         rows = self.conn.execute(
-            "SELECT * FROM edges WHERE revision_id = ?", (revision_id,)
+            "SELECT * FROM edges WHERE revision_id = ? AND valid_until IS NULL", (revision_id,)
         ).fetchall()
         return [self._row_to_edge(r) for r in rows]
+
+    def repair_duplicate_live_intervals(
+            self, repository_id: str, now: float) -> tuple[int, int]:
+        """Close stale duplicate live intervals (self-healing invariant).
+
+        At most one live row may exist per logical entity id, and per
+        logical edge key. Re-opened rows (a re-asserted id clearing a
+        close stamp) and missed closes otherwise leave two live
+        intervals for one fact, and every "latest" lookup then answers
+        ambiguously. Keeps the latest valid_from per bucket and
+        version-closes the rest. Returns (entities, edges) closed.
+
+        Edge buckets are the supersession match key plus the call-site
+        suffix from the edge id: parallel call sites share
+        (src, dst, type) legitimately and must not collapse into one.
+        """
+        n_entities = 0
+        dup_ids = self.conn.execute(
+            "SELECT logical_entity_id FROM entities"
+            " WHERE valid_until IS NULL AND repository_id = ?"
+            " GROUP BY logical_entity_id HAVING COUNT(*) > 1",
+            (repository_id,),
+        ).fetchall()
+        for (lid,) in dup_ids:
+            rows = self.conn.execute(
+                "SELECT rowid FROM entities"
+                " WHERE logical_entity_id = ? AND valid_until IS NULL"
+                " AND repository_id = ?"
+                " ORDER BY valid_from DESC, rowid DESC",
+                (lid, repository_id),
+            ).fetchall()
+            for (rid,) in rows[1:]:
+                self.conn.execute(
+                    "UPDATE entities SET valid_until = ?, t_expired = ?"
+                    " WHERE rowid = ?",
+                    (now, now, rid),
+                )
+                n_entities += 1
+        entmap = {
+            r[0]: r[1] for r in self.conn.execute(
+                "SELECT revision_entity_id, logical_entity_id FROM entities"
+                " WHERE revision_id IN (SELECT revision_id FROM revisions"
+                " WHERE repository_id = ?)",
+                (repository_id,)).fetchall()
+        }
+        live = self.conn.execute(
+            "SELECT id, src_entity_id, dst_entity_id, type, metadata_json,"
+            " valid_from FROM edges WHERE valid_until IS NULL"
+            " AND revision_id IN (SELECT revision_id FROM revisions"
+            " WHERE repository_id = ?)",
+            (repository_id,),
+        ).fetchall()
+        buckets: dict[tuple, list] = {}
+        for r in live:
+            meta = json.loads(r[4]) if r[4] else {}
+            site = ""
+            if r[0]:
+                last = r[0].rsplit("_", 1)[-1]
+                if ":" in last:
+                    site = last
+            key = _edge_match_key(entmap.get(r[1], r[1]),
+                                  entmap.get(r[2], r[2]), r[3], meta) + (site,)
+            buckets.setdefault(key, []).append(r)
+        n_edges = 0
+        for rows in buckets.values():
+            if len(rows) < 2:
+                continue
+            rows.sort(key=lambda r: (r[5] if r[5] is not None else -1.0, r[0]),
+                      reverse=True)
+            for r in rows[1:]:
+                self.conn.execute(
+                    "UPDATE edges SET valid_until = ?, t_expired = ?"
+                    " WHERE id = ?",
+                    (now, now, r[0]),
+                )
+                n_edges += 1
+        if n_entities or n_edges:
+            self._maybe_commit()
+        return n_entities, n_edges
 
     def close(self):
         self.conn.close()

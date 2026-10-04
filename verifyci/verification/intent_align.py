@@ -759,7 +759,10 @@ def _name_matches(dst_name, name: str, edge_type: str) -> bool:
         return True
     if edge_type != "IMPORTS":
         return False
-    return str(dst_name).split(".")[-1] == str(name).split(".")[-1]
+    dst, ban = str(dst_name), str(name)
+    if dst.split(".")[-1] == ban.split(".")[-1]:
+        return True
+    return dst.startswith(ban + ".")
 
 
 def _graph_search(graph: Any, name: str, edge_type: str

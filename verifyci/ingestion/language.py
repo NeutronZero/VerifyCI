@@ -2,6 +2,7 @@ import os
 
 LANGUAGE_BY_EXT = {
     ".py": "python",
+    ".pyi": "python",
     ".c": "c",
     ".cpp": "cpp",
     ".cc": "cpp",

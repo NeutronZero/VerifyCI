@@ -58,14 +58,21 @@ def as_index(neighbor: Any, node_map: dict) -> int | None:
 
 
 def _edge_payloads_between(graph: Any, src_idx: int, dst_idx: int) -> list[Any] | None:
-    """Edge payloads from src to dst, or None when the graph has no edge API."""
+    """Edge payloads from src to dst, or None when the graph has no edge API.
+
+    A missing API (test fakes, unfamiliar adapters) bypasses filtering;
+    a failing API raises: an exception means the graph is unreadable,
+    and traversing unfiltered over corrupt edge data would silently
+    invent or drop impact. Callers fail closed on RuntimeError.
+    """
     fn = getattr(graph, "get_all_edge_data", None)
     if not callable(fn):
         return None
     try:
         return list(fn(src_idx, dst_idx))
-    except Exception:  # noqa: BLE001, S110
-        return None
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(
+            f"edge data unreadable: {type(e).__name__}: {e}") from e
 
 
 def _edge_type_name(edge: Any) -> str | None:

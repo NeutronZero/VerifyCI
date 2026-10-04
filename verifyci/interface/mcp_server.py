@@ -1,11 +1,9 @@
 import asyncio
+import time as _time
 from typing import Any
 
-from verifyci.contracts.scheduler import TERMINAL_STATUSES
-
-
-MAX_DIFF_CHARS = 1_000_000
-MAX_TASK_DIFF_CHARS = 100_000
+from verifyci.contracts.scheduler import TERMINAL_STATUSES, TaskStatus
+from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_K, MAX_TASK_DIFF_CHARS
 
 
 class MCPServer:
@@ -114,10 +112,33 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
         from verifyci.retrieval.graph_retriever import GraphRetriever
         from verifyci.retrieval.reranker import CrossEncoderReranker
 
+        _qstart = _time.time()
+        _qstatus = "ok"
+
+        def _emit_log(_result=None):
+            # Same wiring as commands/query.py: env-gated query log,
+            # fail-silent — observability must never break retrieval.
+            try:
+                from verifyci.env import get_env as _ql_env
+                from verifyci.observability.querylog import QueryLogger as _QL
+                _log_path = _ql_env("QUERYLOG") or ""
+                if not _log_path:
+                    return
+                _dur = (_time.time() - _qstart) * 1000.0
+                _n = len((_result or {}).get("results", [])) if isinstance(_result, dict) else 0
+                _QL(_log_path).log_query(query, caller="mcp.code.search",
+                                         duration_ms=_dur, results_count=_n,
+                                         status=_qstatus)
+            except Exception:  # noqa: BLE001
+                pass
+
         with start_agent_span("code.search", conversation_id, "code.search"):
-            k = max(1, min(int(k or 10), 100))
+            k = max(1, min(int(k or 10), MAX_K))
             if graph is None:
-                return {"results": [], "query": query, "methods": [], "error": "no_graph_loaded"}
+                _qstatus = "no_graph_loaded"
+                _r = {"results": [], "query": query, "methods": [], "error": "no_graph_loaded"}
+                _emit_log(_r)
+                return _r
             from verifyci.retrieval.provider import default_dense_provider
             import os as _os
             cache_dir = None
@@ -158,8 +179,10 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                 methods = methods + [f"rerank:{reranker.backend}"]
             else:
                 ranked = [SearchResult(id=i, score=s, metadata={}) for i, s in fused[:k]]
-            return {"results": [_enriched_hit(r) for r in ranked],
-                    "query": query, "methods": methods}
+            out = {"results": [_enriched_hit(r) for r in ranked],
+                   "query": query, "methods": methods}
+            _emit_log(out)
+            return out
 
     def _enriched_hit(hit: Any) -> dict:
         entity = by_revision_id.get(hit.id)
@@ -225,7 +248,15 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                     "changed_entities": [],
                 }
             if len(diff) > MAX_DIFF_CHARS:
-                return {"revision_id": revision_id, "status": "FAILED", "error": "diff_too_large"}
+                return {
+                    "revision_id": revision_id,
+                    "status": "FAIL",
+                    "error": "diff_too_large",
+                    "report_id": "",
+                    "rationale": "diff_too_large",
+                    "files": parse_diff_files(diff),
+                    "changed_entities": [],
+                }
             reasoner = SemiFormalReasoner()
             cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map,
                                    entities=entities or None, waivers=_repo_waivers)
@@ -252,6 +283,12 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
             if entities:
                 used_revision = (getattr(entities[0], "revision_id", "")
                                  or revision_id)
+            if store is None and graph is None and not entities and decision.status == "INCONCLUSIVE":
+                return {"revision_id": used_revision, "status": "INFRA_ERROR",
+                        "report_id": report.report_id,
+                        "error": "no_store_loaded",
+                        "rationale": "storage_unavailable:no_store_loaded",
+                        "files": files, "changed_entities": changed}
             return {"revision_id": used_revision, "status": decision.status,
                     "report_id": report.report_id, "rationale": decision.rationale,
                     "files": files, "changed_entities": changed}
@@ -263,16 +300,16 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
 
         with start_agent_span("task.run", conversation_id, "task.run"):
             if _repo_invariants_err:
-                return {"task": task, "status": "FAILED", "error": "invalid_invariants_config", "ledger_head": None}
+                return {"task": task, "task_id": None, "status": "FAILED", "steps": 0, "decision": None, "error": "invalid_invariants_config", "ledger_head": None}
             if len(diff) > MAX_TASK_DIFF_CHARS:
-                return {"task": task, "status": "FAILED", "error": "diff_too_large", "ledger_head": None}
+                return {"task": task, "task_id": None, "status": "FAILED", "steps": 0, "decision": None, "error": "diff_too_large", "ledger_head": None}
             if len(task) > MAX_TASK_DIFF_CHARS:
-                return {"task": task, "status": "FAILED", "error": "task_too_large", "ledger_head": None}
+                return {"task": task, "task_id": None, "status": "FAILED", "steps": 0, "decision": None, "error": "task_too_large", "ledger_head": None}
             planner = Planner()
             intent = build_intent_package(task)
             task_ir = planner.plan(task, intent.intent_package_id, "default")
             if not validate_task_ir(task_ir):
-                return {"task": task, "status": "FAILED", "error": "invalid_task_ir",
+                return {"task": task, "task_id": None, "status": "FAILED", "steps": 0, "decision": None, "error": "invalid_task_ir",
                         "ledger_head": None}
             from verifyci.interface.commands.run import _dedupe_invariants
             context = {
@@ -288,15 +325,20 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
             if status in TERMINAL_STATUSES:
                 decision = scheduler.decision(task_id)
                 head = scheduler.ledger_head(task_id)
+                from verifyci.interface.commands.run import _audit_notes
                 result = {"task": task, "task_id": task_id, "status": status.value,
                           "steps": len(task_ir.steps),
                           "decision": decision.status if decision else None,
                           "ledger_head": head}
+                result.update(_audit_notes(scheduler._tasks.get(task_id, {})))
                 return result
             await asyncio.sleep(0.1)
         await scheduler.cancel(task_id)
-        return {"task": task, "task_id": task_id, "status": "TIMEOUT",
-                "ledger_head": None}
+        from verifyci.interface.commands.run import _audit_notes
+        result = {"task": task, "task_id": task_id, "status": "TIMEOUT",
+                  "ledger_head": scheduler.ledger_head(task_id)}
+        result.update(_audit_notes(scheduler._tasks.get(task_id, {})))
+        return result
 
     async def task_status(task_id: str) -> dict:
         status = await scheduler.status(task_id)

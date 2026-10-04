@@ -36,7 +36,7 @@ class DenseRetriever:
         for id, item in self._index.items():
             score = _cosine_similarity(query_embedding, item["embedding"])
             results.append(SearchResult(id=id, score=score, metadata=item["metadata"]))
-        results.sort(key=lambda r: r.score, reverse=True)
+        results.sort(key=lambda r: (-r.score, r.id))
         return results[:k]
 
 

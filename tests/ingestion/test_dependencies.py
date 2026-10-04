@@ -150,3 +150,24 @@ def test_bad_manifests_never_raise():
     for name, source in cases:
         assert isinstance(
             extract_dependencies(name, source, "rev"), list)
+
+
+def test_npm_peer_and_optional_dependencies():
+    source = '{"peerDependencies": {"react": "^18.0.0"}, "optionalDependencies": {"fsevents": "^2.3.2"}}'
+    rows = _pkgs("package.json", source)
+    assert ("react", "^18.0.0") in rows
+    assert ("fsevents", "^2.3.2") in rows
+
+
+def test_pyproject_groups():
+    toml = """
+[dependency-groups]
+dev = ["black>=23.0", "mypy>=1.0"]
+
+[tool.poetry.group.test.dependencies]
+pytest-mock = "^3.10"
+"""
+    rows = _pkgs("pyproject.toml", toml)
+    assert ("black", "23.0") in rows
+    assert ("mypy", "1.0") in rows
+    assert ("pytest-mock", "3.10") in rows

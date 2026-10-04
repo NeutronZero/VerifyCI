@@ -252,12 +252,18 @@ def verify_chain(db: str = "",
 def evaluate():
     from verifyci.interface.commands.evaluate import run_evaluate
     import json
-    typer.echo(json.dumps(run_evaluate(), indent=2))
+    res = run_evaluate()
+    typer.echo(json.dumps(res, indent=2))
+    if not (res.get("ledger_chain") and res.get("replay_equivalence") and res.get("event_replay")):
+        raise typer.Exit(code=1)
 
 
 @app.command()
+@_infra_exit
 def serve(db: str = "", transport: str = typer.Option("stdio", help="stdio or http"),
           host: str = "127.0.0.1", port: int = 8000):
+    if transport not in ("stdio", "http"):
+        raise typer.BadParameter(f"invalid transport '{transport}': must be 'stdio' or 'http'")
     from verifyci.interface.fastmcp_server import serve as _serve
     _serve(db or None, transport=transport, host=host, port=port)
 

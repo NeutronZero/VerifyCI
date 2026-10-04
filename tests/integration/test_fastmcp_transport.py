@@ -62,7 +62,7 @@ def test_passthrough_wrappers_fail_honest_on_empty_graph(tmp_path):
     query = _call(mcp, "graph_query", {"query": "f"})
     assert query["results"] == [] and query["error"] == "no_store_loaded"
     small = _call(mcp, "verify_diff", {"diff": "not a diff"})
-    assert small["status"] == "INCONCLUSIVE"
+    assert small["status"] == "INFRA_ERROR"
 
 
 def test_serve_stdio_and_http_wiring(tmp_path, monkeypatch):

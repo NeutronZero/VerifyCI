@@ -47,7 +47,7 @@ class GraphRetriever:
         if self.graph is None or max_hops <= 0 or not seed_entity_ids:
             return []
 
-        from verifyci.graph.traverse import as_index
+        from verifyci.graph.traverse import as_index, edge_allowed
         edge_adj = self._adjacency_from_edges()
         if edge_adj is not None:
             seeds = [self.node_map[eid] for eid in seed_entity_ids
@@ -92,6 +92,20 @@ class GraphRetriever:
                             neighbor = raw
                     if neighbor is None or neighbor in seed_set or neighbor in distances:
                         continue
+                    if adj is None and isinstance(node, int) and isinstance(neighbor, int):
+                        # Fallback relation filter (same rule as
+                        # traverse.edge_allowed): semantic edges expand,
+                        # containment/docs do not. Graphs without an
+                        # edge API bypass unfiltered; unmapped string
+                        # ids bypass below this check entirely.
+                        try:
+                            if not (edge_allowed(self.graph, node, neighbor,
+                                                 _TRAVERSABLE_VALUES)
+                                    or edge_allowed(self.graph, neighbor, node,
+                                                    _TRAVERSABLE_VALUES)):
+                                continue
+                        except RuntimeError:
+                            continue
                     distances[neighbor] = hop
                     nxt.add(neighbor)
             frontier = nxt

@@ -85,7 +85,9 @@ def classify_path(path: str | None) -> FilePartition:
         return FilePartition.DOCUMENTATION
     if norm.startswith("docs/"):
         return FilePartition.DOCUMENTATION
-    if norm.upper().startswith("LICENSE"):
+    # Basename-exact: a `licensed_code/*.py` tree must not read as LICENSE*.
+    base = norm.rsplit("/", 1)[-1].upper()
+    if base == "LICENSE" or base.startswith("LICENSE.") or base.startswith("LICENCE"):
         return FilePartition.DOCUMENTATION
 
     # 3. Test Suite

@@ -27,12 +27,8 @@ class ReplayEngine:
             nearest = self.get_latest_anchor(from_revision)
             anchor = nearest
         if anchor is None:
-            return ProjectionState(
-                projection_id=f"replay_{from_revision}_{to_revision}",
-                revision_id=to_revision,
-                state={},
-                timestamp=time.time(),
-            )
+            raise RuntimeError(
+                f"no anchor for replay {from_revision!r} -> {to_revision!r}")
 
         state = dict(anchor.state)
         current = anchor.revision_id  # resume from the anchor actually used
@@ -54,6 +50,7 @@ class ReplayEngine:
         if path_deltas is not None:
             for delta in path_deltas:
                 state.update(delta)
+            current = to_revision
         else:
             visited = set()
             while current != to_revision and current not in visited:
@@ -67,6 +64,13 @@ class ReplayEngine:
                     break
                 current, delta = next_delta
                 state.update(delta)
+
+        if current != to_revision:
+            # Fail closed: a partial state labeled with an unreached
+            # revision would verify against history that never happened.
+            raise RuntimeError(
+                f"no delta path for replay {from_revision!r} ->"
+                f" {to_revision!r} (reached {current!r})")
 
         return ProjectionState(
             projection_id=f"replay_{from_revision}_{to_revision}",

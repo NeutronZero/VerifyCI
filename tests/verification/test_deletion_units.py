@@ -88,8 +88,11 @@ def test_guard_preserved_in_additions():
 
 def test_waiver_file_and_text_match(monkeypatch):
     monkeypatch.setenv("VERIFYCI_WAIVER_KEYS", "s3cret")
+    # Class-3 contract change: a file-only target (`src/app.py`) would
+    # waive EVERY guard removed file-wide, so it never matches (fail
+    # closed). Waive with `file:symbol` or a symbol target instead.
     by_file = _waiver("src/app.py")
-    assert _matches_waiver(["    require_auth()"], "src/app.py", [by_file]) is by_file
+    assert _matches_waiver(["    require_auth()"], "src/app.py", [by_file]) is None
     by_text = _waiver("require_auth")
     assert _matches_waiver(["    require_auth()"], "src/other.py", [by_text]) is by_text
     assert _matches_waiver(["    return 1"], "src/other.py", [by_text]) is None

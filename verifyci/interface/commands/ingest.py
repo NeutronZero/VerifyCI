@@ -388,19 +388,21 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
         totals["disappeared_entities"] = gone_e
         totals["disappeared_edges"] = gone_d
 
-        # Defensive Invariant Assertion (Post-Ingest):
-        # Ensure at most one live interval exists per logical entity in the repository.
-        dup = store.conn.execute(
-            "SELECT logical_entity_id, COUNT(*) FROM entities"
-            " WHERE valid_until IS NULL AND repository_id = ?"
-            " GROUP BY logical_entity_id HAVING COUNT(*) > 1",
-            (repo.name,),
-        ).fetchone()
-        if dup:
-            from verifyci.interface.commands import InfraError
-            raise InfraError(
-                "multiple_live_intervals",
-                f"Multiple live intervals detected for logical entity: {dup[0]} (count {dup[1]})"
-            )
+        # Post-ingest repair (self-healing, never a brick): at most one
+        # live interval per logical entity / edge key. Stale duplicates
+        # (re-opened rows, missed closes) are version-closed here; the
+        # counts below are the operator-visible fail-closed signal.
+        import time as _rt
+        _repair_at = _rt.time()
+        repaired_entities, repaired_edges = store.repair_duplicate_live_intervals(
+            repo.name, _repair_at)
+        if repaired_entities or repaired_edges:
+            import sys as _sys
+            print(f"repaired {repaired_entities} entities,"
+                  f" {repaired_edges} edges with duplicate live intervals",
+                  file=_sys.stderr)
+        totals["repaired_entities"] = repaired_entities
+        totals["repaired_edges"] = repaired_edges
+        totals["repaired_live_intervals"] = repaired_entities + repaired_edges
 
         return totals

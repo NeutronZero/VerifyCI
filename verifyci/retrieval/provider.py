@@ -160,6 +160,10 @@ class CachedEmbeddingProvider(EmbeddingProvider):
         missing = sorted({t for t, k in zip(texts, keys) if k not in self._mem})
         if missing:
             vectors = await self.base.embed(missing)
+            if len(vectors) != len(missing):
+                raise RuntimeError(
+                    f"embedding backend returned {len(vectors)} vectors"
+                    f" for {len(missing)} texts")
             for text, vector in zip(missing, vectors):
                 self._mem[_cache_key(text)] = [float(v) for v in vector]
             self._save()

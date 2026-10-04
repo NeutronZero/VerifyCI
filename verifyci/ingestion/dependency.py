@@ -83,7 +83,7 @@ def _parse_npm(source: str, file_path: str, revision_id: str,
         # Top-level list (or scalar) has no sections to read.
         return []
     edges = []
-    for section in ("dependencies", "devDependencies"):
+    for section in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
         section_data = data.get(section, {}) or {}
         if not isinstance(section_data, dict):
             continue
@@ -404,4 +404,22 @@ def _parse_pyproject_toml(source: str, file_path: str, revision_id: str,
             if pkg == "python":
                 continue
             _add(pkg, _poetry_version(spec))
+    poetry_groups = poetry.get("group", {}) if isinstance(poetry, dict) else {}
+    if isinstance(poetry_groups, dict):
+        for grp_data in poetry_groups.values():
+            if isinstance(grp_data, dict):
+                g_deps = grp_data.get("dependencies", {})
+                if isinstance(g_deps, dict):
+                    for pkg, spec in g_deps.items():
+                        if pkg != "python":
+                            _add(pkg, _poetry_version(spec))
+    dep_groups = data.get("dependency-groups", {}) if isinstance(data, dict) else {}
+    if isinstance(dep_groups, dict):
+        for grp in dep_groups.values():
+            if isinstance(grp, list):
+                for dep in grp:
+                    if isinstance(dep, str):
+                        parsed = _pypi_spec_name_version(dep)
+                        if parsed is not None:
+                            _add(*parsed)
     return edges

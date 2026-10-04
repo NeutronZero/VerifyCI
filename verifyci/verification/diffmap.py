@@ -558,6 +558,21 @@ def uninspectable_files(diff: str | None) -> list[str]:
     return [p for p in out if p is not None]
 
 
+def files_with_stray_lines(diff: str | None) -> list[str]:
+    """Files carrying `+`/`-` lines outside any hunk (git mode/index noise
+    or hand-edited content). Strays have no old-side anchor, so the
+    seeding/coverage geometry cannot attribute them: consumers treat them
+    as uncovered (fail closed) rather than letting sibling hunks certify
+    the file. Preamble strays (no file yet, path None) are excluded."""
+    out: list[str] = []
+    for f in parse_unified_diff(diff):
+        if f.path is None:
+            continue
+        if (f.stray_added or f.stray_removed) and f.path not in out:
+            out.append(f.path)
+    return out
+
+
 def changed_line_anchor_sets(diff: str | None) -> dict[str, list[set[int]]]:
     """Old-side anchors per changed LINE, by diff file path.
 
