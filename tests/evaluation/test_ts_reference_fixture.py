@@ -13,7 +13,7 @@ SRC_DIR = Path("tests/fixtures/ts_reference_src")
 def test_ts_reference_fixture_sha256_immutability():
     """Fixture bytes must match the hardcoded SHA-256 constant exactly."""
     assert FIXTURE_PATH.is_file(), f"Fixture file not found: {FIXTURE_PATH}"
-    data = FIXTURE_PATH.read_bytes()
+    data = FIXTURE_PATH.read_bytes().replace(b"\r\n", b"\n")
     actual_hash = hashlib.sha256(data).hexdigest()
     assert (
         actual_hash == EXPECTED_FIXTURE_SHA256

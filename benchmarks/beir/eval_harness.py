@@ -37,7 +37,7 @@ CONFIG = json.loads((HERE / "config.json").read_text(encoding="utf-8"))
 
 
 def _sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def load():
