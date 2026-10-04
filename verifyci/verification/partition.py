@@ -31,12 +31,17 @@ class FilePartition(str, Enum):
     ANCILLARY = "ancillary"          # Scripts, benchmarks, scratch tools (e.g. benchmarks/, scripts/)
 
 
-_TEST_FILE_RE = re.compile(r"(^|/)(test_[^/]+\.py|[^/]+_test\.py)$")
-_TEST_DIR_RE = re.compile(r"(^|/)tests?/")
+_TEST_FILE_RE = re.compile(
+    r"(^|/)(test_[^/]+\.py|[^/]+_test\.py|[^/]+\.(?:test|spec)\.(?:[jt]sx?|[mc]js|[mc]ts))$"
+)
+_TEST_DIR_RE = re.compile(r"(^|/)(?:tests?|__tests__)/")
 _DOC_EXT_RE = re.compile(r"\.(md|rst|txt)$", re.IGNORECASE)
 _CONFIG_NAME_RE = re.compile(
     r"(?:^|/)(pyproject\.toml|setup\.(?:py|cfg)|requirements.*\.txt|"
-    r"package\.json|package-lock\.json|Cargo\.(?:toml|lock)|pom\.xml|go\.(?:mod|sum))$|^\.github/"
+    r"package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|"
+    r"tsconfig(?:\..*)?\.json|\.eslintrc.*|eslint\.config\..*|\.prettierrc.*|"
+    r"\.editorconfig|\.babelrc.*|babel\.config\..*|jest\.config\..*|vitest\.config\..*|"
+    r"Cargo\.(?:toml|lock)|pom\.xml|go\.(?:mod|sum))$|^\.github/"
 )
 _ANCILLARY_DIR_RE = re.compile(r"^(benchmarks/|scripts/|scratch/)")
 _CODE_DIR_RE = re.compile(r"^(verifyci/|src/)")

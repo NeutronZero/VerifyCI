@@ -223,3 +223,37 @@ diff --git a/mystery/unknown.xyz b/mystery/unknown.xyz
         # Calling methods repeatedly returns identical tuple references
         assert pdiff.files_for_partition(FilePartition.CODE_CORE) is pdiff.files_for_partition(FilePartition.CODE_CORE)
         assert pdiff.hunks_for_partition(FilePartition.CODE_CORE) is pdiff.hunks_for_partition(FilePartition.CODE_CORE)
+
+
+class TestPolyglotClassification:
+    def test_ts_js_test_files(self):
+        ts_test_files = [
+            "src/app.test.ts",
+            "src/app.spec.ts",
+            "src/components/button.test.tsx",
+            "lib/index.test.js",
+            "lib/index.spec.js",
+            "lib/index.test.mjs",
+            "lib/index.spec.cjs",
+            "__tests__/utils.ts",
+            "src/__tests__/cache.js",
+        ]
+        for f in ts_test_files:
+            assert classify_path(f) == FilePartition.TEST_SUITE, f"Failed for {f}"
+
+    def test_ts_js_config_files(self):
+        config_files = [
+            "package.json",
+            "package-lock.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "tsconfig.json",
+            "tsconfig.build.json",
+            ".eslintrc.json",
+            ".prettierrc.json",
+            "jest.config.js",
+            "vitest.config.ts",
+        ]
+        for f in config_files:
+            assert classify_path(f) == FilePartition.CONFIGURATION, f"Failed for {f}"
+

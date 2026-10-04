@@ -7,9 +7,9 @@ from verifyci.contracts.identity import compute_logical_entity_id, compute_revis
 from verifyci.ingestion.file_slice import slice_source
 from verifyci.ingestion.parser import ParsedFile
 
-CALL_NODES = ("call", "call_expression")
-FUNC_NODES = ("function_definition", "function_declaration", "method_definition")
-CLASS_NODES = ("class_definition", "class_specifier", "struct_specifier")
+CALL_NODES = ("call", "call_expression", "new_expression")
+FUNC_NODES = ("function_definition", "function_declaration", "generator_function_declaration", "method_definition")
+CLASS_NODES = ("class_definition", "class_specifier", "struct_specifier", "class_declaration", "interface_declaration", "type_alias_declaration")
 #: Declarator node types that can wrap a C/C++ function name. Beyond the
 #: plain trio, functions returning pointers/references nest the real
 #: declarator inside pointer/reference wrappers — without these,
@@ -223,6 +223,18 @@ def _walk(node):
         yield from _walk(child)
 
 
+def _is_arrow_func_decl(node) -> bool:
+    if node.type == "variable_declarator":
+        val = node.child_by_field_name("value")
+        if not val:
+            for c in node.children:
+                if c.type in ("arrow_function", "function_expression"):
+                    val = c
+                    break
+        return bool(val and val.type in ("arrow_function", "function_expression"))
+    return False
+
+
 def _walk_pruned(node):
     """Walk a function body for call sites without descending into
     nested named definitions. A nested `def inner` is visited as its
@@ -230,7 +242,7 @@ def _walk_pruned(node):
     the outer function too (double count). Lambdas and comprehensions
     are anonymous and stay in scope."""
     for child in node.children:
-        if child.type in FUNC_NODES or child.type in CLASS_NODES:
+        if child.type in FUNC_NODES or child.type in CLASS_NODES or _is_arrow_func_decl(child):
             continue
         yield child
         yield from _walk_pruned(child)
@@ -297,6 +309,19 @@ def _scope_name(node, source: bytes, language: str = "python") -> Optional[str]:
             for child in node.children:
                 if child.type == "identifier":
                     return _text(child, source)
+        elif language in ("typescript", "tsx", "javascript"):
+            if node.type in ("function_declaration", "generator_function_declaration"):
+                for child in node.children:
+                    if child.type == "identifier":
+                        return _text(child, source)
+            elif node.type == "method_definition":
+                for child in node.children:
+                    if child.type in ("property_identifier", "identifier"):
+                        return _text(child, source)
+            elif node.type == "variable_declarator":
+                for child in node.children:
+                    if child.type == "identifier":
+                        return _text(child, source)
         return None
     if node.type in DECLARATOR_TYPES:
         # A qualified name nested anywhere down the declarator spine
@@ -330,7 +355,7 @@ def _scope_name(node, source: bytes, language: str = "python") -> Optional[str]:
                 found = _text(child, source)
         return found
     for child in node.children:
-        if child.type in ("identifier", "type_identifier"):
+        if child.type in ("identifier", "type_identifier", "property_identifier"):
             return _text(child, source)
     return None
 
@@ -386,7 +411,20 @@ def _walk_scoped(node, source: bytes, stack: list[tuple[str, str]],
     naming only — they are filtered out of identity scopes so logical
     ids stay stable for code that never moved."""
     yield node, stack
-    kind = "class" if node.type in CLASS_NODES else ("func" if node.type in FUNC_NODES else None)
+    if node.type in CLASS_NODES:
+        kind = "class"
+    elif node.type in ("function_definition", "function_declaration", "generator_function_declaration", "method_definition"):
+        kind = "func"
+    elif node.type == "variable_declarator":
+        val = node.child_by_field_name("value")
+        if not val:
+            for c in node.children:
+                if c.type in ("arrow_function", "function_expression"):
+                    val = c
+                    break
+        kind = "func" if (val and val.type in ("arrow_function", "function_expression")) else None
+    else:
+        kind = None
     child_stack = stack
     if kind is not None:
         name = _scope_name(node, source, language)
@@ -425,6 +463,25 @@ def _classify_node(node, language: str, stack: Optional[list[tuple[str, str]]] =
             return EntityType.CLASS
         if node.type == "type_definition":
             return EntityType.TYPE
+    elif language in ("typescript", "tsx", "javascript"):
+        if node.type in ("function_declaration", "generator_function_declaration"):
+            return EntityType.METHOD if stack and stack[-1][0] == "class" else EntityType.FUNCTION
+        if node.type == "method_definition":
+            return EntityType.METHOD
+        if node.type == "class_declaration":
+            return EntityType.CLASS
+        if node.type in ("interface_declaration", "type_alias_declaration"):
+            return EntityType.TYPE
+        if node.type == "variable_declarator":
+            val = node.child_by_field_name("value")
+            if not val:
+                for c in node.children:
+                    if c.type in ("arrow_function", "function_expression"):
+                        val = c
+                        break
+            if val and val.type in ("arrow_function", "function_expression"):
+                return EntityType.METHOD if stack and stack[-1][0] == "class" else EntityType.FUNCTION
+            return None
     return None
 
 
@@ -514,10 +571,16 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
                       else [n for _, n in stack])
             qualified_name = "::".join(qparts + [name])
 
-        # G-01: Inherit decorator start line if wrapped in decorated_definition
+        # G-01: Inherit decorator / export start line if wrapped in decorated_definition or export_statement
         parent = parents.get(_node_key(node))
-        if parent is not None and parent.type == "decorated_definition":
+        if parent is not None and parent.type in ("decorated_definition", "export_statement"):
             line_start = parent.start_point[0] + 1
+        elif parent is not None and parent.type == "lexical_declaration":
+            grandparent = parents.get(_node_key(parent))
+            if grandparent is not None and grandparent.type == "export_statement":
+                line_start = grandparent.start_point[0] + 1
+            else:
+                line_start = parent.start_point[0] + 1
         else:
             line_start = node.start_point[0] + 1
         line_end = node.end_point[0] + 1
@@ -691,7 +754,7 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
 
     decorated_sites: set[tuple[str, int, int]] = set()
     for node, stack in _walk_scoped(root, parsed.source, [], parsed.language):
-        if node.type not in FUNC_NODES:
+        if node.type not in FUNC_NODES and not _is_arrow_func_decl(node):
             continue
         caller_name = _scope_name(node, parsed.source, parsed.language)
         if not caller_name:
@@ -835,6 +898,22 @@ def _extract_params(node, source: bytes, language: str = "python") -> list[str]:
                                 if name and name not in params:
                                     params.append(name)
         return params
+    elif language in ("typescript", "tsx", "javascript"):
+        for child in _walk(node):
+            if child.type == "formal_parameters":
+                for p in child.children:
+                    if p.type in ("required_parameter", "optional_parameter"):
+                        for desc in p.children:
+                            if desc.type == "identifier":
+                                text = _text(desc, source)
+                                if text not in params:
+                                    params.append(text)
+                                break
+                    elif p.type == "identifier":
+                        text = _text(p, source)
+                        if text not in params:
+                            params.append(text)
+        return params
     for child in node.children:
         if child.type == "parameters":
             for part in child.children:
@@ -866,12 +945,12 @@ def _extract_callee_name(node, source: bytes) -> Optional[str]:
         if child.type == "identifier":
             return _text(child, source)
     for child in node.children:
-        if child.type in ("attribute", "field_expression", "scoped_identifier"):
-            ids = [d for d in _walk(child) if d.type in ("identifier", "type_identifier", "field_identifier")]
+        if child.type in ("attribute", "field_expression", "scoped_identifier", "member_expression"):
+            ids = [d for d in _walk(child) if d.type in ("identifier", "type_identifier", "field_identifier", "property_identifier")]
             if ids:
                 return _text(ids[-1], source)
     for desc in _walk(node):
-        if desc.type in ("identifier", "field_identifier") and desc is not node:
+        if desc.type in ("identifier", "field_identifier", "property_identifier") and desc is not node:
             return _text(desc, source)
     return None
 
@@ -882,6 +961,10 @@ def _extract_import_modules(node, source: bytes) -> list[str]:
         for child in node.children:
             if child.type == "dotted_name":
                 modules.append(_text(child, source))
+            elif child.type == "string":
+                text = _text(child, source).strip("\"' `")
+                if text:
+                    modules.append(text)
             elif child.type == "aliased_import":
                 for grandchild in child.children:
                     if grandchild.type == "dotted_name":

@@ -36,11 +36,11 @@ def _bare_callee(node, source: bytes) -> set[str]:
             from verifyci.ingestion.extractor import _text
             names.add(_text(child, source))
             break
-        elif child.type in ("attribute", "scoped_identifier", "qualified_identifier", "field_expression"):
+        elif child.type in ("attribute", "scoped_identifier", "qualified_identifier", "field_expression", "member_expression"):
             from verifyci.ingestion.extractor import _text
             full_attr = _text(child, source).strip()
             names.add(full_attr)
-            ids = [d for d in _walk(child) if d.type in ("identifier", "type_identifier", "field_identifier")]
+            ids = [d for d in _walk(child) if d.type in ("identifier", "type_identifier", "field_identifier", "property_identifier")]
             if ids:
                 final_name = _text(ids[-1], source)
                 if full_attr.startswith(("builtins.", "__builtins__.", "std::")):
@@ -78,7 +78,7 @@ def extract_added_refs_status(diff: str | None) -> tuple[dict[str, dict[str, set
     parser = TreeSitterParser()
     for file, lines in per_file.items():
         language = detect_language(file)
-        if language not in ("python", "c", "cpp"):
+        if language not in ("python", "c", "cpp", "typescript", "tsx", "javascript"):
             continue
         try:
             parsed = parser.parse(file, textwrap.dedent(chr(10).join(lines)).encode("utf-8"), language)

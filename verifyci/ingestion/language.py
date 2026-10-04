@@ -12,6 +12,14 @@ LANGUAGE_BY_EXT = {
     # This also matches what benchmarks/score_cpp.py already assumed.
     ".h": "cpp",
     ".hpp": "cpp",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".mts": "typescript",
+    ".cts": "typescript",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
     ".md": "markdown",
     ".txt": "txt",
 }

@@ -1,14 +1,15 @@
 import time
 from typing import Optional
 
-from verifyci.contracts.entity import Entity, EntityType
+from verifyci.contracts.entity import Entity, EntitySnippetRecord, EntityType
 from verifyci.contracts.edge import Edge, EdgeType, CPGEdgeSubtype
 from verifyci.contracts.identity import compute_logical_entity_id, compute_revision_entity_id
+from verifyci.ingestion.file_slice import slice_source
 from verifyci.ingestion.parser import ParsedFile
 
-CALL_NODES = ("call", "call_expression")
-FUNC_NODES = ("function_definition", "function_declaration", "method_definition")
-CLASS_NODES = ("class_definition", "class_specifier", "struct_specifier")
+CALL_NODES = ("call", "call_expression", "new_expression")
+FUNC_NODES = ("function_definition", "function_declaration", "generator_function_declaration", "method_definition")
+CLASS_NODES = ("class_definition", "class_specifier", "struct_specifier", "class_declaration", "interface_declaration", "type_alias_declaration")
 #: Declarator node types that can wrap a C/C++ function name. Beyond the
 #: plain trio, functions returning pointers/references nest the real
 #: declarator inside pointer/reference wrappers — without these,
@@ -27,6 +28,11 @@ def _make_entity(
     line_start: int, line_end: int, now: float, scope: str = "",
     snippet: str = "", identity_scope: Optional[str] = None,
     qualified_name: str = "",
+    snippet_is_complete: bool = True,
+    snippet_truncated_at_line: Optional[int] = None,
+    signature: str = "",
+    accessor: str = "",
+    slices: Optional[list[str]] = None,
 ) -> Entity:
     # identity_scope pins the logical id: namespace entries are filtered
     # out of it, so wrapping code in `namespace ns {}` renames nothing
@@ -35,12 +41,24 @@ def _make_entity(
     # C/C++ only) is the canonical name the deferred resolver matches
     # qualified references against.
     lid_scope = scope if identity_scope is None else identity_scope
-    logical_id = compute_logical_entity_id(repository_id, file_path, name, entity_type, lid_scope)
+    logical_id = compute_logical_entity_id(
+        repository_id, file_path, name, entity_type, lid_scope, signature=signature
+    )
     metadata = {"scope": scope} if scope else {}
     if qualified_name:
         metadata["qualified_name"] = qualified_name
     if snippet:
         metadata["snippet"] = snippet
+        metadata["snippet_is_complete"] = snippet_is_complete
+        if snippet_truncated_at_line is not None:
+            metadata["snippet_truncated_at_line"] = snippet_truncated_at_line
+        metadata["snippet_char_count"] = len(snippet)
+    if slices:
+        metadata["slices"] = list(slices)
+    if accessor:
+        metadata["accessor"] = accessor
+    if signature:
+        metadata["signature"] = signature
     return Entity(
         repository_id=repository_id,
         logical_entity_id=logical_id,
@@ -135,21 +153,86 @@ def _split_source_lines(source: bytes) -> list[str]:
             for line in source.decode("utf-8", errors="replace").split("\n")]
 
 
+def _source_snippet_record(
+    source: bytes, line_start: int, line_end: int, limit: int = 2000
+) -> EntitySnippetRecord:
+    """Citeable source fragment record stored at ingest time. Truncates
+    strictly at a newline boundary when exceeding limit."""
+    try:
+        if line_start <= 0 and line_end <= 0:
+            return EntitySnippetRecord(
+                lines=(),
+                is_complete=True,
+                truncated_at_line=None,
+                char_count=0,
+                encoding="utf-8",
+            )
+        lines = _split_source_lines(source)
+        eff_start = max(1, line_start)
+        if eff_start > line_end or eff_start > len(lines):
+            return EntitySnippetRecord(
+                lines=(),
+                is_complete=True,
+                truncated_at_line=None,
+                char_count=0,
+                encoding="utf-8",
+            )
+        start_idx = eff_start - 1
+        end_idx = max(0, line_end)
+        span_lines = lines[start_idx:end_idx]
+        span = line_end - eff_start + 1
+
+        kept_lines: list[str] = []
+        current_len = 0
+        for line in span_lines:
+            add_len = len(line) + (1 if kept_lines else 0)
+            if current_len + add_len <= limit:
+                kept_lines.append(line)
+                current_len += add_len
+            else:
+                break
+
+        is_complete = len(kept_lines) == span
+        truncated_at_line = None if is_complete else (eff_start + len(kept_lines))
+        return EntitySnippetRecord(
+            lines=kept_lines,
+            is_complete=is_complete,
+            truncated_at_line=truncated_at_line,
+            char_count=current_len,
+            encoding="utf-8",
+        )
+    except Exception:  # noqa: BLE001, S110
+        return EntitySnippetRecord(
+            lines=(),
+            is_complete=False,
+            truncated_at_line=max(1, line_start) if line_start > 0 else None,
+            char_count=0,
+            encoding="utf-8",
+        )
+
+
 def _source_snippet(source: bytes, line_start: int, line_end: int, limit: int = 2000) -> str:
     """Citeable source fragment stored at ingest time, so evidence never
     depends on the working tree still containing the file."""
-    try:
-        lines = _split_source_lines(source)
-        fragment = "\n".join(lines[max(0, line_start - 1):line_end])
-    except Exception:  # noqa: BLE001, S110
-        return ""
-    return fragment[:limit]
+    return _source_snippet_record(source, line_start, line_end, limit=limit).text
 
 
 def _walk(node):
     yield node
     for child in node.children:
         yield from _walk(child)
+
+
+def _is_arrow_func_decl(node) -> bool:
+    if node.type == "variable_declarator":
+        val = node.child_by_field_name("value")
+        if not val:
+            for c in node.children:
+                if c.type in ("arrow_function", "function_expression"):
+                    val = c
+                    break
+        return bool(val and val.type in ("arrow_function", "function_expression"))
+    return False
 
 
 def _walk_pruned(node):
@@ -159,7 +242,7 @@ def _walk_pruned(node):
     the outer function too (double count). Lambdas and comprehensions
     are anonymous and stay in scope."""
     for child in node.children:
-        if child.type in FUNC_NODES or child.type in CLASS_NODES:
+        if child.type in FUNC_NODES or child.type in CLASS_NODES or _is_arrow_func_decl(child):
             continue
         yield child
         yield from _walk_pruned(child)
@@ -226,6 +309,19 @@ def _scope_name(node, source: bytes, language: str = "python") -> Optional[str]:
             for child in node.children:
                 if child.type == "identifier":
                     return _text(child, source)
+        elif language in ("typescript", "tsx", "javascript"):
+            if node.type in ("function_declaration", "generator_function_declaration"):
+                for child in node.children:
+                    if child.type == "identifier":
+                        return _text(child, source)
+            elif node.type == "method_definition":
+                for child in node.children:
+                    if child.type in ("property_identifier", "identifier"):
+                        return _text(child, source)
+            elif node.type == "variable_declarator":
+                for child in node.children:
+                    if child.type == "identifier":
+                        return _text(child, source)
         return None
     if node.type in DECLARATOR_TYPES:
         # A qualified name nested anywhere down the declarator spine
@@ -259,7 +355,7 @@ def _scope_name(node, source: bytes, language: str = "python") -> Optional[str]:
                 found = _text(child, source)
         return found
     for child in node.children:
-        if child.type in ("identifier", "type_identifier"):
+        if child.type in ("identifier", "type_identifier", "property_identifier"):
             return _text(child, source)
     return None
 
@@ -315,7 +411,20 @@ def _walk_scoped(node, source: bytes, stack: list[tuple[str, str]],
     naming only — they are filtered out of identity scopes so logical
     ids stay stable for code that never moved."""
     yield node, stack
-    kind = "class" if node.type in CLASS_NODES else ("func" if node.type in FUNC_NODES else None)
+    if node.type in CLASS_NODES:
+        kind = "class"
+    elif node.type in ("function_definition", "function_declaration", "generator_function_declaration", "method_definition"):
+        kind = "func"
+    elif node.type == "variable_declarator":
+        val = node.child_by_field_name("value")
+        if not val:
+            for c in node.children:
+                if c.type in ("arrow_function", "function_expression"):
+                    val = c
+                    break
+        kind = "func" if (val and val.type in ("arrow_function", "function_expression")) else None
+    else:
+        kind = None
     child_stack = stack
     if kind is not None:
         name = _scope_name(node, source, language)
@@ -354,20 +463,94 @@ def _classify_node(node, language: str, stack: Optional[list[tuple[str, str]]] =
             return EntityType.CLASS
         if node.type == "type_definition":
             return EntityType.TYPE
+    elif language in ("typescript", "tsx", "javascript"):
+        if node.type in ("function_declaration", "generator_function_declaration"):
+            return EntityType.METHOD if stack and stack[-1][0] == "class" else EntityType.FUNCTION
+        if node.type == "method_definition":
+            return EntityType.METHOD
+        if node.type == "class_declaration":
+            return EntityType.CLASS
+        if node.type in ("interface_declaration", "type_alias_declaration"):
+            return EntityType.TYPE
+        if node.type == "variable_declarator":
+            val = node.child_by_field_name("value")
+            if not val:
+                for c in node.children:
+                    if c.type in ("arrow_function", "function_expression"):
+                        val = c
+                        break
+            if val and val.type in ("arrow_function", "function_expression"):
+                return EntityType.METHOD if stack and stack[-1][0] == "class" else EntityType.FUNCTION
+            return None
     return None
+
+
+def _extract_param_types(node, source: bytes) -> list[str]:
+    """Extract canonicalized C/C++ parameter types in declaration order.
+    Parameter names are strictly excluded. Pointer/ref spacing and const
+    qualifiers are normalized. void f(void) is normalized to empty [].
+    Templates are deferred to V1.2.
+    """
+    param_list = None
+    for child in _walk(node):
+        if child.type == "parameter_list":
+            param_list = child
+            break
+    if param_list is None:
+        return []
+    types = []
+    for p in param_list.children:
+        if p.type != "parameter_declaration":
+            continue
+        is_const = False
+        type_parts = []
+        is_ptr = 0
+        is_ref = 0
+        for c in p.children:
+            if c.type == "type_qualifier" and "const" in _text(c, source):
+                is_const = True
+            elif c.type in ("primitive_type", "type_identifier", "sized_type_specifier"):
+                t_str = _text(c, source).strip()
+                if "const" in t_str.split():
+                    is_const = True
+                    t_str = " ".join(part for part in t_str.split() if part != "const")
+                type_parts.append(t_str)
+            elif c.type in ("pointer_declarator", "abstract_pointer_declarator"):
+                for sc in _walk(c):
+                    if sc.type == "*":
+                        is_ptr += 1
+            elif c.type in ("reference_declarator", "abstract_reference_declarator"):
+                for sc in _walk(c):
+                    if sc.type == "&":
+                        is_ref += 1
+        base_type = " ".join(type_parts).strip()
+        if not base_type:
+            continue
+        # C void parameter list: void f(void) -> empty
+        if base_type == "void" and is_ptr == 0 and is_ref == 0:
+            continue
+        type_str = ("const " if is_const else "") + base_type + ("*" * is_ptr) + ("&" * is_ref)
+        types.append(type_str)
+    return types
 
 
 def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -> list[Entity]:
     now = time.time()
+    num_lines = max(1, len(parsed.source.splitlines()))
     module = _make_entity(
         repository_id, revision_id, parsed.file_path, parsed.file_path,
-        EntityType.MODULE, parsed.language, parsed.source_hash, 1, 1, now,
+        EntityType.MODULE, parsed.language, parsed.source_hash, 1, num_lines, now,
     )
     entities = [module]
     if parsed.tree is None:
         return entities
 
     root = parsed.tree.root_node
+    parents = {}
+    for node in _walk(root):
+        for child in node.children:
+            parents[_node_key(child)] = node
+
     is_c_like = parsed.language in ("c", "cpp")
     for node, stack in _walk_scoped(root, parsed.source, [], parsed.language):
         qualified_scope = (
@@ -387,15 +570,72 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
             qparts = ([qualified_scope] if qualified_scope
                       else [n for _, n in stack])
             qualified_name = "::".join(qparts + [name])
-        line_start = node.start_point[0] + 1
+
+        # G-01: Inherit decorator / export start line if wrapped in decorated_definition or export_statement
+        parent = parents.get(_node_key(node))
+        if parent is not None and parent.type in ("decorated_definition", "export_statement"):
+            line_start = parent.start_point[0] + 1
+        elif parent is not None and parent.type == "lexical_declaration":
+            grandparent = parents.get(_node_key(parent))
+            if grandparent is not None and grandparent.type == "export_statement":
+                line_start = grandparent.start_point[0] + 1
+            else:
+                line_start = parent.start_point[0] + 1
+        else:
+            line_start = node.start_point[0] + 1
         line_end = node.end_point[0] + 1
+        snip_rec = _source_snippet_record(parsed.source, line_start, line_end)
+        slices = None
+        snippet_text = snip_rec.text
+        if not snip_rec.is_complete:
+            raw_slices = slice_source(parsed.source, line_start, line_end, max_chars=2000)
+            if len(raw_slices) > 1:
+                snippet_text = raw_slices[0]
+                slices = raw_slices[1:]
+                snip_rec = EntitySnippetRecord(
+                    lines=snip_rec.lines,
+                    is_complete=True,
+                    truncated_at_line=None,
+                    char_count=snip_rec.char_count,
+                    encoding="utf-8",
+                    slices=tuple(slices),
+                )
+
+        # G-02: Overload and property accessor disambiguation
+        signature = ""
+        accessor = ""
+        if is_c_like and entity_type in (EntityType.FUNCTION, EntityType.METHOD):
+            param_types = _extract_param_types(node, parsed.source)
+            signature = ", ".join(param_types)
+        elif parsed.language == "python" and parent is not None and parent.type == "decorated_definition":
+            for dec in parent.children:
+                if dec.type == "decorator":
+                    dec_text = _text(dec, parsed.source).strip()
+                    if dec_text == "@property":
+                        accessor = "getter"
+                        signature = "getter"
+                        break
+                    elif dec_text.endswith(".setter"):
+                        accessor = "setter"
+                        signature = "setter"
+                        break
+                    elif dec_text.endswith(".deleter"):
+                        accessor = "deleter"
+                        signature = "deleter"
+                        break
+
         entities.append(_make_entity(
             repository_id, revision_id, parsed.file_path, name, entity_type,
             parsed.language, parsed.source_hash,
             line_start, line_end, now, scope,
-            snippet=_source_snippet(parsed.source, line_start, line_end),
+            snippet=snippet_text,
             identity_scope=identity_scope,
             qualified_name=qualified_name,
+            snippet_is_complete=snip_rec.is_complete,
+            snippet_truncated_at_line=snip_rec.truncated_at_line,
+            signature=signature,
+            accessor=accessor,
+            slices=list(snip_rec.slices) if snip_rec.slices else None,
         ))
         if entity_type in (EntityType.FUNCTION, EntityType.METHOD):
             param_scope = f"{identity_scope}.{name}" if identity_scope else name
@@ -426,10 +666,11 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
             header = _include_header(node, parsed.source)
             if header and header not in seen_imports:
                 seen_imports.add(header)
+                line_end = node.end_point[0] if (node.end_point[1] == 0 and node.end_point[0] > node.start_point[0]) else node.end_point[0] + 1
                 entities.append(_make_entity(
                     repository_id, revision_id, parsed.file_path, header,
                     EntityType.IMPORT, parsed.language, parsed.source_hash,
-                    node.start_point[0] + 1, node.end_point[0] + 1, now,
+                    node.start_point[0] + 1, line_end, now,
                 ))
     return entities
 
@@ -513,7 +754,7 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
 
     decorated_sites: set[tuple[str, int, int]] = set()
     for node, stack in _walk_scoped(root, parsed.source, [], parsed.language):
-        if node.type not in FUNC_NODES:
+        if node.type not in FUNC_NODES and not _is_arrow_func_decl(node):
             continue
         caller_name = _scope_name(node, parsed.source, parsed.language)
         if not caller_name:
@@ -657,6 +898,22 @@ def _extract_params(node, source: bytes, language: str = "python") -> list[str]:
                                 if name and name not in params:
                                     params.append(name)
         return params
+    elif language in ("typescript", "tsx", "javascript"):
+        for child in _walk(node):
+            if child.type == "formal_parameters":
+                for p in child.children:
+                    if p.type in ("required_parameter", "optional_parameter"):
+                        for desc in p.children:
+                            if desc.type == "identifier":
+                                text = _text(desc, source)
+                                if text not in params:
+                                    params.append(text)
+                                break
+                    elif p.type == "identifier":
+                        text = _text(p, source)
+                        if text not in params:
+                            params.append(text)
+        return params
     for child in node.children:
         if child.type == "parameters":
             for part in child.children:
@@ -688,12 +945,12 @@ def _extract_callee_name(node, source: bytes) -> Optional[str]:
         if child.type == "identifier":
             return _text(child, source)
     for child in node.children:
-        if child.type in ("attribute", "field_expression", "scoped_identifier"):
-            ids = [d for d in _walk(child) if d.type in ("identifier", "type_identifier", "field_identifier")]
+        if child.type in ("attribute", "field_expression", "scoped_identifier", "member_expression"):
+            ids = [d for d in _walk(child) if d.type in ("identifier", "type_identifier", "field_identifier", "property_identifier")]
             if ids:
                 return _text(ids[-1], source)
     for desc in _walk(node):
-        if desc.type in ("identifier", "field_identifier") and desc is not node:
+        if desc.type in ("identifier", "field_identifier", "property_identifier") and desc is not node:
             return _text(desc, source)
     return None
 
@@ -704,6 +961,10 @@ def _extract_import_modules(node, source: bytes) -> list[str]:
         for child in node.children:
             if child.type == "dotted_name":
                 modules.append(_text(child, source))
+            elif child.type == "string":
+                text = _text(child, source).strip("\"' `")
+                if text:
+                    modules.append(text)
             elif child.type == "aliased_import":
                 for grandchild in child.children:
                     if grandchild.type == "dotted_name":

@@ -11,8 +11,15 @@ _CALL_TARGET_TYPES = frozenset({EntityType.FUNCTION, EntityType.METHOD, EntityTy
 _BASE_TARGET_TYPES = frozenset({EntityType.CLASS, EntityType.TYPE})
 
 #: Languages that link calls freely across each other. C and C++ share
-#: headers and `extern "C"`; every other language links only itself.
-_LANGUAGE_FAMILIES = {"c": "c-family", "cpp": "c-family"}
+#: headers and `extern "C"`; TypeScript, TSX, and JavaScript link together;
+#: every other language links only itself.
+_LANGUAGE_FAMILIES = {
+    "c": "c-family",
+    "cpp": "c-family",
+    "typescript": "js-family",
+    "tsx": "js-family",
+    "javascript": "js-family",
+}
 
 
 def _same_lang_family(a: str, b: str) -> bool:

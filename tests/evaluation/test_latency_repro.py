@@ -144,16 +144,10 @@ def test_frozen_sources_match_working_tree():
     # set fails loudly, and any change to the timed path itself still
     # requires re-running benchmarks/latency/measure.py. If this exception
     # is ever extended a second time, re-measure instead.
-    documented_exceptions_ex = {
-        "_make_entity", "_source_snippet", "_source_snippet_record", "extract_entities",
-    }
-    # Structural, not advisory: this set is EXACT. Adding a fifth name
-    # (or a second exception record anywhere) fails here and forces a
-    # re-measurement decision instead of a quieter comment. The frozen
-    # discipline is mechanical enforcement, not prose.
-    assert documented_exceptions_ex == {
-        "_make_entity", "_source_snippet", "_source_snippet_record", "extract_entities",
-    }, "extractor exception set changed: re-run benchmarks/latency/measure.py, do not widen this set"
+    documented_exceptions_ex = set()
+    assert documented_exceptions_ex == set(), (
+        "extractor exception set changed: re-run benchmarks/latency/measure.py, do not widen this set"
+    )
     assert set(lem) >= set(fem) - documented_exceptions_ex
     for name, fx_body in fem.items():
         if name in documented_exceptions_ex:

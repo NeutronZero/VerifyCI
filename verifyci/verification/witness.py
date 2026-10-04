@@ -14,6 +14,7 @@ from verifyci.contracts.verification_ir import ExecutionWitness
 from verifyci.verification.diffmap import normalize_path, parse_unified_diff
 
 _DEF_TEST_RE = re.compile(r"^[+ ]\s*def\s+(test_[a-zA-Z0-9_]+)\s*\(")
+_JS_TEST_RE = re.compile(r"^[+ ]\s*(?:it|test)(?:\.\w+)?\s*\(\s*['\"`]([^'\"`\n]+)['\"`]")
 _PROBE_META_RE = re.compile(r"test_probe\s*[:=]\s*[\"']?([a-zA-Z0-9_./]+)[\"']?")
 
 
@@ -23,12 +24,16 @@ def _module_stem(path: str) -> str:
         if norm.startswith(prefix):
             norm = norm[len(prefix):]
             break
-    # strip test_ prefix from filename
     parts = norm.split("/")
-    if parts[-1].startswith("test_"):
-        parts[-1] = parts[-1][5:]
-    elif parts[-1].endswith("_test.py"):
-        parts[-1] = parts[-1][:-8] + ".py"
+    filename = parts[-1]
+    if filename.startswith("test_"):
+        parts[-1] = filename[5:]
+    elif filename.endswith("_test.py"):
+        parts[-1] = filename[:-8] + ".py"
+    else:
+        m = re.sub(r"\.(?:test|spec)\.([jt]sx?|[mc]js|[mc]ts)$", r".\1", filename)
+        if m != filename:
+            parts[-1] = m
     return "/".join(parts)
 
 
@@ -65,6 +70,12 @@ def extract_execution_witnesses(
                         fn_name = m_fn.group(1)
                         if fn_name not in test_funcs:
                             test_funcs.append(fn_name)
+                    else:
+                        m_js = _JS_TEST_RE.match(line)
+                        if m_js:
+                            fn_name = m_js.group(1)
+                            if fn_name not in test_funcs:
+                                test_funcs.append(fn_name)
                     m_probe = _PROBE_META_RE.search(line)
                     if m_probe:
                         probe_target = m_probe.group(1)
@@ -88,7 +99,7 @@ def extract_execution_witnesses(
             matches = set()
             for line in raw_lines:
                 for cf in code_files:
-                    stem = code_stems[cf].replace(".py", "")
+                    stem = re.sub(r"\.[a-zA-Z0-9]+$", "", code_stems[cf])
                     bare = stem.split("/")[-1]
                     if not bare:
                         continue
@@ -106,7 +117,19 @@ def extract_execution_witnesses(
         # 3. Fallback naming convention
         if is_general and code_files:
             tf_stem = _module_stem(norm_tf)
-            matches = [cf for cf, cs in code_stems.items() if cs == tf_stem or cs.endswith("/" + tf_stem) or tf_stem.endswith("/" + cs)]
+            tf_stem_no_ext = re.sub(r"\.[a-zA-Z0-9]+$", "", tf_stem)
+
+            def _stem_matches(cs: str) -> bool:
+                if cs == tf_stem or cs.endswith("/" + tf_stem) or tf_stem.endswith("/" + cs):
+                    return True
+                cs_no_ext = re.sub(r"\.[a-zA-Z0-9]+$", "", cs)
+                return (
+                    cs_no_ext == tf_stem_no_ext
+                    or cs_no_ext.endswith("/" + tf_stem_no_ext)
+                    or tf_stem_no_ext.endswith("/" + cs_no_ext)
+                )
+
+            matches = [cf for cf, cs in code_stems.items() if _stem_matches(cs)]
             if len(matches) == 1:
                 target_file = matches[0]
                 association_method = "naming_convention"

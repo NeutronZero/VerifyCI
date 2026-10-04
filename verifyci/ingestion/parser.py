@@ -28,12 +28,17 @@ class TreeSitterParser:
             import tree_sitter_python as tspython
             import tree_sitter_cpp as tscpp
             import tree_sitter_c as tsc
+            import tree_sitter_typescript as tstypescript
+            import tree_sitter_javascript as tsjavascript
             from tree_sitter import Parser, Language
 
             lang_map = {
                 "python": Language(tspython.language()),
                 "cpp": Language(tscpp.language()),
                 "c": Language(tsc.language()),
+                "typescript": Language(tstypescript.language_typescript()),
+                "tsx": Language(tstypescript.language_tsx()),
+                "javascript": Language(tsjavascript.language()),
             }
             if language in lang_map:
                 parser = Parser(lang_map[language])

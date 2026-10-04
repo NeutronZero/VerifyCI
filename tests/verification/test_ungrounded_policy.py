@@ -145,6 +145,32 @@ def test_execution_witness_extraction_and_association():
     assert w_unrelated.target_file is None
 
 
+def test_ts_js_execution_witness_extraction():
+    diff = (
+        "diff --git a/tests/app.test.ts b/tests/app.test.ts\n"
+        "--- a/tests/app.test.ts\n"
+        "+++ b/tests/app.test.ts\n"
+        "@@ -1,3 +1,7 @@\n"
+        "+it('should handle request correctly', () => {\n"
+        "+    expect(true).toBe(true);\n"
+        "+});\n"
+        "+test.skip('handles fallback', async () => {});\n"
+    )
+    witnesses = extract_execution_witnesses(
+        diff,
+        code_files=["src/app.ts"],
+        test_files=["tests/app.test.ts"],
+    )
+    assert len(witnesses) == 2
+    fns = {w.test_function for w in witnesses}
+    assert "should handle request correctly" in fns
+    assert "handles fallback" in fns
+    for w in witnesses:
+        assert w.is_general_regression is False
+        assert w.target_file == "src/app.ts"
+
+
+
 # ---------------------------------------------------------------------------
 # 4. Documentation-Only Fast Path
 # ---------------------------------------------------------------------------
