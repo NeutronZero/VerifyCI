@@ -1,8 +1,5 @@
-import asyncio
-import os
 import sqlite3
 import time
-from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
@@ -11,7 +8,6 @@ from verifyci.contracts.evidence import EvidencePack, SourceChunk
 from verifyci.ingestion.extractor import extract_entities
 from verifyci.ingestion.parser import TreeSitterParser
 from verifyci.interface.cli import app as cli_app
-from verifyci.interface.commands import InfraError
 from verifyci.interface.commands.init import run_init
 from verifyci.interface.commands.ingest import run_ingest
 from verifyci.interface.http import VerifyRequest

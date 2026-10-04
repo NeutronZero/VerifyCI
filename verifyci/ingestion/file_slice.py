@@ -34,7 +34,8 @@ def slice_source(
         return []
 
     span_lines = [
-        l.decode("utf-8", errors="replace") for l in lines_raw[eff_start - 1 : eff_end]
+        line.decode("utf-8", errors="replace")
+        for line in lines_raw[eff_start - 1 : eff_end]
     ]
     full_text = "".join(span_lines)
     if len(full_text) <= max_chars:

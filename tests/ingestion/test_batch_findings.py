@@ -1,4 +1,3 @@
-import pytest
 from verifyci.contracts.entity import EntityType
 from verifyci.ingestion.extractor import extract_entities
 from verifyci.ingestion.parser import TreeSitterParser

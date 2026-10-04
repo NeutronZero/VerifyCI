@@ -21,10 +21,9 @@ from verifyci.env import get_env
 from verifyci.interface.commands.query import run_query
 from verifyci.interface.commands.stats import run_stats
 from verifyci.interface.commands.verify import run_verify
+from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_K, MAX_TASK_DIFF_CHARS as MAX_TASK_CHARS
 
 app = FastAPI(title="VerifyCI")
-
-from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_K, MAX_TASK_DIFF_CHARS as MAX_TASK_CHARS
 
 
 def _api_token() -> str:

@@ -1,4 +1,3 @@
-import pytest
 
 from verifyci.contracts.edge import CPGEdgeSubtype, Edge, EdgeType
 from verifyci.contracts.entity import Entity, EntityType

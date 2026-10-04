@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-import pytest
 
 from verifyci.observability.querylog import QueryLogger
 

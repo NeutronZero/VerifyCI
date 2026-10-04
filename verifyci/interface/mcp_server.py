@@ -2,7 +2,7 @@ import asyncio
 import time as _time
 from typing import Any
 
-from verifyci.contracts.scheduler import TERMINAL_STATUSES, TaskStatus
+from verifyci.contracts.scheduler import TERMINAL_STATUSES
 from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_K, MAX_TASK_DIFF_CHARS
 
 

@@ -1,12 +1,9 @@
-import pytest
 
 from verifyci.contracts.edge import CPGEdgeSubtype, Edge, EdgeType
 from verifyci.contracts.entity import Entity, EntityType
-from verifyci.contracts.evidence import EvidencePack, SourceChunk
 from verifyci.contracts.validate import (
     validate_edge,
     validate_entity,
-    validate_evidence_pack,
     validate_graph_contracts,
 )
 

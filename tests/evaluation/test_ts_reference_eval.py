@@ -3,9 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import shutil
-import tempfile
 
-import pytest
 
 from verifyci.contracts.edge import CPGEdgeSubtype, Edge, EdgeType
 from verifyci.contracts.entity import Entity, EntityType

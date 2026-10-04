@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-import pytest
 
 from verifyci.storage.atomic import (
     write_bytes_atomic,

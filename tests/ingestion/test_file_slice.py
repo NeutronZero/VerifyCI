@@ -1,7 +1,5 @@
-import pytest
 
-from verifyci.contracts.entity import Entity, EntitySnippetRecord, EntityType
-from verifyci.ingestion.extractor import _source_snippet_record
+from verifyci.contracts.entity import Entity, EntityType
 from verifyci.ingestion.file_slice import slice_source
 from verifyci.verification.removal import _snippet_record
 
