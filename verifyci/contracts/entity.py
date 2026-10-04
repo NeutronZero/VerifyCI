@@ -26,6 +26,7 @@ class EntitySnippetRecord:
     truncated_at_line: Optional[int]  # 1-based line where truncation occurred, if any
     char_count: int
     encoding: str = "utf-8"
+    slices: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -34,12 +35,14 @@ class EntitySnippetRecord:
         truncated_at_line: Optional[int],
         char_count: int,
         encoding: str = "utf-8",
+        slices: tuple[str, ...] | list[str] = (),
     ):
         object.__setattr__(self, "lines", tuple(lines))
         object.__setattr__(self, "is_complete", is_complete)
         object.__setattr__(self, "truncated_at_line", truncated_at_line)
         object.__setattr__(self, "char_count", char_count)
         object.__setattr__(self, "encoding", encoding)
+        object.__setattr__(self, "slices", tuple(slices))
 
     @property
     def text(self) -> str:

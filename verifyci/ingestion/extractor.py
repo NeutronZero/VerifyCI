@@ -4,6 +4,7 @@ from typing import Optional
 from verifyci.contracts.entity import Entity, EntitySnippetRecord, EntityType
 from verifyci.contracts.edge import Edge, EdgeType, CPGEdgeSubtype
 from verifyci.contracts.identity import compute_logical_entity_id, compute_revision_entity_id
+from verifyci.ingestion.file_slice import slice_source
 from verifyci.ingestion.parser import ParsedFile
 
 CALL_NODES = ("call", "call_expression")
@@ -31,6 +32,7 @@ def _make_entity(
     snippet_truncated_at_line: Optional[int] = None,
     signature: str = "",
     accessor: str = "",
+    slices: Optional[list[str]] = None,
 ) -> Entity:
     # identity_scope pins the logical id: namespace entries are filtered
     # out of it, so wrapping code in `namespace ns {}` renames nothing
@@ -51,6 +53,8 @@ def _make_entity(
         if snippet_truncated_at_line is not None:
             metadata["snippet_truncated_at_line"] = snippet_truncated_at_line
         metadata["snippet_char_count"] = len(snippet)
+    if slices:
+        metadata["slices"] = list(slices)
     if accessor:
         metadata["accessor"] = accessor
     if signature:
@@ -518,6 +522,21 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
             line_start = node.start_point[0] + 1
         line_end = node.end_point[0] + 1
         snip_rec = _source_snippet_record(parsed.source, line_start, line_end)
+        slices = None
+        snippet_text = snip_rec.text
+        if not snip_rec.is_complete:
+            raw_slices = slice_source(parsed.source, line_start, line_end, max_chars=2000)
+            if len(raw_slices) > 1:
+                snippet_text = raw_slices[0]
+                slices = raw_slices[1:]
+                snip_rec = EntitySnippetRecord(
+                    lines=snip_rec.lines,
+                    is_complete=True,
+                    truncated_at_line=None,
+                    char_count=snip_rec.char_count,
+                    encoding="utf-8",
+                    slices=tuple(slices),
+                )
 
         # G-02: Overload and property accessor disambiguation
         signature = ""
@@ -546,13 +565,14 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
             repository_id, revision_id, parsed.file_path, name, entity_type,
             parsed.language, parsed.source_hash,
             line_start, line_end, now, scope,
-            snippet=snip_rec.text,
+            snippet=snippet_text,
             identity_scope=identity_scope,
             qualified_name=qualified_name,
             snippet_is_complete=snip_rec.is_complete,
             snippet_truncated_at_line=snip_rec.truncated_at_line,
             signature=signature,
             accessor=accessor,
+            slices=list(snip_rec.slices) if snip_rec.slices else None,
         ))
         if entity_type in (EntityType.FUNCTION, EntityType.METHOD):
             param_scope = f"{identity_scope}.{name}" if identity_scope else name

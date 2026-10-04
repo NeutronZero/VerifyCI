@@ -80,10 +80,21 @@ def _snippet_record(entity) -> EntitySnippetRecord | None:
     if not snippet:
         return None
 
-    raw_lines = _split_source_lines(str(snippet).encode("utf-8", errors="replace"))
+    slices = meta.get("slices") or []
+    if slices:
+        if slices[0] == snippet:
+            full_text = "".join(slices)
+        else:
+            full_text = str(snippet) + "".join(slices)
+    else:
+        full_text = str(snippet)
+
+    raw_lines = _split_source_lines(full_text.encode("utf-8", errors="replace"))
     start = getattr(entity, "line_start", 1) or 1
     end = getattr(entity, "line_end", start) or start
     span = end - start + 1
+    if len(raw_lines) == span + 1 and raw_lines[-1] == "":
+        raw_lines = raw_lines[:-1]
 
     if "snippet_is_complete" in meta:
         is_complete = bool(meta["snippet_is_complete"])
@@ -92,7 +103,7 @@ def _snippet_record(entity) -> EntitySnippetRecord | None:
             lines=raw_lines,
             is_complete=is_complete,
             truncated_at_line=truncated_at_line,
-            char_count=len(snippet),
+            char_count=len(full_text),
             encoding="utf-8",
         )
 
