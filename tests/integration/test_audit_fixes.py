@@ -199,3 +199,94 @@ def func_b(param_y):
         if parent and child and parent.name == "func_b" and child.name == "param_x":
             assert False, "func_b must not contain param_x from func_a"
 
+
+def test_config_load_handles_malformed_yaml_structures_with_value_error(tmp_path):
+    import pytest
+    from verifyci.verification.config import _load_file, _load_waivers_file
+
+    bad_inv = tmp_path / "invariants.yaml"
+    bad_inv.write_text("- id: rule1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="malformed"):
+        _load_file(str(bad_inv))
+
+    bad_waiver = tmp_path / "waivers.yaml"
+    bad_waiver.write_text("- target: auth.py\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="malformed"):
+        _load_waivers_file(str(bad_waiver))
+
+
+def test_validate_task_ir_rejects_cycles_dangling_and_missing_budget():
+    from verifyci.contracts.task_ir import TaskIR, Step, Budget
+    from verifyci.orchestration.compiler.validation import validate_task_ir
+
+    # Budget is None
+    task_no_budget = TaskIR(
+        goal="run task",
+        intent_package_id="intent-1",
+        steps=[Step(step_id="step_a", type="t", config={}, pre_commit_hook_id="h", depends_on=[])],
+        constraints=[],
+        budget=None,
+        policy_id="default",
+    )
+    assert validate_task_ir(task_no_budget) is False
+
+    # Cycle in steps
+    task_cycle = TaskIR(
+        goal="run task",
+        intent_package_id="intent-1",
+        steps=[
+            Step(step_id="step_a", type="t", config={}, pre_commit_hook_id="h", depends_on=["step_b"]),
+            Step(step_id="step_b", type="t", config={}, pre_commit_hook_id=None, depends_on=["step_a"]),
+        ],
+        constraints=[],
+        budget=Budget(budget_id="b", nano_usd=1000),
+        policy_id="default",
+    )
+    assert validate_task_ir(task_cycle) is False
+
+    # Dangling dependency
+    task_dangling = TaskIR(
+        goal="run task",
+        intent_package_id="intent-1",
+        steps=[
+            Step(step_id="step_a", type="t", config={}, pre_commit_hook_id="h", depends_on=["ghost_step"]),
+        ],
+        constraints=[],
+        budget=Budget(budget_id="b", nano_usd=1000),
+        policy_id="default",
+    )
+    assert validate_task_ir(task_dangling) is False
+
+
+def test_emit_event_supports_task_and_conversation_id_and_none_ledger():
+    from verifyci.memory.ledger import EventLedger
+    from verifyci.orchestration.events import emit_event
+
+    assert emit_event(None, "EVT", {}, {}) is None
+
+    ledger = EventLedger()
+    event = emit_event(ledger, "TASK_COMPLETED", {"status": "ok"}, {"src": "test"}, task_id="task-99", conversation_id="conv-1")
+    assert event is not None
+    assert event.task_id == "task-99"
+    assert event.conversation_id == "conv-1"
+
+
+def test_cosine_similarity_dimension_mismatch_and_empty():
+    from verifyci.retrieval.dense import _cosine_similarity
+
+    assert _cosine_similarity([], [1.0, 2.0]) == 0.0
+    assert _cosine_similarity([1.0], [1.0, 2.0]) == 0.0
+    assert _cosine_similarity([1.0, 0.0], [1.0, 0.0]) == 1.0
+
+
+def test_metadata_store_wal_and_context_manager(tmp_path):
+    from verifyci.storage.metadata import MetadataStore
+
+    db_path = str(tmp_path / "meta.db")
+    with MetadataStore(db_path) as store:
+        store.upsert_file("app.py", "hash1", "python", "rev1")
+        row = store.get_file("app.py")
+        assert row is not None
+        assert row[0] == "app.py"
+
+

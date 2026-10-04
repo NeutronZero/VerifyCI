@@ -114,6 +114,7 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
         from verifyci.retrieval.reranker import CrossEncoderReranker
 
         with start_agent_span("code.search", conversation_id, "code.search"):
+            k = max(1, min(int(k or 10), 100))
             if graph is None:
                 return {"results": [], "query": query, "methods": [], "error": "no_graph_loaded"}
             from verifyci.retrieval.provider import default_dense_provider

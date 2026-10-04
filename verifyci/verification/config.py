@@ -76,6 +76,8 @@ def _load_waivers_file(path: str) -> list[SignedIntentWaiver]:
     except yaml.YAMLError as e:
         raise ValueError(f"malformed waivers file {path}: {e}") from e
     data = data or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"malformed waivers file {path}: top-level must be a mapping")
     waivers = []
     for i, item in enumerate(data.get("waivers", []) or []):
         if not isinstance(item, dict):
@@ -112,8 +114,12 @@ def _load_file(path: str) -> list[Invariant]:
     except yaml.YAMLError as e:
         raise ValueError(f"malformed invariants file {path}: {e}") from e
     data = data or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"malformed invariants file {path}: top-level must be a mapping")
     invariants = []
     for i, item in enumerate(data.get("invariants", []) or []):
+        if not isinstance(item, dict):
+            raise ValueError(f"invariant entry #{i} in {path} must be a mapping")
         inv_id = str(item.get("id", f"repo-{i}"))
         raw_scope = item.get("target_scope")
         scope = "global_strict" if raw_scope is None else str(raw_scope).strip().lower()

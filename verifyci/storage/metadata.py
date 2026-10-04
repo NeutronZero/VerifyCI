@@ -8,9 +8,12 @@ class MetadataStore:
         self._owns_conn = conn is None
         if conn is None:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-            conn = sqlite3.connect(db_path)
+            conn = sqlite3.connect(db_path, timeout=30.0)
         self.conn = conn
         try:
+            if self._owns_conn:
+                self.conn.execute("PRAGMA journal_mode=WAL")
+                self.conn.execute("PRAGMA busy_timeout=5000")
             self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS file_metadata (
                     file_path TEXT PRIMARY KEY,
@@ -48,3 +51,9 @@ class MetadataStore:
     def close(self):
         if self._owns_conn:
             self.conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
