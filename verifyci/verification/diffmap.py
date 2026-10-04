@@ -667,7 +667,10 @@ def _is_seedable(entity) -> bool:
     t = getattr(entity, "type", None)
     if t is None:
         return True
-    return str(getattr(t, "value", t)) != "MODULE"
+    val = str(getattr(t, "value", t))
+    # PARAMETER and IMPORT entities overlap enclosing FUNCTION/METHOD spans;
+    # VARIABLE is excluded defensively (currently un-emitted by extractor).
+    return val not in ("MODULE", "PARAMETER", "IMPORT", "VARIABLE")
 
 
 def find_ambiguous_files(files: list[str], entities: list) -> dict[str, list[str]]:

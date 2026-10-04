@@ -424,3 +424,39 @@ def test_a2_deletion_and_modification_do_not_regress():
         "src/app.py") == ["top"]
     assert _a2_seed("@@ -22,2 +22,2 @@\n class Kls:\n-    a = 1\n").get(
         "src/app.py") == ["Kls", "meth"]
+
+
+def test_is_seedable_exclusions():
+    from verifyci.contracts.entity import EntityType
+    from verifyci.verification.diffmap import _is_seedable
+
+    class DummyEntity:
+        def __init__(self, t):
+            self.type = t
+
+    # Non-seedable syntax nodes
+    assert _is_seedable(DummyEntity(EntityType.PARAMETER)) is False
+    assert _is_seedable(DummyEntity(EntityType.IMPORT)) is False
+    assert _is_seedable(DummyEntity(EntityType.VARIABLE)) is False
+    assert _is_seedable(DummyEntity(EntityType.MODULE)) is False
+    assert _is_seedable(DummyEntity("PARAMETER")) is False
+    assert _is_seedable(DummyEntity("IMPORT")) is False
+    assert _is_seedable(DummyEntity("VARIABLE")) is False
+    assert _is_seedable(DummyEntity("MODULE")) is False
+
+    # Seedable functional nodes
+    assert _is_seedable(DummyEntity(EntityType.FUNCTION)) is True
+    assert _is_seedable(DummyEntity(EntityType.METHOD)) is True
+    assert _is_seedable(DummyEntity(EntityType.CLASS)) is True
+    assert _is_seedable(DummyEntity(None)) is True
+
+
+def test_call_flow_types_excludes_references():
+    from verifyci.graph.traverse import CALL_FLOW_TYPES
+
+    assert "CALLS" in CALL_FLOW_TYPES
+    assert "IMPORTS" in CALL_FLOW_TYPES
+    assert "INHERITS" in CALL_FLOW_TYPES
+    assert "DEPENDS_ON" in CALL_FLOW_TYPES
+    assert "REFERENCES" not in CALL_FLOW_TYPES
+

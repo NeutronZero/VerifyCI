@@ -9,7 +9,8 @@ from typing import Any
 
 #: Edge types that carry call/dependency influence. CONTAINS/HAS_NAME are
 #: structural and excluded so blast radius measures real dependents.
-CALL_FLOW_TYPES = frozenset({"CALLS", "REFERENCES", "IMPORTS", "INHERITS", "DEPENDS_ON"})
+#: REFERENCES is excluded to eliminate non-causal identifier fanout.
+CALL_FLOW_TYPES = frozenset({"CALLS", "IMPORTS", "INHERITS", "DEPENDS_ON"})
 
 
 def payload_id(payload: Any) -> str | None:
