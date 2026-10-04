@@ -108,8 +108,13 @@ def test_frozen_sources_match_working_tree():
     #   A5 added `PRAGMA journal_mode=WAL` to __init__ (setup),
     #   A6 made insert_entity/insert_edge stamp-preserving upserts
     #      (build_scale_db setup; the temporal gate times
-    #       get_entity_as_of).
-    accepted_drift = {"__init__", "insert_entity", "insert_edge", "insert_event", "close"}
+    #       get_entity_as_of),
+    #   post-Phase-2 audit fix added `AND valid_until IS NULL` to
+    #      get_entities_by_revision (revert-ingest dedup; the timed
+    #      gate calls get_entity_as_of only — measure.py has no
+    #      get_entities_by_revision call site).
+    accepted_drift = {"__init__", "insert_entity", "insert_edge", "insert_event", "close",
+                      "get_entities_by_revision"}
     assert set(lm) >= set(fm) - accepted_drift
     for name, fx_body in fm.items():
         if name in accepted_drift:

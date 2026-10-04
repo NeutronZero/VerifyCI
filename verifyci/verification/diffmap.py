@@ -354,7 +354,7 @@ def parse_unified_diff(diff: str | None) -> list[FileDiff]:
             f.hunks.append(h)
             continue
         # --- stray +/- outside any hunk (never discarded) --------------
-        if line == "--" or line == "-- ":
+        if line in ("--", "-- ", "---", "--- "):
             # format-patch signature separator: end-of-patch marker, not
             # a removed `--` line (real removals live inside hunks).
             # Without this every format-patch input trips the removal

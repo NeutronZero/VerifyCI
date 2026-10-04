@@ -72,6 +72,32 @@ def _is_guard_preserved_in_additions(added_lines: list[str]) -> bool:
     return False
 
 
+def _def_line_matches(line: str, name: str) -> bool:
+    """Declaration-line match beyond Python (TS/JS/C/C++ Contract 4).
+
+    Python `def/class` only caught renames; TS `function f(`, `const f = (`,
+    and C/C++ declarators `int f(` fell through to `no_code_deletion_hunks`
+    PASS. Liberal by design: callers gate on the entity name, so a
+    looser match only routes to scrutiny, never to a pass.
+    """
+    if re.search(rf"\b(def|class|function|fn)\s+{re.escape(name)}\s*(\(|:|\{{)", line):
+        return True
+    if re.search(rf"\b(const|let|var)\s+{re.escape(name)}\s*=", line):
+        return True
+    if re.search(rf"(?<![\w:]){re.escape(name)}\s*\([^;{{}}]*\)\s*(?:const\s*)?[\{{;]", line):
+        return True
+    return False
+
+
+def _looks_like_def(line: str) -> bool:
+    t = line.strip()
+    if t.startswith(("def ", "async def ", "class ")):
+        return True
+    if re.match(r"(?:export\s+)?(?:async\s+)?(?:function\s+\w|class\s+\w|(?:const|let|var)\s+\w+\s*=)", t):
+        return True
+    return bool(re.search(r"(?<![\w:])[\w:~]+\s*\([^;{}]*\)\s*(?:const\s*)?[{;]\s*$", t))
+
+
 def _matches_waiver(
     removed_guard_lines: list[str],
     file_path: str,
@@ -295,7 +321,7 @@ def verify_deletion_hunks(
                 continue
             is_net_deletion = (len(minus_lines) > len(plus_lines)) or (hunk.old_count > hunk.new_count)
             guard_lines = [ml for ml in minus_lines if _is_guard_line(ml)]
-            old_defs = [ml for ml in minus_lines if ml.strip().startswith(("def ", "async def ", "class "))]
+            old_defs = [ml for ml in minus_lines if _looks_like_def(ml)]
 
             if not is_net_deletion and not guard_lines and not old_defs:
                 continue
@@ -406,14 +432,8 @@ def verify_deletion_hunks(
                 e_name = getattr(e, "name", "")
                 if not e_name:
                     continue
-                def_removed = any(
-                    bool(re.search(rf"\b(def|class)\s+{re.escape(e_name)}\s*(\(|:)", ml))
-                    for ml in minus_lines
-                )
-                def_added = any(
-                    bool(re.search(rf"\b(def|class)\s+{re.escape(e_name)}\s*(\(|:)", pl))
-                    for pl in plus_lines
-                )
+                def_removed = any(_def_line_matches(ml, e_name) for ml in minus_lines)
+                def_added = any(_def_line_matches(pl, e_name) for pl in plus_lines)
                 if def_removed and not def_added:
                     deleted_entity = e
                     break
@@ -444,8 +464,8 @@ def verify_deletion_hunks(
                 enclosing = overlapping_entities[0]
                 # Enclosing entity continuity check
                 # Check if declaration line was replaced by non-def or unrelated code
-                old_defs = [ml for ml in minus_lines if ml.strip().startswith(("def ", "async def ", "class "))]
-                new_defs = [pl for pl in plus_lines if pl.strip().startswith(("def ", "async def ", "class "))]
+                old_defs = [ml for ml in minus_lines if _looks_like_def(ml)]
+                new_defs = [pl for pl in plus_lines if _looks_like_def(pl)]
 
                 if old_defs and not new_defs:
                     verdicts.append(DeletionHunkVerdict(

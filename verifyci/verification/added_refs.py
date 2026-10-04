@@ -36,6 +36,14 @@ def _bare_callee(node, source: bytes) -> set[str]:
             from verifyci.ingestion.extractor import _text
             names.add(_text(child, source))
             break
+        elif child.type == "template_function":
+            # C++ `evil<T>(...)`: callee is template_function wrapping the name.
+            from verifyci.ingestion.extractor import _text
+            for d in _walk(child):
+                if d.type in ("identifier", "type_identifier"):
+                    names.add(_text(d, source))
+                    break
+            break
         elif child.type in ("attribute", "scoped_identifier", "qualified_identifier", "field_expression", "member_expression"):
             from verifyci.ingestion.extractor import _text
             full_attr = _text(child, source).strip()

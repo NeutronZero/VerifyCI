@@ -69,6 +69,7 @@ AWS_KEY_RE = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
 PEM_RE = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----")
 JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
 CONN_STR_RE = re.compile(r"://[^/\s:()\"']+:[^/\s@()\"']{4,}@")
+_PROTO_RE = re.compile(r"(?i)(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp|kafka|mqtt|ldap|sqlite|oracle|mssql|clickhouse)://")
 JSON_SECRET_RE = re.compile("(?i)" + chr(34) + ".{0,128}?" + _KEY + ".{0,128}?" + chr(34) + " *: *" + chr(34) + ".{8,512}" + chr(34))
 
 _SECRET_PATTERNS = (SECRET_RE, UNQUOTED_SECRET_RE, SHORT_UNQUOTED_SECRET_RE,
@@ -153,16 +154,12 @@ def _is_secret_carve_out(content: str, opener: str | None = None, fname: str | N
     if any(p.search(content) for p in (AWS_KEY_RE, PEM_RE, JWT_RE, CONN_STR_RE)):
         return False
 
-    stripped = content.strip()
     if opener:
         op_strip = opener.strip()
         if any(fn in op_strip for fn in ("re.compile", "re.search", "re.match", "re.findall", "re.sub")):
             return True
         if not re.search(r"[:=]", op_strip):
             return True
-
-    if stripped.startswith(('r"', "r'", 'r"""', "r'''")):
-        return True
     if re.search(r'\br["\'](?:\(\?[aiLmsux]|\\[bBwWsSdD]|\^|\.\*)', content):
         return True
 
@@ -532,7 +529,11 @@ def _added_hits(diff: str, kind: str, name: str) -> tuple[list[str], bool]:
         refs, parse_ok, had_error = extract_added_refs_status(diff)
     except Exception:  # noqa: BLE001
         return [], False
-    hits = sorted(f for f, kinds in refs.items() if name in kinds.get(kind, set()))
+    if kind == "imports":
+        hits = sorted(f for f, kinds in refs.items()
+                      if any(_name_matches(r, name, "IMPORTS") for r in kinds.get(kind, set())))
+    else:
+        hits = sorted(f for f, kinds in refs.items() if name in kinds.get(kind, set()))
     if kind == "calls" and parse_ok:
         # The tree path is strictly-stricter (bare callees, imports via
         # grammar), so always back it with the lexical scan for this exact
@@ -708,8 +709,16 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
                 st[2] = False
                 st[3] = []
             continue
-        if _KEYWORD_RE.search(content) is None:
-            continue
+        if _KEYWORD_RE.search(content) is None and CONN_STR_RE.search(content) is None:
+            # Keywordless split connection strings (postgres://user: ... on
+            # line 1 with the secret on line 2) never enter continuation
+            # otherwise; protocol prefix is the trigger there. A bare
+            # unclosed paren (`conn = (`) also opens a window: the joined
+            # secret check still does the real work, so normal calls only
+            # cost buffering, never false hits.
+            if _PROTO_RE.search(content) is None:
+                if content.count(chr(40)) <= content.count(chr(41)):
+                    continue
         if content.count(tdq) % 2 == 1:
             st[0] = tdq
             st[3] = [content]

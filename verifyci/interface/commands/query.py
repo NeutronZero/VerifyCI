@@ -23,20 +23,44 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
     """
     from verifyci.graph.builder import GraphBuilder
 
+    import time as _qt
+    _qstart = _qt.time()
+    _qstatus = "ok"
+
+    def _emit_log(_result=None):
+        try:
+            from verifyci.env import get_env as _ql_env
+            from verifyci.observability.querylog import QueryLogger as _QL
+            _log_path = _ql_env("QUERYLOG") or ""
+            if not _log_path:
+                return
+            _dur = (_qt.time() - _qstart) * 1000.0
+            _n = len((_result or {}).get("results", [])) if isinstance(_result, dict) else 0
+            _QL(_log_path).log_query(question, caller="run_query",
+                                     duration_ms=_dur, results_count=_n, status=_qstatus)
+        except Exception:  # noqa: BLE001
+            pass
+
     db = resolve_db(db_path)
     import os as _query_os
     if not _query_os.path.exists(db):
-        return {"query": question, "results": [], "methods": [],
+        _r = {"query": question, "results": [], "methods": [],
                 "evidence": {"entities": 0, "chunks": 0, "provenance": 0},
                 "error": "db_not_found"}
+        _qstatus = "db_not_found"
+        _emit_log(_r)
+        return _r
     try:
         store = GraphStore(db, read_only=True)
     except sqlite3.Error as e:
         # An unreadable store is infrastructure, not "no hits": the CLI
         # maps the error key to exit 3 instead of a green zero-answer.
-        return {"query": question, "results": [], "methods": [],
+        _r = {"query": question, "results": [], "methods": [],
                 "evidence": {"entities": 0, "chunks": 0, "provenance": 0},
                 "error": f"db_unreadable: {e}"}
+        _qstatus = "db_unreadable"
+        _emit_log(_r)
+        return _r
     try:
         # Search the latest revision only: older revisions stay in the DB
         # for history, but returning superseded rows as answers is wrong.
@@ -137,11 +161,13 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
                          "file_path": getattr(e, "file_path", None),
                          "line_start": getattr(e, "line_start", None),
                          "line_end": getattr(e, "line_end", None)})
-        return {"query": question,
+        _out = {"query": question,
                 "results": hits,
                 "methods": methods,
                 "evidence": {"entities": len(pack.entities), "chunks": len(pack.source_chunks),
                              "provenance": len(pack.provenance)}}
+        _emit_log(_out)
+        return _out
     finally:
         store.close()
 

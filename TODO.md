@@ -56,3 +56,43 @@ Status: diagnosed; fix not implemented pre-ship (see below).
   safe direction (escalation, never a false FAIL); changing seed/traversal
   semantics days before release without re-running the eval corpora would trade
   a known-safe over-escalation for unknown verdict shifts.
+
+## 3. TypeScript method decorator span drop (diagnosed 2026-10-04)
+
+Source: post-Phase-2 adversarial audit, finding 11 (LOW).
+Status: diagnosed; fix not implemented.
+
+- Mechanism: tree-sitter-typescript nests no `decorated_definition` wrapper;
+  `class_body` holds `decorator` as a sibling of `method_definition`, so
+  `extract_entities` records the method span without its decorator lines
+  (`verifyci/ingestion/extractor.py`, G-01 parent-inherit branch).
+- Fix requires touching `extract_entities`, whose source is pinned by the
+  latency frozen-source guard (`tests/evaluation/test_latency_repro.py`,
+  extractor exception set must stay empty — widen only via re-measure per
+  `bb2a013` precedent: refresh `benchmarks/latency/fixture/extractor.py`
+  + re-run `benchmarks/latency/measure.py`).
+- Decision: DEFER to post-release with a benchmark re-run; decorator-only
+  edits to TS methods stay under-grounded (INCONCLUSIVE direction), never
+  a false PASS.
+
+## 4. Line-1 config-fragment false FAIL (diagnosed 2026-10-04)
+
+Source: post-Phase-2 adversarial audit, finding 6 (HIGH as stated).
+Status: diagnosed; fix not implemented — pinned tests mandate current behavior.
+
+- Mechanism: `_validate_configuration_diff`
+  (`verifyci/verification/semi_formal_reason.py`) parses hunk-lines-only
+  content as a full document. A valid mid-file edit near line 1
+  (e.g. `package.json` version bump, `@@ -1,4`) yields a fragment that
+  fails `json.loads`/`tomllib.loads` and returns `fail`.
+- Remediation (fragment → INCONCLUSIVE unless brand-new file) flips 7
+  pinned tests that require `fail` on invalid line-1 fragments
+  (`test_invalid_config_fails_verify`, `test_yaml_valid_and_invalid`,
+  `test_json_fragment_valid_invalid_multi_hunk`,
+  `test_tests_plus_invalid_config_fails`,
+  `test_configuration_only_diff_validates_schema`, plus the
+  `multi_hunk_json_configuration` reasoning-string pin). Distinguishing
+  "invalid content" from "valid fragment" needs base-file content the
+  gate does not load.
+- Decision: DEFER. Fail-closed on config fragments is the safe direction;
+  landing INCONCLUSIVE-by-default needs corpus re-measurement first.

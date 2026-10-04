@@ -32,7 +32,7 @@ class FilePartition(str, Enum):
 
 
 _TEST_FILE_RE = re.compile(
-    r"(^|/)(test_[^/]+\.py|[^/]+_test\.py|[^/]+\.(?:test|spec)\.(?:[jt]sx?|[mc]js|[mc]ts))$"
+    r"(^|/)(test_[^/]+\.(?:py|cpp|cc|cxx|c|h|hpp)|[^/]+_test\.(?:py|cpp|cc|cxx|c|h|hpp)|[^/]+\.(?:test|spec)\.(?:[jt]sx?|[mc]js|[mc]ts|cpp|cc|cxx|c))$"
 )
 _TEST_DIR_RE = re.compile(r"(^|/)(?:tests?|__tests__)/")
 _DOC_EXT_RE = re.compile(r"\.(md|rst|txt)$", re.IGNORECASE)
