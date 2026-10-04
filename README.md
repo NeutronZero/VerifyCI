@@ -194,3 +194,6 @@ saturated blast radius); per-patch parent-revision ingest is required for
 honest verdicts. On C, `has_error` is not parse-health signal (macro idiom
 fires it on nearly every file); macro invocations with braces
 (`for_each_x(y) {`) additionally extract as phantom FUNCTION entities.
+
+**TypeScript/JavaScript scope (Phase 2)**: TS/JS extraction is verified against `vercel/swr` (20/20) and `sindresorhus/got` (5/5) with explicit relative ES6 imports and unique symbol targets within a package. Complex `tsconfig.json` path mappings, ambient `.d.ts` declarations, namespace merging, and third-party `node_modules` resolution are not covered. Halt floor and acceptance bars are frozen in `tests/evaluation/test_ts_reference_eval.py`.
+
