@@ -1,0 +1,181 @@
+{
+  "_doc": "The quality gate measures whether the caller's innermost containing entity resolves some call to the target symbol in the expected target file; it does not assert the specific byte offset or line number of the call site within that entity.",
+  "version": 1,
+  "call_sites": [
+    {
+      "caller_file": "swr/src/index.ts",
+      "caller_line": 7,
+      "expected_callee_symbol": "useSWR",
+      "expected_callee_file": "swr/src/use-swr.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/index.ts",
+      "caller_line": 11,
+      "expected_callee_symbol": "initCache",
+      "expected_callee_file": "swr/src/_internal/utils/cache.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/index.ts",
+      "caller_line": 16,
+      "expected_callee_symbol": "compareConfig",
+      "expected_callee_file": "swr/src/_internal/utils/config.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/index.ts",
+      "caller_line": 20,
+      "expected_callee_symbol": "initFocus",
+      "expected_callee_file": "swr/src/_internal/utils/web-preset.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/index.ts",
+      "caller_line": 24,
+      "expected_callee_symbol": "initReconnect",
+      "expected_callee_file": "swr/src/_internal/utils/web-preset.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/use-swr.ts",
+      "caller_line": 6,
+      "expected_callee_symbol": "initCache",
+      "expected_callee_file": "swr/src/_internal/utils/cache.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/use-swr.ts",
+      "caller_line": 7,
+      "expected_callee_symbol": "initDefaultConfig",
+      "expected_callee_file": "swr/src/_internal/utils/config.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/use-swr.ts",
+      "caller_line": 8,
+      "expected_callee_symbol": "initFocus",
+      "expected_callee_file": "swr/src/_internal/utils/web-preset.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/use-swr.ts",
+      "caller_line": 9,
+      "expected_callee_symbol": "initReconnect",
+      "expected_callee_file": "swr/src/_internal/utils/web-preset.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/use-swr.ts",
+      "caller_line": 14,
+      "expected_callee_symbol": "revalidateAllKeys",
+      "expected_callee_file": "swr/src/_internal/utils/cache.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/use-swr.ts",
+      "caller_line": 18,
+      "expected_callee_symbol": "isOnline",
+      "expected_callee_file": "swr/src/_internal/utils/web-preset.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/use-swr.ts",
+      "caller_line": 26,
+      "expected_callee_symbol": "isVisible",
+      "expected_callee_file": "swr/src/_internal/utils/web-preset.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/use-swr.ts",
+      "caller_line": 30,
+      "expected_callee_symbol": "onErrorRetry",
+      "expected_callee_file": "swr/src/_internal/utils/config.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/use-swr.ts",
+      "caller_line": 31,
+      "expected_callee_symbol": "compareConfig",
+      "expected_callee_file": "swr/src/_internal/utils/config.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/_internal/utils/cache.ts",
+      "caller_line": 6,
+      "expected_callee_symbol": "isOnline",
+      "expected_callee_file": "swr/src/_internal/utils/web-preset.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/_internal/utils/cache.ts",
+      "caller_line": 7,
+      "expected_callee_symbol": "onErrorRetry",
+      "expected_callee_file": "swr/src/_internal/utils/config.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/_internal/utils/cache.ts",
+      "caller_line": 13,
+      "expected_callee_symbol": "initFocus",
+      "expected_callee_file": "swr/src/_internal/utils/web-preset.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/_internal/utils/cache.ts",
+      "caller_line": 16,
+      "expected_callee_symbol": "initReconnect",
+      "expected_callee_file": "swr/src/_internal/utils/web-preset.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/_internal/utils/cache.ts",
+      "caller_line": 26,
+      "expected_callee_symbol": "compareConfig",
+      "expected_callee_file": "swr/src/_internal/utils/config.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "swr/src/_internal/utils/config.ts",
+      "caller_line": 15,
+      "expected_callee_symbol": "initCache",
+      "expected_callee_file": "swr/src/_internal/utils/cache.ts",
+      "language": "typescript"
+    },
+    {
+      "caller_file": "got/source/core/index.js",
+      "caller_line": 4,
+      "expected_callee_symbol": "validateOptions",
+      "expected_callee_file": "got/source/core/utils/options.js",
+      "language": "javascript"
+    },
+    {
+      "caller_file": "got/source/core/index.js",
+      "caller_line": 5,
+      "expected_callee_symbol": "urlToOptions",
+      "expected_callee_file": "got/source/core/utils/options.js",
+      "language": "javascript"
+    },
+    {
+      "caller_file": "got/source/core/index.js",
+      "caller_line": 6,
+      "expected_callee_symbol": "optionsToUrl",
+      "expected_callee_file": "got/source/core/utils/options.js",
+      "language": "javascript"
+    },
+    {
+      "caller_file": "got/source/core/index.js",
+      "caller_line": 11,
+      "expected_callee_symbol": "normalizeArguments",
+      "expected_callee_file": "got/source/core/utils/options.js",
+      "language": "javascript"
+    },
+    {
+      "caller_file": "got/source/core/index.js",
+      "caller_line": 16,
+      "expected_callee_symbol": "optionsToUrl",
+      "expected_callee_file": "got/source/core/utils/options.js",
+      "language": "javascript"
+    }
+  ]
+}
