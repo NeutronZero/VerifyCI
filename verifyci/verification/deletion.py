@@ -84,11 +84,27 @@ def _matches_waiver(
         t = w.target.strip()
         if not t:
             continue  # empty target must not match everything
+        # V-11: Match exact file target
         norm_t = normalize_path(t)
         if norm_file == norm_t or norm_file.endswith("/" + norm_t.lstrip("/")):
             return w
+
+        # V-11: Match qualified file:symbol target
+        if ":" in t:
+            f_part, s_part = t.split(":", 1)
+            norm_f = normalize_path(f_part.strip())
+            s_clean = s_part.strip()
+            if norm_file == norm_f or norm_file.endswith("/" + norm_f.lstrip("/")):
+                pat = re.compile(r"(?<![\w.])" + re.escape(s_clean) + r"(?![\w])")
+                for gl in removed_guard_lines:
+                    if pat.search(gl) or gl.strip() == s_clean:
+                        return w
+            continue
+
+        # V-11: Exact symbol token match (prevent loose substring false matches like "auth" in "require_auth")
+        pat = re.compile(r"(?<![\w.])" + re.escape(t) + r"(?![\w])")
         for gl in removed_guard_lines:
-            if t in gl:
+            if pat.search(gl) or gl.strip() == t:
                 return w
     return None
 

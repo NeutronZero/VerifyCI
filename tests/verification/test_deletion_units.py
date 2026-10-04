@@ -94,6 +94,15 @@ def test_waiver_file_and_text_match(monkeypatch):
     assert _matches_waiver(["    require_auth()"], "src/other.py", [by_text]) is by_text
     assert _matches_waiver(["    return 1"], "src/other.py", [by_text]) is None
 
+    # V-11: Loose substring must NOT match (e.g. "auth" does not match "require_auth()")
+    loose_text = _waiver("auth")
+    assert _matches_waiver(["    require_auth()"], "src/other.py", [loose_text]) is None
+
+    # V-11: Qualified file:symbol matching
+    qual_match = _waiver("src/app.py:require_auth")
+    assert _matches_waiver(["    require_auth()"], "src/app.py", [qual_match]) is qual_match
+    assert _matches_waiver(["    require_auth()"], "src/other.py", [qual_match]) is None
+
 
 def test_waiver_deny_by_default(monkeypatch):
     # No key configured, no opt-in: an unverifiable waiver suppresses nothing.
