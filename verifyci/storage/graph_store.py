@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS revisions (
 );
 
 CREATE TABLE IF NOT EXISTS entities (
-    revision_entity_id TEXT PRIMARY KEY,
+    revision_entity_id TEXT NOT NULL,
     logical_entity_id TEXT NOT NULL,
     repository_id TEXT NOT NULL,
     revision_id TEXT NOT NULL,
@@ -31,12 +31,13 @@ CREATE TABLE IF NOT EXISTS entities (
     line_end INTEGER,
     language TEXT,
     source_hash TEXT NOT NULL,
-    valid_from REAL,
+    valid_from REAL NOT NULL,
     valid_until REAL,
     t_created REAL,
     t_expired REAL,
     metadata_json TEXT,
     properties_json TEXT,
+    PRIMARY KEY (revision_entity_id, valid_from),
     FOREIGN KEY (revision_id) REFERENCES revisions(revision_id)
 );
 CREATE INDEX IF NOT EXISTS idx_entities_logical ON entities(logical_entity_id);
@@ -175,6 +176,60 @@ def _has_table(conn, name: str) -> bool:
     ).fetchone() is not None
 
 
+def _migrate_v0_to_v1(conn: sqlite3.Connection) -> None:
+    # No-op: v0 is the baseline pre-composite-key schema at commit 451b551.
+    pass
+
+
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+    # Forward-compatible composite key migration for S-01.
+    # Note: Cannot restore previously overwritten deletion intervals from raw state.
+    old_isolation = conn.isolation_level
+    conn.isolation_level = None  # Autocommit mode for explicit transaction control
+    conn.execute("PRAGMA foreign_keys = OFF;")
+    conn.execute("BEGIN TRANSACTION;")
+    try:
+        conn.execute("""
+            CREATE TABLE entities_v2 (
+                revision_entity_id TEXT NOT NULL,
+                logical_entity_id TEXT NOT NULL,
+                repository_id TEXT NOT NULL,
+                revision_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                line_start INTEGER,
+                line_end INTEGER,
+                language TEXT,
+                source_hash TEXT NOT NULL,
+                valid_from REAL NOT NULL,
+                valid_until REAL,
+                t_created REAL,
+                t_expired REAL,
+                metadata_json TEXT,
+                properties_json TEXT,
+                PRIMARY KEY (revision_entity_id, valid_from),
+                FOREIGN KEY (revision_id) REFERENCES revisions(revision_id)
+            );
+        """)
+        conn.execute("INSERT INTO entities_v2 SELECT * FROM entities;")
+        conn.execute("DROP TABLE entities;")
+        conn.execute("ALTER TABLE entities_v2 RENAME TO entities;")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_entities_logical ON entities(logical_entity_id);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_entities_logical_valid ON entities(logical_entity_id, valid_from, valid_until);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_entities_revision ON entities(revision_id);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_entities_path ON entities(file_path);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name);")
+        conn.execute("PRAGMA user_version = 2;")
+        conn.execute("COMMIT;")
+    except Exception:
+        conn.execute("ROLLBACK;")
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.isolation_level = old_isolation
+
+
 class GraphStore:
     def __init__(self, db_path: str, read_only: bool = False):
         self.db_path = db_path
@@ -217,8 +272,19 @@ class GraphStore:
         # which skips this pragma entirely).
         try:
             self.conn.execute("PRAGMA journal_mode=WAL")
-            self.conn.executescript(SCHEMA)
-            self.conn.commit()
+            table_exists = self.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='entities'"
+            ).fetchone() is not None
+            if not table_exists:
+                self.conn.executescript(SCHEMA)
+                self.conn.execute("PRAGMA user_version = 2;")
+                self.conn.commit()
+            else:
+                v = self.conn.execute("PRAGMA user_version;").fetchone()[0]
+                if v < 1:
+                    _migrate_v0_to_v1(self.conn)
+                if v < 2:
+                    _migrate_v1_to_v2(self.conn)
         except BaseException:
             # Same half-open guarantee as the read-only path above.
             self.conn.close()
@@ -517,15 +583,27 @@ class GraphStore:
         # re-opens a row that a supersede had closed — the revert cycle
         # A->B->A asserts A current again). Content-derived fields cannot
         # differ under the same id: the revision hash fixes them.
+        # S-01: One row per valid-time interval. If this revision entity is
+        # already open (valid_until IS NULL), reuse its valid_from to ensure
+        # re-ingesting unchanged content does not create duplicate live intervals.
+        # If it was previously closed (e.g. revert cycle), a fresh interval is inserted.
+        existing = self.conn.execute(
+            "SELECT valid_from FROM entities WHERE revision_entity_id = ? AND valid_until IS NULL",
+            (entity.revision_entity_id,)
+        ).fetchone()
+        if existing is not None:
+            v_from = existing[0]
+        else:
+            v_from = entity.valid_from if entity.valid_from is not None else (entity.t_created if entity.t_created is not None else 0.0)
         self.conn.execute(
             "INSERT INTO entities VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
-            " ON CONFLICT(revision_entity_id) DO UPDATE SET"
+            " ON CONFLICT(revision_entity_id, valid_from) DO UPDATE SET"
             "   valid_until = excluded.valid_until,"
             "   t_expired   = excluded.t_expired",
             (entity.revision_entity_id, entity.logical_entity_id, entity.repository_id,
              entity.revision_id, entity.type.value, entity.name, entity.file_path,
              entity.line_start, entity.line_end, entity.language, entity.source_hash,
-             entity.valid_from, entity.valid_until, entity.t_created, entity.t_expired,
+             v_from, entity.valid_until, entity.t_created, entity.t_expired,
              json.dumps(entity.metadata), entity.properties_json),
         )
         self._maybe_commit()

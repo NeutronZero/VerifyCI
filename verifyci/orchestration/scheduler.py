@@ -411,9 +411,10 @@ class AsyncDAGScheduler(Scheduler):
                     store.insert_event(e)
             task["persisted_count"] = persisted + len(events)
         except Exception as e:  # noqa: BLE001
-            import traceback
+            import sys
+            task["audit_degraded"] = True
             task["persist_error"] = f"{type(e).__name__}: {e}"
-            traceback.print_exc()
+            sys.stderr.write(f"[WARNING] scheduler persist degraded for task {task_id}: {type(e).__name__}: {e}\n")
 
     def _emit(self, event_type: str, task_id: str, conversation_id: str, payload: dict) -> None:
         # Append to the task's own ledger; mirror into the shared

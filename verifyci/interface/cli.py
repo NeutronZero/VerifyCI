@@ -44,7 +44,7 @@ def ingest(path: str, incremental: bool = False,
         totals = run_ingest(path, incremental=incremental, commit_id=commit or None)
     except FileNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=3)
     typer.echo(f"Revision: {totals['revision_id']}")
     typer.echo(f"Files: {totals['files']} (skipped {totals['skipped']}), "
                f"entities: {totals['entities']}, edges: {totals['edges']}")

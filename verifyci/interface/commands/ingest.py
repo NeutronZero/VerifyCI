@@ -387,4 +387,20 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
         totals["closed_edges"] += gone_d
         totals["disappeared_entities"] = gone_e
         totals["disappeared_edges"] = gone_d
+
+        # Defensive Invariant Assertion (Post-Ingest):
+        # Ensure at most one live interval exists per logical entity in the repository.
+        dup = store.conn.execute(
+            "SELECT logical_entity_id, COUNT(*) FROM entities"
+            " WHERE valid_until IS NULL AND repository_id = ?"
+            " GROUP BY logical_entity_id HAVING COUNT(*) > 1",
+            (repo.name,),
+        ).fetchone()
+        if dup:
+            from verifyci.interface.commands import InfraError
+            raise InfraError(
+                "multiple_live_intervals",
+                f"Multiple live intervals detected for logical entity: {dup[0]} (count {dup[1]})"
+            )
+
         return totals

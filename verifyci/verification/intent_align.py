@@ -149,6 +149,10 @@ def _forbid_evidence(diff, kind, name):
 
 
 def _is_secret_carve_out(content: str, opener: str | None = None, fname: str | None = None) -> bool:
+    # V-01: Never carve out unambiguous high-signal credential shapes
+    if any(p.search(content) for p in (AWS_KEY_RE, PEM_RE, JWT_RE, CONN_STR_RE)):
+        return False
+
     stripped = content.strip()
     if opener:
         op_strip = opener.strip()
@@ -161,10 +165,6 @@ def _is_secret_carve_out(content: str, opener: str | None = None, fname: str | N
         return True
     if re.search(r'\br["\'](?:\(\?[aiLmsux]|\\[bBwWsSdD]|\^|\.\*)', content):
         return True
-
-    # Never carve out unambiguous high-signal credential shapes
-    if any(p.search(content) for p in (AWS_KEY_RE, PEM_RE, JWT_RE, CONN_STR_RE)):
-        return False
 
     path_prefixes = ("/", "./", "../", "\\", "c:\\", "C:\\", "/sys/", "/etc/", "/dev/", "/tmp/", "/proc/")
 

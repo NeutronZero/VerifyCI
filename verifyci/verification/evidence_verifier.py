@@ -1,4 +1,5 @@
 from verifyci.contracts.evidence import EvidencePack
+from verifyci.verification.diffmap import normalize_path
 
 
 def verify_evidence_coverage(evidence_pack: EvidencePack) -> bool:
@@ -10,8 +11,12 @@ def verify_evidence_coverage(evidence_pack: EvidencePack) -> bool:
             return False
     entities = evidence_pack.entities or []
     if entities:
-        pairs = {(getattr(e, 'file_path', None), getattr(e, 'source_hash', None)) for e in entities}
+        pairs = {
+            (normalize_path(getattr(e, 'file_path', '') or ''), getattr(e, 'source_hash', None))
+            for e in entities
+        }
         for chunk in chunks:
-            if (chunk.file_path, chunk.source_hash) not in pairs:
+            chunk_path = normalize_path(chunk.file_path or '')
+            if (chunk_path, chunk.source_hash) not in pairs:
                 return False
     return True

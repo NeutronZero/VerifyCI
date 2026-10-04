@@ -117,10 +117,9 @@ def test_enum_class_in_c_grammar_is_not_a_function():
     assert funcs == []
 
 
-def test_overload_definitions_collapse_to_one_entity():
-    # Two `write` overloads share (file, name, type, scope) and therefore
-    # one logical id; storage keeps first-wins. Documented, not blessed:
-    # overloads are invisible to identity, same as same-name redefinitions.
+def test_overload_definitions_disambiguated_by_signature():
+    # G-02: Overloads are disambiguated by canonicalized parameter types.
+    # Parameter names are excluded, so renaming parameters preserves identity.
     from verifyci.contracts.entity import EntityType
     from verifyci.ingestion.extractor import extract_entities
     from verifyci.ingestion.parser import TreeSitterParser
@@ -129,8 +128,15 @@ def test_overload_definitions_collapse_to_one_entity():
     parsed = TreeSitterParser().parse("x.cpp", src, "cpp")
     funcs = [e for e in extract_entities(parsed, "r", "rev")
              if e.type == EntityType.FUNCTION and e.name == "write"]
-    assert len(funcs) == 2  # both emitted...
-    assert funcs[0].logical_entity_id == funcs[1].logical_entity_id  # ...one identity
+    assert len(funcs) == 2
+    assert funcs[0].logical_entity_id != funcs[1].logical_entity_id  # different types -> distinct identities
+
+    # Parameter name changes preserve identity
+    src_rename = (b"void write(uint8_t different_name) { (void)different_name; }\n")
+    parsed_rename = TreeSitterParser().parse("x.cpp", src_rename, "cpp")
+    func_rename = [e for e in extract_entities(parsed_rename, "r", "rev")
+                   if e.type == EntityType.FUNCTION and e.name == "write"][0]
+    assert funcs[0].logical_entity_id == func_rename.logical_entity_id
 
 
 def test_pointer_and_reference_returns_emit_entities():

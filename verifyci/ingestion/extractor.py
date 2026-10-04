@@ -29,6 +29,8 @@ def _make_entity(
     qualified_name: str = "",
     snippet_is_complete: bool = True,
     snippet_truncated_at_line: Optional[int] = None,
+    signature: str = "",
+    accessor: str = "",
 ) -> Entity:
     # identity_scope pins the logical id: namespace entries are filtered
     # out of it, so wrapping code in `namespace ns {}` renames nothing
@@ -37,7 +39,9 @@ def _make_entity(
     # C/C++ only) is the canonical name the deferred resolver matches
     # qualified references against.
     lid_scope = scope if identity_scope is None else identity_scope
-    logical_id = compute_logical_entity_id(repository_id, file_path, name, entity_type, lid_scope)
+    logical_id = compute_logical_entity_id(
+        repository_id, file_path, name, entity_type, lid_scope, signature=signature
+    )
     metadata = {"scope": scope} if scope else {}
     if qualified_name:
         metadata["qualified_name"] = qualified_name
@@ -47,6 +51,10 @@ def _make_entity(
         if snippet_truncated_at_line is not None:
             metadata["snippet_truncated_at_line"] = snippet_truncated_at_line
         metadata["snippet_char_count"] = len(snippet)
+    if accessor:
+        metadata["accessor"] = accessor
+    if signature:
+        metadata["signature"] = signature
     return Entity(
         repository_id=repository_id,
         logical_entity_id=logical_id,
@@ -416,6 +424,55 @@ def _classify_node(node, language: str, stack: Optional[list[tuple[str, str]]] =
     return None
 
 
+def _extract_param_types(node, source: bytes) -> list[str]:
+    """Extract canonicalized C/C++ parameter types in declaration order.
+    Parameter names are strictly excluded. Pointer/ref spacing and const
+    qualifiers are normalized. void f(void) is normalized to empty [].
+    Templates are deferred to V1.2.
+    """
+    param_list = None
+    for child in _walk(node):
+        if child.type == "parameter_list":
+            param_list = child
+            break
+    if param_list is None:
+        return []
+    types = []
+    for p in param_list.children:
+        if p.type != "parameter_declaration":
+            continue
+        is_const = False
+        type_parts = []
+        is_ptr = 0
+        is_ref = 0
+        for c in p.children:
+            if c.type == "type_qualifier" and "const" in _text(c, source):
+                is_const = True
+            elif c.type in ("primitive_type", "type_identifier", "sized_type_specifier"):
+                t_str = _text(c, source).strip()
+                if "const" in t_str.split():
+                    is_const = True
+                    t_str = " ".join(part for part in t_str.split() if part != "const")
+                type_parts.append(t_str)
+            elif c.type in ("pointer_declarator", "abstract_pointer_declarator"):
+                for sc in _walk(c):
+                    if sc.type == "*":
+                        is_ptr += 1
+            elif c.type in ("reference_declarator", "abstract_reference_declarator"):
+                for sc in _walk(c):
+                    if sc.type == "&":
+                        is_ref += 1
+        base_type = " ".join(type_parts).strip()
+        if not base_type:
+            continue
+        # C void parameter list: void f(void) -> empty
+        if base_type == "void" and is_ptr == 0 and is_ref == 0:
+            continue
+        type_str = ("const " if is_const else "") + base_type + ("*" * is_ptr) + ("&" * is_ref)
+        types.append(type_str)
+    return types
+
+
 def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -> list[Entity]:
     now = time.time()
     num_lines = max(1, len(parsed.source.splitlines()))
@@ -428,6 +485,11 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
         return entities
 
     root = parsed.tree.root_node
+    parents = {}
+    for node in _walk(root):
+        for child in node.children:
+            parents[_node_key(child)] = node
+
     is_c_like = parsed.language in ("c", "cpp")
     for node, stack in _walk_scoped(root, parsed.source, [], parsed.language):
         qualified_scope = (
@@ -447,9 +509,39 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
             qparts = ([qualified_scope] if qualified_scope
                       else [n for _, n in stack])
             qualified_name = "::".join(qparts + [name])
-        line_start = node.start_point[0] + 1
+
+        # G-01: Inherit decorator start line if wrapped in decorated_definition
+        parent = parents.get(_node_key(node))
+        if parent is not None and parent.type == "decorated_definition":
+            line_start = parent.start_point[0] + 1
+        else:
+            line_start = node.start_point[0] + 1
         line_end = node.end_point[0] + 1
         snip_rec = _source_snippet_record(parsed.source, line_start, line_end)
+
+        # G-02: Overload and property accessor disambiguation
+        signature = ""
+        accessor = ""
+        if is_c_like and entity_type in (EntityType.FUNCTION, EntityType.METHOD):
+            param_types = _extract_param_types(node, parsed.source)
+            signature = ", ".join(param_types)
+        elif parsed.language == "python" and parent is not None and parent.type == "decorated_definition":
+            for dec in parent.children:
+                if dec.type == "decorator":
+                    dec_text = _text(dec, parsed.source).strip()
+                    if dec_text == "@property":
+                        accessor = "getter"
+                        signature = "getter"
+                        break
+                    elif dec_text.endswith(".setter"):
+                        accessor = "setter"
+                        signature = "setter"
+                        break
+                    elif dec_text.endswith(".deleter"):
+                        accessor = "deleter"
+                        signature = "deleter"
+                        break
+
         entities.append(_make_entity(
             repository_id, revision_id, parsed.file_path, name, entity_type,
             parsed.language, parsed.source_hash,
@@ -459,6 +551,8 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
             qualified_name=qualified_name,
             snippet_is_complete=snip_rec.is_complete,
             snippet_truncated_at_line=snip_rec.truncated_at_line,
+            signature=signature,
+            accessor=accessor,
         ))
         if entity_type in (EntityType.FUNCTION, EntityType.METHOD):
             param_scope = f"{identity_scope}.{name}" if identity_scope else name

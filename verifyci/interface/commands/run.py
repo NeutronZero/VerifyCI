@@ -99,6 +99,7 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
                                       _latest_revision_id(store, db), head)
                     return result
                 await asyncio.sleep(0.1)
+            await scheduler.cancel(task_id)
             return {"task": task, "task_id": task_id, "status": "TIMEOUT",
                     "steps": len(task_ir.steps), "ledger_head": None}
         finally:

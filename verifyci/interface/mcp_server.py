@@ -53,7 +53,8 @@ def _describe_graph(graph, node_map: dict, limit: int = 5000) -> tuple:
 
 def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                       dense_provider: Any = None, ledger: Any = None,
-                      entities: list | None = None) -> MCPServer:
+                      entities: list | None = None,
+                      rw_store: Any = None) -> MCPServer:
     from verifyci.observability.tracing import start_agent_span
     from verifyci.orchestration.scheduler import AsyncDAGScheduler
 
@@ -278,7 +279,7 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                 "graph": graph, "node_map": node_map, "entities": entities,
                 "invariants": _dedupe_invariants(intent.invariants + _repo_invariants),
                 "waivers": list(_repo_waivers),
-                "diff": diff, "store": store,
+                "diff": diff, "store": rw_store or store,
             }
             task_id = await scheduler.submit(task_ir, conversation_id=conversation_id,
                                              context=context)
@@ -293,6 +294,7 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                           "ledger_head": head}
                 return result
             await asyncio.sleep(0.1)
+        await scheduler.cancel(task_id)
         return {"task": task, "task_id": task_id, "status": "TIMEOUT",
                 "ledger_head": None}
 

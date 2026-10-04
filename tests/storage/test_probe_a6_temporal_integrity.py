@@ -123,8 +123,13 @@ def test_reappeared_content_after_change_keeps_both_observations(tmp_path):
         " WHERE name='foo' ORDER BY valid_from").fetchall()
     # revision ids: A, B, A again. The A row was observed first and its
     # stamp must still equal the FIRST observation (no rewrite).
-    assert rows[0][1] == a_created[0], "revert-cycle re-ingest rewrote the A row"
-    assert len(rows) == 2, rows                    # A and B
+    # S-01: Composite key yields one row per valid-time interval. Revert cycle A->B->A
+    # records 3 intervals across 2 distinct revisions (A closed, B closed, A re-opened).
+    assert len(rows) == 3, rows
+    assert len({r[0] for r in rows}) == 2
+    assert rows[0][2] is not None, "first A observation was left open"
+    assert rows[1][2] is not None, "B observation was left open"
+    assert rows[2][2] is None, "reverted A observation must be open"
     # Latest revision after revert: the ingests chain (not the revisions
     # table) decides, and it must now point back at A.
     from verifyci.interface.commands import resolve_repository

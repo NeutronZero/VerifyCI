@@ -67,6 +67,7 @@ class VerifyRequest(BaseModel):
     diff: str = Field(max_length=MAX_DIFF_CHARS)
     revision_id: str = ""
     task_id: str = "http_verify"
+    db: str = ""
 
 
 class TaskRequest(BaseModel):

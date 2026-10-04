@@ -22,11 +22,10 @@ def create_fastmcp_server(db_path: str, name: str = "verifyci"):
     from verifyci.memory.ledger import EventLedger
     from verifyci.storage.graph_store import GraphStore
     import os as _os
-    # Fail closed on a missing path: constructing a GraphStore would
-    # mkdir and materialize an empty database at a client-chosen path.
-    # Read-only: the server never writes the store (reads for verify /
-    # query tools), so a sealed checkout stays openable.
-    store = GraphStore(db, read_only=True) if _os.path.exists(db) else None
+    # I-01: Dual-store boundary. Observation tools run on ro_store;
+    # task execution uses rw_store for event ledger persistence.
+    ro_store = GraphStore(db, read_only=True) if _os.path.exists(db) else None
+    rw_store = GraphStore(db, read_only=False) if _os.path.exists(db) else None
     graph, node_map, entities = load_graph(db)
     if not entities:
         entities = payload_entities(graph)
@@ -34,8 +33,8 @@ def create_fastmcp_server(db_path: str, name: str = "verifyci"):
     # report ledger_head None. The server is long-lived; the scheduler
     # keeps one ledger per task (plus this aggregate mirror), so
     # interleaved tasks keep verifiable per-task subchains and heads.
-    inner = create_mcp_server(graph=graph, store=store, node_map=node_map,
-                              ledger=EventLedger(), entities=entities)
+    inner = create_mcp_server(graph=graph, store=ro_store, rw_store=rw_store,
+                              node_map=node_map, ledger=EventLedger(), entities=entities)
 
     mcp = FastMCP(name)
 

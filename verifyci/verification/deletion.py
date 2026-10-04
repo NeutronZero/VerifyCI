@@ -142,9 +142,11 @@ def _check_signature_compatibility(old_def_line: str, new_def_line: str) -> tupl
                 return False, f"param_position_mismatch:{old_name}->{new_name}"
 
     new_all_names = {name for name, _ in new_params}
-    for old_name in old_req:
+    for old_name, has_def in old_params:
         if old_name not in new_all_names:
-            return False, f"required_param_removed:{old_name}"
+            if not has_def:
+                return False, f"required_param_removed:{old_name}"
+            return False, f"optional_param_removed:{old_name}"
 
     return True, ""
 
