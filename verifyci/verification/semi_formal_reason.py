@@ -60,6 +60,23 @@ def _find_code_deletion_hunks(diff_str: str, code_files: set[str]) -> list[tuple
     return hunks
 
 
+def _is_new_file(f) -> bool:
+    """Brand-new file: old side is /dev/null or hunks start at 0.
+
+    Only a new file's hunk content is the whole document, so only
+    there is a parse failure a real rejection. Partial hunks of
+    existing files are fragments — decline, don't fail.
+    """
+    if getattr(f, "old_path", None) in (None, "/dev/null"):
+        if not getattr(f, "hunks", None):
+            return False
+        return True
+    try:
+        return bool(f.hunks) and all(h.old_start == 0 for h in f.hunks)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _validate_configuration_diff(diff_str: str, config_files: list[str]) -> tuple[str, str]:
     from verifyci.verification.diffmap import normalize_path, parse_unified_diff
     norm_config = {normalize_path(f) for f in config_files}
@@ -81,17 +98,17 @@ def _validate_configuration_diff(diff_str: str, config_files: list[str]) -> tupl
             try:
                 tomllib.loads(content)
             except Exception as e:
-                if f.hunks and f.hunks[0].new_start > 1:
-                    return "inconclusive", f"{f.path}: toml_fragment ({e})"
-                return "fail", f"{f.path}: {e}"
+                if _is_new_file(f):
+                    return "fail", f"{f.path}: {e}"
+                return "inconclusive", f"{f.path}: toml_fragment ({e})"
         elif p_lower.endswith((".yaml", ".yml")):
             import yaml
             try:
                 yaml.safe_load(content)
             except Exception as e:
-                if f.hunks and f.hunks[0].new_start > 1:
-                    return "inconclusive", f"{f.path}: yaml_fragment ({e})"
-                return "fail", f"{f.path}: {e}"
+                if _is_new_file(f):
+                    return "fail", f"{f.path}: {e}"
+                return "inconclusive", f"{f.path}: yaml_fragment ({e})"
         elif p_lower.endswith(".json"):
             import json
             try:
@@ -103,9 +120,11 @@ def _validate_configuration_diff(diff_str: str, config_files: list[str]) -> tupl
                     try:
                         json.loads("[" + content + "]")
                     except Exception as e:
+                        if _is_new_file(f):
+                            return "fail", f"{f.path}: {e}"
                         if len(f.hunks) > 1:
                             return "inconclusive", f"{f.path}: multi_hunk_json_configuration ({e})"
-                        return "fail", f"{f.path}: {e}"
+                        return "inconclusive", f"{f.path}: json_fragment ({e})"
         elif p_lower.endswith((".ini", ".cfg")):
             import configparser
             import re

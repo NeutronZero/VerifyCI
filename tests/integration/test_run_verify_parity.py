@@ -69,7 +69,7 @@ def test_waived_guard_removal_passes_both_paths(tmp_path, monkeypatch):
     assert task["decision"] == "PASS", task
 
 
-def test_invalid_config_fails_verify(tmp_path):
+def test_invalid_config_fragment_declines_verify(tmp_path):
     repo = _repo_with_guard(tmp_path)
     db = str(repo / ".verifyci" / "verifyci.db")
     diff = (
@@ -77,6 +77,22 @@ def test_invalid_config_fails_verify(tmp_path):
         "--- a/pyproject.toml\n"
         "+++ b/pyproject.toml\n"
         "@@ -1,1 +1,2 @@\n"
+        "+[project\n"
+        "+broken = = =\n"
+    )
+    out = run_verify(diff, db_path=db)
+    # Fragment of an existing file: decline, don't reject.
+    assert out["status"] == "INCONCLUSIVE", out
+
+
+def test_new_invalid_config_fails_verify(tmp_path):
+    repo = _repo_with_guard(tmp_path)
+    db = str(repo / ".verifyci" / "verifyci.db")
+    diff = (
+        "diff --git a/pyproject.toml b/pyproject.toml\n"
+        "--- /dev/null\n"
+        "+++ b/pyproject.toml\n"
+        "@@ -0,0 +1,2 @@\n"
         "+[project\n"
         "+broken = = =\n"
     )

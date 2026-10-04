@@ -146,3 +146,15 @@ def test_querylog_wired_when_env_set(tmp_path, monkeypatch):
 
 def test_unused_import_sqlite_ok():
     assert sqlite3.sqlite_version_info >= (3, 8)
+
+
+def test_ts_method_decorator_span():
+    # TODO #3: sibling decorator lines belong to the method span.
+    from verifyci.ingestion.extractor import extract_entities
+    from verifyci.ingestion.parser import TreeSitterParser
+    src = b"class Foo {\n  @dec\n  method() {\n    return 1;\n  }\n}\n"
+    parsed = TreeSitterParser().parse("x.ts", src, "typescript")
+    meths = [e for e in extract_entities(parsed, "r", "v")
+             if getattr(e, "name", "") == "method"]
+    assert len(meths) == 1
+    assert (meths[0].line_start, meths[0].line_end) == (2, 5)

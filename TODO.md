@@ -60,7 +60,9 @@ Status: diagnosed; fix not implemented pre-ship (see below).
 ## 3. TypeScript method decorator span drop (diagnosed 2026-10-04)
 
 Source: post-Phase-2 adversarial audit, finding 11 (LOW).
-Status: diagnosed; fix not implemented.
+Status: implemented — sibling-decorator walk-back in `extract_entities`
+with latency re-baseline (`measure.py` re-run, `fixture/extractor.py`
+refreshed, `results.json` regenerated).
 
 - Mechanism: tree-sitter-typescript nests no `decorated_definition` wrapper;
   `class_body` holds `decorator` as a sibling of `method_definition`, so
@@ -71,14 +73,17 @@ Status: diagnosed; fix not implemented.
   extractor exception set must stay empty — widen only via re-measure per
   `bb2a013` precedent: refresh `benchmarks/latency/fixture/extractor.py`
   + re-run `benchmarks/latency/measure.py`).
-- Decision: DEFER to post-release with a benchmark re-run; decorator-only
-  edits to TS methods stay under-grounded (INCONCLUSIVE direction), never
-  a false PASS.
+- Decision: LANDED with benchmark re-run (`measure.py`, fixture +
+  `results.json` refreshed per `bb2a013` precedent); decorator-only
+  edits to TS methods now ground to the decorator span.
 
 ## 4. Line-1 config-fragment false FAIL (diagnosed 2026-10-04)
 
 Source: post-Phase-2 adversarial audit, finding 6 (HIGH as stated).
-Status: diagnosed; fix not implemented — pinned tests mandate current behavior.
+Status: implemented — fragments of existing files decline
+(INCONCLUSIVE); brand-new files with invalid content still fail.
+Pinned tests updated to the new contract with new-file FAIL cases
+preserving fail-closed coverage.
 
 - Mechanism: `_validate_configuration_diff`
   (`verifyci/verification/semi_formal_reason.py`) parses hunk-lines-only
@@ -94,5 +99,7 @@ Status: diagnosed; fix not implemented — pinned tests mandate current behavior
   `multi_hunk_json_configuration` reasoning-string pin). Distinguishing
   "invalid content" from "valid fragment" needs base-file content the
   gate does not load.
-- Decision: DEFER. Fail-closed on config fragments is the safe direction;
-  landing INCONCLUSIVE-by-default needs corpus re-measurement first.
+- Decision (landed): fragment → INCONCLUSIVE, new-file invalid → FAIL.
+  INCONCLUSIVE routes to HUMAN_REVIEW, never PASS, so no silent
+  acceptance; fail-closed coverage for genuine new files is pinned by
+  new-file FAIL cases in the updated tests.

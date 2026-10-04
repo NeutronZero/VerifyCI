@@ -236,8 +236,21 @@ def test_configuration_only_diff_validates_schema():
         "+this is blatant invalid toml = = =\n"
     )
     cert_invalid = reasoner.verify(diff=diff_invalid, graph=None, entities=None)
-    assert cert_invalid.conclusion.result == "fail"
+    # Fragment of an existing file: decline, don't reject.
+    assert cert_invalid.conclusion.result == "inconclusive"
     assert cert_invalid.certificate_verified is False
+
+    diff_new_invalid = (
+        "diff --git a/pyproject.toml b/pyproject.toml\n"
+        "--- /dev/null\n"
+        "+++ b/pyproject.toml\n"
+        "@@ -0,0 +1,2 @@\n"
+        "+[project\n"
+        "+this is blatant invalid toml = = =\n"
+    )
+    cert_new_invalid = reasoner.verify(diff=diff_new_invalid, graph=None, entities=None)
+    assert cert_new_invalid.conclusion.result == "fail"
+    assert cert_new_invalid.certificate_verified is False
 
 
 def test_headerless_ini_fragment_declines_not_rejects():

@@ -581,6 +581,23 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
                 line_start = grandparent.start_point[0] + 1
             else:
                 line_start = parent.start_point[0] + 1
+        elif parent is not None and parsed.language in ("typescript", "tsx", "javascript"):
+            # TS: method decorators are siblings (class_body: decorator,
+            # method_definition) with no decorated_definition wrapper.
+            # Walk back over adjacent decorator siblings.
+            line_start = node.start_point[0] + 1
+            try:
+                sibs = parent.children
+                idx = next(i for i, s in enumerate(sibs) if _node_key(s) == _node_key(node))
+                j = idx - 1
+                while j >= 0 and sibs[j].type == "decorator":
+                    if sibs[j].end_point[0] + 1 == line_start - 1:
+                        line_start = sibs[j].start_point[0] + 1
+                        j -= 1
+                    else:
+                        break
+            except (StopIteration, IndexError):
+                pass
         else:
             line_start = node.start_point[0] + 1
         line_end = node.end_point[0] + 1

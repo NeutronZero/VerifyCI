@@ -69,6 +69,19 @@ def test_yaml_valid_and_invalid():
     assert cert.conclusion.result == "pass" and cert.certificate_verified
     invalid = valid.replace("runs-on: ubuntu-latest", "key: [unclosed")
     cert = SemiFormalReasoner().verify(diff=invalid, graph=None, entities=None)
+    # Fragment of an existing file: validity indeterminate, decline.
+    assert cert.conclusion.result == "inconclusive" and not cert.certificate_verified
+    assert "yaml_fragment" in cert.conclusion.reasoning
+    # Brand-new file with invalid content: the hunk IS the document, reject.
+    new_bad = (
+        "diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml\n"
+        "--- /dev/null\n"
+        "+++ b/.github/workflows/ci.yml\n"
+        "@@ -0,0 +1,2 @@\n"
+        "+name: ci\n"
+        "+key: [unclosed\n"
+    )
+    cert = SemiFormalReasoner().verify(diff=new_bad, graph=None, entities=None)
     assert cert.conclusion.result == "fail" and not cert.certificate_verified
 
 
@@ -86,6 +99,18 @@ def test_json_fragment_valid_invalid_multi_hunk():
     assert cert.conclusion.result == "pass" and cert.certificate_verified
     invalid = pkg("@@ -1,1 +1,2 @@\n {\n+  {{{{\n")
     cert = SemiFormalReasoner().verify(diff=invalid, graph=None, entities=None)
+    # Fragment of an existing file: decline, don't reject.
+    assert cert.conclusion.result == "inconclusive" and not cert.certificate_verified
+    assert "json_fragment" in cert.conclusion.reasoning
+    new_bad = (
+        "diff --git a/package.json b/package.json\n"
+        "--- /dev/null\n"
+        "+++ b/package.json\n"
+        "@@ -0,0 +1,2 @@\n"
+        "+{\n"
+        "+  {{{{\n"
+    )
+    cert = SemiFormalReasoner().verify(diff=new_bad, graph=None, entities=None)
     assert cert.conclusion.result == "fail" and not cert.certificate_verified
     multi = pkg("@@ -1,1 +1,2 @@\n {\n+  {{{\n", "@@ -5,1 +6,2 @@\n }\n+  }}}\n")
     cert = SemiFormalReasoner().verify(diff=multi, graph=None, entities=None)
@@ -125,7 +150,7 @@ def test_context_free_removal_only_config_diff_skipped():
 # --- partition branches ------------------------------------------------------
 
 
-def test_tests_plus_invalid_config_fails():
+def test_tests_plus_invalid_config_declines():
     diff = (
         "diff --git a/tests/test_a.py b/tests/test_a.py\n"
         "--- a/tests/test_a.py\n"
@@ -137,6 +162,20 @@ def test_tests_plus_invalid_config_fails():
         "--- a/pyproject.toml\n"
         "+++ b/pyproject.toml\n"
         "@@ -1,1 +1,2 @@\n"
+        "+[project\n"
+        "+broken = = =\n"
+    )
+    cert = SemiFormalReasoner().verify(diff=diff, graph=None, entities=None)
+    # Config fragment of an existing file: decline, don't reject.
+    assert cert.conclusion.result == "inconclusive"
+
+
+def test_tests_plus_new_invalid_config_fails():
+    diff = (
+        "diff --git a/pyproject.toml b/pyproject.toml\n"
+        "--- /dev/null\n"
+        "+++ b/pyproject.toml\n"
+        "@@ -0,0 +1,2 @@\n"
         "+[project\n"
         "+broken = = =\n"
     )
