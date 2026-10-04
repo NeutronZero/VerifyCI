@@ -13,9 +13,12 @@ jobs:
         python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev]"
+      - run: uv pip install --system -e ".[dev]"
       - run: ruff check .
-      - run: python -m pytest tests/ -q
+      - run: python -m pytest tests/ -n auto -q
