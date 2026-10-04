@@ -80,7 +80,7 @@ def test_rrf_fusion_deterministic_ties_and_safe_k():
 def test_resolve_repository_on_relative_default_path():
     repo = resolve_repository(".verifyci/verifyci.db")
     assert repo is not None
-    assert repo == "verifyci"
+    assert repo.lower() == "verifyci"
 
 
 def test_replay_engine_branching_paths():

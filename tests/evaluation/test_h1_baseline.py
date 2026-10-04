@@ -53,6 +53,11 @@ def test_h1a_reproduces_frozen_baseline():
     fatal = [e for e in h.validate(corpus, queries)
              if not e.startswith("gate UNESTABLISHED")]
     assert fatal == []
+    safe = "".join(c if c.isalnum() else "_" for c in h.CONFIG["model"])
+    cache_path = HERE / f"embedding_cache_{safe}.json"
+    if not cache_path.exists():
+        import pytest
+        pytest.skip(f"Offline embedding cache {cache_path.name} not found")
     provider = h.make_provider("ollama", HERE)
     rankings = asyncio.run(h.build_rankings(corpus, queries, provider))
     metrics = h.score(rankings, queries)
