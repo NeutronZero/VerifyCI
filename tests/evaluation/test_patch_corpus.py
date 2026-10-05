@@ -57,19 +57,26 @@ RECORDED = {
 # never becomes a gate PASS; a human must still look. If that
 # containment ever weakens (warn policy, direct certificate consumers),
 # this decision must be revisited — silent acceptance is not permitted.
+# Re-measurement after call-target tripwire (matrix row S2,
+# `call_target_check`, non-blocking): S2 PASS -> HUMAN_REVIEW
+# (same-LHS callee disappearance). False PASS 1 -> 0 with zero
+# correct-patch collateral (equivalence 0.875, precision 1.0,
+# false_reject_ids [] all unchanged). Frozen labels still say PASS
+# for S2 — same old-capability protocol as S1/S3/S4 above.
 POSTFIX = {
     "patch_equivalence": 0.875,
     "verification_precision": 1.0,
     "deterministic_catch_rate": 1.0,
-    "semantic_false_accept_rate": 1.0,
-    "semantic_decline_rate": 0.0,
+    "semantic_false_accept_rate": 0.0,
+    "semantic_decline_rate": 1.0,
     "false_reject_ids": [],
     "false_positive_fail_ids": [],
+    "wrong_accepted_ids": [],
     "confusion": {
-        "wrong_all": {"caught": 4, "accepted": 4, "declined": 1},
+        "wrong_all": {"caught": 4, "accepted": 0, "declined": 5},
         "correct_all": {"caught": 0, "accepted": 5, "declined": 3},
         "wrong_deterministic": {"caught": 4, "accepted": 0, "declined": 0},
-        "wrong_semantic": {"caught": 0, "accepted": 4, "declined": 0},
+        "wrong_semantic": {"caught": 0, "accepted": 0, "declined": 4},
     },
 }
 

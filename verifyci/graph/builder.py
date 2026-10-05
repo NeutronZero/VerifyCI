@@ -27,11 +27,17 @@ def _same_lang_family(a: str, b: str) -> bool:
 
 
 class GraphBuilder:
-    def __init__(self, allow_external: bool = True):
+    def __init__(self, allow_external: bool = True, collect_events: bool = False):
         self._graph = None
         self._node_map = {}
         self._allow_external = allow_external
+        self._collect_events = collect_events
         self.resolution_stats: dict[str, int] = {}
+        # Per-reference resolution log (roadmap item C calibration
+        # dataset): one row per deferred edge when collect_events is
+        # on, recording HOW it resolved for later accuracy labeling.
+        # Off by default: empty, zero overhead, zero behavior change.
+        self.resolution_events: list[dict] = []
 
     def build(self, entities: list[Entity], edges: list[Edge],
               now: float | None = None):
@@ -47,6 +53,7 @@ class GraphBuilder:
         self._graph = rx.PyDiGraph()
         self._node_map = {}
         self.resolution_stats = {"resolved": 0, "ambiguous": 0, "missing": 0}
+        self.resolution_events = []
 
         pending: list[Edge] = []
         for entity in entities:
@@ -92,6 +99,11 @@ class GraphBuilder:
         # `ns::Base` reference against every node was O(pending x nodes).
         qual_index: dict[str, list[str]] = {}
         top_index: dict[str, list[str]] = {}
+        # Same, for qualified CALL targets (FUNCTION/METHOD/CLASS). The
+        # inherits pair above covers CLASS/TYPE bases only; calls need
+        # their own eligible set.
+        call_qual_index: dict[str, list[str]] = {}
+        call_top_index: dict[str, list[str]] = {}
         for eid, idx in self._node_map.items():
             payload = self._graph[idx]
             if not hasattr(payload, "type") or not hasattr(payload, "name"):
@@ -107,6 +119,13 @@ class GraphBuilder:
                     qual_index.setdefault(qualified, []).append(eid)
                 else:
                     top_index.setdefault(payload.name, []).append(eid)
+            if payload.type in _CALL_TARGET_TYPES:
+                qualified = (getattr(payload, "metadata", None) or {}).get(
+                    "qualified_name")
+                if qualified:
+                    call_qual_index.setdefault(qualified, []).append(eid)
+                else:
+                    call_top_index.setdefault(payload.name, []).append(eid)
             language = getattr(payload, "language", "") or ""
             if language:
                 by_lang[eid] = language
@@ -115,10 +134,45 @@ class GraphBuilder:
             src_idx = self._node_map.get(edge.src_entity_id)
             if src_idx is None:
                 self.resolution_stats["missing"] += 1
+                self._record(edge, "calls"
+                             if edge.type == EdgeType.CALLS_UNRESOLVED else "inherits",
+                             (edge.metadata or {}).get(
+                                 "callee_qualified",
+                                 (edge.metadata or {}).get(
+                                     "callee", (edge.metadata or {}).get("base", ""))),
+                             "unresolved-source", "missing", 0)
                 continue
             if edge.type == EdgeType.CALLS_UNRESOLVED:
                 name = (edge.metadata or {}).get("callee", "")
                 caller_lang = getattr(self._graph[src_idx], "language", "") or ""
+                qualified_ref = (edge.metadata or {}).get("callee_qualified", "")
+                if qualified_ref and "::" in qualified_ref:
+                    # A spelled `ns::helper` resolves ONLY canonically: a
+                    # same-file bare `helper` must not capture it (same
+                    # rule as qualified bases), and it must never fall
+                    # back to the bare unique-name path below — linking
+                    # a namespaced call to a top-level same-named entity
+                    # invents impact. Zero or several canonical hits stay
+                    # unlinked, fail closed.
+                    candidates = [
+                        e for e in self._match_qualified(
+                            qualified_ref, call_qual_index, call_top_index)
+                        if self._graph[self._node_map[e]].type in _CALL_TARGET_TYPES
+                        and (not caller_lang or _same_lang_family(
+                            by_lang.get(e, caller_lang), caller_lang))]
+                    if len(candidates) != 1:
+                        self.resolution_stats["ambiguous" if candidates else "missing"] += 1
+                        self._record(edge, "calls", qualified_ref,
+                                     "qualified-canonical",
+                                     "ambiguous" if candidates else "missing",
+                                     len(candidates))
+                        continue
+                    self._link_resolved(edge, src_idx, candidates[0],
+                                        EdgeType.CALLS, CPGEdgeSubtype.CALLS_DIRECT,
+                                        now, resolver="qualified-canonical")
+                    self._record(edge, "calls", qualified_ref,
+                                 "qualified-canonical", "resolved", 1)
+                    continue
                 candidates = [
                     e for e in by_name.get(name, [])
                     if self._graph[self._node_map[e]].type in _CALL_TARGET_TYPES
@@ -133,10 +187,15 @@ class GraphBuilder:
                         by_lang.get(e, caller_lang), caller_lang))]
                 if len(candidates) != 1:
                     self.resolution_stats["ambiguous" if candidates else "missing"] += 1
+                    self._record(edge, "calls", name, "unique-bare-name",
+                                 "ambiguous" if candidates else "missing",
+                                 len(candidates))
                     continue
                 self._link_resolved(edge, src_idx, candidates[0],
                                     EdgeType.CALLS, CPGEdgeSubtype.CALLS_DIRECT,
-                                    now)
+                                    now, resolver="unique-bare-name")
+                self._record(edge, "calls", name, "unique-bare-name",
+                             "resolved", 1)
             elif edge.type == EdgeType.INHERITS_UNRESOLVED:
                 name = (edge.metadata or {}).get("base", "")
                 if "::" in name:
@@ -146,10 +205,48 @@ class GraphBuilder:
                                   if self._graph[self._node_map[e]].type in _BASE_TARGET_TYPES]
                 if len(candidates) != 1:
                     self.resolution_stats["ambiguous" if candidates else "missing"] += 1
+                    self._record(edge, "inherits", name,
+                                 "qualified-canonical"
+                                 if "::" in name else "unique-bare-name",
+                                 "ambiguous" if candidates else "missing",
+                                 len(candidates))
                     continue
                 self._link_resolved(edge, src_idx, candidates[0],
                                     EdgeType.INHERITS, CPGEdgeSubtype.INHERITS,
-                                    now)
+                                    now,
+                                    resolver="qualified-canonical"
+                                    if "::" in name else "unique-bare-name")
+                self._record(edge, "inherits", name,
+                             "qualified-canonical"
+                             if "::" in name else "unique-bare-name",
+                             "resolved", 1)
+
+    def _record(self, edge, kind: str, ref: str, resolver: str,
+                outcome: str, candidates: int) -> None:
+        """Append one calibration row when collection is enabled.
+
+        `outcome` is resolved|ambiguous|missing. `ref` is the spelled
+        reference (bare name, or `ns::name` when the site spelled one).
+        Ground truth labeling happens elsewhere; this only records the
+        decision inputs so accuracy can be measured per resolver later.
+        """
+        if not self._collect_events:
+            return
+        meta = edge.metadata or {}
+        scope = meta.get("caller_scope", meta.get("scope", "")) or ""
+        src = self._graph[self._node_map[edge.src_entity_id]] \
+            if edge.src_entity_id in self._node_map else None
+        self.resolution_events.append({
+            "edge_id": edge.id,
+            "kind": kind,
+            "ref": ref,
+            "resolver": resolver,
+            "outcome": outcome,
+            "candidates": candidates,
+            "caller_language": getattr(src, "language", "") or "",
+            "caller_scope_depth": len([s for s in str(scope).split(".") if s]),
+            "spelled_qualified": "::" in ref,
+        })
 
     def _match_qualified(self, name: str, qual_index: dict | None = None,
                          top_index: dict | None = None) -> list[str]:
@@ -187,7 +284,17 @@ class GraphBuilder:
 
     def _link_resolved(self, unresolved: Edge, src_idx: int, dst_eid: str,
                        edge_type: EdgeType, subtype: CPGEdgeSubtype,
-                       now: float) -> None:
+                       now: float, resolver: str = "unique-bare-name") -> None:
+        """Materialize a deferred reference as a graph link, stamped with
+        HOW it resolved. `resolver` is `unique-bare-name` (exactly one
+        entity carries the bare name) or `qualified-canonical` (the
+        spelled `ns::name` matched one canonical `qualified_name`).
+        Direct intra-file links carry no stamp — they are AST-direct by
+        construction. The stamp is audit provenance ("why does VerifyCI
+        believe this edge exists?"), never a confidence weight: nothing
+        consumes it yet, and weighting it into risk scores is a
+        separately-measured change.
+        """
         dst_idx = self._node_map[dst_eid]
         self._graph.add_edge(src_idx, dst_idx, Edge(
             id=f"{unresolved.id}__{dst_eid}",
@@ -199,7 +306,8 @@ class GraphBuilder:
             valid_from=now,
             observed_at=now,
             t_created=now,
-            metadata={**(unresolved.metadata or {}), "deferred": True},
+            metadata={**(unresolved.metadata or {}), "deferred": True,
+                      "resolver": resolver},
         ))
         self.resolution_stats["resolved"] += 1
 

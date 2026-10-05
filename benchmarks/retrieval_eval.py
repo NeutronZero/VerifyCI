@@ -66,7 +66,8 @@ async def _dense_ranked(provider, query: str) -> list[str]:
     return [d for d, _ in scored]
 
 
-def _hybrid_ranked(provider, query: str, k: int = 10) -> list[str]:
+def _hybrid_ranked(provider, query: str, k: int = 10,
+                   exact_bonus=None, qualified_bonus=None) -> list[str]:
     bm25 = BM25Retriever()
     for doc_id, text in CORPUS.items():
         bm25.add(doc_id, text)
@@ -76,7 +77,8 @@ def _hybrid_ranked(provider, query: str, k: int = 10) -> list[str]:
     dense = [SearchResult(id=d, score=1.0 / (i + 1), metadata={"text": CORPUS[d]})
              for i, d in enumerate(dense_ids)]
     fused = rrf_fusion(dense, sparse, [])
-    reranked = OfflineReranker().rerank(
+    reranked = OfflineReranker(exact_bonus=exact_bonus,
+                               qualified_bonus=qualified_bonus).rerank(
         query, [SearchResult(id=d, score=0.0, metadata={"text": CORPUS[d]}) for d in fused], k=k)
     return [r.id for r in reranked]
 
@@ -85,12 +87,14 @@ async def _dense_ranked_async(provider, query: str) -> list[str]:
     return await _dense_ranked(provider, query)
 
 
-def run_benchmark(k_recall: int = 5, k_ndcg: int = 10) -> dict:
+def run_benchmark(k_recall: int = 5, k_ndcg: int = 10,
+                  exact_bonus=None, qualified_bonus=None) -> dict:
     import asyncio
     provider = HashEmbeddingProvider()
     recs, ndcgs, dense_ndcgs = [], [], []
     for query, relevant in QUERIES.items():
-        hybrid = _hybrid_ranked(provider, query)
+        hybrid = _hybrid_ranked(provider, query, exact_bonus=exact_bonus,
+                                qualified_bonus=qualified_bonus)
         dense = asyncio.run(_dense_ranked(provider, query))
         recs.append(recall_at(hybrid, relevant, k_recall))
         ndcgs.append(ndcg_at(hybrid, relevant, k_ndcg))

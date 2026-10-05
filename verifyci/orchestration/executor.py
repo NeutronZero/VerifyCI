@@ -56,6 +56,8 @@ class Executor:
             from verifyci.verification.defaults import default_invariants
             from verifyci.verification.diffmap import parse_diff_files, seed_entities_for_diff
             from verifyci.verification.removal import removal_provenance_check
+            from verifyci.verification.return_swap import return_statement_check
+            from verifyci.verification.call_swap import call_target_check
             from verifyci.contracts.verification_ir import (
                 VerificationPolicy,
             )
@@ -98,6 +100,8 @@ class Executor:
             )
             checks.append(blast_check)
             checks.append(removal_provenance_check(diff, graph_entities))
+            checks.append(return_statement_check(diff))
+            checks.append(call_target_check(diff))
 
             if invariants:
                 inv_checks, _metrics = evaluate_invariants(

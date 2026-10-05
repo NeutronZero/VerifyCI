@@ -14,7 +14,7 @@ from verifyci.ingestion.extractor import extract_edges, extract_entities
 from verifyci.ingestion.parser import TreeSitterParser
 
 
-def _build(files: dict[str, tuple[bytes, str]]):
+def _build(files: dict[str, tuple[bytes, str]], **kwargs):
     parser = TreeSitterParser()
     entities, edges = [], []
     for name, (source, language) in files.items():
@@ -22,7 +22,7 @@ def _build(files: dict[str, tuple[bytes, str]]):
         file_entities = extract_entities(parsed, "repo1", "rev1")
         entities.extend(file_entities)
         edges.extend(extract_edges(parsed, file_entities, "rev1"))
-    builder = GraphBuilder()
+    builder = GraphBuilder(**kwargs)
     return builder, builder.build(entities, edges), entities, edges
 
 
@@ -247,3 +247,160 @@ def test_c_file_links_header_defined_function():
     })
     assert ("main", "shared_add", EdgeType.CALLS) in _links(graph)
     assert builder.resolution_stats["resolved"] == 1
+
+
+def test_qualified_call_resolves_canonically():
+    # `ns::helper()` must link the namespaced definition even with a
+    # same-named top-level function in the revision: the bare fallback
+    # would see two `helper` candidates and give up.
+    builder, graph, _, _ = _build({
+        "base.cpp": (b"namespace ns {\nvoid helper() {}\n}\n", "cpp"),
+        "other.cpp": (b"void helper() {}\n", "cpp"),
+        "app.cpp": (b"void user() { ns::helper(); }\n", "cpp"),
+    })
+    targets = [(graph[src].name, graph[dst].file_path)
+               for _, (src, dst, payload) in graph.edge_index_map().items()
+               if payload.type == EdgeType.CALLS]
+    assert targets == [("user", "base.cpp")]
+    assert builder.resolution_stats == {"resolved": 1, "ambiguous": 0, "missing": 0}
+
+
+def test_qualified_call_to_missing_stays_unlinked():
+    # `ns::ghost()` must NOT fall back to the unique top-level `ghost`:
+    # a namespaced reference never links a bare same-named entity.
+    builder, graph, _, _ = _build({
+        "other.cpp": (b"void ghost() {}\n", "cpp"),
+        "app.cpp": (b"void user() { ns::ghost(); }\n", "cpp"),
+    })
+    assert [link for link in _links(graph) if link[2] == EdgeType.CALLS] == []
+    assert builder.resolution_stats["missing"] == 1
+
+
+def test_bare_call_with_two_namespaced_defs_stays_ambiguous():
+    builder, _, _, _ = _build({
+        "a.cpp": (b"namespace n1 {\nvoid helper() {}\n}\n", "cpp"),
+        "b.cpp": (b"namespace n2 {\nvoid helper() {}\n}\n", "cpp"),
+        "c.cpp": (b"void user() { helper(); }\n", "cpp"),
+    })
+    assert builder.resolution_stats == {"resolved": 0, "ambiguous": 1, "missing": 0}
+
+
+def _resolved_payloads(graph):
+    return [payload
+            for _, (_, _, payload) in graph.edge_index_map().items()
+            if (getattr(payload, "metadata", None) or {}).get("deferred")]
+
+
+def test_resolved_links_carry_resolver_provenance():
+    _, graph, _, _ = _build({
+        "a.cpp": (b"void helper() {}\n", "cpp"),
+        "b.cpp": (b"void user() { helper(); }\n", "cpp"),
+    })
+    stamped = _resolved_payloads(graph)
+    assert len(stamped) == 1
+    assert stamped[0].metadata["resolver"] == "unique-bare-name"
+    # The original reference survives alongside the stamp.
+    assert stamped[0].metadata["callee"] == "helper"
+
+
+def test_qualified_resolved_links_carry_canonical_resolver():
+    _, graph, _, _ = _build({
+        "base.cpp": (b"namespace ns {\nvoid helper() {}\n}\n", "cpp"),
+        "other.cpp": (b"void helper() {}\n", "cpp"),
+        "app.cpp": (b"void user() { ns::helper(); }\n", "cpp"),
+    })
+    stamped = _resolved_payloads(graph)
+    assert len(stamped) == 1
+    assert stamped[0].metadata["resolver"] == "qualified-canonical"
+    assert stamped[0].metadata["callee_qualified"] == "ns::helper"
+
+
+def test_explicit_class_call_prefers_that_class_method():
+    # Module-level `App.run()` names its scope: it links App.run even
+    # though a same-named top-level `run` shares the file.
+    _, graph, _, _ = _build({
+        "a.py": (b"class App:\n    def run(self):\n        pass\n"
+                 b"\n\ndef run():\n    pass\n\nApp.run()\n",
+                 "python"),
+    })
+    calls = [(s, t) for s, t, typ in _links(graph) if typ == EdgeType.CALLS]
+    assert ("a.py", "run") in calls
+    targets = [t for s, t in calls if s == "a.py"]
+    assert len(targets) == 1
+
+
+def test_explicit_class_call_target_is_the_method():
+    _, graph, _, _ = _build({
+        "a.py": (b"class App:\n    def run(self):\n        pass\n"
+                 b"\n\ndef run():\n    pass\n\nApp.run()\n",
+                 "python"),
+    })
+    methods = [graph[dst] for _, (src, dst, payload) in graph.edge_index_map().items()
+               if payload.type == EdgeType.CALLS]
+    assert [m.name for m in methods] == ["run"]
+    assert [m.type for m in methods] == [EntityType.METHOD]
+
+
+def test_instance_receiver_invents_no_edge():
+    # `self.help()` with no `help` anywhere: no type proof, no edge.
+    builder, graph, _, _ = _build({
+        "a.py": (b"class App:\n    def run(self):\n        self.help()\n",
+                 "python"),
+    })
+    assert [link for link in _links(graph) if link[2] == EdgeType.CALLS] == []
+    assert builder.resolution_stats["missing"] == 1
+
+
+def test_unknown_class_receiver_stays_unlinked():
+    # `Widget().run()`: the receiver call and the method call both
+    # stay unresolved — no type proof, no edge either way.
+    builder, graph, _, _ = _build({
+        "a.py": (b"def user():\n    Widget().run()\n", "python"),
+    })
+    assert [link for link in _links(graph) if link[2] == EdgeType.CALLS] == []
+    assert builder.resolution_stats == {"resolved": 0, "ambiguous": 0, "missing": 2}
+
+
+def test_resolution_events_off_by_default():
+    builder, _, _, _ = _build({
+        "a.cpp": (b"void helper() {}\n", "cpp"),
+        "b.cpp": (b"void user() { helper(); }\n", "cpp"),
+    })
+    assert builder.resolution_events == []
+
+
+def test_resolution_events_record_decision_inputs():
+    builder, _, _, _ = _build({
+        "a.cpp": (b"void helper() {}\n", "cpp"),
+        "b.cpp": (b"void user() { helper(); }\n", "cpp"),
+        "c.cpp": (b"void load() {}\n", "cpp"),
+        "d.cpp": (b"void load(int x) { (void)x; }\n", "cpp"),
+        "e.cpp": (b"void other() { load(); load(); }\n", "cpp"),
+    }, collect_events=True)
+    by_ref = {}
+    for ev in builder.resolution_events:
+        by_ref.setdefault(ev["ref"], []).append(ev)
+    assert by_ref["helper"][0]["resolver"] == "unique-bare-name"
+    assert by_ref["helper"][0]["outcome"] == "resolved"
+    # `load` spelled twice at two sites, two same-named defs: two
+    # ambiguous rows with candidate counts, fail closed.
+    assert len(by_ref["load"]) == 2
+    assert all(ev["outcome"] == "ambiguous" for ev in by_ref["load"])
+    assert all(ev["candidates"] == 2 for ev in by_ref["load"])
+    assert all(set(ev) >= {"edge_id", "kind", "ref", "resolver", "outcome",
+                           "candidates", "caller_language",
+                           "caller_scope_depth", "spelled_qualified"}
+               for ev in builder.resolution_events)
+
+
+def test_resolution_events_capture_qualified_rows():
+    builder, _, _, _ = _build({
+        "base.cpp": (b"namespace ns {\nvoid helper() {}\n}\n", "cpp"),
+        "other.cpp": (b"void helper() {}\n", "cpp"),
+        "app.cpp": (b"void user() { ns::helper(); }\n", "cpp"),
+    }, collect_events=True)
+    (ev,) = builder.resolution_events
+    assert ev["resolver"] == "qualified-canonical"
+    assert ev["outcome"] == "resolved"
+    assert ev["ref"] == "ns::helper"
+    assert ev["spelled_qualified"] is True

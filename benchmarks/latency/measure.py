@@ -168,6 +168,7 @@ def build_scale_db(tmp_path: Path) -> tuple[str, int, int]:
     """Deterministic 10K-edge temporal DB via the frozen GraphStore."""
     from verifyci.contracts.edge import CPGEdgeSubtype, Edge, EdgeType
     from verifyci.contracts.entity import Entity, EntityType
+    from verifyci.contracts.revision import Revision
     from verifyci.storage.graph_store import GraphStore
     db = tmp_path / "scale10k.db"
     store = GraphStore(str(db))
@@ -177,6 +178,14 @@ def build_scale_db(tmp_path: Path) -> tuple[str, int, int]:
     lids = [f"logical:{i:05d}" for i in range(N_ENTS)]
     try:
         with store.batch():
+            # Writer connections enforce revision FKs: seed the revision
+            # rows the entities/edges below point at (rev_0..rev_4).
+            for v in range(N_VERSIONS):
+                store.insert_revision(Revision(
+                    revision_id=f"rev_{v}", repository_id="bench",
+                    commit_id=None, parent_revision_id=None,
+                    source_hash=f"bench_rev_{v}", timestamp=t0,
+                    ingestion_config_hash="bench"))
             for k, lid in enumerate(lids):
                 # N_VERSIONS temporal versions per logical id
                 cuts = sorted(rng.uniform(t0, t0 + span) for _ in range(N_VERSIONS - 1))

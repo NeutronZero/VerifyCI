@@ -7,6 +7,8 @@ from verifyci.verification.diffmap import parse_diff_files, seed_entities_for_di
 from verifyci.verification.intent_align import evaluate_invariants
 from verifyci.verification.policy import PolicyEvaluator
 from verifyci.verification.removal import removal_provenance_check
+from verifyci.verification.return_swap import return_statement_check
+from verifyci.verification.call_swap import call_target_check
 from verifyci.verification.semi_formal_reason import SemiFormalReasoner
 from verifyci.verification.verification_ir import build_semi_check, build_verification_report
 
@@ -75,6 +77,8 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
         graph=graph, changed_entities=changed, test_entities=set(), node_map=node_map or None)
     checks.append(blast_check)
     checks.append(removal_provenance_check(diff, entities or []))
+    checks.append(return_statement_check(diff))
+    checks.append(call_target_check(diff))
     inv_checks, _metrics = evaluate_invariants(
         diff, invariants, graph, evidence=list(cert.evidence))
     checks.extend(inv_checks)

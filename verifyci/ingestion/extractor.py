@@ -82,12 +82,15 @@ def _make_entity(
 
 def _make_unresolved(
     revision_id: str, src: str, kind: str, name: str, scope: str,
-    now: float, site: str = "",
+    now: float, site: str = "", qualified: str = "",
 ) -> Edge:
     """A reference the current file cannot resolve: calls to functions
     defined (or only declared) elsewhere, bases from other headers.
     `dst_entity_id` stays empty so the builder never links it; the
     post-build resolver fills it in when the name is unambiguous.
+    `qualified` (C/C++ `ns::name` call sites only) carries the raw
+    canonical reference so the resolver can match it against
+    `metadata["qualified_name"]` instead of the bare name.
     """
     if kind == "inherits":
         edge_type: EdgeType = EdgeType.INHERITS_UNRESOLVED
@@ -96,6 +99,8 @@ def _make_unresolved(
     else:
         edge_type = EdgeType.CALLS_UNRESOLVED
         meta = {"callee": name, "caller_scope": scope}
+        if qualified:
+            meta["callee_qualified"] = qualified
         eid = f"edge_{revision_id[:12]}_{src}_unresolved_calls_{name}_{site}"
     return Edge(
         id=eid,
@@ -783,6 +788,24 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
     def scope_of(e: Entity) -> str:
         return (e.metadata or {}).get("scope", "")
 
+    # Same-file classes and their methods, for explicit-receiver calls
+    # (`App.run()` where `class App` is defined in this file). Methods
+    # keyed under their class only when the method scope names the
+    # class exactly — inherited or namespaced scopes do not qualify.
+    class_names = {e.name for e in entities if e.type == EntityType.CLASS}
+    class_methods: dict[str, dict[str, Entity]] = {}
+    for e in entities:
+        if e.type == EntityType.METHOD and scope_of(e) in class_names:
+            class_methods.setdefault(scope_of(e), {})[e.name] = e
+
+    def _resolve_explicit_method(attr: str, receiver: str,
+                                 table: dict[str, dict[str, Entity]],
+                                 ) -> Optional[Entity]:
+        methods = table.get(receiver)
+        if not methods:
+            return None
+        return methods.get(attr)
+
     def resolve(name: str, caller_scope: str) -> Optional[Entity]:
         candidates = [c for c in by_name.get(name, [])
                       if c.type in (EntityType.FUNCTION, EntityType.METHOD, EntityType.CLASS)]
@@ -806,16 +829,35 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
         callee_name = _extract_callee_name(site_node, parsed.source)
         if not callee_name:
             return
-        callee = resolve(callee_name, caller_scope)
+        # Explicit `ClassName.method()` first: when the class is defined
+        # in THIS file and names the method's scope, the receiver is the
+        # scope — no guessing involved, and it beats the bare-name path
+        # (which would otherwise hand `App.run()` to an unscoped
+        # top-level `run`). Anything else (instances like `self`/`obj`,
+        # unknown receivers, deeper chains) uses the bare path, and
+        # without type proof an unresolvable receiver means no edge.
+        callee = None
+        dotted = _extract_dotted_callee(site_node, parsed.source)
+        if dotted is not None:
+            callee = _resolve_explicit_method(
+                dotted[1], dotted[0], class_methods)
+        if callee is None:
+            callee = resolve(callee_name, caller_scope)
         site = f"{site_node.start_point[0] + 1}:{site_node.start_byte}"
         if callee is None:
             # Callee not defined in this file: emit an unresolved
             # reference, not silence. A post-build resolver links it
             # when exactly one entity with that name exists anywhere;
-            # builtins and ambiguous names stay unlinked.
+            # builtins and ambiguous names stay unlinked. A qualified
+            # call site (`ns::helper()`) also carries the canonical
+            # reference so the deferred pass can match it exactly
+            # instead of degrading to the bare name.
+            qualified = _extract_callee_qualified(
+                site_node, parsed.source, parsed.language)
             edges.append(_make_unresolved(
                 revision_id, caller.revision_entity_id, "calls",
-                callee_name, caller_scope, now, site))
+                callee_name, caller_scope, now, site,
+                qualified=qualified or ""))
             return
         if callee.revision_entity_id == caller.revision_entity_id:
             edges.append(_make_edge(
@@ -1039,6 +1081,48 @@ def _c_param_name(pdecl, source: bytes) -> Optional[str]:
         if desc.type == "identifier":
             found = _text(desc, source)
     return found
+
+
+def _extract_callee_qualified(node, source: bytes, language: str) -> Optional[str]:
+    """Raw canonical callee (`ns::helper`, `::Global`) when the call site
+    spells one, else None. C/C++ only: the call's function child is the
+    scoped/qualified identifier itself. Member accesses (`a.b()`,
+    `obj->run()`) and other languages keep the bare-name path — only a
+    `::` reference is canonical. Arguments are never inspected, so a
+    qualified type inside them (`f(ns::T())`) cannot leak in.
+    """
+    if language not in ("c", "cpp"):
+        return None
+    fn = node.child_by_field_name("function")
+    if fn is None and node.children:
+        fn = node.children[0]
+    if fn is not None and fn.type in ("qualified_identifier", "scoped_identifier"):
+        return _qualified_raw(fn, source)
+    return None
+
+
+def _extract_dotted_callee(node, source: bytes) -> Optional[tuple[str, str]]:
+    """One-level `Receiver.attr` call shape, else None.
+
+    Only attribute/field/member access whose receiver is a bare
+    identifier (`App.run()`, `self.help()`): deeper chains
+    (`a.b.c()`) and computed receivers carry no class information
+    without type tracking, so they stay on the bare-name path.
+    """
+    for child in node.children:
+        # Scoped/qualified identifiers (`ns::helper`) are the canonical
+        # `::` path's job, not this one — only dotted access applies.
+        if child.type in ("attribute", "field_expression", "member_expression",
+                          "member_access"):
+            ids = [d for d in _walk(child) if d.type in
+                   ("identifier", "type_identifier", "field_identifier",
+                    "property_identifier")]
+            if len(ids) == 2:
+                recv, attr = (_text(ids[0], source), _text(ids[-1], source))
+                if recv and attr and "." not in recv and ":" not in recv:
+                    return recv, attr
+            return None
+    return None
 
 
 def _extract_callee_name(node, source: bytes) -> Optional[str]:

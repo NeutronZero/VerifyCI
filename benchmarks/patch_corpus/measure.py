@@ -79,6 +79,12 @@ def compute_metrics(table):
     false_rejects = [t["id"] for t in correct if t["status"] == "FAIL"]
     fp_fails = [t["id"] for t in fails if t["ground_truth"] == "correct"]
     missed_deterministic = [t["id"] for t in det if t["status"] != "FAIL"]
+    # False confidence accounting (roadmap item 12): a wrong patch the
+    # gate PASSed is the costliest outcome — worse than a decline — so
+    # the accepting ids are listed explicitly, not just rated. Today
+    # these are the four semantic wrongs the gate admits it cannot judge
+    # (documented V1 scope limit, not a surprise).
+    wrong_accepted_ids = [t["id"] for t in wrong if t["status"] == "PASS"]
     # Confusion (verdict vs semantic ground_truth): caught=FAIL, missed=PASS,
     # declined=INCONCLUSIVE/HUMAN_REVIEW.
     def bucket(rows):
@@ -105,6 +111,7 @@ def compute_metrics(table):
         "false_reject_ids": false_rejects,
         "false_positive_fail_ids": fp_fails,
         "missed_deterministic_ids": missed_deterministic,
+        "wrong_accepted_ids": wrong_accepted_ids,
         "confusion": confusion,
         "n_correct": len(correct), "n_wrong": len(wrong), "n_fail": len(fails),
     }
@@ -131,6 +138,7 @@ def main():
     print("false_rejects:", m["false_reject_ids"])
     print("false_positive_fails:", m["false_positive_fail_ids"])
     print("missed_deterministic:", m["missed_deterministic_ids"])
+    print("wrong_accepted (false PASS):", m["wrong_accepted_ids"])
     print("\n== FP/FN breakdown (caught=FAIL, accepted=PASS, declined=INCONCLUSIVE/HUMAN_REVIEW) ==")
     for k, v in m["confusion"].items():
         print(f"  {k:20} {v}")
