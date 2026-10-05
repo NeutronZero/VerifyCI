@@ -356,3 +356,59 @@ def test_check_forbid_unreadable_graph_is_inability():
 
     passed, why, est, ev = _check_forbid("x", Boom(), "eval", "CALLS")
     assert not passed and not est
+
+
+# --- _KEY semantics & prefilter superset tests -------------------------------
+
+
+def test_key_exact_semantics_preserved():
+    from verifyci.verification.intent_align import SECRET_RE, UNQUOTED_SECRET_RE
+
+    # Bare words token, auth, private, api, key must NOT trigger secret assignment regexes
+    non_secret_assignments = [
+        'token = "hello_world"',
+        'auth = "some_auth_str"',
+        'private = "true"',
+        'api = "v1"',
+        'key = "value"',
+    ]
+    for line in non_secret_assignments:
+        assert not SECRET_RE.search(line), f"SECRET_RE incorrectly matched: {line}"
+        assert not UNQUOTED_SECRET_RE.search(line), f"UNQUOTED_SECRET_RE incorrectly matched: {line}"
+
+    # Genuine secret assignments must match
+    secret_assignments = [
+        'password = "hunter2hunter2"',
+        'passwd = "s3cr3tPassword"',
+        'my_secret = "super_secret_value"',
+        'api_key = "1234567890123456"',
+        'auth_token = "abcdef1234567890"',
+        'private_key = "secret_key_data"',
+        'DB_PASSWORD=s3cr3tPr0dValue',
+    ]
+    for line in secret_assignments:
+        assert SECRET_RE.search(line) or UNQUOTED_SECRET_RE.search(line), f"Failed to match secret: {line}"
+
+
+def test_secret_prefilter_is_strict_superset():
+    from verifyci.verification.intent_align import _SECRET_PATTERNS, _SECRET_PREFILTER_RE
+
+    sample_secrets = [
+        'password = "hunter2hunter2"',
+        'passwd: "s3cr3tPassword"',
+        'my_secret = "super_secret_value"',
+        'api_key = "1234567890123456"',
+        'auth_token = "abcdef1234567890"',
+        'private_key = "secret_key_data"',
+        'AWS_SECRET_ACCESS_KEY=12345678',
+        'AKIAIOSFODNN7EXAMPLE',
+        '-----BEGIN RSA PRIVATE KEY-----',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c',
+        'postgres://user:pass1234@localhost:5432/db',
+        '{"app_secret": "1234567890123456"}',
+    ]
+
+    for line in sample_secrets:
+        matches_any_pattern = any(p.search(line) for p in _SECRET_PATTERNS)
+        if matches_any_pattern:
+            assert _SECRET_PREFILTER_RE.search(line), f"Prefilter missed candidate line: {line}"

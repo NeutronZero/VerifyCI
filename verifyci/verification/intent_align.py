@@ -31,7 +31,7 @@ from verifyci.graph.traverse import iter_edge_payloads
 #: (`AWS_SECRET_ACCESS_`) are an order of magnitude shorter.
 _KEY_TERMS = ("password", "passwd", "secret", "api", "auth", "token", "private", "key")
 
-_KEY = (r"(?:[A-Za-z0-9_]{0,64}[_-])?(?:" + "|".join(_KEY_TERMS[:7]) + r"|api[_-]?key"
+_KEY = (r"(?:[A-Za-z0-9_]{0,64}[_-])?(?:password|passwd|secret|api[_-]?key"
         r"|auth[_-]?token|private[_-]?key)(?:[_-][A-Za-z0-9_]{1,64})?")
 
 SECRET_RE = re.compile(
