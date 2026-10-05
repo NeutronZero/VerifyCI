@@ -1,0 +1,25 @@
+{
+  "revision": "cap003_tail_seeding (reviewed re-baseline candidate; does NOT feed the evidence bundle until promotion is approved)",
+  "frozen_reference": {
+    "v1_cases": "benchmarks/blast_corpus/cases.jsonl (untouched), coverage 1.0/0.8571 MEASURED",
+    "v1_config": "benchmarks/blast_corpus/config.json (untouched)"
+  },
+  "label_changes_vs_v1": {
+    "B6-hub-tail-insert": "known_gap -> seeded; expected set UNCHANGED (topological twin of B1: same seed entity, same graph, same 2-hop contract)",
+    "B7-isolated-tail-insert": "known_gap_empty -> seeded; expected [] UNCHANGED (isolated has no edges under any mode)",
+    "all_other_cases": "byte-identical labels (all 9 expected sets independently re-derived from fixture source + contract; all match v1)"
+  },
+  "mechanism_justification": "span-intersection seeding rule in verifyci/verification/diffmap.py (entity seeds iff hunk old-lines intersect its span): B6 hunk lines 21-26 intersect hub span 22-24; B7 lines 29-31 intersect isolated span 30-31. Verified from code + hunk headers + fixture spans, never from detection output.",
+  "measurement": {
+    "method": "TEMP script cap003_measure.py reusing frozen measure.collect/compute_metrics against cap003 cases; fixture unmodified",
+    "coverage_all": 1.0,
+    "coverage_seeded_only": 1.0,
+    "contract_fn_ids": [],
+    "known_gap_miss_ids": [],
+    "total_fp": 1,
+    "fp_note": "B5 def-line seed bleed persists (disclosed v1 artifact; recall 1.0, superset detection)"
+  },
+  "canonical_claim": "ESTABLISHED (1.0 >= 0.95 and 1.0 >= 0.90)",
+  "promotion_status": "NOT PROMOTED — awaiting review. Promotion mechanics per v1 config no_tuning_rule: replace B6/B7 modes in cases.jsonl, regenerate results.json, append review note to config.json.",
+  "residual_circularity": "modes were flipped knowing fresh behavior; mitigated because (a) expected sets never derived from output, (b) mode flips follow from the independently verified seeding mechanism, (c) B6 expectation equals B1 twin. Disclosed, not hidden."
+}
