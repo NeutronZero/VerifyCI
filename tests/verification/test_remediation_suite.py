@@ -337,13 +337,17 @@ def test_h_evidence_completeness(monkeypatch):
 
 def test_h_evidence_bundle_self_consistency():
     """Evidence-bundle self-consistency (E3): every ESTABLISHED claim must satisfy
-    its own establishment predicate against the metrics in the bundle.
+    its own establishment predicate against the benchmark metrics.
 
     Catches the blast-radius rule inconsistency where the bundle emitted
     ESTABLISHED from cov_seeded alone while is_established also required cov_all>=0.90.
+    Calls evaluate_claims() directly so the test is hermetic on fresh
+    checkouts (evidence/evidence-bundle.json is gitignored).
     """
     import json
     from pathlib import Path
+
+    from scripts import build_evidence_bundle
 
     root = Path(__file__).resolve().parent.parent.parent
 
@@ -372,8 +376,8 @@ def test_h_evidence_bundle_self_consistency():
         "blast_radius_bounds": blast_expected,
     }
 
-    bundle = json.loads((root / "evidence" / "evidence-bundle.json").read_text(encoding="utf-8"))
-    claims = bundle.get("claims", {})
+    evaluation = build_evidence_bundle.evaluate_claims()
+    claims = evaluation["claims"]
 
     for name, want in expected.items():
         got = claims.get(name, {}).get("status")
@@ -382,17 +386,17 @@ def test_h_evidence_bundle_self_consistency():
             f"but benchmark metrics imply {want!r}"
         )
 
-    missing = claims.get("missing_benchmarks") or []
+    missing = evaluation.get("missing_benchmarks") or []
     all_established = all(v == "ESTABLISHED" for v in expected.values())
-    if all_established and not missing:
-        want_overall = "ESTABLISHED"
-    elif any(v != "ESTABLISHED" for v in expected.values()) or missing:
+    if missing:
         want_overall = "UNESTABLISHED"
+    elif all_established:
+        want_overall = "ESTABLISHED"
     else:
-        want_overall = "MEASURED"
+        want_overall = "UNESTABLISHED"
 
-    assert bundle.get("overall_status") == want_overall, (
-        f"evidence-bundle overall_status mismatch: bundle says {bundle.get('overall_status')!r}, "
+    assert evaluation.get("overall_status") == want_overall, (
+        f"evidence-bundle overall_status mismatch: bundle says {evaluation.get('overall_status')!r}, "
         f"but claim statuses imply {want_overall!r}"
     )
 
