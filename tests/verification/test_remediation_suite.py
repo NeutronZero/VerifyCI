@@ -335,6 +335,68 @@ def test_h_evidence_completeness(monkeypatch):
     assert len(evaluation["missing_benchmarks"]) > 0
 
 
+def test_h_evidence_bundle_self_consistency():
+    """Evidence-bundle self-consistency (E3): every ESTABLISHED claim must satisfy
+    its own establishment predicate against the metrics in the bundle.
+
+    Catches the blast-radius rule inconsistency where the bundle emitted
+    ESTABLISHED from cov_seeded alone while is_established also required cov_all>=0.90.
+    """
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent.parent
+
+    beir = json.loads((root / "benchmarks" / "beir" / "results.json").read_text(encoding="utf-8"))
+    patch = json.loads((root / "benchmarks" / "patch_corpus" / "results.json").read_text(encoding="utf-8"))
+    blast = json.loads((root / "benchmarks" / "blast_corpus" / "results.json").read_text(encoding="utf-8"))
+
+    beir_expected = "ESTABLISHED" if beir["gate"]["established"] else "MEASURED"
+
+    patch_m = patch["metrics"]
+    patch_expected = (
+        "ESTABLISHED"
+        if (patch_m["overall_agreement"] >= 0.90
+            and patch_m["deterministic_catch_rate"] >= 0.95
+            and patch_m["semantic_false_accept_rate"] == 0.0)
+        else "MEASURED"
+    )
+
+    blast_m = blast["metrics"]
+    blast_is_established = (blast_m["coverage_seeded_only"] >= 0.95 and blast_m["coverage_all"] >= 0.90)
+    blast_expected = "ESTABLISHED" if blast_is_established else "MEASURED"
+
+    expected = {
+        "H1_retrieval_fusion": beir_expected,
+        "patch_corpus_verifier": patch_expected,
+        "blast_radius_bounds": blast_expected,
+    }
+
+    bundle = json.loads((root / "evidence" / "evidence-bundle.json").read_text(encoding="utf-8"))
+    claims = bundle.get("claims", {})
+
+    for name, want in expected.items():
+        got = claims.get(name, {}).get("status")
+        assert got == want, (
+            f"evidence-bundle claim {name!r} status mismatch: bundle says {got!r}, "
+            f"but benchmark metrics imply {want!r}"
+        )
+
+    missing = claims.get("missing_benchmarks") or []
+    all_established = all(v == "ESTABLISHED" for v in expected.values())
+    if all_established and not missing:
+        want_overall = "ESTABLISHED"
+    elif any(v != "ESTABLISHED" for v in expected.values()) or missing:
+        want_overall = "UNESTABLISHED"
+    else:
+        want_overall = "MEASURED"
+
+    assert bundle.get("overall_status") == want_overall, (
+        f"evidence-bundle overall_status mismatch: bundle says {bundle.get('overall_status')!r}, "
+        f"but claim statuses imply {want_overall!r}"
+    )
+
+
 # ============================================================================
 # Test I: Benchmark source integrity
 # ============================================================================

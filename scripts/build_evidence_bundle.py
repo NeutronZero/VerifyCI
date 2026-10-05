@@ -96,7 +96,7 @@ def evaluate_claims() -> dict:
         cov_all = metrics.get("coverage_all", 0.0)
         is_established = (cov_seeded >= 0.95 and cov_all >= 0.90)
         claims["blast_radius_bounds"] = {
-            "status": "ESTABLISHED" if cov_seeded >= 0.95 else "MEASURED",
+            "status": "ESTABLISHED" if is_established else "MEASURED",
             "coverage_seeded_only": cov_seeded,
             "coverage_all": cov_all,
         }
@@ -115,10 +115,8 @@ def evaluate_claims() -> dict:
         overall = "INCONCLUSIVE"
     elif all(s == "ESTABLISHED" for s in all_statuses):
         overall = "ESTABLISHED"
-    elif any(s in ("UNMET", "MISSING") for s in all_statuses):
-        overall = "UNESTABLISHED"
     else:
-        overall = "MEASURED"
+        overall = "UNESTABLISHED"
 
     return {"overall_status": overall, "claims": claims, "missing_benchmarks": missing_benchmarks}
 
