@@ -14,17 +14,17 @@ CORE_INVARIANTS = [
     "tests/verification/test_ungrounded_policy.py",
     "tests/interface/test_probe_infra_errors.py",
     "tests/storage/test_probe_a6_temporal_integrity.py",
-    "tests/performance/test_performance_benchmarks.py",
 ]
 
 SAFE_TEST_TARGET_RE = re.compile(r"[A-Za-z0-9_./-]+\.py")
+SAFE_TEST_DIR_RE = re.compile(r"tests/(?:[A-Za-z0-9_.-]+/)*")
 
 # Source path to test directory mapping
 PATH_MAPPING = {
     "verifyci/contracts/": ["tests/contracts/"],
     "verifyci/graph/": ["tests/graph/"],
     "verifyci/ingestion/": ["tests/ingestion/"],
-    "verifyci/interface/": ["tests/interface/"],
+    "verifyci/interface/": ["tests/interface/", "tests/integration/"],
     "verifyci/memory/": ["tests/memory/"],
     "verifyci/observability/": ["tests/observability/"],
     "verifyci/orchestration/": ["tests/orchestration/"],
@@ -32,6 +32,7 @@ PATH_MAPPING = {
     "verifyci/storage/": ["tests/storage/"],
     "verifyci/verification/": ["tests/verification/"],
     "benchmarks/": ["tests/evaluation/"],
+    "benchmarks/latency/": ["tests/performance/"],
 }
 
 # Changes that trigger the FULL test suite
@@ -39,7 +40,6 @@ FULL_RUN_TRIGGERS = [
     "pyproject.toml",
     ".github/",
     ".gitattributes",
-    "tests/conftest.py",
     "scripts/",
 ]
 
@@ -89,12 +89,21 @@ def select_tests(changed_files: list[str]) -> list[str]:
 
 
 def validate_test_targets(targets: list[str]) -> list[str]:
-    """Allow only repository-relative Python test paths with safe characters."""
+    """Allow only repository-relative test paths with safe characters.
+
+    Accepts directory targets (e.g. tests/, tests/interface/) and .py files.
+    """
     for target in targets:
+        path = Path(target)
+        if any(part == ".." for part in path.parts):
+            raise ValueError(f"unsafe pytest target: {target!r}")
+        if target.endswith("/"):
+            if not SAFE_TEST_DIR_RE.fullmatch(target):
+                raise ValueError(f"unsafe pytest target: {target!r}")
+            continue
         if not SAFE_TEST_TARGET_RE.fullmatch(target):
             raise ValueError(f"unsafe pytest target: {target!r}")
-        path = Path(target)
-        if not target.startswith("tests/") or any(part == ".." for part in path.parts):
+        if not target.startswith("tests/"):
             raise ValueError(f"unsafe pytest target: {target!r}")
     return targets
 

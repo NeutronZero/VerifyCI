@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
 import os
 import platform
@@ -24,6 +25,8 @@ def get_environment_metadata() -> dict:
 
     branch = os.environ.get("GITHUB_REF_NAME", "local")
     pyproject_bytes = (ROOT / "pyproject.toml").read_bytes() if (ROOT / "pyproject.toml").exists() else b""
+    lock_path = ROOT / "uv.lock"
+    lock_bytes = lock_path.read_bytes() if lock_path.exists() else b""
 
     return {
         "commit": git_sha,
@@ -34,6 +37,11 @@ def get_environment_metadata() -> dict:
         "machine": platform.machine(),
         "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "pyproject_sha256": hashlib.sha256(pyproject_bytes).hexdigest(),
+        "uv_lock_sha256": hashlib.sha256(lock_bytes).hexdigest() if lock_bytes else None,
+        "resolved_versions": {
+            dist.metadata["Name"]: dist.version
+            for dist in sorted(importlib.metadata.distributions(), key=lambda d: (d.metadata["Name"] or "").lower())
+        },
     }
 
 

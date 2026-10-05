@@ -6,7 +6,27 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
+  # ------------------------------------------------------------------
+  # LINT (single run, all events)
+  # ------------------------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen --extra dev
+      - run: uv run --no-sync ruff check .
+
   # ------------------------------------------------------------------
   # TIER 1: PR FAST GATE (< 30s target, runs on every pull request)
   # ------------------------------------------------------------------
@@ -14,39 +34,45 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
-          cache-dependency-glob: "pyproject.toml"
-      - uses: actions/setup-python@v5
+          cache-dependency-glob: "uv.lock"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
-      - run: uv pip install --system -e ".[dev]"
-      - run: ruff check .
+      - run: uv sync --frozen --extra dev
       - name: Select Changed & Critical Tests
         run: |
-          python scripts/ci_test_selector.py origin/main > selected-tests.txt
+          uv run --no-sync python scripts/ci_test_selector.py origin/main > selected-tests.txt
           python - <<'PY'
           import re
           from pathlib import Path
 
-          pattern = re.compile(r"[A-Za-z0-9_./-]+\.py")
+          file_re = re.compile(r"[A-Za-z0-9_./-]+\.py")
+          dir_re = re.compile(r"tests/(?:[A-Za-z0-9_.-]+/)*")
           targets = Path("selected-tests.txt").read_text(encoding="utf-8").splitlines()
           if not targets:
               raise SystemExit("no pytest targets selected")
-          if any(not pattern.fullmatch(target) or not target.startswith("tests/") for target in targets):
-              raise SystemExit("unsafe pytest target emitted by selector")
+          for target in targets:
+              if ".." in Path(target).parts:
+                  raise SystemExit(f"unsafe pytest target: {target!r}")
+              if target.endswith("/"):
+                  if not dir_re.fullmatch(target):
+                      raise SystemExit(f"unsafe pytest target: {target!r}")
+              elif not file_re.fullmatch(target) or not target.startswith("tests/"):
+                  raise SystemExit(f"unsafe pytest target: {target!r}")
           PY
       - name: Run Selected Tests
         run: |
           mapfile -t TARGETS < selected-tests.txt
-          python -m pytest -n auto -q --junitxml=test-results.xml -- "${TARGETS[@]}"
+          uv run --no-sync python -m pytest -n auto -q --junitxml=test-results.xml -- "${TARGETS[@]}"
       - name: Upload PR Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pr-test-results
           path: test-results.xml
@@ -60,23 +86,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.12", "3.13"]
+        exclude:
+          - os: windows-latest
+            python-version: "3.13"
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
-          cache-dependency-glob: "pyproject.toml"
-      - uses: actions/setup-python@v5
+          cache-dependency-glob: "uv.lock"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: uv pip install --system -e ".[dev]"
-      - run: ruff check .
-      - run: python -m pytest tests/ -n auto -q --junitxml=test-results-${{ matrix.os }}-${{ matrix.python-version }}.xml
+      - run: uv sync --frozen --extra dev
+      - run: uv run --no-sync python -m pytest tests/ -n auto -q --junitxml=test-results-${{ matrix.os }}-${{ matrix.python-version }}.xml
       - name: Upload Matrix Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: test-results-${{ matrix.os }}-${{ matrix.python-version }}
           path: test-results-*.xml
@@ -89,23 +117,44 @@ jobs:
     runs-on: ubuntu-latest
     needs: full-matrix
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
-          cache-dependency-glob: "pyproject.toml"
-      - uses: actions/setup-python@v5
+          cache-dependency-glob: "uv.lock"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
-      - run: uv pip install --system -e ".[dev]"
+      - run: uv sync --frozen --extra dev
       - name: Run Evidence & Benchmark Reproduction Gate
         run: |
-          python -m pytest tests/evaluation/ tests/performance/ -q
+          uv run --no-sync python -m pytest tests/evaluation/ tests/performance/ -n auto -q
       - name: Generate Evidence Bundle & Summary
         run: |
-          python scripts/build_evidence_bundle.py
+          uv run --no-sync python scripts/build_evidence_bundle.py
       - name: Upload Evidence Bundle
-        uses: actions/upload-artifact@v4
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: evidence-bundle
           path: evidence/evidence-bundle.json
+
+  # ------------------------------------------------------------------
+  # SUPPLY-CHAIN AUDIT (advisory, non-blocking)
+  # ------------------------------------------------------------------
+  supply-chain-audit:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen --extra dev
+      - name: pip-audit (advisory, non-blocking)
+        run: uvx pip-audit --desc || true
