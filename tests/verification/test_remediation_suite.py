@@ -336,69 +336,91 @@ def test_h_evidence_completeness(monkeypatch):
 
 
 def test_h_evidence_bundle_self_consistency():
-    """Evidence-bundle self-consistency (E3): every ESTABLISHED claim must satisfy
-    its own establishment predicate against the benchmark metrics.
-
-    Catches the blast-radius rule inconsistency where the bundle emitted
-    ESTABLISHED from cov_seeded alone while is_established also required cov_all>=0.90.
-    Calls evaluate_claims() directly so the test is hermetic on fresh
-    checkouts (evidence/evidence-bundle.json is gitignored).
-    """
+    """Evidence-bundle self-consistency uses the canonical gate implementation."""
     import json
-    from pathlib import Path
 
     from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import CLAIM_RESULT_PATHS, evaluate_claim, load_evidence
 
     root = Path(__file__).resolve().parent.parent.parent
-
-    beir = json.loads((root / "benchmarks" / "beir" / "results.json").read_text(encoding="utf-8"))
-    patch = json.loads((root / "benchmarks" / "patch_corpus" / "results.json").read_text(encoding="utf-8"))
-    blast = json.loads((root / "benchmarks" / "blast_corpus" / "results.json").read_text(encoding="utf-8"))
-
-    beir_expected = "ESTABLISHED" if beir["gate"]["established"] else "MEASURED"
-
-    patch_m = patch["metrics"]
-    patch_expected = (
-        "ESTABLISHED"
-        if (patch_m["overall_agreement"] >= 0.90
-            and patch_m["deterministic_catch_rate"] >= 0.95
-            and patch_m["semantic_false_accept_rate"] == 0.0)
-        else "MEASURED"
-    )
-
-    blast_m = blast["metrics"]
-    blast_is_established = (blast_m["coverage_seeded_only"] >= 0.95 and blast_m["coverage_all"] >= 0.90)
-    blast_expected = "ESTABLISHED" if blast_is_established else "MEASURED"
-
-    expected = {
-        "H1_retrieval_fusion": beir_expected,
-        "patch_corpus_verifier": patch_expected,
-        "blast_radius_bounds": blast_expected,
-    }
-
     evaluation = build_evidence_bundle.evaluate_claims()
-    claims = evaluation["claims"]
 
-    for name, want in expected.items():
-        got = claims.get(name, {}).get("status")
-        assert got == want, (
-            f"evidence-bundle claim {name!r} status mismatch: bundle says {got!r}, "
-            f"but benchmark metrics imply {want!r}"
-        )
+    for name, relative_path in CLAIM_RESULT_PATHS.items():
+        raw = json.loads((root / relative_path).read_text(encoding="utf-8"))
+        expected = evaluate_claim(name, raw)["status"]
+        got = evaluation["claims"][name]["status"]
+        assert got == expected, f"claim {name!r}: bundle={got!r}, canonical={expected!r}"
+        assert load_evidence(root / relative_path).ok is True
 
-    missing = evaluation.get("missing_benchmarks") or []
-    all_established = all(v == "ESTABLISHED" for v in expected.values())
-    if missing:
-        want_overall = "UNESTABLISHED"
-    elif all_established:
-        want_overall = "ESTABLISHED"
-    else:
-        want_overall = "UNESTABLISHED"
-
-    assert evaluation.get("overall_status") == want_overall, (
-        f"evidence-bundle overall_status mismatch: bundle says {evaluation.get('overall_status')!r}, "
-        f"but claim statuses imply {want_overall!r}"
+    expected_overall = (
+        "ESTABLISHED"
+        if all(c["status"] == "ESTABLISHED" for c in evaluation["claims"].values())
+        else "UNESTABLISHED"
     )
+    assert evaluation["overall_status"] == expected_overall
+    assert not (
+        evaluation["claims"]["blast_radius_bounds"]["status"] == "ESTABLISHED"
+        and evaluation["claims"]["blast_radius_bounds"]["coverage_all"] < 0.90
+    )
+
+
+def test_h_h1_gate_boolean_cannot_forge_establishment():
+    from verifyci.evidence.claims import evaluate_claim
+
+    base = {
+        "run": {"queries": 60, "dry_run": False},
+        "validators": {"errors": [], "drift": False},
+        "gate": {"established": False},
+        "metrics": {
+            "dense": {"ndcg": 0.60},
+            "hybrid": {"ndcg": 0.66},
+            "delta_ndcg": 0.001,
+        },
+    }
+    assert evaluate_claim("H1_retrieval_fusion", base)["status"] == "ESTABLISHED"
+
+    forged = {
+        **base,
+        "metrics": {**base["metrics"], "hybrid": {"ndcg": 0.61}},
+        "gate": {"established": True},
+    }
+    assert evaluate_claim("H1_retrieval_fusion", forged)["status"] == "MEASURED"
+
+    nonfinite = {
+        **base,
+        "metrics": {**base["metrics"], "dense": {"ndcg": float("inf")}},
+    }
+    assert evaluate_claim("H1_retrieval_fusion", nonfinite)["status"] == "MISSING"
+
+
+def test_h_malformed_benchmark_is_missing(tmp_path):
+    from scripts import build_evidence_bundle
+
+    beir = tmp_path / "benchmarks" / "beir"
+    beir.mkdir(parents=True)
+    (beir / "results.json").write_text("{not-json", encoding="utf-8")
+
+    evaluation = build_evidence_bundle.evaluate_claims(tmp_path)
+    assert evaluation["claims"]["H1_retrieval_fusion"]["status"] == "MISSING"
+    assert evaluation["overall_status"] == "UNESTABLISHED"
+
+
+def test_sec_001_selector_allowlist_and_ci_transport():
+    from scripts.ci_test_selector import validate_test_targets
+
+    assert validate_test_targets(["tests/verification/test_example.py"]) == [
+        "tests/verification/test_example.py"
+    ]
+    with pytest.raises(ValueError):
+        validate_test_targets(["tests/evil.py\n--basetemp=/tmp/pwn"])
+    with pytest.raises(ValueError):
+        validate_test_targets(["tests/../pyproject.py"])
+
+    workflow = (
+        Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
+    ).read_text(encoding="utf-8")
+    assert "GITHUB_OUTPUT" not in workflow
+    assert 'python -m pytest -n auto -q --junitxml=test-results.xml -- "${TARGETS[@]}"' in workflow
 
 
 # ============================================================================

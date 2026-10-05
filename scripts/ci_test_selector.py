@@ -2,6 +2,7 @@
 """Change-aware test selector with invariant fail-closed guarantee."""
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,8 @@ CORE_INVARIANTS = [
     "tests/storage/test_probe_a6_temporal_integrity.py",
     "tests/performance/test_performance_benchmarks.py",
 ]
+
+SAFE_TEST_TARGET_RE = re.compile(r"[A-Za-z0-9_./-]+\.py")
 
 # Source path to test directory mapping
 PATH_MAPPING = {
@@ -43,7 +46,6 @@ FULL_RUN_TRIGGERS = [
 
 def get_changed_files(base_ref: str = "origin/main") -> list[str]:
     """Retrieve list of files changed against base reference using git."""
-    # Attempt 1: git diff against base_ref...HEAD (e.g. in PR context)
     for cmd in (
         ["git", "diff", "--name-only", f"{base_ref}...HEAD"],
         ["git", "diff", "--name-only", f"{base_ref}"],
@@ -63,11 +65,9 @@ def get_changed_files(base_ref: str = "origin/main") -> list[str]:
 
 def select_tests(changed_files: list[str]) -> list[str]:
     """Determine test paths to execute based on changed files."""
-    # Empty or unable to determine diff -> run all tests safely
     if not changed_files:
         return ["tests/"]
 
-    # Check for root/config triggers that require full test run
     for trigger in FULL_RUN_TRIGGERS:
         if any(f.startswith(trigger) for f in changed_files):
             return ["tests/"]
@@ -76,14 +76,11 @@ def select_tests(changed_files: list[str]) -> list[str]:
 
     for f in changed_files:
         norm_f = f.replace("\\", "/")
-        # If a test file itself changed, include it
         if norm_f.startswith("tests/") and norm_f.endswith(".py"):
-            # Check if file exists on disk (was not deleted)
             if Path(norm_f).is_file():
                 selected.add(norm_f)
             continue
 
-        # Match source paths
         for src_prefix, test_targets in PATH_MAPPING.items():
             if norm_f.startswith(src_prefix):
                 selected.update(test_targets)
@@ -91,11 +88,25 @@ def select_tests(changed_files: list[str]) -> list[str]:
     return sorted(selected)
 
 
+def validate_test_targets(targets: list[str]) -> list[str]:
+    """Allow only repository-relative Python test paths with safe characters."""
+    for target in targets:
+        if not SAFE_TEST_TARGET_RE.fullmatch(target):
+            raise ValueError(f"unsafe pytest target: {target!r}")
+        path = Path(target)
+        if not target.startswith("tests/") or any(part == ".." for part in path.parts):
+            raise ValueError(f"unsafe pytest target: {target!r}")
+    return targets
+
+
 def main():
     base = sys.argv[1] if len(sys.argv) > 1 else "origin/main"
     files = get_changed_files(base)
     targets = select_tests(files)
-    print(" ".join(targets))
+    validate_test_targets(targets)
+    # One target per line is deliberate: the CI caller transports these through
+    # a file and passes them to pytest as an argument array, never GITHUB_OUTPUT.
+    print("\n".join(targets))
 
 
 if __name__ == "__main__":

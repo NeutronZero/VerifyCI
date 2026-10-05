@@ -13,4 +13,4 @@ benchmarks/beir/__pycache__/
 .coverage
 *.tmp
 opencode.json
-evidence/
+/evidence/

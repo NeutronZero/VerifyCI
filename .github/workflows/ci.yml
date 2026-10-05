@@ -27,13 +27,23 @@ jobs:
       - run: uv pip install --system -e ".[dev]"
       - run: ruff check .
       - name: Select Changed & Critical Tests
-        id: select-tests
         run: |
-          TARGETS=$(python scripts/ci_test_selector.py origin/main)
-          echo "targets=$TARGETS" >> $GITHUB_OUTPUT
+          python scripts/ci_test_selector.py origin/main > selected-tests.txt
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          pattern = re.compile(r"[A-Za-z0-9_./-]+\.py")
+          targets = Path("selected-tests.txt").read_text(encoding="utf-8").splitlines()
+          if not targets:
+              raise SystemExit("no pytest targets selected")
+          if any(not pattern.fullmatch(target) or not target.startswith("tests/") for target in targets):
+              raise SystemExit("unsafe pytest target emitted by selector")
+          PY
       - name: Run Selected Tests
         run: |
-          python -m pytest ${{ steps.select-tests.outputs.targets }} -n auto -q --junitxml=test-results.xml
+          mapfile -t TARGETS < selected-tests.txt
+          python -m pytest -n auto -q --junitxml=test-results.xml -- "${TARGETS[@]}"
       - name: Upload PR Test Results
         if: always()
         uses: actions/upload-artifact@v4
