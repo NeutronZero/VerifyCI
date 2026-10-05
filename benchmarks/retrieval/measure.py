@@ -27,7 +27,10 @@ HERE = Path(__file__).resolve().parent
 
 
 def _sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # Normalize line endings: working copies may carry CRLF while git blobs
+    # are LF (see .gitattributes eol=lf). Hash the normalized form so the
+    # pin is checkout-independent.
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def pct(samples: list[int], q: float) -> int:

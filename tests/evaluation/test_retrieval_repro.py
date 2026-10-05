@@ -21,7 +21,8 @@ CONFIG = ROOT / "benchmarks" / "retrieval" / "config.json"
 
 
 def _sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # Same CRLF normalization as measure.py: checkout-independent pin.
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def _load_recorded():
