@@ -1,0 +1,418 @@
+[
+ {
+  "id": "B1-hub-midline",
+  "old_lines": [
+   20,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26
+  ],
+  "function_spans": [
+   {
+    "name": "leaf",
+    "start": 10,
+    "end": 11
+   },
+   {
+    "name": "mid1",
+    "start": 14,
+    "end": 15
+   },
+   {
+    "name": "mid2",
+    "start": 18,
+    "end": 19
+   },
+   {
+    "name": "hub",
+    "start": 22,
+    "end": 23
+   },
+   {
+    "name": "far",
+    "start": 26,
+    "end": 27
+   },
+   {
+    "name": "isolated",
+    "start": 30,
+    "end": 31
+   }
+  ],
+  "intersecting": [
+   "far",
+   "hub"
+  ],
+  "mode": "seeded",
+  "mode_changed_vs_v1": false
+ },
+ {
+  "id": "B2-leaf-midline",
+  "old_lines": [
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14
+  ],
+  "function_spans": [
+   {
+    "name": "leaf",
+    "start": 10,
+    "end": 11
+   },
+   {
+    "name": "mid1",
+    "start": 14,
+    "end": 15
+   },
+   {
+    "name": "mid2",
+    "start": 18,
+    "end": 19
+   },
+   {
+    "name": "hub",
+    "start": 22,
+    "end": 23
+   },
+   {
+    "name": "far",
+    "start": 26,
+    "end": 27
+   },
+   {
+    "name": "isolated",
+    "start": 30,
+    "end": 31
+   }
+  ],
+  "intersecting": [
+   "leaf",
+   "mid1"
+  ],
+  "mode": "seeded",
+  "mode_changed_vs_v1": false
+ },
+ {
+  "id": "B3-isolated-zero",
+  "old_lines": [
+   28,
+   29,
+   30,
+   31
+  ],
+  "function_spans": [
+   {
+    "name": "leaf",
+    "start": 10,
+    "end": 11
+   },
+   {
+    "name": "mid1",
+    "start": 14,
+    "end": 15
+   },
+   {
+    "name": "mid2",
+    "start": 18,
+    "end": 19
+   },
+   {
+    "name": "hub",
+    "start": 22,
+    "end": 23
+   },
+   {
+    "name": "far",
+    "start": 26,
+    "end": 27
+   },
+   {
+    "name": "isolated",
+    "start": 30,
+    "end": 31
+   }
+  ],
+  "intersecting": [
+   "isolated"
+  ],
+  "mode": "seeded",
+  "mode_changed_vs_v1": false
+ },
+ {
+  "id": "B4-far-change",
+  "old_lines": [
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30
+  ],
+  "function_spans": [
+   {
+    "name": "leaf",
+    "start": 10,
+    "end": 11
+   },
+   {
+    "name": "mid1",
+    "start": 14,
+    "end": 15
+   },
+   {
+    "name": "mid2",
+    "start": 18,
+    "end": 19
+   },
+   {
+    "name": "hub",
+    "start": 22,
+    "end": 23
+   },
+   {
+    "name": "far",
+    "start": 26,
+    "end": 27
+   },
+   {
+    "name": "isolated",
+    "start": 30,
+    "end": 31
+   }
+  ],
+  "intersecting": [
+   "far",
+   "isolated"
+  ],
+  "mode": "seeded",
+  "mode_changed_vs_v1": false
+ },
+ {
+  "id": "B5-hub-defline",
+  "old_lines": [
+   19,
+   20,
+   21,
+   22,
+   23,
+   24,
+   25
+  ],
+  "function_spans": [
+   {
+    "name": "leaf",
+    "start": 10,
+    "end": 11
+   },
+   {
+    "name": "mid1",
+    "start": 14,
+    "end": 15
+   },
+   {
+    "name": "mid2",
+    "start": 18,
+    "end": 19
+   },
+   {
+    "name": "hub",
+    "start": 22,
+    "end": 23
+   },
+   {
+    "name": "far",
+    "start": 26,
+    "end": 27
+   },
+   {
+    "name": "isolated",
+    "start": 30,
+    "end": 31
+   }
+  ],
+  "intersecting": [
+   "hub",
+   "mid2"
+  ],
+  "mode": "seeded",
+  "mode_changed_vs_v1": false
+ },
+ {
+  "id": "B6-hub-tail-insert",
+  "old_lines": [
+   21,
+   22,
+   23,
+   24,
+   25,
+   26
+  ],
+  "function_spans": [
+   {
+    "name": "leaf",
+    "start": 10,
+    "end": 11
+   },
+   {
+    "name": "mid1",
+    "start": 14,
+    "end": 15
+   },
+   {
+    "name": "mid2",
+    "start": 18,
+    "end": 19
+   },
+   {
+    "name": "hub",
+    "start": 22,
+    "end": 23
+   },
+   {
+    "name": "far",
+    "start": 26,
+    "end": 27
+   },
+   {
+    "name": "isolated",
+    "start": 30,
+    "end": 31
+   }
+  ],
+  "intersecting": [
+   "far",
+   "hub"
+  ],
+  "mode": "seeded",
+  "mode_changed_vs_v1": true
+ },
+ {
+  "id": "B7-isolated-tail-insert",
+  "old_lines": [
+   29,
+   30,
+   31
+  ],
+  "function_spans": [
+   {
+    "name": "leaf",
+    "start": 10,
+    "end": 11
+   },
+   {
+    "name": "mid1",
+    "start": 14,
+    "end": 15
+   },
+   {
+    "name": "mid2",
+    "start": 18,
+    "end": 19
+   },
+   {
+    "name": "hub",
+    "start": 22,
+    "end": 23
+   },
+   {
+    "name": "far",
+    "start": 26,
+    "end": 27
+   },
+   {
+    "name": "isolated",
+    "start": 30,
+    "end": 31
+   }
+  ],
+  "intersecting": [
+   "isolated"
+  ],
+  "mode": "seeded",
+  "mode_changed_vs_v1": true
+ },
+ {
+  "id": "B8-method-callee",
+  "old_lines": [
+   11,
+   12,
+   13,
+   14
+  ],
+  "function_spans": [
+   {
+    "name": "remote",
+    "start": 8,
+    "end": 9
+   },
+   {
+    "name": "handle",
+    "start": 13,
+    "end": 14
+   }
+  ],
+  "intersecting": [
+   "handle"
+  ],
+  "mode": "seeded",
+  "mode_changed_vs_v1": false
+ },
+ {
+  "id": "B9-mid2-branch",
+  "old_lines": [
+   16,
+   17,
+   18,
+   19,
+   20,
+   21,
+   22
+  ],
+  "function_spans": [
+   {
+    "name": "leaf",
+    "start": 10,
+    "end": 11
+   },
+   {
+    "name": "mid1",
+    "start": 14,
+    "end": 15
+   },
+   {
+    "name": "mid2",
+    "start": 18,
+    "end": 19
+   },
+   {
+    "name": "hub",
+    "start": 22,
+    "end": 23
+   },
+   {
+    "name": "far",
+    "start": 26,
+    "end": 27
+   },
+   {
+    "name": "isolated",
+    "start": 30,
+    "end": 31
+   }
+  ],
+  "intersecting": [
+   "hub",
+   "mid2"
+  ],
+  "mode": "seeded",
+  "mode_changed_vs_v1": false
+ }
+]
