@@ -820,7 +820,11 @@ def _graph_search(graph: Any, name: str, edge_type: str
                 meta = getattr(edge, "metadata", None) or {}
                 if isinstance(meta, dict) and meta.get("callee") == name:
                     found = True
-                    viol_src.append((getattr(edge, "src_entity_id", None), ""))
+                    src = getattr(edge, "src_entity_id", None)
+                    src_file = files.get(src, "")
+                    if src_file:
+                        viol_files.append(src_file)
+                    viol_src.append((src, src_file))
                 continue
             if etype != edge_type:
                 continue

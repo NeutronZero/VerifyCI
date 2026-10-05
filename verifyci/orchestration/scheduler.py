@@ -413,7 +413,7 @@ class AsyncDAGScheduler(Scheduler):
             return ("block", e.decision)
         except (asyncio.TimeoutError, TimeoutError):
             step = node.get("step_id") or "unknown"
-            return ("error", (step, f"TimeoutError: node_timeout after {timeout}s"))
+            return ("timeout", (step, f"TimeoutError: node_timeout after {timeout}s"))
         except Exception as e:  # noqa: BLE001
             # Unexpected node failure, attributed: which step, what type,
             # what message. The generic _execute handler can no longer tell.

@@ -2,7 +2,11 @@ from verifyci.contracts.verification_ir import VerificationPolicy
 from verifyci.interface.commands import InfraError, open_for_read, resolve_db
 from verifyci.interface.commands.graph_loader import load_graph
 from verifyci.verification.blast_radius import blast_radius_check
-from verifyci.verification.config import load_repo_invariants, load_repo_waivers
+from verifyci.verification.config import (
+    is_policy_file,
+    load_trusted_base_invariants,
+    load_trusted_base_waivers,
+)
 from verifyci.verification.diffmap import parse_diff_files, seed_entities_for_diff
 from verifyci.verification.intent_align import evaluate_invariants
 from verifyci.verification.policy import PolicyEvaluator
@@ -39,7 +43,7 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
         infra_error = e.kind
     if infra_error and infra_error in ("db_not_found", "db_locked", "db_unreadable"):
         graph, node_map, entities, resolved_revision = None, {}, [], ""
-        invariants = []
+        invariants = load_trusted_base_invariants(None, diff=diff)
         waivers = []
     else:
         try:
@@ -54,8 +58,8 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
             infra_error = infra_error or e.kind
             graph, node_map, entities, resolved_revision = None, {}, [], ""
         try:
-            invariants = load_repo_invariants(db)
-            waivers = load_repo_waivers(db)
+            invariants = load_trusted_base_invariants(db, diff=diff)
+            waivers = load_trusted_base_waivers(db, diff=diff)
         except ValueError:
             files = parse_diff_files(diff)
             return {
@@ -88,16 +92,39 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
         on_human_review="block", require_deterministic_checker=True,
     )
     decision = PolicyEvaluator().evaluate(report, policy)
-    if infra_error and decision.status == "INCONCLUSIVE":
-        # The gate could not conclude AND could not read its store:
-        # report the real cause instead of letting a broken database
-        # hide behind "nothing grounded". FAIL/HUMAN_REVIEW/PASS are
-        # left alone — they are real verdicts the diff text earned.
+    policy_modified = any(is_policy_file(f) for f in files)
+    if infra_error:
+        if decision.status == "FAIL":
+            # Explicit contract: diff-intrinsic security/contract violation preempts
+            # infrastructure error to guarantee fail-closed security gating (exit 1),
+            # while explicitly recording that an infrastructure failure co-occurred.
+            return {"report_id": report.report_id, "status": "FAIL",
+                    "rationale": decision.rationale,
+                    "infra_error": infra_error,
+                    "contract": "security_violation_preempts_infra_error",
+                    "revision_id": resolved_revision,
+                    "files": files, "changed_entities": changed}
+        # Required verification substrate failure dominates over PASS,
+        # INCONCLUSIVE, and HUMAN_REVIEW — missing/broken storage must NEVER return PASS.
         return {"report_id": report.report_id, "status": "INFRA_ERROR",
                 "error": infra_error,
                 "rationale": f"storage_unavailable:{infra_error}",
                 "revision_id": resolved_revision,
                 "files": files, "changed_entities": changed}
+
+    if policy_modified:
+        if decision.status == "FAIL":
+            # Invariant violation under trusted base configuration preempts; fails closed.
+            return {"report_id": report.report_id, "status": "FAIL",
+                    "rationale": decision.rationale, "revision_id": resolved_revision,
+                    "files": files, "changed_entities": changed}
+        # Base-Ref Policy Integrity: gate configuration was modified in the diff;
+        # policy changes cannot be silently accepted and require explicit human review.
+        return {"report_id": report.report_id, "status": "HUMAN_REVIEW",
+                "rationale": "unverified_policy_change: gate configuration modified in diff",
+                "revision_id": resolved_revision,
+                "files": files, "changed_entities": changed}
+
     return {"report_id": report.report_id, "status": decision.status,
             "rationale": decision.rationale, "revision_id": resolved_revision,
             "files": files, "changed_entities": changed}

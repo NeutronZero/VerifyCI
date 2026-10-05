@@ -173,6 +173,7 @@ class GraphBuilder:
                     self._record(edge, "calls", qualified_ref,
                                  "qualified-canonical", "resolved", 1)
                     continue
+                receiver = (edge.metadata or {}).get("receiver", "")
                 candidates = [
                     e for e in by_name.get(name, [])
                     if self._graph[self._node_map[e]].type in _CALL_TARGET_TYPES
@@ -185,9 +186,19 @@ class GraphBuilder:
                     # recorded language (test fakes) match anything.
                     and (not caller_lang or _same_lang_family(
                         by_lang.get(e, caller_lang), caller_lang))]
+                if receiver:
+                    # Receiver-aware check: an attribute access `receiver.attr()` must not
+                    # be captured by top-level bare functions (e.g. def get():) or unrelated classes.
+                    # Only match if candidate is in a class/scope matching the receiver.
+                    candidates = [
+                        e for e in candidates
+                        if (getattr(self._graph[self._node_map[e]], "metadata", {}).get("scope") == receiver
+                            or getattr(self._graph[self._node_map[e]], "metadata", {}).get("identity_scope") == receiver)
+                    ]
                 if len(candidates) != 1:
                     self.resolution_stats["ambiguous" if candidates else "missing"] += 1
-                    self._record(edge, "calls", name, "unique-bare-name",
+                    self._record(edge, "calls", f"{receiver}.{name}" if receiver else name,
+                                 "receiver-aware" if receiver else "unique-bare-name",
                                  "ambiguous" if candidates else "missing",
                                  len(candidates))
                     continue

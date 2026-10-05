@@ -106,7 +106,7 @@ def test_search_accepts_db_param(monkeypatch):
     # /search used to ignore the repo DB entirely (always the default);
     # a missing explicit DB must surface db_not_found, not default hits.
     monkeypatch.setenv('ACI_API_TOKEN', 's3cret')
-    r = _client().get('/search', params={'q': 'x', 'db': '/nonexistent/ghost.db'},
+    r = _client().get('/search', params={'q': 'x', 'db': '.verifyci/ghost.db'},
                       headers={'Authorization': 'Bearer s3cret'})
     assert r.status_code == 200
     assert r.json()["error"] == "db_not_found"
@@ -120,12 +120,33 @@ def test_task_run_forwards_diff_and_db(monkeypatch):
     c = _client()
     secret_diff = ('diff --git a/s.py b/s.py\n--- a/s.py\n+++ b/s.py\n'
                    '@@ -1,0 +1,1 @@\n+password = "hunter2hunter2"\n')
-    r = c.post('/task/run', json={'task': 't', 'diff': secret_diff, 'db': '/nonexistent/ghost.db'},
+    r = c.post('/task/run', json={'task': 't', 'diff': secret_diff, 'db': '.verifyci/ghost.db'},
                headers={'Authorization': 'Bearer s3cret'})
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "INFRA_ERROR", body
     assert body["error"] == "db_not_found", body
+
+
+def test_sanitize_db_rejects_external_absolute_path(monkeypatch):
+    monkeypatch.setenv('ACI_API_TOKEN', 's3cret')
+    # External absolute path
+    r = _client().get('/search', params={'q': 'x', 'db': '/etc/shadow'},
+                      headers={'Authorization': 'Bearer s3cret'})
+    assert r.status_code == 400
+    assert r.json()["detail"] == "invalid_db_path"
+
+    # Non-.db file
+    r2 = _client().get('/search', params={'q': 'x', 'db': '.verifyci/.env'},
+                       headers={'Authorization': 'Bearer s3cret'})
+    assert r2.status_code == 400
+    assert r2.json()["detail"] == "invalid_db_path"
+
+    # Outside .verifyci directory
+    r3 = _client().get('/search', params={'q': 'x', 'db': 'storage/outside.db'},
+                       headers={'Authorization': 'Bearer s3cret'})
+    assert r3.status_code == 400
+    assert r3.json()["detail"] == "invalid_db_path"
 
 
 def test_verify_diff_cli_exit_codes(tmp_path):

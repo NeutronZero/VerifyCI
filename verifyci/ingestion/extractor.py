@@ -82,7 +82,7 @@ def _make_entity(
 
 def _make_unresolved(
     revision_id: str, src: str, kind: str, name: str, scope: str,
-    now: float, site: str = "", qualified: str = "",
+    now: float, site: str = "", qualified: str = "", receiver: str = "",
 ) -> Edge:
     """A reference the current file cannot resolve: calls to functions
     defined (or only declared) elsewhere, bases from other headers.
@@ -101,6 +101,8 @@ def _make_unresolved(
         meta = {"callee": name, "caller_scope": scope}
         if qualified:
             meta["callee_qualified"] = qualified
+        if receiver:
+            meta["receiver"] = receiver
         eid = f"edge_{revision_id[:12]}_{src}_unresolved_calls_{name}_{site}"
     return Edge(
         id=eid,
@@ -857,7 +859,8 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
             edges.append(_make_unresolved(
                 revision_id, caller.revision_entity_id, "calls",
                 callee_name, caller_scope, now, site,
-                qualified=qualified or ""))
+                qualified=qualified or "",
+                receiver=dotted[0] if dotted else ""))
             return
         if callee.revision_entity_id == caller.revision_entity_id:
             edges.append(_make_edge(

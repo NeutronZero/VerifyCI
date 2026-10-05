@@ -80,12 +80,83 @@ def create_fastmcp_server(db_path: str, name: str = "verifyci"):
     return mcp
 
 
+def _is_loopback(host: str) -> bool:
+    if host in ("127.0.0.1", "localhost", "::1"):
+        return True
+    try:
+        import ipaddress
+        return ipaddress.ip_address(host).is_loopback
+    except Exception:
+        return False
+
+
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+import hmac
+import ipaddress
+
+
+class FastMCPAuthMiddleware(BaseHTTPMiddleware):
+    """Enforce request-level authentication on FastMCP HTTP transport.
+
+    When VERIFYCI_API_TOKEN (or legacy ACI_API_TOKEN) is configured, every HTTP request
+    must present valid `Authorization: Bearer <token>`.
+    When unset (local-CLI default), only loopback clients (127.0.0.1, localhost, ::1)
+    are permitted; non-loopback requests without valid token receive 401.
+    """
+
+    async def dispatch(self, request, call_next):
+        from verifyci.env import get_env
+        token = get_env("API_TOKEN", "")
+        if token:
+            auth_header = request.headers.get("authorization", "")
+            try:
+                expected = f"Bearer {token}".encode("utf-8")
+                presented = auth_header.encode("utf-8")
+            except (UnicodeEncodeError, AttributeError):
+                return JSONResponse({"detail": "unauthorized"}, status_code=401)
+            if not hmac.compare_digest(presented, expected):
+                return JSONResponse({"detail": "unauthorized"}, status_code=401)
+            return await call_next(request)
+
+        host = ""
+        try:
+            client = request.client
+            host = client.host if hasattr(client, "host") else ""
+        except Exception:
+            host = ""
+        if host in ("127.0.0.1", "localhost", "::1"):
+            return await call_next(request)
+        try:
+            if host and ipaddress.ip_address(host).is_loopback:
+                return await call_next(request)
+        except ValueError:
+            pass
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+
+
+def create_fastmcp_http_app(db_path: str = ""):
+    """Create a Starlette HTTP app with FastMCPAuthMiddleware attached."""
+    mcp = create_fastmcp_server(db_path or None)
+    return mcp.http_app(middleware=[Middleware(FastMCPAuthMiddleware)])
+
+
 def serve(db_path: str = "", transport: str = "stdio", host: str = "127.0.0.1",
           port: int = 8000) -> None:
+    from verifyci.env import get_env
+    if transport == "http" and not _is_loopback(host):
+        token = get_env("API_TOKEN", "")
+        if not token:
+            raise PermissionError(
+                "unauthenticated_network_transport: Non-loopback FastMCP HTTP requires "
+                "VERIFYCI_API_TOKEN (or legacy ACI_API_TOKEN)"
+            )
     mcp = create_fastmcp_server(db_path or None)
     if transport == "stdio":
         # Banner and logs must stay off stdout: stdio is a framed JSON-RPC
         # byte stream, and any decoration corrupts every client read.
         mcp.run(show_banner=False)
     else:
-        mcp.run(transport="http", host=host, port=port, show_banner=False)
+        middleware = [Middleware(FastMCPAuthMiddleware)]
+        mcp.run(transport="http", host=host, port=port, middleware=middleware, show_banner=False)

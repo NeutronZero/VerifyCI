@@ -161,10 +161,10 @@ async def test_node_timeout_marks_error():
         tid = await sched.submit(dag)
         for _ in range(100):
             st = await sched.status(tid)
-            if st == TaskStatus.FAILED:
+            if st in (TaskStatus.FAILED, TaskStatus.TIMEOUT):
                 break
             await asyncio.sleep(0.05)
-        assert await sched.status(tid) == TaskStatus.FAILED
+        assert await sched.status(tid) == TaskStatus.TIMEOUT
         assert 'Timeout' in sched._tasks[tid]['error']
     finally:
         exmod.Executor.execute_node = real

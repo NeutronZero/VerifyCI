@@ -67,8 +67,9 @@ def test_ts_and_cpp_deletion_detected():
     assert not _def_line_matches('  evaluation("x");', "eval")
 
 
-def test_revision_query_returns_live_only():
-    # Finding 5: closed intervals must not load alongside live ones.
+def test_historical_revision_query_returns_snapshot():
+    # Historical revision snapshot: explicit revision queries return the
+    # facts belonging to that revision even when superseded by later revisions.
     import os
     import tempfile
     import time
@@ -96,7 +97,7 @@ def test_revision_query_returns_live_only():
     old_rows = st.get_entities_by_revision("r1")
     new_rows = st.get_entities_by_revision("r2")
     st.close()
-    assert old_rows == [], [e.revision_entity_id for e in old_rows]
+    assert len(old_rows) == 1, [e.revision_entity_id for e in old_rows]
     assert len(new_rows) == 1
 
 

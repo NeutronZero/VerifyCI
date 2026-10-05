@@ -371,6 +371,16 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
             carried_e, carried_d = _carry_forward(
                 store, carried_sources, carried_texts, revision.revision_id, closed_at,
                 repository_id=repo.name)
+            for rel, _old_rev in carried_sources:
+                rec = meta.get_file(str(repo / rel))
+                digest = rec[1] if rec else ""
+                lang = rec[2] if rec else "python"
+                meta.upsert_file(str(repo / rel), digest, lang, revision.revision_id)
+            for rel, _old_rev in carried_texts:
+                rec = meta.get_file(str(repo / rel))
+                digest = rec[1] if rec else ""
+                lang = rec[2] if rec else "manifest"
+                meta.upsert_file(str(repo / rel), digest, lang, revision.revision_id)
             totals["entities"] += carried_e
             totals["edges"] += carried_d
             totals["carried_entities"] = carried_e

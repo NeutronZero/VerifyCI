@@ -92,11 +92,25 @@ def search(q: str, k: int = Query(default=10, ge=1, le=MAX_K), db: str = "",
 def _sanitize_db(db: str) -> str | None:
     if not db:
         return None
+    import os
     from pathlib import Path
-    p = Path(db)
-    if "\x00" in db or ".." in p.parts:
+    if "\x00" in db:
         raise HTTPException(status_code=400, detail="invalid_db_path")
-    return str(p)
+    p = Path(db)
+    if ".." in p.parts:
+        raise HTTPException(status_code=400, detail="invalid_db_path")
+    if p.suffix != ".db":
+        raise HTTPException(status_code=400, detail="invalid_db_path")
+    # Disallow arbitrary filesystem paths; must reside within repo's .verifyci directory.
+    repo_root = Path(os.environ.get("VERIFYCI_ROOT", os.getcwd())).resolve()
+    try:
+        resolved = (repo_root / p).resolve() if not p.is_absolute() else p.resolve()
+        allowed_dir = (repo_root / ".verifyci").resolve()
+        if not resolved.is_relative_to(allowed_dir):
+            raise HTTPException(status_code=400, detail="invalid_db_path")
+    except (ValueError, RuntimeError):
+        raise HTTPException(status_code=400, detail="invalid_db_path")
+    return str(resolved)
 
 
 @app.post("/verify/diff")

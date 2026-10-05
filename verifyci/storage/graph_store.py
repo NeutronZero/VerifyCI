@@ -732,13 +732,13 @@ class GraphStore:
 
     def get_entities_by_revision(self, revision_id: str) -> list[Entity]:
         rows = self.conn.execute(
-            "SELECT * FROM entities WHERE revision_id = ? AND valid_until IS NULL", (revision_id,)
+            "SELECT * FROM entities WHERE revision_id = ?", (revision_id,)
         ).fetchall()
         return [self._row_to_entity(r) for r in rows]
 
     def get_edges_by_revision(self, revision_id: str) -> list[Edge]:
         rows = self.conn.execute(
-            "SELECT * FROM edges WHERE revision_id = ? AND valid_until IS NULL", (revision_id,)
+            "SELECT * FROM edges WHERE revision_id = ?", (revision_id,)
         ).fetchall()
         return [self._row_to_edge(r) for r in rows]
 
