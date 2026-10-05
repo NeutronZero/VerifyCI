@@ -14,9 +14,7 @@ I. Benchmark source integrity (production code hash verification)
 J. Resolver precision (ambiguous candidates and receiver-aware attribute calls remain unresolved)
 """
 import asyncio
-import os
 import tempfile
-import time
 from pathlib import Path
 
 import pytest
@@ -199,7 +197,6 @@ def test_e_forbidden_unresolved_call_scoping():
     # Construct a graph with a CALLS_UNRESOLVED edge in untouched_old.py
     import rustworkx as rx
     from verifyci.contracts.edge import Edge
-    from verifyci.contracts.identity import compute_revision_entity_id
 
     g = rx.PyDiGraph()
     caller = Entity(

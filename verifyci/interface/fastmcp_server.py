@@ -5,6 +5,12 @@ in-process ``MCPServer`` dict-class remains for embedding/tests; this
 module is the network boundary.
 """
 from typing import Any
+import hmac
+import ipaddress
+
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 
 MAX_DIFF_CHARS = 1_000_000
@@ -88,13 +94,6 @@ def _is_loopback(host: str) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except Exception:
         return False
-
-
-from starlette.middleware import Middleware
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
-import hmac
-import ipaddress
 
 
 class FastMCPAuthMiddleware(BaseHTTPMiddleware):
