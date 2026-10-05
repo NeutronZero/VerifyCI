@@ -1,7 +1,7 @@
 """Verification-layer blast-radius check.
 
 Thin wrapper over the graph-traversal implementation in
-``src.retrieval.blast_radius`` that additionally produces a ``CheckResult``
+``verifyci.retrieval.blast_radius`` that additionally produces a ``CheckResult``
 suitable for inclusion in a ``VerificationReport``.
 
 The check is deliberately non-blocking: blast radius measures exposure
@@ -18,9 +18,11 @@ from verifyci.contracts.verification_ir import BlastRadiusResult, CheckResult
 from verifyci.graph.traverse import NodeMapError
 from verifyci.retrieval.blast_radius import compute_blast_radius
 
-__all__ = ["compute_blast_radius", "blast_radius_check"]
+__all__ = ["blast_radius_check"]
 
-RISK_BLOCK_THRESHOLD = 0.8
+RISK_REVIEW_THRESHOLD = 0.8
+# Deprecated alias: nothing blocks on exposure; the threshold routes to review.
+RISK_BLOCK_THRESHOLD = RISK_REVIEW_THRESHOLD
 
 
 def blast_radius_check(
@@ -42,8 +44,9 @@ def blast_radius_check(
             node_map=node_map,
             max_hops=max_hops,
         )
-    except NodeMapError as e:
-        # An unreadable graph is inability (INCONCLUSIVE at policy), never
+    except (NodeMapError, RuntimeError) as e:
+        # An unreadable graph is inability (never PASS; policy routes the
+        # failed non-blocking check to HUMAN_REVIEW), never
         # a clean bill of health: the old code derived an empty map and
         # passed every diff on it, silently, forever.
         from verifyci.contracts.verification_ir import BlastRadiusResult as _BRR
@@ -60,7 +63,7 @@ def blast_radius_check(
         )
     check = CheckResult(
         check_id="blast_radius",
-        passed=blast.risk_score < RISK_BLOCK_THRESHOLD,
+        passed=blast.risk_score < RISK_REVIEW_THRESHOLD,
         score=1.0 - blast.risk_score,
         evidence=list(blast.affected_callers) + list(blast.affected_callees),
         explanation=f"risk_score={blast.risk_score:.2f}",

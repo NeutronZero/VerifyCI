@@ -31,8 +31,8 @@ def test_blast_wrapper_reports_same_file_callers():
 
 def test_blast_wrapper_unreadable_graph_is_inability():
     # An unreadable graph used to derive an empty map and pass every
-    # diff on it, silently, forever. Now it is inability (INCONCLUSIVE
-    # at policy), never a clean bill of health.
+    # diff on it, silently, forever. Now it is inability (never PASS;
+    # policy routes the failed non-blocking check to HUMAN_REVIEW).
     class _Broken:
         def node_indices(self):
             return [0]
@@ -42,6 +42,29 @@ def test_blast_wrapper_unreadable_graph_is_inability():
 
     blast, check = blast_radius_check(
         graph=_Broken(), changed_entities=["e1"], test_entities=set())
+    assert check.passed is False
+    assert check.established is False
+    assert "graph_unreadable" in check.explanation
+
+
+def test_blast_wrapper_corrupt_edge_api_is_inability():
+    # traverse documents fail-closed on RuntimeError from the edge-data
+    # path; the wrapper must convert it to inability, not propagate.
+    class _CorruptEdges:
+        def predecessors(self, idx):
+            return [101] if idx == 1 else []
+
+        def successors(self, idx):
+            return []
+
+        def get_all_edge_data(self, src, dst):
+            raise RuntimeError("edge store corrupt")
+
+    node_map = {"changed": 1, "caller": 101}
+    _, check = blast_radius_check(
+        graph=_CorruptEdges(), changed_entities=["changed"],
+        test_entities=set(), node_map=node_map, max_hops=1,
+    )
     assert check.passed is False
     assert check.established is False
     assert "graph_unreadable" in check.explanation

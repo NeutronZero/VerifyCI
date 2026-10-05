@@ -1,0 +1,70 @@
+{
+  "protocol": "benchmarks/retrieval/config.json (frozen)",
+  "protocol_sha256": "f2864fb6a83a281d692429ddd8be0921af954aa25fa46e5cdf63bffd72523eb3",
+  "frozen_sources": {
+    "vector_store.py": "f0d31cbc9594be0233950d4924cc3aac48f075757f7059921be6d85ea74483e9",
+    "dense.py": "3db2257d1cb39a92249e5b8831229d44ab9d7dc0e6fefa7a5112db798c33331a",
+    "sparse.py": "7420303a9bc5131e37fd81e19b7da61649b1b832c00a945e1cf7f772cf9a4460",
+    "fusion.py": "68f833126e0891d7b07586da27798ea4a0dd8f431359b40f8e2d43e40cec8a4c"
+  },
+  "environment": {
+    "python": "3.14.7",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "machine": "DESKTOP-9U7ORK8",
+    "cpu_count": 8
+  },
+  "grid": {
+    "docs": [
+      1000,
+      10000
+    ],
+    "dim": 256,
+    "k": 10,
+    "queries": 100,
+    "seed": 20261005
+  },
+  "scales": {
+    "1000": {
+      "dense_search": {
+        "n": 100,
+        "us": {
+          "median": 53152.0,
+          "p95": 76370.1,
+          "p99": 86468.2,
+          "max": 87824.6
+        }
+      },
+      "sparse_search": {
+        "n": 100,
+        "us": {
+          "median": 928.6,
+          "p95": 1048.3,
+          "p99": 1334.6,
+          "max": 1561.9
+        }
+      },
+      "fusion_us_avg": 11.4
+    },
+    "10000": {
+      "dense_search": {
+        "n": 100,
+        "us": {
+          "median": 531203.1,
+          "p95": 936610.8,
+          "p99": 1060122.4,
+          "max": 1081496.7
+        }
+      },
+      "sparse_search": {
+        "n": 100,
+        "us": {
+          "median": 20999.5,
+          "p95": 35498.2,
+          "p99": 48876.7,
+          "max": 92948.1
+        }
+      },
+      "fusion_us_avg": 23.9
+    }
+  }
+}

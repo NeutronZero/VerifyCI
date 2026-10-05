@@ -1,0 +1,19 @@
+{
+  "purpose": "Retrieval scalability measurement: separate embed vs search vs cache-save costs on a frozen N/d grid. Mirrors the latency protocol (percentiles, env block, source hashes, rerun guard).",
+  "frozen_before_measurement": true,
+  "grid": {
+    "docs": [1000, 10000],
+    "dim": 256,
+    "k": 10,
+    "queries": 100,
+    "seed": 20261005
+  },
+  "percentiles": "numpy-free: sorted samples, index = ceil(q*n)-1 for p50/p95/p99",
+  "timing": "per-op perf_counter_ns around the call only; gc disabled during sampling loops, re-enabled after",
+  "gate_classification": {
+    "contract": "no promoting gate: measurement-only. Results inform index/cache design before any retrieval rewrite.",
+    "cross_machine_claim": "NOT made: numbers are host-specific; reproducibility = protocol + source hashes + environment",
+    "no_retrofit": "grid and budgets are frozen here before the first measurement"
+  },
+  "rerun_guard": "test_retrieval_repro re-runs under VERIFYCI_RETRIEVAL_RERUN=1 and asserts: same source hashes, same grid, median within +/-50%, tail within 3x. It never asserts identical ns."
+}
