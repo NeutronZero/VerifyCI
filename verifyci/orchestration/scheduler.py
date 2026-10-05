@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -8,6 +9,8 @@ from typing import Any
 from verifyci.contracts.scheduler import (
     ExecutableDAG, Scheduler, TERMINAL_STATUSES, TaskStatus,
 )
+
+logger = logging.getLogger(__name__)
 
 # Bounded worker pool for node execution. asyncio.to_thread uses the
 # loop's default executor (unbounded for our purposes and shared with
@@ -147,8 +150,8 @@ class AsyncDAGScheduler(Scheduler):
                 head = ledger.head_hash()
                 if head is not None:
                     return head
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Failed to read ledger head for task %s: %s", task_id, exc)
         return task.get("ledger_head")
 
     def _pin_head(self, task_id: str) -> None:
@@ -160,7 +163,8 @@ class AsyncDAGScheduler(Scheduler):
         try:
             ledger = task.get("ledger")
             task["ledger_head"] = ledger.head_hash() if ledger is not None else None
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to pin ledger head for task %s: %s", task_id, exc)
             task["ledger_head"] = None
 
     async def cancel(self, task_id: str) -> None:
@@ -437,7 +441,9 @@ class AsyncDAGScheduler(Scheduler):
             events = ledger.get_events()[persisted:]
             if not events:
                 return
-            if hasattr(store, "batch"):
+            if hasattr(store, "insert_events"):
+                store.insert_events(events)
+            elif hasattr(store, "batch"):
                 with store.batch():
                     for e in events:
                         store.insert_event(e)

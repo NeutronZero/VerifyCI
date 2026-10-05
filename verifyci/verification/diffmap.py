@@ -176,6 +176,78 @@ def _header_path(line: str, marker: str) -> str | None:
     return _clean(line[len(marker):])
 
 
+def _parse_standard_hunk(
+    lines: list[str], idx: int, head: re.Match, f_path: str | None
+) -> tuple[Hunk, int, bool]:
+    """Consume and build a standard unified diff hunk with exact counts."""
+    old_start = int(head.group(1))
+    old_count = int(head.group(2) if head.group(2) is not None else 1)
+    new_start = int(head.group(3))
+    new_count = int(head.group(4) if head.group(4) is not None else 1)
+    h = Hunk(f_path, old_start, old_count, new_start, new_count, [])
+    idx += 1
+    old_rem, new_rem = old_count, new_count
+    new_file_ahead = False
+    while idx < len(lines) and (old_rem > 0 or new_rem > 0):
+        b = lines[idx]
+        if _is_boundary(b):
+            break
+        if _new_file_ahead(lines, idx):
+            new_file_ahead = True
+            break
+        if b.startswith("\\"):
+            h.lines.append(b)
+            idx += 1
+            continue
+        if b and b[0] not in " +-\\":
+            break
+        if b.startswith("+"):
+            if new_rem <= 0:
+                break
+            new_rem -= 1
+        elif b.startswith("-"):
+            if old_rem <= 0:
+                break
+            old_rem -= 1
+        else:
+            if old_rem <= 0 or new_rem <= 0:
+                break
+            old_rem -= 1
+            new_rem -= 1
+        h.lines.append(b if b != "" else " ")
+        idx += 1
+    return h, idx, new_file_ahead
+
+
+def _parse_combined_hunk(
+    lines: list[str], idx: int, line: str, f_path: str | None
+) -> tuple[Hunk, int]:
+    """Consume and build a combined (@@@) or malformed @@ hunk."""
+    try:
+        om = re.search(r"-(\d+)", line)
+        nms = re.findall(r"\+(\d+)", line)
+        old_start = int(om.group(1)) if om else 0
+        new_start = int(nms[-1]) if nms else 0
+    except Exception:
+        old_start = new_start = 0
+    h = Hunk(f_path, old_start, 1, new_start, 1, [], approximate=True)
+    idx += 1
+    while idx < len(lines):
+        b = lines[idx]
+        if _is_boundary(b):
+            break
+        if b.startswith(_HUNK_BODY_PREFIXES) or b == "":
+            h.lines.append(b)
+            idx += 1
+            continue
+        if h.approximate and b.lstrip() != "":
+            h.lines.append(b)
+            idx += 1
+            continue
+        break
+    return h, idx
+
+
 def parse_unified_diff(diff: str | None) -> list[FileDiff]:
     lines = _diff_lines(diff)
     files: list[FileDiff] = []
@@ -279,78 +351,15 @@ def parse_unified_diff(diff: str | None) -> list[FileDiff]:
         head = _HEAD_RE.match(line)
         if head:
             f = _file()
-            old_start = int(head.group(1))
-            old_count = int(head.group(2) if head.group(2) is not None else 1)
-            new_start = int(head.group(3))
-            new_count = int(head.group(4) if head.group(4) is not None else 1)
-            h = Hunk(f.path, old_start, old_count, new_start, new_count, [])
-            idx += 1
-            old_rem, new_rem = old_count, new_count
-            while idx < len(lines) and (old_rem > 0 or new_rem > 0):
-                b = lines[idx]
-                if _is_boundary(b):
-                    break
-                if _new_file_ahead(lines, idx):
-                    # Overstated counts ran past the hunk into the next
-                    # file's headers: stop and let the `---` line open a
-                    # NEW block (cur=None) instead of corrupting this
-                    # file's paths with content-shaped headers.
-                    cur, pair_complete = None, False
-                    break
-                if b.startswith("\\"):
-                    h.lines.append(b)
-                    idx += 1
-                    continue
-                if b and b[0] not in " +-\\":
-                    break  # not a valid body line: stop, don't absorb
-                if b.startswith("+"):
-                    if new_rem <= 0:
-                        break  # overstated counts: stop, don't absorb
-                    new_rem -= 1
-                elif b.startswith("-"):
-                    if old_rem <= 0:
-                        break
-                    old_rem -= 1
-                else:
-                    if old_rem <= 0 or new_rem <= 0:
-                        break
-                    old_rem -= 1
-                    new_rem -= 1
-                # An empty line is context with the space stripped
-                # (git emits " " as ""); it consumes both counts.
-                h.lines.append(b if b != "" else " ")
-                idx += 1
+            h, idx, new_file = _parse_standard_hunk(lines, idx, head, f.path)
+            if new_file:
+                cur, pair_complete = None, False
             f.hunks.append(h)
             continue
         comb = _COMBINED_RE.match(line)
         if comb or line.startswith("@@"):
-            # combined (@@@) or malformed @@: greedy, approximate — one
-            # side of a merge diff has no single coherent count model, so
-            # consumers treat its lines as unverified (removal.py's
-            # approximate branch); unchanged semantics.
             f = _file()
-            try:
-                om = re.search(r"-(\d+)", line)
-                nms = re.findall(r"\+(\d+)", line)
-                old_start = int(om.group(1)) if om else 0
-                new_start = int(nms[-1]) if nms else 0
-            except Exception:
-                old_start = new_start = 0
-            h = Hunk(f.path, old_start, 1, new_start, 1, [], approximate=True)
-            idx += 1
-            while idx < len(lines):
-                b = lines[idx]
-                if _is_boundary(b):
-                    break
-                if b.startswith(_HUNK_BODY_PREFIXES) or b == "":
-                    h.lines.append(b)
-                    idx += 1
-                    continue
-                if h.approximate and b.lstrip() != "":
-                    h.lines.append(b)
-                    idx += 1
-                    continue
-                break
+            h, idx = _parse_combined_hunk(lines, idx, line, f.path)
             f.hunks.append(h)
             continue
         # --- stray +/- outside any hunk (never discarded) --------------

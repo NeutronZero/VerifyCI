@@ -460,3 +460,33 @@ def test_call_flow_types_excludes_references():
     assert "DEPENDS_ON" in CALL_FLOW_TYPES
     assert "REFERENCES" not in CALL_FLOW_TYPES
 
+
+def test_split_git_paths_unclosed_quote_fallback():
+    from verifyci.verification.diffmap import _split_git_paths
+
+    # Line with an unclosed quote triggers shlex.split exception and falls back to whitespace split
+    line = 'diff --git "src/a.py src/b.py'
+    old, new = _split_git_paths(line)
+    assert old == '"src/a.py'
+    assert new == 'src/b.py'
+
+
+def test_parse_unified_diff_malformed_combined_hunk_header_fallback():
+    from verifyci.verification.diffmap import parse_unified_diff
+
+    # Combined diff header with an integer exceeding Python int string conversion limit
+    big_num = "9" * 5000
+    diff = (
+        "diff --git a/src/app.py b/src/app.py\n"
+        "--- a/src/app.py\n"
+        "+++ b/src/app.py\n"
+        f"@@@ -{big_num} +1 @@@\n"
+        "+line\n"
+    )
+    result = parse_unified_diff(diff)
+    assert len(result) == 1
+    assert result[0].path == "src/app.py"
+    assert len(result[0].hunks) == 1
+    assert result[0].hunks[0].old_start == 0
+    assert result[0].hunks[0].new_start == 0
+

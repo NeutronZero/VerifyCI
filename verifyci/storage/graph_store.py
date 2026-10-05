@@ -689,24 +689,34 @@ class GraphStore:
         return self._row_to_entity(row) if row else None
 
     def insert_event(self, event) -> None:
+        self.insert_events([event])
+
+    def insert_events(self, events: list) -> None:
+        if not events:
+            return
         import json as _json
-        att = getattr(event, "attestation", None)
-        if att is not None:
-            import dataclasses
-            if dataclasses.is_dataclass(att):
-                att_json = _json.dumps(dataclasses.asdict(att))
-            elif hasattr(att, "__dict__"):
-                att_json = _json.dumps(att.__dict__)
+        import dataclasses
+        rows = []
+        for event in events:
+            att = getattr(event, "attestation", None)
+            if att is not None:
+                if dataclasses.is_dataclass(att):
+                    att_json = _json.dumps(dataclasses.asdict(att))
+                elif hasattr(att, "__dict__"):
+                    att_json = _json.dumps(att.__dict__)
+                else:
+                    att_json = _json.dumps(att)
             else:
-                att_json = _json.dumps(att)
-        else:
-            att_json = None
-        self.conn.execute(
+                att_json = None
+            rows.append((
+                event.id, event.type, event.timestamp, event.task_id, event.conversation_id,
+                _json.dumps(event.payload or {}), _json.dumps(event.provenance or {}),
+                event.prev_event_hash,
+                att_json,
+            ))
+        self.conn.executemany(
             "INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?,?,?,?)",
-            (event.id, event.type, event.timestamp, event.task_id, event.conversation_id,
-             _json.dumps(event.payload or {}), _json.dumps(event.provenance or {}),
-             event.prev_event_hash,
-             att_json),
+            rows,
         )
         self._maybe_commit()
 
@@ -747,7 +757,7 @@ class GraphStore:
         suffix from the edge id: parallel call sites share
         (src, dst, type) legitimately and must not collapse into one.
         """
-        n_entities = 0
+        entity_updates = []
         dup_ids = self.conn.execute(
             "SELECT logical_entity_id FROM entities"
             " WHERE valid_until IS NULL AND repository_id = ?"
@@ -763,12 +773,14 @@ class GraphStore:
                 (lid, repository_id),
             ).fetchall()
             for (rid,) in rows[1:]:
-                self.conn.execute(
-                    "UPDATE entities SET valid_until = ?, t_expired = ?"
-                    " WHERE rowid = ?",
-                    (now, now, rid),
-                )
-                n_entities += 1
+                entity_updates.append((now, now, rid))
+        if entity_updates:
+            self.conn.executemany(
+                "UPDATE entities SET valid_until = ?, t_expired = ?"
+                " WHERE rowid = ?",
+                entity_updates,
+            )
+        n_entities = len(entity_updates)
         entmap = {
             r[0]: r[1] for r in self.conn.execute(
                 "SELECT revision_entity_id, logical_entity_id FROM entities"
@@ -794,19 +806,21 @@ class GraphStore:
             key = _edge_match_key(entmap.get(r[1], r[1]),
                                   entmap.get(r[2], r[2]), r[3], meta) + (site,)
             buckets.setdefault(key, []).append(r)
-        n_edges = 0
+        edge_updates = []
         for rows in buckets.values():
             if len(rows) < 2:
                 continue
             rows.sort(key=lambda r: (r[5] if r[5] is not None else -1.0, r[0]),
                       reverse=True)
             for r in rows[1:]:
-                self.conn.execute(
-                    "UPDATE edges SET valid_until = ?, t_expired = ?"
-                    " WHERE id = ?",
-                    (now, now, r[0]),
-                )
-                n_edges += 1
+                edge_updates.append((now, now, r[0]))
+        if edge_updates:
+            self.conn.executemany(
+                "UPDATE edges SET valid_until = ?, t_expired = ?"
+                " WHERE id = ?",
+                edge_updates,
+            )
+        n_edges = len(edge_updates)
         if n_entities or n_edges:
             self._maybe_commit()
         return n_entities, n_edges

@@ -357,6 +357,144 @@ def _has_associated_witness(
     return False
 
 
+def _check_hunk_provenance(
+    file_path: str, hunk: Any, covering: list
+) -> tuple[bool, bool]:
+    old_ln = hunk.old_start
+    hunk_fabricated = False
+    hunk_unverified = False
+    for line in hunk.lines:
+        if line.startswith("+") or line.startswith("\\"):
+            continue
+        if not line.startswith("-"):
+            old_ln += 1
+            continue
+        content = line[1:]
+        c_status = _classify_removed(file_path, old_ln, content, covering)
+        if c_status == "fabricated":
+            hunk_fabricated = True
+            break
+        elif c_status != "verified":
+            hunk_unverified = True
+        old_ln += 1
+    return hunk_fabricated, hunk_unverified
+
+
+def _verify_class_3_guard_hunk(
+    file_path: str,
+    hunk: Any,
+    guard_lines: list[str],
+    plus_lines: list[str],
+    waivers: tuple[SignedIntentWaiver, ...] | list[SignedIntentWaiver],
+) -> DeletionHunkVerdict | None:
+    if not guard_lines or _is_guard_preserved_in_additions(plus_lines, guard_lines):
+        return None
+    matched_waiver = _matches_waiver(guard_lines, file_path, waivers)
+    if matched_waiver:
+        from verifyci.env import get_env as _get_env
+        _posture = ("keyed" if (_get_env("WAIVER_KEYS") or _get_env("WAIVER_PUBLIC_KEYS"))
+                    else "bearer-opt-in")
+        return DeletionHunkVerdict(
+            file_path=file_path,
+            old_start=hunk.old_start,
+            deletion_class=DeletionClass.CLASS_3_GUARD_REMOVAL,
+            passed=True,
+            status="PASS",
+            reasoning=(f"class_3_guard_removal_waived:"
+                       f"{matched_waiver.waiver_id}:{_posture}"),
+        )
+    return DeletionHunkVerdict(
+        file_path=file_path,
+        old_start=hunk.old_start,
+        deletion_class=DeletionClass.CLASS_3_GUARD_REMOVAL,
+        passed=False,
+        status="FAIL",
+        reasoning=f"class_3_guard_removal_without_waiver:{file_path}:{hunk.old_start}",
+    )
+
+
+def _verify_class_1_dead_code_hunk(
+    file_path: str,
+    hunk: Any,
+    deleted_entity: Any,
+    graph: Any,
+    node_map: dict | None,
+    code_entities: list,
+    diff_files: set[str],
+) -> DeletionHunkVerdict:
+    surviving = _find_surviving_callers(deleted_entity, graph, node_map, code_entities, diff_files)
+    if surviving:
+        return DeletionHunkVerdict(
+            file_path=file_path,
+            old_start=hunk.old_start,
+            deletion_class=DeletionClass.CLASS_1_DEAD_CODE,
+            passed=False,
+            status="INCONCLUSIVE",
+            reasoning=f"surviving_callers_detected:{','.join(surviving[:3])}",
+        )
+    return DeletionHunkVerdict(
+        file_path=file_path,
+        old_start=hunk.old_start,
+        deletion_class=DeletionClass.CLASS_1_DEAD_CODE,
+        passed=True,
+        status="PASS",
+        reasoning=f"class_1_dead_code_verified:{deleted_entity.name}",
+    )
+
+
+def _verify_class_2_refactoring_hunk(
+    file_path: str,
+    hunk: Any,
+    enclosing: Any,
+    minus_lines: list[str],
+    plus_lines: list[str],
+    witnesses: tuple[ExecutionWitness, ...] | list[ExecutionWitness],
+) -> DeletionHunkVerdict:
+    old_defs = [ml for ml in minus_lines if _looks_like_def(ml)]
+    new_defs = [pl for pl in plus_lines if _looks_like_def(pl)]
+
+    if old_defs and not new_defs:
+        return DeletionHunkVerdict(
+            file_path=file_path,
+            old_start=hunk.old_start,
+            deletion_class=DeletionClass.CLASS_2_REFACTORING,
+            passed=False,
+            status="INCONCLUSIVE",
+            reasoning=f"entity_continuity_broken:{enclosing.name}",
+        )
+
+    if old_defs and new_defs:
+        compat, sig_err = _check_signature_compatibility(old_defs[0], new_defs[0])
+        if not compat:
+            return DeletionHunkVerdict(
+                file_path=file_path,
+                old_start=hunk.old_start,
+                deletion_class=DeletionClass.CLASS_2_REFACTORING,
+                passed=False,
+                status="INCONCLUSIVE",
+                reasoning=f"signature_incompatible:{sig_err}",
+            )
+
+    if not _has_associated_witness(file_path, enclosing, witnesses):
+        return DeletionHunkVerdict(
+            file_path=file_path,
+            old_start=hunk.old_start,
+            deletion_class=DeletionClass.CLASS_2_REFACTORING,
+            passed=False,
+            status="INCONCLUSIVE",
+            reasoning=f"missing_execution_witness:{enclosing.name}",
+        )
+
+    return DeletionHunkVerdict(
+        file_path=file_path,
+        old_start=hunk.old_start,
+        deletion_class=DeletionClass.CLASS_2_REFACTORING,
+        passed=True,
+        status="PASS",
+        reasoning=f"class_2_refactoring_verified:{enclosing.name}",
+    )
+
+
 def verify_deletion_hunks(
     diff: str | None,
     code_files: list[str],
@@ -375,7 +513,6 @@ def verify_deletion_hunks(
     diff_files = {normalize_path(f.path) for f in parsed}
 
     code_entities = [e for e in (entities or []) if _is_code(e)]
-
     verdicts: list[DeletionHunkVerdict] = []
 
     for f in parsed:
@@ -403,25 +540,7 @@ def verify_deletion_hunks(
             if not is_net_deletion and not guard_lines and not old_defs:
                 continue
 
-            # Check provenance of removed lines first
-            old_ln = hunk.old_start
-            hunk_fabricated = False
-            hunk_unverified = False
-            for line in hunk.lines:
-                if line.startswith("+") or line.startswith("\\"):
-                    continue
-                if not line.startswith("-"):
-                    old_ln += 1
-                    continue
-                content = line[1:]
-                c_status = _classify_removed(f.path, old_ln, content, covering)
-                if c_status == "fabricated":
-                    hunk_fabricated = True
-                    break
-                elif c_status != "verified":
-                    hunk_unverified = True
-                old_ln += 1
-
+            hunk_fabricated, hunk_unverified = _check_hunk_provenance(f.path, hunk, covering)
             if hunk_fabricated:
                 verdicts.append(DeletionHunkVerdict(
                     file_path=f.path,
@@ -444,53 +563,19 @@ def verify_deletion_hunks(
                 ))
                 continue
 
-            # Provenance is 100% verified! Now evaluate deletion semantics.
-            # 1. Class 3 check: Guard / assertion removal without waiver
-            if guard_lines and not _is_guard_preserved_in_additions(plus_lines, guard_lines):
-                matched_waiver = _matches_waiver(guard_lines, f.path, waivers)
-                if matched_waiver:
-                    # Record WHICH trust posture waived this: keys configured
-                    # (cryptographic) vs bearer opt-in (sticky process-wide
-                    # env the moment it is set — it never un-sets itself).
-                    # Readers of this verdict must see the posture, not
-                    # just the waiver id; backfilling it later is expensive.
-                    from verifyci.env import get_env as _get_env
-                    _posture = ("keyed" if (_get_env("WAIVER_KEYS")
-                                            or _get_env("WAIVER_PUBLIC_KEYS"))
-                                else "bearer-opt-in")
-                    verdicts.append(DeletionHunkVerdict(
-                        file_path=f.path,
-                        old_start=hunk.old_start,
-                        deletion_class=DeletionClass.CLASS_3_GUARD_REMOVAL,
-                        passed=True,
-                        status="PASS",
-                        reasoning=(f"class_3_guard_removal_waived:"
-                                   f"{matched_waiver.waiver_id}:{_posture}"),
-                    ))
-                else:
-                    verdicts.append(DeletionHunkVerdict(
-                        file_path=f.path,
-                        old_start=hunk.old_start,
-                        deletion_class=DeletionClass.CLASS_3_GUARD_REMOVAL,
-                        passed=False,
-                        status="FAIL",
-                        reasoning=f"class_3_guard_removal_without_waiver:{f.path}:{hunk.old_start}",
-                    ))
+            # Provenance verified: check Class 3 guard removal
+            c3_verdict = _verify_class_3_guard_hunk(f.path, hunk, guard_lines, plus_lines, waivers)
+            if c3_verdict is not None:
+                verdicts.append(c3_verdict)
                 continue
 
-            # Find entities overlapping this hunk
+            # Overlapping entities
             h_end = hunk.old_start + max(1, hunk.old_count) - 1
             overlapping_entities = [
                 e for e in covering
                 if not (getattr(e, "line_end", 1) < hunk.old_start or getattr(e, "line_start", 1) > h_end)
             ]
 
-            # NOTE (defensive): the no-overlap verdict below is unreachable
-            # in practice — provenance-verified implies an entity contains
-            # the removed line, which intersects the hunk window by
-            # construction (pure insertions skip earlier for lack of `-`
-            # lines). Kept so unattributable deletions decline rather
-            # than pass if the geometry ever changes.
             if not overlapping_entities:
                 verdicts.append(DeletionHunkVerdict(
                     file_path=f.path,
@@ -502,8 +587,6 @@ def verify_deletion_hunks(
                 ))
                 continue
 
-            # Determine whether any entity is being deleted (Class 1) or refactored (Class 2)
-            # An entity is deleted if its declaration line is removed and not re-declared
             deleted_entity = None
             for e in overlapping_entities:
                 e_name = getattr(e, "name", "")
@@ -516,78 +599,12 @@ def verify_deletion_hunks(
                     break
 
             if deleted_entity is not None:
-                # Class 1: Dead code / unreferenced entity removal
-                surviving = _find_surviving_callers(deleted_entity, graph, node_map, code_entities, diff_files)
-                if surviving:
-                    verdicts.append(DeletionHunkVerdict(
-                        file_path=f.path,
-                        old_start=hunk.old_start,
-                        deletion_class=DeletionClass.CLASS_1_DEAD_CODE,
-                        passed=False,
-                        status="INCONCLUSIVE",
-                        reasoning=f"surviving_callers_detected:{','.join(surviving[:3])}",
-                    ))
-                else:
-                    verdicts.append(DeletionHunkVerdict(
-                        file_path=f.path,
-                        old_start=hunk.old_start,
-                        deletion_class=DeletionClass.CLASS_1_DEAD_CODE,
-                        passed=True,
-                        status="PASS",
-                        reasoning=f"class_1_dead_code_verified:{deleted_entity.name}",
-                    ))
+                verdicts.append(_verify_class_1_dead_code_hunk(
+                    f.path, hunk, deleted_entity, graph, node_map, code_entities, diff_files
+                ))
             else:
-                # Class 2: Refactoring / intra-entity replacement
-                enclosing = overlapping_entities[0]
-                # Enclosing entity continuity check
-                # Check if declaration line was replaced by non-def or unrelated code
-                old_defs = [ml for ml in minus_lines if _looks_like_def(ml)]
-                new_defs = [pl for pl in plus_lines if _looks_like_def(pl)]
-
-                if old_defs and not new_defs:
-                    verdicts.append(DeletionHunkVerdict(
-                        file_path=f.path,
-                        old_start=hunk.old_start,
-                        deletion_class=DeletionClass.CLASS_2_REFACTORING,
-                        passed=False,
-                        status="INCONCLUSIVE",
-                        reasoning=f"entity_continuity_broken:{enclosing.name}",
-                    ))
-                    continue
-
-                # Signature compatibility check
-                if old_defs and new_defs:
-                    compat, sig_err = _check_signature_compatibility(old_defs[0], new_defs[0])
-                    if not compat:
-                        verdicts.append(DeletionHunkVerdict(
-                            file_path=f.path,
-                            old_start=hunk.old_start,
-                            deletion_class=DeletionClass.CLASS_2_REFACTORING,
-                            passed=False,
-                            status="INCONCLUSIVE",
-                            reasoning=f"signature_incompatible:{sig_err}",
-                        ))
-                        continue
-
-                # Execution witness corroboration
-                if not _has_associated_witness(f.path, enclosing, witnesses):
-                    verdicts.append(DeletionHunkVerdict(
-                        file_path=f.path,
-                        old_start=hunk.old_start,
-                        deletion_class=DeletionClass.CLASS_2_REFACTORING,
-                        passed=False,
-                        status="INCONCLUSIVE",
-                        reasoning=f"missing_execution_witness:{enclosing.name}",
-                    ))
-                    continue
-
-                verdicts.append(DeletionHunkVerdict(
-                    file_path=f.path,
-                    old_start=hunk.old_start,
-                    deletion_class=DeletionClass.CLASS_2_REFACTORING,
-                    passed=True,
-                    status="PASS",
-                    reasoning=f"class_2_refactoring_verified:{enclosing.name}",
+                verdicts.append(_verify_class_2_refactoring_hunk(
+                    f.path, hunk, overlapping_entities[0], minus_lines, plus_lines, witnesses
                 ))
 
     return verdicts

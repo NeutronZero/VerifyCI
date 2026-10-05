@@ -1,3 +1,4 @@
+import asyncio
 from abc import ABC, abstractmethod
 import hashlib
 import math
@@ -166,7 +167,7 @@ class CachedEmbeddingProvider(EmbeddingProvider):
                     f" for {len(missing)} texts")
             for text, vector in zip(missing, vectors):
                 self._mem[_cache_key(text)] = [float(v) for v in vector]
-            self._save()
+            await asyncio.to_thread(self._save)
         return [list(self._mem[k]) for k in keys]
 
     def model_name(self) -> str:

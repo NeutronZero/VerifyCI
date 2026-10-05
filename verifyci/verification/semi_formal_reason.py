@@ -145,11 +145,28 @@ def _validate_configuration_diff(diff_str: str, config_files: list[str]) -> tupl
 
 
 @dataclass
+@dataclass
 class DeterministicCheck:
     checker_id: str
     passed: bool
     detail: str = ""
     is_deterministic: bool = True
+
+
+@dataclass
+class DeterministicCheckContext:
+    files: list[str]
+    mapping: dict
+    paths: list[ExecutionTrace]
+    evidence: list[FileEvidence]
+    module_only: list[str] | None = None
+    deletion_hunks: list[tuple[int, str]] | None = None
+    code_files: list[str] | None = None
+    config_valid: bool = True
+    config_err: str = ""
+    deletion_passed: bool | None = None
+    deletion_status: str = ""
+    deletion_detail: str = ""
 
 
 class SemiFormalReasoner:
@@ -161,204 +178,87 @@ class SemiFormalReasoner:
         self.model_name = model_name
         self.max_hops = max_hops
 
-    def verify(self, diff: Any, graph: Any, node_map: dict | None = None,
-               entities: list | None = None,
-               waivers: list | None = None) -> Certificate:
-        from verifyci.verification.partition import classify_path, FilePartition
+    def _handle_empty_diff(self, waivers_list: list) -> Certificate:
+        det_checks = [
+            DeterministicCheck(checker_id="diff_parsed", passed=False, detail="files=0"),
+            DeterministicCheck(checker_id="seeds_grounded", passed=False, detail="grounded=0 ungrounded=[]"),
+            DeterministicCheck(checker_id="trace_supported", passed=False, detail="paths=0"),
+            DeterministicCheck(checker_id="evidence_coverage", passed=False, detail="evidence=0"),
+            DeterministicCheck(checker_id="deletion_verification", passed=True, detail="deletion_hunks=0"),
+        ]
+        conclusion = Conclusion(result="inconclusive", reasoning="insufficient_evidence:diff_parsed,seeds_grounded,trace_supported,evidence_coverage (grounded=0 ungrounded=[])")
+        return Certificate(
+            certificate_id=str(uuid.uuid4()),
+            premises=[],
+            evidence=[],
+            execution_traces=[],
+            conclusion=conclusion,
+            confidence=0.2,
+            generated_by=self.model_name,
+            checked_by=[c.checker_id for c in det_checks],
+            verification_method="semi_formal_reasoning",
+            certificate_verified=False,
+            timestamp=time.time(),
+            witnesses=(),
+            waivers=(),
+        )
+
+    def _verify_non_code_files(
+        self,
+        diff_str: str,
+        files: list[str],
+        test_files: list[str],
+        doc_files: list[str],
+        config_files: list[str],
+        entities: list | None,
+        waivers_list: list,
+    ) -> Certificate:
         from verifyci.verification.witness import extract_execution_witnesses
 
-        diff_str = diff if isinstance(diff, str) else str(diff or "")
-        files = parse_diff_files(diff_str)
-        if not files:
+        premises = [
+            Premise(premise_id=str(uuid.uuid4()), statement=f"file_changed:{f}", source=f)
+            for f in files
+        ]
+        if doc_files and not test_files and not config_files:
             det_checks = [
-                DeterministicCheck(checker_id="diff_parsed", passed=False, detail="files=0"),
-                DeterministicCheck(checker_id="seeds_grounded", passed=False, detail="grounded=0 ungrounded=[]"),
-                DeterministicCheck(checker_id="trace_supported", passed=False, detail="paths=0"),
-                DeterministicCheck(checker_id="evidence_coverage", passed=False, detail="evidence=0"),
-                DeterministicCheck(checker_id="deletion_verification", passed=True, detail="deletion_hunks=0"),
+                DeterministicCheck(checker_id="documentation_policy", passed=True, detail=f"doc_files={len(doc_files)}"),
             ]
-            conclusion = Conclusion(result="inconclusive", reasoning="insufficient_evidence:diff_parsed,seeds_grounded,trace_supported,evidence_coverage (grounded=0 ungrounded=[])")
+            conclusion = Conclusion(result="pass", reasoning="documentation_inert_change")
             return Certificate(
                 certificate_id=str(uuid.uuid4()),
-                premises=[],
+                premises=premises,
                 evidence=[],
                 execution_traces=[],
                 conclusion=conclusion,
-                confidence=0.2,
+                confidence=1.0,
                 generated_by=self.model_name,
                 checked_by=[c.checker_id for c in det_checks],
-                verification_method="semi_formal_reasoning",
-                certificate_verified=False,
+                verification_method="fast_path_documentation",
+                certificate_verified=True,
                 timestamp=time.time(),
                 witnesses=(),
-                waivers=(),
+                waivers=tuple(waivers_list),
             )
 
-        code_files = [f for f in files if classify_path(f) == FilePartition.CODE_CORE]
-        test_files = [f for f in files if classify_path(f) == FilePartition.TEST_SUITE]
-        doc_files = [f for f in files if classify_path(f) == FilePartition.DOCUMENTATION]
-        config_files = [f for f in files if classify_path(f) == FilePartition.CONFIGURATION]
-        waivers_list = list(waivers or [])
-
-        if not code_files:
-            premises = [
-                Premise(premise_id=str(uuid.uuid4()), statement=f"file_changed:{f}", source=f)
-                for f in files
-            ]
-            if doc_files and not test_files and not config_files:
-                det_checks = [
-                    DeterministicCheck(checker_id="documentation_policy", passed=True, detail=f"doc_files={len(doc_files)}"),
-                ]
-                conclusion = Conclusion(result="pass", reasoning="documentation_inert_change")
-                return Certificate(
-                    certificate_id=str(uuid.uuid4()),
-                    premises=premises,
-                    evidence=[],
-                    execution_traces=[],
-                    conclusion=conclusion,
-                    confidence=1.0,
-                    generated_by=self.model_name,
-                    checked_by=[c.checker_id for c in det_checks],
-                    verification_method="fast_path_documentation",
-                    certificate_verified=True,
-                    timestamp=time.time(),
-                    witnesses=(),
-                    waivers=tuple(waivers_list),
-                )
-
-            if config_files and not test_files and not doc_files:
-                cfg_status, err = _validate_configuration_diff(diff_str, config_files)
-                if cfg_status == "inconclusive":
-                    det_checks = [
-                        DeterministicCheck(
-                            checker_id="diff_parsed",
-                            passed=True,
-                            detail=f"files={len(files)}",
-                        ),
-                        DeterministicCheck(
-                            checker_id="configuration_schema_validation",
-                            passed=False,
-                            detail=err or "multi_hunk_json_configuration",
-                        ),
-                    ]
-                    conclusion = Conclusion(
-                        result="inconclusive",
-                        reasoning=f"insufficient_evidence:configuration_schema_validation ({err})",
-                    )
-                    return Certificate(
-                        certificate_id=str(uuid.uuid4()),
-                        premises=premises,
-                        evidence=[],
-                        execution_traces=[],
-                        conclusion=conclusion,
-                        confidence=0.5,
-                        generated_by=self.model_name,
-                        checked_by=[c.checker_id for c in det_checks],
-                        verification_method="configuration_schema_validation",
-                        certificate_verified=False,
-                        timestamp=time.time(),
-                        witnesses=(),
-                        waivers=tuple(waivers_list),
-                    )
-                is_valid = (cfg_status == "pass")
-                det_checks = [
-                    DeterministicCheck(
-                        checker_id="configuration_schema_validation",
-                        passed=is_valid,
-                        detail=err or "syntax_valid",
-                    ),
-                ]
-                conclusion = (
-                    Conclusion(result="pass", reasoning="configuration_schema_valid")
-                    if is_valid
-                    else Conclusion(result="fail", reasoning=f"configuration_schema_invalid: {err}")
-                )
-                return Certificate(
-                    certificate_id=str(uuid.uuid4()),
-                    premises=premises,
-                    evidence=[],
-                    execution_traces=[],
-                    conclusion=conclusion,
-                    confidence=1.0 if is_valid else 0.0,
-                    generated_by=self.model_name,
-                    checked_by=[c.checker_id for c in det_checks],
-                    verification_method="configuration_schema_validation",
-                    certificate_verified=is_valid,
-                    timestamp=time.time(),
-                    witnesses=(),
-                    waivers=tuple(waivers_list),
-                )
-
-            if test_files:
-                cfg_status = "pass"
-                config_err = ""
-                if config_files:
-                    cfg_status, config_err = _validate_configuration_diff(diff_str, config_files)
-                witnesses = extract_execution_witnesses(
-                    diff=diff_str,
-                    code_files=[],
-                    test_files=test_files,
-                    entities=entities,
-                )
-                if cfg_status == "inconclusive":
-                    det_checks = [
-                        DeterministicCheck(checker_id="diff_parsed", passed=True, detail=f"files={len(files)}"),
-                        DeterministicCheck(checker_id="seeds_grounded", passed=True, detail="no_code_core_files"),
-                        DeterministicCheck(checker_id="test_suite_policy", passed=False, detail=config_err),
-                    ]
-                    conclusion = Conclusion(result="inconclusive", reasoning=f"insufficient_evidence:test_suite_policy ({config_err})")
-                    return Certificate(
-                        certificate_id=str(uuid.uuid4()),
-                        premises=premises,
-                        evidence=[],
-                        execution_traces=[],
-                        conclusion=conclusion,
-                        confidence=0.5,
-                        generated_by=self.model_name,
-                        checked_by=[c.checker_id for c in det_checks],
-                        verification_method="test_suite_policy",
-                        certificate_verified=False,
-                        timestamp=time.time(),
-                        witnesses=tuple(witnesses),
-                        waivers=tuple(waivers_list),
-                    )
-                config_ok = (cfg_status == "pass")
-                det_checks = [
-                    DeterministicCheck(checker_id="diff_parsed", passed=True, detail=f"files={len(files)}"),
-                    DeterministicCheck(checker_id="seeds_grounded", passed=True, detail="no_code_core_files"),
-                    DeterministicCheck(checker_id="test_suite_policy", passed=config_ok, detail=config_err or f"test_files={len(test_files)}"),
-                ]
-                conclusion = (
-                    Conclusion(result="pass", reasoning="test_suite_only_change")
-                    if config_ok
-                    else Conclusion(result="fail", reasoning=f"configuration_schema_invalid: {config_err}")
-                )
-                return Certificate(
-                    certificate_id=str(uuid.uuid4()),
-                    premises=premises,
-                    evidence=[],
-                    execution_traces=[],
-                    conclusion=conclusion,
-                    confidence=1.0 if config_ok else 0.0,
-                    generated_by=self.model_name,
-                    checked_by=[c.checker_id for c in det_checks],
-                    verification_method="test_suite_policy",
-                    certificate_verified=config_ok,
-                    timestamp=time.time(),
-                    witnesses=tuple(witnesses),
-                    waivers=tuple(waivers_list),
-                )
-
-            cfg_status = "pass"
-            config_err = ""
-            if config_files:
-                cfg_status, config_err = _validate_configuration_diff(diff_str, config_files)
+        if config_files and not test_files and not doc_files:
+            cfg_status, err = _validate_configuration_diff(diff_str, config_files)
             if cfg_status == "inconclusive":
                 det_checks = [
-                    DeterministicCheck(checker_id="diff_parsed", passed=True, detail=f"files={len(files)}"),
-                    DeterministicCheck(checker_id="non_code_policy", passed=False, detail=config_err),
+                    DeterministicCheck(
+                        checker_id="diff_parsed",
+                        passed=True,
+                        detail=f"files={len(files)}",
+                    ),
+                    DeterministicCheck(
+                        checker_id="configuration_schema_validation",
+                        passed=False,
+                        detail=err or "multi_hunk_json_configuration",
+                    ),
                 ]
-                conclusion = Conclusion(result="inconclusive", reasoning=f"insufficient_evidence:non_code_policy ({config_err})")
+                conclusion = Conclusion(
+                    result="inconclusive",
+                    reasoning=f"insufficient_evidence:configuration_schema_validation ({err})",
+                )
                 return Certificate(
                     certificate_id=str(uuid.uuid4()),
                     premises=premises,
@@ -368,19 +268,82 @@ class SemiFormalReasoner:
                     confidence=0.5,
                     generated_by=self.model_name,
                     checked_by=[c.checker_id for c in det_checks],
-                    verification_method="non_code_policy",
+                    verification_method="configuration_schema_validation",
                     certificate_verified=False,
                     timestamp=time.time(),
                     witnesses=(),
                     waivers=tuple(waivers_list),
                 )
+            is_valid = (cfg_status == "pass")
+            det_checks = [
+                DeterministicCheck(
+                    checker_id="configuration_schema_validation",
+                    passed=is_valid,
+                    detail=err or "syntax_valid",
+                ),
+            ]
+            conclusion = (
+                Conclusion(result="pass", reasoning="configuration_schema_valid")
+                if is_valid
+                else Conclusion(result="fail", reasoning=f"configuration_schema_invalid: {err}")
+            )
+            return Certificate(
+                certificate_id=str(uuid.uuid4()),
+                premises=premises,
+                evidence=[],
+                execution_traces=[],
+                conclusion=conclusion,
+                confidence=1.0 if is_valid else 0.0,
+                generated_by=self.model_name,
+                checked_by=[c.checker_id for c in det_checks],
+                verification_method="configuration_schema_validation",
+                certificate_verified=is_valid,
+                timestamp=time.time(),
+                witnesses=(),
+                waivers=tuple(waivers_list),
+            )
+
+        if test_files:
+            cfg_status = "pass"
+            config_err = ""
+            if config_files:
+                cfg_status, config_err = _validate_configuration_diff(diff_str, config_files)
+            witnesses = extract_execution_witnesses(
+                diff=diff_str,
+                code_files=[],
+                test_files=test_files,
+                entities=entities,
+            )
+            if cfg_status == "inconclusive":
+                det_checks = [
+                    DeterministicCheck(checker_id="diff_parsed", passed=True, detail=f"files={len(files)}"),
+                    DeterministicCheck(checker_id="seeds_grounded", passed=True, detail="no_code_core_files"),
+                    DeterministicCheck(checker_id="test_suite_policy", passed=False, detail=config_err),
+                ]
+                conclusion = Conclusion(result="inconclusive", reasoning=f"insufficient_evidence:test_suite_policy ({config_err})")
+                return Certificate(
+                    certificate_id=str(uuid.uuid4()),
+                    premises=premises,
+                    evidence=[],
+                    execution_traces=[],
+                    conclusion=conclusion,
+                    confidence=0.5,
+                    generated_by=self.model_name,
+                    checked_by=[c.checker_id for c in det_checks],
+                    verification_method="test_suite_policy",
+                    certificate_verified=False,
+                    timestamp=time.time(),
+                    witnesses=tuple(witnesses),
+                    waivers=tuple(waivers_list),
+                )
             config_ok = (cfg_status == "pass")
             det_checks = [
                 DeterministicCheck(checker_id="diff_parsed", passed=True, detail=f"files={len(files)}"),
-                DeterministicCheck(checker_id="non_code_policy", passed=config_ok, detail=config_err or "non_code_files"),
+                DeterministicCheck(checker_id="seeds_grounded", passed=True, detail="no_code_core_files"),
+                DeterministicCheck(checker_id="test_suite_policy", passed=config_ok, detail=config_err or f"test_files={len(test_files)}"),
             ]
             conclusion = (
-                Conclusion(result="pass", reasoning="non_code_change")
+                Conclusion(result="pass", reasoning="test_suite_only_change")
                 if config_ok
                 else Conclusion(result="fail", reasoning=f"configuration_schema_invalid: {config_err}")
             )
@@ -393,11 +356,85 @@ class SemiFormalReasoner:
                 confidence=1.0 if config_ok else 0.0,
                 generated_by=self.model_name,
                 checked_by=[c.checker_id for c in det_checks],
-                verification_method="non_code_policy",
+                verification_method="test_suite_policy",
                 certificate_verified=config_ok,
+                timestamp=time.time(),
+                witnesses=tuple(witnesses),
+                waivers=tuple(waivers_list),
+            )
+
+        cfg_status = "pass"
+        config_err = ""
+        if config_files:
+            cfg_status, config_err = _validate_configuration_diff(diff_str, config_files)
+        if cfg_status == "inconclusive":
+            det_checks = [
+                DeterministicCheck(checker_id="diff_parsed", passed=True, detail=f"files={len(files)}"),
+                DeterministicCheck(checker_id="non_code_policy", passed=False, detail=config_err),
+            ]
+            conclusion = Conclusion(result="inconclusive", reasoning=f"insufficient_evidence:non_code_policy ({config_err})")
+            return Certificate(
+                certificate_id=str(uuid.uuid4()),
+                premises=premises,
+                evidence=[],
+                execution_traces=[],
+                conclusion=conclusion,
+                confidence=0.5,
+                generated_by=self.model_name,
+                checked_by=[c.checker_id for c in det_checks],
+                verification_method="non_code_policy",
+                certificate_verified=False,
                 timestamp=time.time(),
                 witnesses=(),
                 waivers=tuple(waivers_list),
+            )
+        config_ok = (cfg_status == "pass")
+        det_checks = [
+            DeterministicCheck(checker_id="diff_parsed", passed=True, detail=f"files={len(files)}"),
+            DeterministicCheck(checker_id="non_code_policy", passed=config_ok, detail=config_err or "non_code_files"),
+        ]
+        conclusion = (
+            Conclusion(result="pass", reasoning="non_code_change")
+            if config_ok
+            else Conclusion(result="fail", reasoning=f"configuration_schema_invalid: {config_err}")
+        )
+        return Certificate(
+            certificate_id=str(uuid.uuid4()),
+            premises=premises,
+            evidence=[],
+            execution_traces=[],
+            conclusion=conclusion,
+            confidence=1.0 if config_ok else 0.0,
+            generated_by=self.model_name,
+            checked_by=[c.checker_id for c in det_checks],
+            verification_method="non_code_policy",
+            certificate_verified=config_ok,
+            timestamp=time.time(),
+            witnesses=(),
+            waivers=tuple(waivers_list),
+        )
+
+    def verify(self, diff: Any, graph: Any, node_map: dict | None = None,
+               entities: list | None = None,
+               waivers: list | None = None) -> Certificate:
+        from verifyci.verification.partition import classify_path, FilePartition
+        from verifyci.verification.witness import extract_execution_witnesses
+
+        diff_str = diff if isinstance(diff, str) else str(diff or "")
+        files = parse_diff_files(diff_str)
+        waivers_list = list(waivers or [])
+
+        if not files:
+            return self._handle_empty_diff(waivers_list)
+
+        code_files = [f for f in files if classify_path(f) == FilePartition.CODE_CORE]
+        test_files = [f for f in files if classify_path(f) == FilePartition.TEST_SUITE]
+        doc_files = [f for f in files if classify_path(f) == FilePartition.DOCUMENTATION]
+        config_files = [f for f in files if classify_path(f) == FilePartition.CONFIGURATION]
+
+        if not code_files:
+            return self._verify_non_code_files(
+                diff_str, files, test_files, doc_files, config_files, entities, waivers_list
             )
 
         code_deletion_hunks = _find_code_deletion_hunks(diff_str, set(code_files))
@@ -455,7 +492,7 @@ class SemiFormalReasoner:
         _chunks = [SourceChunk(chunk_id=e.file_path, file_path=e.file_path, line_start=e.line_start, line_end=e.line_end, content=e.snippet, source_hash=e.source_hash) for e in evidence]
         _pack = EvidencePack(query='', entities=list(entities or []), relationships=[], source_chunks=_chunks, provenance=[], scores={}, retrieval_methods=[], retrieval_timestamp=0.0, graph_revision='')
         _covered = verify_evidence_coverage(_pack)
-        det_checks = self._run_deterministic_checks(
+        chk_ctx = DeterministicCheckContext(
             files=files,
             mapping=mapping,
             paths=paths,
@@ -469,6 +506,7 @@ class SemiFormalReasoner:
             deletion_status=del_status,
             deletion_detail=del_reason,
         )
+        det_checks = self._run_deterministic_checks(context=chk_ctx)
         conclusion = self._derive_conclusion(paths, evidence, det_checks)
         verified = (
             bool(det_checks)
@@ -548,18 +586,54 @@ class SemiFormalReasoner:
             ))
         return evidence
 
-    def _run_deterministic_checks(self, files: list[str], mapping: dict,
-                                   paths: list[ExecutionTrace],
-                                   evidence: list[FileEvidence],
-                                   module_only: list[str] | None = None,
-                                   deletion_hunks: list[tuple[int, str]] | None = None,
-                                   code_files: list[str] | None = None,
-                                   config_valid: bool = True,
-                                   config_err: str = "",
-                                   deletion_passed: bool | None = None,
-                                   deletion_status: str = "",
-                                   deletion_detail: str = "",
-                                   ) -> list[DeterministicCheck]:
+    def _run_deterministic_checks(
+        self,
+        files: list[str] | DeterministicCheckContext | None = None,
+        mapping: dict | None = None,
+        paths: list[ExecutionTrace] | None = None,
+        evidence: list[FileEvidence] | None = None,
+        module_only: list[str] | None = None,
+        deletion_hunks: list[tuple[int, str]] | None = None,
+        code_files: list[str] | None = None,
+        config_valid: bool = True,
+        config_err: str = "",
+        deletion_passed: bool | None = None,
+        deletion_status: str = "",
+        deletion_detail: str = "",
+        *,
+        context: DeterministicCheckContext | None = None,
+    ) -> list[DeterministicCheck]:
+        if context is not None:
+            ctx = context
+        elif isinstance(files, DeterministicCheckContext):
+            ctx = files
+        else:
+            ctx = DeterministicCheckContext(
+                files=files or [],
+                mapping=mapping or {},
+                paths=paths or [],
+                evidence=evidence or [],
+                module_only=module_only,
+                deletion_hunks=deletion_hunks,
+                code_files=code_files,
+                config_valid=config_valid,
+                config_err=config_err,
+                deletion_passed=deletion_passed,
+                deletion_status=deletion_status,
+                deletion_detail=deletion_detail,
+            )
+        files = ctx.files
+        mapping = ctx.mapping
+        paths = ctx.paths
+        evidence = ctx.evidence
+        module_only = ctx.module_only
+        deletion_hunks = ctx.deletion_hunks
+        code_files = ctx.code_files
+        config_valid = ctx.config_valid
+        config_err = ctx.config_err
+        deletion_passed = ctx.deletion_passed
+        deletion_status = ctx.deletion_status
+        deletion_detail = ctx.deletion_detail
         if code_files is None:
             from verifyci.verification.partition import classify_path, FilePartition
             code_files = [f for f in files if classify_path(f) == FilePartition.CODE_CORE]

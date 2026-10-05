@@ -49,64 +49,91 @@ def _describe_graph(graph, node_map: dict, limit: int = 5000) -> tuple:
     return bm25, texts
 
 
-def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
-                      dense_provider: Any = None, ledger: Any = None,
-                      entities: list | None = None,
-                      rw_store: Any = None) -> MCPServer:
-    from verifyci.observability.tracing import start_agent_span
-    from verifyci.orchestration.scheduler import AsyncDAGScheduler
+class MCPServerHandlers:
+    def __init__(
+        self,
+        graph=None,
+        store=None,
+        node_map: dict | None = None,
+        dense_provider: Any = None,
+        ledger: Any = None,
+        entities: list | None = None,
+        rw_store: Any = None,
+    ):
+        from verifyci.orchestration.scheduler import AsyncDAGScheduler
+        from verifyci.verification.config import load_repo_invariants, load_repo_waivers
 
-    server = MCPServer()
-    scheduler = AsyncDAGScheduler(ledger=ledger)
-    if entities is None:
-        from verifyci.interface.commands.graph_loader import payload_entities
-        entities = payload_entities(graph)
+        self.graph = graph
+        self.store = store
+        self.node_map = node_map or {}
+        self.dense_provider = dense_provider
+        self.ledger = ledger
+        self.rw_store = rw_store
+        self.scheduler = AsyncDAGScheduler(ledger=ledger)
 
-    # Search-index reuse: the server is long-lived and loads the graph
-    # once, but code_search used to rebuild the whole BM25 index (and its
-    # texts map) on every call. Cache keyed on a structural fingerprint
-    # of the graph; any node/edge change busts it, so a rebuilt graph is
-    # never served stale. A graph that exposes no counts is always
-    # rebuilt (no cheap staleness guard available).
-    _index_cache: dict[str, Any] = {"key": None, "bm25": None, "texts": None}
+        if entities is None:
+            from verifyci.interface.commands.graph_loader import payload_entities
+            entities = payload_entities(graph)
+        self.entities = entities
 
-    def _index_fingerprint():
+        self._index_cache: dict[str, Any] = {"key": None, "bm25": None, "texts": None}
+
+        self.by_revision_id = {}
+        for _e in self.entities or []:
+            _rid = getattr(_e, "revision_entity_id", None)
+            if _rid and _rid not in self.by_revision_id:
+                self.by_revision_id[_rid] = _e
+
+        self._repo_invariants_err: str | None = None
         try:
-            return (id(graph), int(graph.num_nodes()), int(graph.num_edges()))
+            self._repo_invariants = load_repo_invariants(getattr(store, "db_path", None))
+            self._repo_waivers = load_repo_waivers(getattr(store, "db_path", None))
+        except ValueError:
+            self._repo_invariants = []
+            self._repo_waivers = []
+            self._repo_invariants_err = "invalid_invariants_config"
+
+    def _index_fingerprint(self):
+        try:
+            return (id(self.graph), int(self.graph.num_nodes()), int(self.graph.num_edges()))
         except Exception:  # noqa: BLE001 - adapter without counts
             return None
 
-    def _search_index():
-        key = _index_fingerprint()
+    def _search_index(self):
+        key = self._index_fingerprint()
         if key is None:
-            return _describe_graph(graph, node_map or {})
-        if _index_cache["key"] == key and _index_cache["bm25"] is not None:
-            return _index_cache["bm25"], _index_cache["texts"]
-        bm25, texts = _describe_graph(graph, node_map or {})
-        _index_cache.update({"key": key, "bm25": bm25, "texts": texts})
+            return _describe_graph(self.graph, self.node_map)
+        if self._index_cache["key"] == key and self._index_cache["bm25"] is not None:
+            return self._index_cache["bm25"], self._index_cache["texts"]
+        bm25, texts = _describe_graph(self.graph, self.node_map)
+        self._index_cache.update({"key": key, "bm25": bm25, "texts": texts})
         return bm25, texts
 
-    # Revision-id index over the loaded revision: lets search hits carry
-    # file/name/lines and lets definition/query resolve a revision id
-    # directly, so an agent can chain search -> definition without
-    # re-deriving a logical id or symbol name.
-    by_revision_id = {}
-    for _e in entities or []:
-        _rid = getattr(_e, "revision_entity_id", None)
-        if _rid and _rid not in by_revision_id:
-            by_revision_id[_rid] = _e
-    from verifyci.verification.config import load_repo_invariants, load_repo_waivers
-    _repo_invariants_err: str | None = None
-    try:
-        _repo_invariants = load_repo_invariants(getattr(store, "db_path", None))
-        _repo_waivers = load_repo_waivers(getattr(store, "db_path", None))
-    except ValueError:
-        _repo_invariants = []
-        _repo_waivers = []
-        _repo_invariants_err = "invalid_invariants_config"
+    def _enriched_hit(self, hit: Any) -> dict:
+        entity = self.by_revision_id.get(hit.id)
+        return {"id": hit.id, "score": hit.score,
+                "name": getattr(entity, "name", None),
+                "file_path": getattr(entity, "file_path", None),
+                "line_start": getattr(entity, "line_start", None),
+                "line_end": getattr(entity, "line_end", None)}
 
-    async def code_search(query: str, k: int = 10, conversation_id: str = "",
-                        rerank: bool = False) -> dict:
+    def _resolve_symbol(self, symbol: str, asOf: float | None = None):
+        # Revision id first (what search returns), then logical id,
+        # then name — in that order, so chained lookups never miss.
+        # The revision-id shortcut is timeless: with asOf given it is
+        # skipped so the time filter (not the loaded revision) decides.
+        if asOf is None and symbol in self.by_revision_id:
+            return self.by_revision_id[symbol]
+        if self.store is None:
+            return None
+        entity = self.store.get_entity_by_logical(symbol, asOf=asOf)
+        if entity is None and hasattr(self.store, "get_entity_by_name"):
+            entity = self.store.get_entity_by_name(symbol, as_of=asOf)
+        return entity
+
+    async def code_search(self, query: str, k: int = 10, conversation_id: str = "",
+                          rerank: bool = False) -> dict:
+        from verifyci.observability.tracing import start_agent_span
         from verifyci.retrieval.dense import SearchResult
         from verifyci.retrieval.fusion import rrf_fusion_with_scores
         from verifyci.retrieval.graph_retriever import GraphRetriever
@@ -134,7 +161,7 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
 
         with start_agent_span("code.search", conversation_id, "code.search"):
             k = max(1, min(int(k or 10), MAX_K))
-            if graph is None:
+            if self.graph is None:
                 _qstatus = "no_graph_loaded"
                 _r = {"results": [], "query": query, "methods": [], "error": "no_graph_loaded"}
                 _emit_log(_r)
@@ -142,16 +169,13 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
             from verifyci.retrieval.provider import default_dense_provider
             import os as _os
             cache_dir = None
-            if store is not None and getattr(store, "db_path", None):
-                cache_dir = _os.path.dirname(_os.path.abspath(store.db_path))
-            provider = dense_provider or default_dense_provider(cache_dir)
-            bm25, texts = _search_index()
+            if self.store is not None and getattr(self.store, "db_path", None):
+                cache_dir = _os.path.dirname(_os.path.abspath(self.store.db_path))
+            provider = self.dense_provider or default_dense_provider(cache_dir)
+            bm25, texts = self._search_index()
             sparse_hits = bm25.search(query, k=k)
             seeds = [h.id for h in sparse_hits[:3]]
-            graph_hits = GraphRetriever(graph, node_map or {}).retrieve(seeds)
-            # One shared universe for both channels: the old code embedded
-            # only the first 500 texts while BM25 indexed thousands, so the
-            # two channels ranked disjoint document sets.
+            graph_hits = GraphRetriever(self.graph, self.node_map).retrieve(seeds)
             universe = list(texts)[:500]
             try:
                 q_emb = (await provider.embed([query]))[0]
@@ -164,9 +188,6 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                 dense_hits = dense_hits[:k]
                 dense_ok = True
             except Exception:  # noqa: BLE001
-                # Dense is down: fuse sparse+graph only and SAY SO. The old
-                # code substituted a copy of the sparse channel, silently
-                # doubling every fused score while reporting a full fusion.
                 dense_hits = []
                 dense_ok = False
             fused = rrf_fusion_with_scores(dense_hits, sparse_hits, graph_hits)
@@ -179,47 +200,25 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                 methods = methods + [f"rerank:{reranker.backend}"]
             else:
                 ranked = [SearchResult(id=i, score=s, metadata={}) for i, s in fused[:k]]
-            out = {"results": [_enriched_hit(r) for r in ranked],
+            out = {"results": [self._enriched_hit(r) for r in ranked],
                    "query": query, "methods": methods}
             _emit_log(out)
             return out
 
-    def _enriched_hit(hit: Any) -> dict:
-        entity = by_revision_id.get(hit.id)
-        return {"id": hit.id, "score": hit.score,
-                "name": getattr(entity, "name", None),
-                "file_path": getattr(entity, "file_path", None),
-                "line_start": getattr(entity, "line_start", None),
-                "line_end": getattr(entity, "line_end", None)}
-
-    def _resolve_symbol(symbol: str, asOf: float | None = None):
-        # Revision id first (what search returns), then logical id,
-        # then name — in that order, so chained lookups never miss.
-        # The revision-id shortcut is timeless: with asOf given it is
-        # skipped so the time filter (not the loaded revision) decides.
-        if asOf is None and symbol in by_revision_id:
-            return by_revision_id[symbol]
-        if store is None:
-            return None
-        entity = store.get_entity_by_logical(symbol, asOf=asOf)
-        if entity is None and hasattr(store, "get_entity_by_name"):
-            entity = store.get_entity_by_name(symbol, as_of=asOf)
-        return entity
-
-    async def code_definition(symbol: str) -> dict:
-        if store is None and symbol not in by_revision_id:
+    async def code_definition(self, symbol: str) -> dict:
+        if self.store is None and symbol not in self.by_revision_id:
             return {"symbol": symbol, "definition": None, "error": "no_store_loaded"}
-        entity = _resolve_symbol(symbol)
+        entity = self._resolve_symbol(symbol)
         if entity:
             return {"symbol": symbol, "definition": {"file_path": entity.file_path,
                     "line_start": entity.line_start, "line_end": entity.line_end,
                     "revision_entity_id": getattr(entity, "revision_entity_id", None)}}
         return {"symbol": symbol, "definition": None}
 
-    async def graph_query(query: str, asOf: float | None = None) -> dict:
-        if store is None and query not in by_revision_id:
+    async def graph_query(self, query: str, asOf: float | None = None) -> dict:
+        if self.store is None and query not in self.by_revision_id:
             return {"query": query, "asOf": asOf, "results": [], "error": "no_store_loaded"}
-        entity = _resolve_symbol(query, asOf=asOf)
+        entity = self._resolve_symbol(query, asOf=asOf)
         if entity:
             return {"query": query, "asOf": asOf,
                     "results": [{"name": entity.name, "file_path": entity.file_path,
@@ -227,8 +226,9 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                                      entity, "revision_entity_id", None)}]}
         return {"query": query, "asOf": asOf, "results": []}
 
-    async def verify_diff(diff: str, revision_id: str = "", conversation_id: str = "") -> dict:
+    async def verify_diff(self, diff: str, revision_id: str = "", conversation_id: str = "") -> dict:
         from verifyci.contracts.verification_ir import VerificationPolicy
+        from verifyci.observability.tracing import start_agent_span
         from verifyci.verification.blast_radius import blast_radius_check
         from verifyci.verification.diffmap import parse_diff_files, seed_entities_for_diff
         from verifyci.verification.intent_align import evaluate_invariants
@@ -240,7 +240,7 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
         from verifyci.verification.verification_ir import build_semi_check, build_verification_report
 
         with start_agent_span("verify.diff", conversation_id, "verify.diff"):
-            if _repo_invariants_err:
+            if self._repo_invariants_err:
                 return {
                     "revision_id": revision_id,
                     "status": "FAIL",
@@ -260,20 +260,20 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                     "changed_entities": [],
                 }
             reasoner = SemiFormalReasoner()
-            cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map,
-                                   entities=entities or None, waivers=_repo_waivers)
+            cert = reasoner.verify(diff=diff, graph=self.graph, node_map=self.node_map,
+                                   entities=self.entities or None, waivers=self._repo_waivers)
             files = parse_diff_files(diff)
-            checks = [build_semi_check(cert, files, entities or [], diff=diff)]
-            mapping = seed_entities_for_diff(files, entities or [], diff)
+            checks = [build_semi_check(cert, files, self.entities or [], diff=diff)]
+            mapping = seed_entities_for_diff(files, self.entities or [], diff)
             changed = sorted({eid for eids in mapping.values() for eid in eids})
             blast, blast_check = blast_radius_check(
-                graph=graph, changed_entities=changed, test_entities=set(), node_map=node_map)
+                graph=self.graph, changed_entities=changed, test_entities=set(), node_map=self.node_map)
             checks.append(blast_check)
-            checks.append(removal_provenance_check(diff, entities or []))
+            checks.append(removal_provenance_check(diff, self.entities or []))
             checks.append(return_statement_check(diff))
             checks.append(call_target_check(diff))
             inv_checks, _metrics = evaluate_invariants(
-                diff, _repo_invariants, graph, evidence=list(cert.evidence))
+                diff, self._repo_invariants, self.graph, evidence=list(cert.evidence))
             checks.extend(inv_checks)
             report = build_verification_report(task_id="mcp_verify", policy_id="default",
                                                checks=checks, blast_radius=blast)
@@ -281,13 +281,11 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                                         on_inconclusive="human_review", on_human_review="block",
                                         require_deterministic_checker=True)
             decision = PolicyEvaluator().evaluate(report, policy)
-            # Report the revision actually grounding the check (the
-            # loaded entities'), not just the requested one.
             used_revision = revision_id
-            if entities:
-                used_revision = (getattr(entities[0], "revision_id", "")
+            if self.entities:
+                used_revision = (getattr(self.entities[0], "revision_id", "")
                                  or revision_id)
-            if store is None and graph is None and not entities and decision.status == "INCONCLUSIVE":
+            if self.store is None and self.graph is None and not self.entities and decision.status == "INCONCLUSIVE":
                 return {"revision_id": used_revision, "status": "INFRA_ERROR",
                         "report_id": report.report_id,
                         "error": "no_store_loaded",
@@ -297,13 +295,14 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                     "report_id": report.report_id, "rationale": decision.rationale,
                     "files": files, "changed_entities": changed}
 
-    async def task_run(task: str, conversation_id: str = "", diff: str = "") -> dict:
+    async def task_run(self, task: str, conversation_id: str = "", diff: str = "") -> dict:
+        from verifyci.observability.tracing import start_agent_span
         from verifyci.orchestration.compiler.validation import validate_task_ir
         from verifyci.orchestration.intent import build_intent_package
         from verifyci.orchestration.planner import Planner
 
         with start_agent_span("task.run", conversation_id, "task.run"):
-            if _repo_invariants_err:
+            if self._repo_invariants_err:
                 return {"task": task, "task_id": None, "status": "FAILED", "steps": 0, "decision": None, "error": "invalid_invariants_config", "ledger_head": None}
             if len(diff) > MAX_TASK_DIFF_CHARS:
                 return {"task": task, "task_id": None, "status": "FAILED", "steps": 0, "decision": None, "error": "diff_too_large", "ledger_head": None}
@@ -317,46 +316,60 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                         "ledger_head": None}
             from verifyci.interface.commands.run import _dedupe_invariants
             context = {
-                "graph": graph, "node_map": node_map, "entities": entities,
-                "invariants": _dedupe_invariants(intent.invariants + _repo_invariants),
-                "waivers": list(_repo_waivers),
-                "diff": diff, "store": rw_store or store,
+                "graph": self.graph, "node_map": self.node_map, "entities": self.entities,
+                "invariants": _dedupe_invariants(intent.invariants + self._repo_invariants),
+                "waivers": list(self._repo_waivers),
+                "diff": diff, "store": self.rw_store or self.store,
             }
-            task_id = await scheduler.submit(task_ir, conversation_id=conversation_id,
-                                             context=context)
+            task_id = await self.scheduler.submit(task_ir, conversation_id=conversation_id,
+                                                  context=context)
         for _ in range(300):
-            status = await scheduler.status(task_id)
+            status = await self.scheduler.status(task_id)
             if status in TERMINAL_STATUSES:
-                decision = scheduler.decision(task_id)
-                head = scheduler.ledger_head(task_id)
+                decision = self.scheduler.decision(task_id)
+                head = self.scheduler.ledger_head(task_id)
                 from verifyci.interface.commands.run import _audit_notes
                 result = {"task": task, "task_id": task_id, "status": status.value,
                           "steps": len(task_ir.steps),
                           "decision": decision.status if decision else None,
                           "ledger_head": head}
-                result.update(_audit_notes(scheduler._tasks.get(task_id, {})))
+                result.update(_audit_notes(self.scheduler._tasks.get(task_id, {})))
                 return result
             await asyncio.sleep(0.1)
-        await scheduler.cancel(task_id)
+        await self.scheduler.cancel(task_id)
         from verifyci.interface.commands.run import _audit_notes
         result = {"task": task, "task_id": task_id, "status": "TIMEOUT",
-                  "ledger_head": scheduler.ledger_head(task_id)}
-        result.update(_audit_notes(scheduler._tasks.get(task_id, {})))
+                  "ledger_head": self.scheduler.ledger_head(task_id)}
+        result.update(_audit_notes(self.scheduler._tasks.get(task_id, {})))
         return result
 
-    async def task_status(task_id: str) -> dict:
-        status = await scheduler.status(task_id)
-        decision = scheduler.decision(task_id)
+    async def task_status(self, task_id: str) -> dict:
+        status = await self.scheduler.status(task_id)
+        decision = self.scheduler.decision(task_id)
         return {"task_id": task_id, "status": status.value,
                 "decision": decision.status if decision else None,
-                "ledger_head": scheduler.ledger_head(task_id)}
+                "ledger_head": self.scheduler.ledger_head(task_id)}
 
-    server.register_tool("code.search", code_search, "Hybrid BM25 + graph retrieval with RRF + rerank")
-    server.register_tool("code.definition", code_definition, "Symbol lookup")
-    server.register_tool("graph.query", graph_query, "Bitemporal graph lookup with asOf")
-    server.register_tool("verify.diff", verify_diff, "Semi-formal + blast radius verification")
-    server.register_tool("task.run", task_run, "Planner → Compiler → Scheduler")
-    server.register_tool("task.status", task_status, "Scheduler-backed DAG execution status")
 
+def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
+                      dense_provider: Any = None, ledger: Any = None,
+                      entities: list | None = None,
+                      rw_store: Any = None) -> MCPServer:
+    handlers = MCPServerHandlers(
+        graph=graph,
+        store=store,
+        node_map=node_map,
+        dense_provider=dense_provider,
+        ledger=ledger,
+        entities=entities,
+        rw_store=rw_store,
+    )
+    server = MCPServer()
+    server.register_tool("code.search", handlers.code_search, "Hybrid BM25 + graph retrieval with RRF + rerank")
+    server.register_tool("code.definition", handlers.code_definition, "Symbol lookup")
+    server.register_tool("graph.query", handlers.graph_query, "Bitemporal graph lookup with asOf")
+    server.register_tool("verify.diff", handlers.verify_diff, "Semi-formal + blast radius verification")
+    server.register_tool("task.run", handlers.task_run, "Planner → Compiler → Scheduler")
+    server.register_tool("task.status", handlers.task_status, "Scheduler-backed DAG execution status")
     return server
 
