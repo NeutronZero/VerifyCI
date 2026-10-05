@@ -1,0 +1,19 @@
+{
+  "experiment": "CAP-001 weighted-RRF revision (NOT a frozen baseline; does not feed the evidence bundle)",
+  "frozen_reference": {
+    "corpus_sha256": "cac3aa9750f2e6b8b73fa4d8599df02429d97f32e35ae06fc8265b3dd8006a44",
+    "delta_ndcg": 0.03838010117237811,
+    "note": "frozen benchmarks/beir/results.json untouched; this revision stands beside it"
+  },
+  "change": "RRF channel weights w_dense=1.0, w_sparse=3.0 (production rrf_fusion uses equal weights, rrf_k=60)",
+  "grid_searched": "rrf_k in {1,5,10,20,30,60,120} x sparse_k in {10,20,60}; BM25 k1/b variants; weight variants; all offline vs frozen cache, exact production tiebreak semantics, baseline replicated to 1e-6 before trusting variants",
+  "result": {
+    "dense_ndcg": 0.6219642456212527,
+    "hybrid_ndcg": 0.6729020252828527,
+    "delta_ndcg": 0.05093777966159996,
+    "queries": 62,
+    "margin_over_gate": 0.00093777966159996
+  },
+  "method": "TEMP script cap001_grid.py (outside repo); deterministic given frozen cache; no new embeddings; production code unmodified",
+  "verdict": "NOT PROMOTED — see EXPERIMENT.md"
+}
