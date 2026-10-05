@@ -257,3 +257,12 @@ class TestPolyglotClassification:
         for f in config_files:
             assert classify_path(f) == FilePartition.CONFIGURATION, f"Failed for {f}"
 
+    def test_nested_doc_path_classification(self):
+        docs = [
+            "docs/api/index.md",
+            "docs/guide/architecture.rst",
+            "CONTRIBUTING.md",
+        ]
+        for f in docs:
+            assert classify_path(f) == FilePartition.DOCUMENTATION, f"Failed for {f}"
+
