@@ -18,14 +18,17 @@ import pytest
 HERE = Path(__file__).resolve().parent
 CORPUS = Path(HERE, "..", "..", "benchmarks", "blast_corpus")
 
-# Recorded first frozen measurement (2026-10-01): coverage 6/7 = 0.857
-# < 0.90 (NOT MET); the only miss is the pre-labeled tail-insertion gap;
-# one precision artifact (B5 context bleed), disclosed not tuned.
+# Recorded measurement after reviewed CAP-003 re-baseline: 9/9 recall 1.0.
+# Historical v1 baseline (2026-10-01) was coverage 6/7 = 0.8571 < 0.90 with
+# the B6 tail-insertion gap labeled known_gap; preserved in git history and
+# cap003_tail_seeding/config.json frozen_reference. Promotion reviewed:
+# modes B6/B7 known_gap->seeded per frozen MODE_PROTOCOL (stdlib geometry),
+# expected sets unchanged (topology-derived, match v1 exactly).
 RECORDED = {
-    "coverage_all": 0.8571,
+    "coverage_all": 1.0,
     "coverage_seeded_only": 1.0,
     "contract_fn_ids": [],
-    "known_gap_miss_ids": ["B6-hub-tail-insert"],
+    "known_gap_miss_ids": [],
     "total_fp": 1,
 }
 
@@ -58,9 +61,11 @@ def test_corpus_shape_is_frozen():
     assert len(cases) == 9
     assert len({c["id"] for c in cases}) == 9
     # required coverage dimensions: direct, transitive, multi-path, zero,
-    # boundary/def-line, tail insertion, cross-file+method
+    # boundary/def-line, tail insertion, cross-file+method.
+    # CAP-003 reviewed re-baseline: all cases seeded (B6/B7 tail-insertion
+    # hunks attribute to enclosing functions per frozen MODE_PROTOCOL).
     modes = {c["mode"] for c in cases}
-    assert "known_gap" in modes and "seeded" in modes
+    assert modes == {"seeded"}, modes
     seeds = {c["seed"] for c in cases}
     assert {"hub", "leaf", "far", "isolated", "handle", "mid2"} <= seeds
     empty = [c for c in cases if not c["expected_impacted"]]
@@ -82,9 +87,10 @@ def test_per_case_frozen_expectations():
         assert rows[cid]["FN"] == 0, cid
     # hub exposure includes cross-file remote and method handle
     assert {"remote", "handle"} <= set(rows["B1-hub-midline"]["detected"])
-    # the pre-labeled gap reproduced exactly: seeding found nothing
+    # CAP-003: the tail-insertion gap is closed — B6 seeds hub and detects
+    # all 6 dependents (was: n_changed 0, risk 0.0, FN 6 pre-repair)
     b6 = rows["B6-hub-tail-insert"]
-    assert b6["n_changed_entities"] == 0 and b6["risk"] == 0.0 and b6["FN"] == 6
+    assert b6["recall"] == 1.0 and b6["FN"] == 0 and b6["TP"] == 6, b6
     # B5 precision artifact (context-bleed second-degree seeding re-adds
     # the seed) is the only FP; disclosed, not retuned
     assert rows["B5-hub-defline"]["FP"] == 1
@@ -100,12 +106,11 @@ def test_zero_impact_and_isolation_hold():
 @pytest.mark.skipif(os.environ.get("VERIFYCI_BLAST_RERUN") != "1",
                     reason="full re-measure; set VERIFYCI_BLAST_RERUN=1")
 def test_measurement_reproduces_recorded_report():
-    """Re-measure on the CURRENT code: it must reproduce the POSTFIX
-    record exactly (the A2 insertion-anchor repair closes the labeled
-    B6 gap; seeded cases and the disclosed B5 FP stay stable). The
-    historical RECORDED baseline stays in results.json untouched —
-    evidence tracking, not expectation retuning: corpus, cases hash,
-    and expected sets are unchanged."""
+    """Re-measure on the CURRENT code: it must reproduce the recorded
+    CAP-003 report exactly (9/9 recall 1.0; B5 FP stable at 1).
+    Historical v1 baseline (0.8571) lives in git history + cap003 config;
+    the recorded file now holds the reviewed re-baseline — evidence
+    tracking, not expectation retuning: expected sets match v1 exactly."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("blast_measure", CORPUS / "measure.py")
     measure = importlib.util.module_from_spec(spec)
