@@ -396,8 +396,12 @@ def test_j_resolver_precision():
 # ============================================================================
 # Test K: Base-ref policy integrity
 # ============================================================================
-def test_k_base_ref_policy_integrity():
+def test_k_base_ref_policy_integrity(tmp_path):
     from verifyci.interface.commands.verify import run_verify
+    from verifyci.storage.graph_store import GraphStore
+
+    db = str(tmp_path / "v.db")
+    GraphStore(db).close()
 
     # Scenario 1: PR diff modifies .verifyci/invariants.yaml to remove a gate
     # rule (forbid_call: eval) and adds a violation in app.py.
@@ -419,7 +423,7 @@ def test_k_base_ref_policy_integrity():
         " def run():\n"
         "+    eval('malicious_payload')\n"
     )
-    res_weaken = run_verify(diff_weaken, db_path=None)
+    res_weaken = run_verify(diff_weaken, db_path=db)
     assert res_weaken["status"] == "FAIL", f"Expected FAIL when attempting to weaken gate, got {res_weaken['status']}"
     assert res_weaken.get("rationale") == "blocking_check_failed"
 
@@ -433,9 +437,13 @@ def test_k_base_ref_policy_integrity():
         " invariants:\n"
         "+  # policy comment added\n"
     )
-    res_policy = run_verify(diff_policy_change, db_path=None)
+    res_policy = run_verify(diff_policy_change, db_path=db)
     assert res_policy["status"] == "HUMAN_REVIEW", f"Expected HUMAN_REVIEW for policy change, got {res_policy['status']}"
     assert "unverified_policy_change" in res_policy["rationale"]
+
+    # Scenario 3: When storage is missing, infrastructure failure dominance holds
+    res_missing = run_verify(diff_policy_change, db_path=str(tmp_path / "ghost.db"))
+    assert res_missing["status"] == "INFRA_ERROR"
 
 
 # ============================================================================
