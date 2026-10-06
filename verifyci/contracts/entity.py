@@ -27,6 +27,7 @@ class EntitySnippetRecord:
     char_count: int
     encoding: str = "utf-8"
     slices: tuple[str, ...] = ()
+    line_hashes: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -36,6 +37,7 @@ class EntitySnippetRecord:
         char_count: int,
         encoding: str = "utf-8",
         slices: tuple[str, ...] | list[str] = (),
+        line_hashes: tuple[str, ...] | list[str] = (),
     ):
         object.__setattr__(self, "lines", tuple(lines))
         object.__setattr__(self, "is_complete", is_complete)
@@ -43,6 +45,7 @@ class EntitySnippetRecord:
         object.__setattr__(self, "char_count", char_count)
         object.__setattr__(self, "encoding", encoding)
         object.__setattr__(self, "slices", tuple(slices))
+        object.__setattr__(self, "line_hashes", tuple(line_hashes))
 
     @property
     def text(self) -> str:

@@ -1,0 +1,143 @@
+{
+  "experiment": "CAP-003A",
+  "title": "Path-Sensitive Removal Provenance",
+  "corpus_sha256": "51a09c91d27d23af893ccafda3dbb22356bf6d8eccf1462b56d03d04e301aac7",
+  "label_sha256": "f42410e2eb4b9711bbbe5bb46b8c9112685a6330a87c7d391dc1d2ccb5273fe3",
+  "case_count": 36,
+  "R0": {
+    "agreement": 0.8611,
+    "correct_count": 31,
+    "total_count": 36,
+    "fabricated_rate": 1.0,
+    "genuine_verified_rate": 0.7692,
+    "inconclusive_rate": 0.8,
+    "slice_stats": {
+      "path_collision": {
+        "total": 4,
+        "correct": 2
+      },
+      "identical_code_multifile": {
+        "total": 4,
+        "correct": 4
+      },
+      "deep_deletions": {
+        "total": 5,
+        "correct": 2
+      },
+      "nested_scopes": {
+        "total": 4,
+        "correct": 4
+      },
+      "moved_code": {
+        "total": 4,
+        "correct": 4
+      },
+      "partial_provenance": {
+        "total": 5,
+        "correct": 5
+      },
+      "unicode_normalization": {
+        "total": 4,
+        "correct": 4
+      },
+      "adversarial_fabrication": {
+        "total": 6,
+        "correct": 6
+      }
+    },
+    "disagreements": [
+      {
+        "id": "REM-PTH-01",
+        "slice": "path_collision",
+        "expected": "INCONCLUSIVE",
+        "actual": "VERIFIED",
+        "explanation": "verified=2 removed lines"
+      },
+      {
+        "id": "REM-PTH-04",
+        "slice": "path_collision",
+        "expected": "INCONCLUSIVE",
+        "actual": "VERIFIED",
+        "explanation": "verified=1 removed lines"
+      },
+      {
+        "id": "REM-DEP-01",
+        "slice": "deep_deletions",
+        "expected": "VERIFIED",
+        "actual": "INCONCLUSIVE",
+        "explanation": "verified=29 unverified=11"
+      },
+      {
+        "id": "REM-DEP-02",
+        "slice": "deep_deletions",
+        "expected": "VERIFIED",
+        "actual": "INCONCLUSIVE",
+        "explanation": "verified=19 unverified=6"
+      },
+      {
+        "id": "REM-DEP-05",
+        "slice": "deep_deletions",
+        "expected": "VERIFIED",
+        "actual": "INCONCLUSIVE",
+        "explanation": "verified=25 unverified=100"
+      }
+    ]
+  },
+  "R1": {
+    "agreement": 1.0,
+    "correct_count": 36,
+    "total_count": 36,
+    "fabricated_rate": 1.0,
+    "genuine_verified_rate": 1.0,
+    "inconclusive_rate": 1.0,
+    "slice_stats": {
+      "path_collision": {
+        "total": 4,
+        "correct": 4
+      },
+      "identical_code_multifile": {
+        "total": 4,
+        "correct": 4
+      },
+      "deep_deletions": {
+        "total": 5,
+        "correct": 5
+      },
+      "nested_scopes": {
+        "total": 4,
+        "correct": 4
+      },
+      "moved_code": {
+        "total": 4,
+        "correct": 4
+      },
+      "partial_provenance": {
+        "total": 5,
+        "correct": 5
+      },
+      "unicode_normalization": {
+        "total": 4,
+        "correct": 4
+      },
+      "adversarial_fabrication": {
+        "total": 6,
+        "correct": 6
+      }
+    },
+    "disagreements": []
+  },
+  "predicates": {
+    "P1_frozen_corpus_integrity": true,
+    "P2_frozen_labels_integrity": true,
+    "P3_100_percent_provenance_for_pass": true,
+    "P4_fabricated_removal_fail_100_percent": true,
+    "P5_genuine_removal_verified_gte_95": true,
+    "P6_incomplete_provenance_never_pass": true,
+    "P7_path_disambiguation_100_percent": true,
+    "P8_no_retroactive_modification": true,
+    "P9_no_secret_leakage": true,
+    "P10_resource_bounds_enforced": true,
+    "P11_full_regression_suite": true,
+    "P12_clean_room_integrity": true
+  }
+}
