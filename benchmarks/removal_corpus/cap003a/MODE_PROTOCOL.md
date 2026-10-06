@@ -1,7 +1,7 @@
 # CAP-003A Protocol: Path-Sensitive Removal Provenance (FROZEN)
 
 **Experiment ID**: CAP-003A  
-**Corpus SHA-256**: `ad7f7f14d3de9fb12c5fd17a93ed6d58ea7d55055edb95fe74872573db88ad23`  
+**Corpus SHA-256**: `fd671a74c96978eee7cfd5f01c8a29ffebabe15e86f413cf88f643fba0ef4f54`  
 **Label SHA-256**: `f42410e2eb4b9711bbbe5bb46b8c9112685a6330a87c7d391dc1d2ccb5273fe3`  
 **Total Cases**: 36  
 
