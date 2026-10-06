@@ -1,0 +1,13 @@
+{
+  "claim": "CAP-002 held-out verifier quality (distinct from frozen v1 patch claim)",
+  "lineage": "new corpus authored BEFORE any verifier run; frozen v1 cases/results untouched",
+  "protocol": "author_v2.py builds byte-valid diffs against frozen base/; labels set from the verification contract (see per-case label_rationale); corpus frozen + hashed; verifier run once; canonical safety predicate applied",
+  "contract_correction_vs_v1": "wrong-semantic cases the gate cannot judge expect HUMAN_REVIEW (safe decline); v1 expected PASS on S1-S4 encoded the old weakness and is NOT repeated",
+  "corpus": "17 cases: 7 correct (5 PASS, 1 HUMAN_REVIEW high-blast, 1 INCONCLUSIVE new-module), 10 wrong (4 deterministic FAIL, 6 semantic HUMAN_REVIEW)",
+  "pass_rule": {
+    "overall_agreement": ">= 0.90 (exact status)",
+    "deterministic_catch_rate": ">= 0.95",
+    "semantic_false_accept_rate": "<= 0.0"
+  },
+  "note": "FAR denominator = wrong cases with category semantic; deterministic denominator = forbid_call/forbid_import/secret/fabricated_removal"
+}
