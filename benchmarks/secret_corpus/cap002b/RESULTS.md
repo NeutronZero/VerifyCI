@@ -20,13 +20,15 @@
 | **Redaction Violations** | 0 | 0 | **0** |
 | **Incomplete Evaluations** | 0 | 0 | **0** |
 
-## Per-Case Comparison Summary
+## Statistical Qualifications & Scope Boundaries
 
-- Total Cases: 35
-- Disagreement Cases: 21
-- D2 Resolution of CAP-002 Falsifiers:
-  - `B-ID-01` (`pwd = "sk-live-..."`): D0 = False (miss), D1 = False (miss), D2 = True (detected).
-  - `B-ID-02` (`x = "ghp_..."`): D0 = False (miss), D1 = True (detected), D2 = True (detected).
-  - `B-ENC-01` (Base64 OpenAI key): D0 = False (miss), D1 = False (miss), D2 = True (detected).
-  - `B-ENC-02` (Hex OpenAI key): D0 = False (miss), D1 = True (detected), D2 = True (detected).
-  - `B-ENC-03` (Double Base64 GitHub token): D0 = False (miss), D1 = False (miss), D2 = True (detected).
+- **Sample Size**: 35 held-out cases (23 positive, 12 negative).
+- **Sampling Uncertainty (Approx. 95% Wilson Intervals)**:
+  - D2 Recall: **67.9% – 95.5%** (20/23 observed = 86.96%)
+  - D2 Precision: **83.9% – 100.0%** (20/20 observed = 100.00%)
+  - Observed FAR: **0.0000** (0/12 negatives). Zero observed false acceptance on this frozen corpus is an empirical result of the evaluated test paths, not proof of population-level FAR = 0%.
+- **Redaction Safety**: No secret material leakage was observed across the specified redaction/evidence test surface, including recursive serialized-output inspection.
+- **Resource Bounds**: The tested execution paths enforce all configured budgets (lines, candidates, transform depth, timeouts), preventing observed unbounded execution.
+- **Falsifier Resolution**: D2 resolves the previously isolated `pwd` falsifier on the frozen CAP-002B corpus (`B-ID-01`), detecting the case through value-first token-structure analysis where both D0 and D1 missed it.
+- **Promotion Scope**: D2 is promoted as the canonical CAP-002B detector capability under the frozen contract. The 35-case corpus serves as established benchmark evidence rather than a claim of universal detection completeness.
+
