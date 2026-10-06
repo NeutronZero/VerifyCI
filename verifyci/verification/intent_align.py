@@ -649,6 +649,8 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
     from verifyci.verification.diffmap import iter_added_lines_with_lineno
     if not diff:
         return True, 'empty diff, nothing to scan', True, []
+    if not diff:
+        return True, 'empty diff, nothing to scan', True, []
     tdq = chr(34) * 3
     tsq = chr(39) * 3
     states = {}
@@ -742,9 +744,24 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
             st[1] = stripped.count(chr(40)) - stripped.count(chr(41))
             st[3] = [content]
             continue
-    if not hits:
-        return True, 'diff text scanned', True, []
-    return False, f'secret-shaped string in {hits[0]}', True, hits
+    if hits:
+        return False, f'secret-shaped string in {hits[0]}', True, hits
+
+    # Redesigned provenance-aware multi-signal detector (CAP-002B)
+    from verifyci.secrets import ResourceLimitExceeded, SecretDetector
+    detector = SecretDetector()
+    try:
+        findings = detector.scan_diff(diff)
+        active = [f for f in findings if f.is_active]
+        if active:
+            new_hits = [f.evidence_string() for f in active]
+            return False, f'secret-shaped string in {new_hits[0]}', True, new_hits
+    except ResourceLimitExceeded as e:
+        return False, f'secret scan resource limit exceeded: {e}', False, []
+    except Exception as e:
+        return False, f'secret scan error: {e}', False, []
+
+    return True, 'diff text scanned', True, []
 def _name_matches(dst_name, name: str, edge_type: str) -> bool:
     """Target match for a graph-side violation.
 

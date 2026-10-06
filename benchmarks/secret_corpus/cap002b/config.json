@@ -1,0 +1,42 @@
+{
+  "experiment_id": "CAP-002B",
+  "name": "provenance-aware multi-signal secret detection",
+  "frozen": {
+    "corpus_cases_count": 35,
+    "corpus_sha256": "b6c7df17e334f6847453012fe3a05bae82181a31411039f7d724df1a4a0ff65c",
+    "labels_sha256": "6f7bc1edb7ff282b93b70e403830e199faab652f91d43753f3d97f1f1f4ac8f8",
+    "timestamp_utc": "2026-10-06T15:48:00Z"
+  },
+  "slices": [
+    "identifier_independent",
+    "provider_structured",
+    "encoded",
+    "fragmented",
+    "path_aware",
+    "false_positive",
+    "composite"
+  ],
+  "comparators": {
+    "D0": "verifyci_v1_regex_scanner",
+    "D1": "betterleaks_1.9.0_external_binary",
+    "D2": "verifyci_redesigned_multisignal_detector"
+  },
+  "d1_binary": {
+    "name": "betterleaks",
+    "version": "1.9.0",
+    "sha256": "41a3dc5e75712d52d25aa7203b0b6bc2fa9c796fe5109d3835c60226a9a69352"
+  },
+  "metrics_tracked": [
+    "detection_recall",
+    "detection_precision",
+    "false_acceptance_rate",
+    "false_reject_rate",
+    "location_accuracy",
+    "duplicate_rate",
+    "name_independent_recall",
+    "encoded_recovery",
+    "composite_recovery",
+    "redaction_violations",
+    "incomplete_evaluations"
+  ]
+}

@@ -1,0 +1,539 @@
+{
+  "experiment_id": "CAP-002B",
+  "frozen": {
+    "corpus_sha256": "b6c7df17e334f6847453012fe3a05bae82181a31411039f7d724df1a4a0ff65c",
+    "labels_sha256": "6f7bc1edb7ff282b93b70e403830e199faab652f91d43753f3d97f1f1f4ac8f8",
+    "cases_count": 35
+  },
+  "d1_comparator": {
+    "version": "1.9.0",
+    "sha256": "41a3dc5e75712d52d25aa7203b0b6bc2fa9c796fe5109d3835c60226a9a69352"
+  },
+  "d2_detector": {
+    "config_hash": "2b7ae5b660accf5c63735d18482547c3ae89a071cc0b039cb838e0bb144f08a7",
+    "rules_count": 15
+  },
+  "metrics": {
+    "D0": {
+      "tp": 8,
+      "tn": 10,
+      "fp": 2,
+      "fn": 15,
+      "recall": 0.3478,
+      "precision": 0.8,
+      "far": 0.1667,
+      "false_reject_rate": 0.6522,
+      "overall_agreement": 0.5143,
+      "name_independent_recall": 0.2857,
+      "encoded_recovery": 0.0,
+      "composite_recovery": 0.5,
+      "incomplete_evaluations": 0,
+      "redaction_violations": 0
+    },
+    "D1": {
+      "tp": 10,
+      "tn": 12,
+      "fp": 0,
+      "fn": 13,
+      "recall": 0.4348,
+      "precision": 1.0,
+      "far": 0.0,
+      "false_reject_rate": 0.5652,
+      "overall_agreement": 0.6286,
+      "name_independent_recall": 0.4286,
+      "encoded_recovery": 0.3333,
+      "composite_recovery": 0.5,
+      "incomplete_evaluations": 0,
+      "redaction_violations": 0
+    },
+    "D2": {
+      "tp": 20,
+      "tn": 12,
+      "fp": 0,
+      "fn": 3,
+      "recall": 0.8696,
+      "precision": 1.0,
+      "far": 0.0,
+      "false_reject_rate": 0.1304,
+      "overall_agreement": 0.9143,
+      "name_independent_recall": 0.7143,
+      "encoded_recovery": 1.0,
+      "composite_recovery": 1.0,
+      "incomplete_evaluations": 0,
+      "redaction_violations": 0
+    }
+  },
+  "disagreements": [
+    {
+      "id": "B-ID-01",
+      "slice": "identifier_independent",
+      "expected": true,
+      "d0": false,
+      "d1": false,
+      "d2": true,
+      "intent": "hardcoded OpenAI key under pwd identifier"
+    },
+    {
+      "id": "B-ID-02",
+      "slice": "identifier_independent",
+      "expected": true,
+      "d0": false,
+      "d1": true,
+      "d2": true,
+      "intent": "hardcoded GitHub personal access token under x"
+    },
+    {
+      "id": "B-ID-03",
+      "slice": "identifier_independent",
+      "expected": true,
+      "d0": false,
+      "d1": true,
+      "d2": true,
+      "intent": "hardcoded Slack bot token under value identifier"
+    },
+    {
+      "id": "B-ID-04",
+      "slice": "identifier_independent",
+      "expected": true,
+      "d0": true,
+      "d1": false,
+      "d2": true,
+      "intent": "hardcoded AWS key under foo identifier"
+    },
+    {
+      "id": "B-ID-06",
+      "slice": "identifier_independent",
+      "expected": true,
+      "d0": false,
+      "d1": false,
+      "d2": false,
+      "intent": "anonymous connect call with password embedded in connection string"
+    },
+    {
+      "id": "B-ID-07",
+      "slice": "identifier_independent",
+      "expected": true,
+      "d0": false,
+      "d1": false,
+      "d2": false,
+      "intent": "Google API key assigned under generic data name"
+    },
+    {
+      "id": "B-STR-01",
+      "slice": "provider_structured",
+      "expected": true,
+      "d0": true,
+      "d1": false,
+      "d2": true,
+      "intent": "RSA private key block introduction"
+    },
+    {
+      "id": "B-STR-02",
+      "slice": "provider_structured",
+      "expected": true,
+      "d0": true,
+      "d1": false,
+      "d2": true,
+      "intent": "OpenSSH private key block introduction"
+    },
+    {
+      "id": "B-STR-05",
+      "slice": "provider_structured",
+      "expected": true,
+      "d0": false,
+      "d1": false,
+      "d2": true,
+      "intent": "Stripe restricted live key introduction"
+    },
+    {
+      "id": "B-ENC-01",
+      "slice": "encoded",
+      "expected": true,
+      "d0": false,
+      "d1": false,
+      "d2": true,
+      "intent": "base64 encoded OpenAI API key"
+    },
+    {
+      "id": "B-ENC-02",
+      "slice": "encoded",
+      "expected": true,
+      "d0": false,
+      "d1": true,
+      "d2": true,
+      "intent": "hex encoded OpenAI key"
+    },
+    {
+      "id": "B-ENC-03",
+      "slice": "encoded",
+      "expected": true,
+      "d0": false,
+      "d1": false,
+      "d2": true,
+      "intent": "double base64 encoded GitHub token"
+    },
+    {
+      "id": "B-FRG-01",
+      "slice": "fragmented",
+      "expected": true,
+      "d0": false,
+      "d1": false,
+      "d2": false,
+      "intent": "string concatenation forming credentials in connection string"
+    },
+    {
+      "id": "B-FRG-02",
+      "slice": "fragmented",
+      "expected": true,
+      "d0": false,
+      "d1": false,
+      "d2": true,
+      "intent": "multiline continuation with parenthesis"
+    },
+    {
+      "id": "B-FRG-03",
+      "slice": "fragmented",
+      "expected": true,
+      "d0": false,
+      "d1": true,
+      "d2": true,
+      "intent": "multiline backslash continuation"
+    },
+    {
+      "id": "B-PTH-01",
+      "slice": "path_aware",
+      "expected": true,
+      "d0": false,
+      "d1": true,
+      "d2": true,
+      "intent": "production path containing active stripe key"
+    },
+    {
+      "id": "B-PTH-04",
+      "slice": "path_aware",
+      "expected": false,
+      "d0": true,
+      "d1": false,
+      "d2": false,
+      "intent": "documentation placeholder in markdown"
+    },
+    {
+      "id": "B-PTH-05",
+      "slice": "path_aware",
+      "expected": true,
+      "d0": false,
+      "d1": false,
+      "d2": true,
+      "intent": "unusual hidden path carrying hardcoded deployment key"
+    },
+    {
+      "id": "B-FP-04",
+      "slice": "false_positive",
+      "expected": false,
+      "d0": true,
+      "d1": false,
+      "d2": false,
+      "intent": "standard template placeholder strings"
+    },
+    {
+      "id": "B-CMP-01",
+      "slice": "composite",
+      "expected": true,
+      "d0": false,
+      "d1": true,
+      "d2": true,
+      "intent": "high entropy blob in close proximity to credential comment marker"
+    },
+    {
+      "id": "B-CMP-02",
+      "slice": "composite",
+      "expected": true,
+      "d0": true,
+      "d1": false,
+      "d2": true,
+      "intent": "intrinsic AWS key requiring no nearby keyword"
+    }
+  ],
+  "case_verdicts": [
+    {
+      "id": "B-ID-01",
+      "slice": "identifier_independent",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": true
+    },
+    {
+      "id": "B-ID-02",
+      "slice": "identifier_independent",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": true,
+      "d2_detected": true
+    },
+    {
+      "id": "B-ID-03",
+      "slice": "identifier_independent",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": true,
+      "d2_detected": true
+    },
+    {
+      "id": "B-ID-04",
+      "slice": "identifier_independent",
+      "expected_violated": true,
+      "d0_detected": true,
+      "d1_detected": false,
+      "d2_detected": true
+    },
+    {
+      "id": "B-ID-05",
+      "slice": "identifier_independent",
+      "expected_violated": true,
+      "d0_detected": true,
+      "d1_detected": true,
+      "d2_detected": true
+    },
+    {
+      "id": "B-ID-06",
+      "slice": "identifier_independent",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": false
+    },
+    {
+      "id": "B-ID-07",
+      "slice": "identifier_independent",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": false
+    },
+    {
+      "id": "B-STR-01",
+      "slice": "provider_structured",
+      "expected_violated": true,
+      "d0_detected": true,
+      "d1_detected": false,
+      "d2_detected": true
+    },
+    {
+      "id": "B-STR-02",
+      "slice": "provider_structured",
+      "expected_violated": true,
+      "d0_detected": true,
+      "d1_detected": false,
+      "d2_detected": true
+    },
+    {
+      "id": "B-STR-03",
+      "slice": "provider_structured",
+      "expected_violated": true,
+      "d0_detected": true,
+      "d1_detected": true,
+      "d2_detected": true
+    },
+    {
+      "id": "B-STR-04",
+      "slice": "provider_structured",
+      "expected_violated": true,
+      "d0_detected": true,
+      "d1_detected": true,
+      "d2_detected": true
+    },
+    {
+      "id": "B-STR-05",
+      "slice": "provider_structured",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": true
+    },
+    {
+      "id": "B-ENC-01",
+      "slice": "encoded",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": true
+    },
+    {
+      "id": "B-ENC-02",
+      "slice": "encoded",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": true,
+      "d2_detected": true
+    },
+    {
+      "id": "B-ENC-03",
+      "slice": "encoded",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": true
+    },
+    {
+      "id": "B-ENC-04",
+      "slice": "encoded",
+      "expected_violated": false,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": false
+    },
+    {
+      "id": "B-FRG-01",
+      "slice": "fragmented",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": false
+    },
+    {
+      "id": "B-FRG-02",
+      "slice": "fragmented",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": true
+    },
+    {
+      "id": "B-FRG-03",
+      "slice": "fragmented",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": true,
+      "d2_detected": true
+    },
+    {
+      "id": "B-PTH-01",
+      "slice": "path_aware",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": true,
+      "d2_detected": true
+    },
+    {
+      "id": "B-PTH-02",
+      "slice": "path_aware",
+      "expected_violated": true,
+      "d0_detected": true,
+      "d1_detected": true,
+      "d2_detected": true
+    },
+    {
+      "id": "B-PTH-03",
+      "slice": "path_aware",
+      "expected_violated": false,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": false
+    },
+    {
+      "id": "B-PTH-04",
+      "slice": "path_aware",
+      "expected_violated": false,
+      "d0_detected": true,
+      "d1_detected": false,
+      "d2_detected": false
+    },
+    {
+      "id": "B-PTH-05",
+      "slice": "path_aware",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": true
+    },
+    {
+      "id": "B-FP-01",
+      "slice": "false_positive",
+      "expected_violated": false,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": false
+    },
+    {
+      "id": "B-FP-02",
+      "slice": "false_positive",
+      "expected_violated": false,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": false
+    },
+    {
+      "id": "B-FP-03",
+      "slice": "false_positive",
+      "expected_violated": false,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": false
+    },
+    {
+      "id": "B-FP-04",
+      "slice": "false_positive",
+      "expected_violated": false,
+      "d0_detected": true,
+      "d1_detected": false,
+      "d2_detected": false
+    },
+    {
+      "id": "B-FP-05",
+      "slice": "false_positive",
+      "expected_violated": false,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": false
+    },
+    {
+      "id": "B-FP-06",
+      "slice": "false_positive",
+      "expected_violated": false,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": false
+    },
+    {
+      "id": "B-FP-07",
+      "slice": "false_positive",
+      "expected_violated": false,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": false
+    },
+    {
+      "id": "B-CMP-01",
+      "slice": "composite",
+      "expected_violated": true,
+      "d0_detected": false,
+      "d1_detected": true,
+      "d2_detected": true
+    },
+    {
+      "id": "B-CMP-02",
+      "slice": "composite",
+      "expected_violated": true,
+      "d0_detected": true,
+      "d1_detected": false,
+      "d2_detected": true
+    },
+    {
+      "id": "B-CMP-03",
+      "slice": "composite",
+      "expected_violated": false,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": false
+    },
+    {
+      "id": "B-CMP-04",
+      "slice": "composite",
+      "expected_violated": false,
+      "d0_detected": false,
+      "d1_detected": false,
+      "d2_detected": false
+    }
+  ]
+}
