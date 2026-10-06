@@ -1,0 +1,36 @@
+{"expected": "VERIFIED", "id": "CALL-KWD-01", "intent": "explicit keyword arguments match verified contract exactly", "slice": "keyword_argument_values"}
+{"expected": "FAIL", "id": "CALL-KWD-02", "intent": "explicit keyword argument strict=False directly violates security policy", "slice": "keyword_argument_values"}
+{"expected": "FAIL", "id": "CALL-KWD-03", "intent": "forbidden argument shell=True detected in subprocess call", "slice": "keyword_argument_values"}
+{"expected": "VERIFIED", "id": "CALL-KWD-04", "intent": "explicit keyword satisfies required TLSv1.3 version", "slice": "keyword_argument_values"}
+{"expected": "INCONCLUSIVE", "id": "CALL-KWD-05", "intent": "dynamic function call as keyword argument cannot be statically grounded", "slice": "keyword_argument_values"}
+{"expected": "VERIFIED", "id": "CALL-POS-01", "intent": "positional index 2 maps to parameter use_ssl and matches True", "slice": "positional_argument_values"}
+{"expected": "FAIL", "id": "CALL-POS-02", "intent": "positional index 2 maps to parameter use_ssl and violates with False", "slice": "positional_argument_values"}
+{"expected": "VERIFIED", "id": "CALL-POS-03", "intent": "positional arguments index 2 and 3 match non-writable non-executable policy", "slice": "positional_argument_values"}
+{"expected": "FAIL", "id": "CALL-POS-04", "intent": "positional index 3 provides True violating executable=False policy", "slice": "positional_argument_values"}
+{"expected": "INCONCLUSIVE", "id": "CALL-POS-05", "intent": "positional index 2 is dynamic expression; ungrounded proof routes to INCONCLUSIVE", "slice": "positional_argument_values"}
+{"expected": "VERIFIED", "id": "CALL-ORD-01", "intent": "arguments passed in canonical semantic parameter order", "slice": "argument_order_swap"}
+{"expected": "FAIL", "id": "CALL-ORD-02", "intent": "transposed arguments invert financial transfer direction", "slice": "argument_order_swap"}
+{"expected": "FAIL", "id": "CALL-ORD-03", "intent": "swapped arguments pass user_id into role parameter violating type semantics", "slice": "argument_order_swap"}
+{"expected": "VERIFIED", "id": "CALL-ORD-04", "intent": "named arguments out of positional order safely bind to corresponding parameters", "slice": "argument_order_swap"}
+{"expected": "INCONCLUSIVE", "id": "CALL-DYN-01", "intent": "os.environ.get is dynamic environment lookup; absence of proof is not proof of compliance", "slice": "dynamic_expression_args"}
+{"expected": "INCONCLUSIVE", "id": "CALL-DYN-02", "intent": "method call session.is_readonly() unresolvable statically", "slice": "dynamic_expression_args"}
+{"expected": "INCONCLUSIVE", "id": "CALL-DYN-03", "intent": "dynamic helper function choose_cipher(cfg) is ungrounded", "slice": "dynamic_expression_args"}
+{"expected": "FAIL", "id": "CALL-DYN-04", "intent": "conditional expression contains branch with forbidden value allow_builtins=True", "slice": "dynamic_expression_args"}
+{"expected": "VERIFIED", "id": "CALL-DYN-05", "intent": "compile-time constant binary operations fold to verified contract values", "slice": "dynamic_expression_args"}
+{"expected": "INCONCLUSIVE", "id": "CALL-KWA-01", "intent": "dynamic **kwargs dictionary cannot be statically grounded", "slice": "kwargs_unpacking"}
+{"expected": "INCONCLUSIVE", "id": "CALL-KWA-02", "intent": "variable *args unpacking cannot be statically grounded", "slice": "kwargs_unpacking"}
+{"expected": "FAIL", "id": "CALL-KWA-03", "intent": "explicit debug=True alongside **kwargs directly violates security contract", "slice": "kwargs_unpacking"}
+{"expected": "VERIFIED", "id": "CALL-KWA-04", "intent": "literal dictionary unpacking can be statically resolved and satisfies contract", "slice": "kwargs_unpacking"}
+{"expected": "VERIFIED", "id": "CALL-DEF-01", "intent": "caller reliance on callee default parameter argon2id satisfies contract", "slice": "default_arg_reliance"}
+{"expected": "FAIL", "id": "CALL-DEF-02", "intent": "caller reliance on omitted parameter inherits insecure default tls=False", "slice": "default_arg_reliance"}
+{"expected": "VERIFIED", "id": "CALL-DEF-03", "intent": "caller reliance on default parameter bypass_cache=False satisfies contract", "slice": "default_arg_reliance"}
+{"expected": "INCONCLUSIVE", "id": "CALL-DEF-04", "intent": "omitted parameter on unmodeled callee signature routes to INCONCLUSIVE", "slice": "default_arg_reliance"}
+{"expected": "VERIFIED", "id": "CALL-RCV-01", "intent": "receiver type SecureStorage matches required receiver contract", "slice": "overload_receiver_context"}
+{"expected": "FAIL", "id": "CALL-RCV-02", "intent": "receiver type InsecureStorage violates required SecureStorage receiver policy", "slice": "overload_receiver_context"}
+{"expected": "INCONCLUSIVE", "id": "CALL-RCV-03", "intent": "untyped parameter receiver cannot be statically proven", "slice": "overload_receiver_context"}
+{"expected": "VERIFIED", "id": "CALL-RCV-04", "intent": "receiver type and keyword argument values both satisfy verified contract", "slice": "overload_receiver_context"}
+{"expected": "FAIL", "id": "CALL-MUT-01", "intent": "call argument string literal mutated from 'a' to 'b' (resolves CAP-002 N-S4 falsifier)", "slice": "call_routing_mutation"}
+{"expected": "FAIL", "id": "CALL-MUT-02", "intent": "call keyword argument mutated from INFO to DEBUG downgrading audit severity", "slice": "call_routing_mutation"}
+{"expected": "VERIFIED", "id": "CALL-MUT-03", "intent": "diff updates timeout from 5 to 30 satisfying required 30s policy", "slice": "call_routing_mutation"}
+{"expected": "INCONCLUSIVE", "id": "CALL-MUT-04", "intent": "call argument mutated to ungrounded dynamic function call", "slice": "call_routing_mutation"}
+{"expected": "FAIL", "id": "CALL-MUT-05", "intent": "call argument mutated from viewer to admin (unauthorized privilege escalation)", "slice": "call_routing_mutation"}
