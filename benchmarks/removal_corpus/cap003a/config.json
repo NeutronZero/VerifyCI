@@ -1,0 +1,24 @@
+{
+  "experiment_id": "CAP-003A",
+  "title": "Path-Sensitive Removal Provenance",
+  "case_count": 36,
+  "slice_counts": {
+    "path_collision": 4,
+    "identical_code_multifile": 4,
+    "deep_deletions": 5,
+    "nested_scopes": 4,
+    "moved_code": 4,
+    "partial_provenance": 5,
+    "unicode_normalization": 4,
+    "adversarial_fabrication": 6
+  },
+  "expected_counts": {
+    "INCONCLUSIVE": 10,
+    "FABRICATED": 13,
+    "VERIFIED": 13
+  },
+  "corpus_sha256": "ad7f7f14d3de9fb12c5fd17a93ed6d58ea7d55055edb95fe74872573db88ad23",
+  "label_sha256": "f42410e2eb4b9711bbbe5bb46b8c9112685a6330a87c7d391dc1d2ccb5273fe3",
+  "status": "CORPUS_FROZEN_IMPLEMENTATION_NOT_YET_EVALUATED",
+  "freeze_rule": "Gold labels sealed from implementation path; no reclassification permitted."
+}

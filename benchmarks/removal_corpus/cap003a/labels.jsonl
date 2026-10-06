@@ -1,0 +1,36 @@
+{"expected": "INCONCLUSIVE", "id": "REM-PTH-01", "intent": "absence of provenance for app/models.py must route to INCONCLUSIVE, not false verification via suffix match", "slice": "path_collision"}
+{"expected": "FABRICATED", "id": "REM-PTH-02", "intent": "content in diff contradicts trusted base content for service_a/utils.py", "slice": "path_collision"}
+{"expected": "VERIFIED", "id": "REM-PTH-03", "intent": "exact path disambiguation matches pkg/utils.py", "slice": "path_collision"}
+{"expected": "INCONCLUSIVE", "id": "REM-PTH-04", "intent": "absence of oauth/tokens.py record must be INCONCLUSIVE, not cross-matched with auth/tokens.py", "slice": "path_collision"}
+{"expected": "VERIFIED", "id": "REM-DUP-01", "intent": "verified removal of known code at exact path and offset", "slice": "identical_code_multifile"}
+{"expected": "FABRICATED", "id": "REM-DUP-02", "intent": "content contradicts stored entity at line 40 of users/validators.py", "slice": "identical_code_multifile"}
+{"expected": "INCONCLUSIVE", "id": "REM-DUP-03", "intent": "unmodeled file must be INCONCLUSIVE, not cross-matched with another file", "slice": "identical_code_multifile"}
+{"expected": "VERIFIED", "id": "REM-DUP-04", "intent": "verified removal of known code at exact path", "slice": "identical_code_multifile"}
+{"expected": "VERIFIED", "id": "REM-DEP-01", "intent": "genuine removal in >2,000 char entity must be VERIFIED when provenance is complete", "slice": "deep_deletions"}
+{"expected": "VERIFIED", "id": "REM-DEP-02", "intent": "genuine removal in large entity with full provenance", "slice": "deep_deletions"}
+{"expected": "FABRICATED", "id": "REM-DEP-03", "intent": "diff contradicts stored entity at line 15", "slice": "deep_deletions"}
+{"expected": "INCONCLUSIVE", "id": "REM-DEP-04", "intent": "incomplete provenance must route to INCONCLUSIVE, not FAIL or false PASS", "slice": "deep_deletions"}
+{"expected": "VERIFIED", "id": "REM-DEP-05", "intent": "complete removal of known deep entity with full provenance", "slice": "deep_deletions"}
+{"expected": "VERIFIED", "id": "REM-NST-01", "intent": "inner function removal verified against nested entity span", "slice": "nested_scopes"}
+{"expected": "VERIFIED", "id": "REM-NST-02", "intent": "method removal verified against class/method hierarchy", "slice": "nested_scopes"}
+{"expected": "FABRICATED", "id": "REM-NST-03", "intent": "stored entity positively contradicts diff body at line 3", "slice": "nested_scopes"}
+{"expected": "VERIFIED", "id": "REM-NST-04", "intent": "innermost closure removal verified", "slice": "nested_scopes"}
+{"expected": "VERIFIED", "id": "REM-MVD-01", "intent": "verified removal of code being relocated", "slice": "moved_code"}
+{"expected": "FABRICATED", "id": "REM-MVD-02", "intent": "content in diff contradicts stored base version of legacy router", "slice": "moved_code"}
+{"expected": "INCONCLUSIVE", "id": "REM-MVD-03", "intent": "absence of provenance for renamed path must route to INCONCLUSIVE", "slice": "moved_code"}
+{"expected": "VERIFIED", "id": "REM-MVD-04", "intent": "single line deletion verified against base entity", "slice": "moved_code"}
+{"expected": "INCONCLUSIVE", "id": "REM-PRT-01", "intent": "unmodeled comment removals outside entity spans must be INCONCLUSIVE, not FAIL", "slice": "partial_provenance"}
+{"expected": "INCONCLUSIVE", "id": "REM-PRT-02", "intent": "unmodeled import lines outside entity spans must be INCONCLUSIVE", "slice": "partial_provenance"}
+{"expected": "INCONCLUSIVE", "id": "REM-PRT-03", "intent": "absence of record due to truncation is not contradiction; routes to INCONCLUSIVE", "slice": "partial_provenance"}
+{"expected": "INCONCLUSIVE", "id": "REM-PRT-04", "intent": "missing snippet record cannot verify or fabricate; must route to INCONCLUSIVE", "slice": "partial_provenance"}
+{"expected": "INCONCLUSIVE", "id": "REM-PRT-05", "intent": "approximate hunk headers cannot establish precise line provenance", "slice": "partial_provenance"}
+{"expected": "VERIFIED", "id": "REM-UNI-01", "intent": "Unicode canonical equivalence (NFC vs NFD) verified", "slice": "unicode_normalization"}
+{"expected": "FABRICATED", "id": "REM-UNI-02", "intent": "syntactic distinction between curly and straight quotes contradicts stored record", "slice": "unicode_normalization"}
+{"expected": "FABRICATED", "id": "REM-UNI-03", "intent": "homoglyph character substitution contradicts ASCII identifier in base record", "slice": "unicode_normalization"}
+{"expected": "VERIFIED", "id": "REM-UNI-04", "intent": "genuine removal of Greek symbol variables verified", "slice": "unicode_normalization"}
+{"expected": "FABRICATED", "id": "REM-FAB-01", "intent": "fabricated code contradicts stored base function", "slice": "adversarial_fabrication"}
+{"expected": "FABRICATED", "id": "REM-FAB-02", "intent": "inverted condition contradicts stored if-statement", "slice": "adversarial_fabrication"}
+{"expected": "FABRICATED", "id": "REM-FAB-03", "intent": "offset mismatch: line 11 in stored record is setup(), not return", "slice": "adversarial_fabrication"}
+{"expected": "FABRICATED", "id": "REM-FAB-04", "intent": "forged line contradicts process_batch() in base record", "slice": "adversarial_fabrication"}
+{"expected": "FABRICATED", "id": "REM-FAB-05", "intent": "claimed empty line contradicts code in stored record", "slice": "adversarial_fabrication"}
+{"expected": "FABRICATED", "id": "REM-FAB-06", "intent": "claimed comment contradicts stored code", "slice": "adversarial_fabrication"}
