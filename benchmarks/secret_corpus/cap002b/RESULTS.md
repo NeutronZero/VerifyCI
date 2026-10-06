@@ -32,3 +32,38 @@
 - **Falsifier Resolution**: D2 resolves the previously isolated `pwd` falsifier on the frozen CAP-002B corpus (`B-ID-01`), detecting the case through value-first token-structure analysis where both D0 and D1 missed it.
 - **Promotion Scope**: D2 is promoted as the canonical CAP-002B detector capability under the frozen contract. The 35-case corpus serves as established benchmark evidence rather than a claim of universal detection completeness.
 
+## Final Audit Conclusion Gate
+
+```text
+CAP-002B
+──────────────────────────────────────────────
+Decision:              PROMOTE
+Status:                ESTABLISHED
+
+D2:
+  Recall:              0.8696 (20/23)
+  Precision:           1.0000 (20/20)
+  Observed FAR:        0.0000 (0/12)
+  FRR:                 0.1304
+  Agreement:           0.9143 (32/35)
+
+Falsifier:
+  CAP-002 pwd case    RESOLVED on frozen corpus
+
+Safety:
+  Secret leakage      NOT OBSERVED on tested surfaces
+  Resource bounds     ENFORCED on tested execution paths
+
+Integrity:
+  Corpus frozen       YES
+  Labels frozen       YES
+  CAP-002 preserved   YES
+  Clean-room          YES
+  D1 PASS authority   NO
+
+Evidence boundary:
+  Established only for the frozen evaluation surface.
+  Universal completeness and population FAR=0 remain UNESTABLISHED.
+──────────────────────────────────────────────
+```
+
