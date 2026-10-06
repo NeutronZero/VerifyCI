@@ -60,7 +60,7 @@ R1:
 
 Resolved Limitations:
   Path Suffix Collision: RESOLVED (zero false matches across bare filenames)
-  2,000-char Snippet Cap: RESOLVED (unbounded per-line provenance hashes)
+  2,000-char Snippet Cap: RESOLVED (per-line provenance hashes remove fixed 2,000-char coverage boundary, subject to resource limits)
   Enclosing Hierarchy:   RESOLVED (innermost & nested scope verification)
 
 Safety & Invariants:
