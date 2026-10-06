@@ -22,7 +22,7 @@ sys.path.insert(0, str(HERE.parent))
 def main() -> None:
     import measure as m
 
-    cases_path = HERE / "cap002_heldout" / "cases.jsonl"
+    cases_path = HERE / "cases.jsonl"
     if not cases_path.exists():
         raise SystemExit("held-out corpus not frozen: run author_v2.py first")
     new_cases = [json.loads(line) for line in
@@ -44,7 +44,7 @@ def main() -> None:
               "verdicts": table,
               "metrics": {k: (dict(v) if not isinstance(v, (str, int, float, list, type(None))) else v)
                           for k, v in metrics.items()}}
-    out = HERE / "cap002_heldout" / "results.json"
+    out = HERE / "results.json"
     out.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     print(f"\nreport -> {out}")
 
