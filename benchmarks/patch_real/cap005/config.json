@@ -1,0 +1,37 @@
+{
+  "experiment_id": "CAP-005",
+  "title": "Generalization & Real-World Patch Validation",
+  "case_count": 64,
+  "source_count": 5,
+  "slice_counts": {
+    "authentic_security_patches": 8,
+    "production_code_removals": 8,
+    "call_site_and_signature_evolution": 8,
+    "multi_file_feature_additions": 8,
+    "dynamic_runtime_idioms": 8,
+    "complex_composite_diffs": 8,
+    "agent_generated_hallucinations": 8,
+    "manifests_and_documentation": 8
+  },
+  "expected_counts": {
+    "PASS": 38,
+    "FAIL": 9,
+    "INCONCLUSIVE": 2,
+    "HUMAN_REVIEW": 15
+  },
+  "falsifier_bearing_cases": {
+    "secret_name_independence": 3,
+    "removal_provenance": 3,
+    "argument_value_blindness": 3
+  },
+  "falsifier_denominator_total": 9,
+  "corpus_sha256": "ca475b33a385e8d1478afedf00d2eeeefdc8ae0f72c9e5527f20fc1fe814e17c",
+  "label_sha256": "589231d38fdf85a764eab85ba19f1ad9e2839fe63c043c3c9636d745f1893075",
+  "source_manifest_sha256": "f330fca7d317ec9a1e8398295d930c49f802e2cc25cf94b3906d7b9b0d47af8d",
+  "status": "CORPUS_FROZEN_IMPLEMENTATION_NOT_YET_EVALUATED",
+  "freeze_rule": "Gold labels sealed from implementation path; no reclassification permitted.",
+  "latency_target": {
+    "p95_ms": 500.0,
+    "max_budget_ms": 2000.0
+  }
+}
