@@ -85,8 +85,16 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
     checks.append(return_statement_check(diff))
     checks.append(call_target_check(diff))
     checks.append(call_semantics_check(diff))
+    from verifyci.verification.guard_inversion import guard_condition_check
+    from verifyci.verification.import_resolution import import_resolution_check
+    from verifyci.verification.partition import classify_path, FilePartition
+    checks.append(guard_condition_check(diff))
+    checks.append(import_resolution_check(diff))
+    inv_evidence = list(cert.evidence)
+    if not inv_evidence and cert.premises and all(classify_path(f) in (FilePartition.CONFIGURATION, FilePartition.TEST_SUITE) for f in files):
+        inv_evidence = [p.statement for p in cert.premises]
     inv_checks, _metrics = evaluate_invariants(
-        diff, invariants, graph, evidence=list(cert.evidence))
+        diff, invariants, graph, evidence=inv_evidence)
     checks.extend(inv_checks)
     report = build_verification_report(task_id=task_id, policy_id="default", checks=checks, blast_radius=blast)
     policy = VerificationPolicy(

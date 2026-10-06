@@ -1,0 +1,22 @@
+"""Billing service."""
+from .checkout import checkout
+def process_order_0(card):
+    return checkout(card)
+def process_order_1(card):
+    return checkout(card)
+def process_order_2(card):
+    return checkout(card)
+def process_order_3(card):
+    return checkout(card)
+def process_order_4(card):
+    return checkout(card)
+def process_order_5(card):
+    return checkout(card)
+def process_order_6(card):
+    return checkout(card)
+def process_order_7(card):
+    return checkout(card)
+def process_order_8(card):
+    return checkout(card)
+def process_order_9(card):
+    return checkout(card)

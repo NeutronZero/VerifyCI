@@ -43,8 +43,37 @@ def extract_execution_witnesses(
     test_files: list[str],
     entities: list | None = None,
 ) -> list[ExecutionWitness]:
-    """Extract and associate execution witnesses from TEST_SUITE changes."""
-    if not diff or not test_files:
+    """Extract and associate execution witnesses from TEST_SUITE changes or base test suite."""
+    if not diff:
+        return []
+
+    if not test_files and entities:
+        from verifyci.verification.partition import classify_path, FilePartition
+        witnesses: list[ExecutionWitness] = []
+        code_stems = {normalize_path(cf): _module_stem(cf) for cf in code_files}
+        for cf in code_files:
+            cf_stem = code_stems[normalize_path(cf)]
+            cf_stem_no_ext = re.sub(r"\.[a-zA-Z0-9]+$", "", cf_stem)
+            for e in entities:
+                epath = normalize_path(getattr(e, "file_path", "") or "")
+                if classify_path(epath) == FilePartition.TEST_SUITE:
+                    tf_stem = _module_stem(epath)
+                    tf_stem_no_ext = re.sub(r"\.[a-zA-Z0-9]+$", "", tf_stem)
+                    if cf_stem_no_ext == tf_stem_no_ext or cf_stem_no_ext in tf_stem_no_ext or tf_stem_no_ext in cf_stem_no_ext:
+                        witnesses.append(ExecutionWitness(
+                            witness_id=f"wit_base_{uuid.uuid4().hex[:8]}",
+                            test_file=epath,
+                            test_function=getattr(e, "name", None),
+                            target_file=cf,
+                            target_entity_id=None,
+                            is_general_regression=False,
+                            association_method="base_suite_witness",
+                        ))
+        if witnesses:
+            return witnesses
+        return []
+
+    if not test_files:
         return []
 
     parsed = parse_unified_diff(diff)

@@ -186,6 +186,9 @@ def _anchor_covered(ln: int, file_spans: list[tuple[int, int]], content: str = "
     # line is itself a decorator line.
     if content.lstrip().startswith("@"):
         return any(s - ln == 1 for s, en in file_spans)
+    # An import statement added adjacent to an existing import/code entity span
+    if content.lstrip().startswith(("import ", "from ")):
+        return any(abs(s - ln) <= 2 or abs(en - ln) <= 2 for s, en in file_spans)
     return False
 
 

@@ -37,7 +37,7 @@ _TEST_FILE_RE = re.compile(
 _TEST_DIR_RE = re.compile(r"(^|/)(?:tests?|__tests__)/")
 _DOC_EXT_RE = re.compile(r"\.(md|rst|txt)$", re.IGNORECASE)
 _CONFIG_NAME_RE = re.compile(
-    r"(?:^|/)(pyproject\.toml|setup\.(?:py|cfg)|requirements.*\.txt|"
+    r"(?:^|/)(pyproject\.toml|\.gitignore|setup\.(?:py|cfg)|requirements.*\.txt|"
     r"package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|"
     r"tsconfig(?:\..*)?\.json|\.eslintrc.*|eslint\.config\..*|\.prettierrc.*|"
     r"\.editorconfig|\.babelrc.*|babel\.config\..*|jest\.config\..*|vitest\.config\..*|"

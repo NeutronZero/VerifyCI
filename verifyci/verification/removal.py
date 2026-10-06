@@ -57,11 +57,13 @@ def _lines_match(line_a: str, line_b: str) -> bool:
     norm_b = _normalize_line(line_b)
     if norm_a == norm_b:
         return True
+    if norm_a.strip() and norm_a.strip() == norm_b.strip():
+        return True
     rep_a = _repair_mojibake(norm_a)
-    if rep_a is not None and _normalize_line(rep_a) == norm_b:
+    if rep_a is not None and _normalize_line(rep_a).strip() == norm_b.strip():
         return True
     rep_b = _repair_mojibake(norm_b)
-    if rep_b is not None and _normalize_line(rep_b) == norm_a:
+    if rep_b is not None and _normalize_line(rep_b).strip() == norm_a.strip():
         return True
     return False
 
@@ -212,7 +214,10 @@ def removal_provenance_check(diff: str | None, entities: list) -> CheckResult:
     verified = unverified = 0
     approx_unverified = 0
     fabricated: list[str] = []
+    from verifyci.verification.partition import classify_path, FilePartition
     for hunk in hunks:
+        if hunk.file and classify_path(hunk.file) in (FilePartition.DOCUMENTATION, FilePartition.CONFIGURATION):
+            continue
         if getattr(hunk, "approximate", False):
             for body in hunk.lines:
                 stripped = body.lstrip()

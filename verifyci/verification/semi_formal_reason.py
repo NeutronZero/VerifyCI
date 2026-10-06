@@ -507,6 +507,13 @@ class SemiFormalReasoner:
             deletion_detail=del_reason,
         )
         det_checks = self._run_deterministic_checks(context=chk_ctx)
+        import re
+        if re.search(r"getattr\s*\([^,]+,\s*f['\"]", diff_str):
+            det_checks.append(DeterministicCheck(
+                checker_id="static_dispatch",
+                passed=False,
+                detail="dynamic_getattr_dispatch",
+            ))
         conclusion = self._derive_conclusion(paths, evidence, det_checks)
         verified = (
             bool(det_checks)

@@ -153,14 +153,17 @@ def _unparse_safe(node: ast.AST) -> str:
 def extract_calls_from_text(text: str, target_callee: str | None = None, top_level_only: bool = False) -> list[CallExpression]:
     """Extracts call expressions from code text or expressions using standard ast."""
     calls: list[CallExpression] = []
-    # Try parsing as full module, or wrap in statement if snippet
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
+    import textwrap
+    clean = textwrap.dedent(text).strip()
+    tree = None
+    for cand in (text, clean, f"x = {clean}", f"def _dummy():\n    {clean}"):
         try:
-            tree = ast.parse(f"x = {text.strip()}")
+            tree = ast.parse(cand)
+            break
         except SyntaxError:
-            return calls
+            continue
+    if tree is None:
+        return calls
 
     def _visit(node: ast.AST):
         if isinstance(node, ast.Call):
@@ -415,6 +418,32 @@ def evaluate_diff_call_case(
     return "INCONCLUSIVE", "call could not be matched"
 
 
+def _is_call_argument_mutation(rc: CallExpression, ac: CallExpression) -> bool:
+    """True if call arguments or values were mutated, rather than compliant evolution."""
+    if rc.callee != ac.callee:
+        return False
+    # If positional args count decreased: dropped argument -> mutation
+    if len(ac.positional_args) < len(rc.positional_args):
+        for i in range(len(ac.positional_args), len(rc.positional_args)):
+            orig = rc.positional_args[i]
+            found = any(val == orig for val in ac.keyword_args.values())
+            if not found:
+                return True
+    # If any positional arg that exists in both changed value -> mutation
+    common_pos = min(len(rc.positional_args), len(ac.positional_args))
+    for i in range(common_pos):
+        if rc.positional_args[i] != ac.positional_args[i]:
+            return True
+    # If an existing keyword argument changed its value -> mutation
+    for k, v in rc.keyword_args.items():
+        if k in ac.keyword_args:
+            if ac.keyword_args[k] != v:
+                return True
+        else:
+            return True
+    return False
+
+
 def call_semantics_check(diff: str | None) -> CheckResult:
     """Non-blocking tripwire check for call argument / routing mutations in diffs.
 
@@ -441,8 +470,13 @@ def call_semantics_check(diff: str | None) -> CheckResult:
                 old_ln += 1
 
         for ln, rc in rem_calls:
+            # If the exact call is preserved in additions, it was not mutated
+            if any(ac.callee == rc.callee and ac.positional_args == rc.positional_args and ac.keyword_args == rc.keyword_args for ac in add_calls):
+                continue
             for ac in add_calls:
-                if rc.callee == ac.callee and (rc.positional_args != ac.positional_args or rc.keyword_args != ac.keyword_args):
+                if rc.callee == "get" and rc.positional_args and ac.positional_args and rc.positional_args[0] == ac.positional_args[0]:
+                    continue
+                if _is_call_argument_mutation(rc, ac):
                     mutations.append(f"{hunk.file}:{ln}: {rc.callee} arguments mutated ({rc.raw_code} -> {ac.raw_code})")
 
     if not mutations:

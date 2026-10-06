@@ -15,6 +15,7 @@ _OPENAI_TOKEN_RE = re.compile(r"""\b(?:sk-live-[A-Za-z0-9_-]{12,}|sk-proj-[A-Za-
 _STRIPE_KEY_RE = re.compile(r"""\b(?:sk|rk)_(?:live|test)_[0-9a-zA-Z]{14,}\b""")
 _GITHUB_TOKEN_RE = re.compile(r"""\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b""")
 _SLACK_TOKEN_RE = re.compile(r"""\bxox[baprs]-[0-9a-zA-Z-]{18,}\b""")
+_SLACK_WEBHOOK_RE = re.compile(r"""https://hooks\.slack\.com/services/[A-Za-z0-9_/-]{24,}\b""")
 _AWS_ACCESS_KEY_RE = re.compile(r"""\b(?:AKIA|ASIA|AROA)[0-9A-Z]{16}\b""")
 _GOOGLE_API_KEY_RE = re.compile(r"""\bAIza[0-9A-Za-z_-]{35}\b""")
 
@@ -118,6 +119,16 @@ def get_default_rules() -> list[SecretRule]:
             specificity=90,
             confidence=0.99,
             min_length=20,
+        ),
+        SecretRule(
+            rule_id="provider_slack_webhook",
+            description="Slack Incoming Webhook URL",
+            detector_family="provider_token",
+            pattern_strategy=_SLACK_WEBHOOK_RE,
+            keywords=(),
+            specificity=90,
+            confidence=0.99,
+            min_length=30,
         ),
         SecretRule(
             rule_id="provider_aws_access_key",

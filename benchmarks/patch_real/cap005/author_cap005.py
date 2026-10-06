@@ -1154,7 +1154,7 @@ def main() -> None:
     (HERE / "cases.jsonl").write_bytes(case_bytes)
 
     # 3. Write labels.jsonl
-    lbl_lines = [json.dumps(l, sort_keys=True) for l in LABELS]
+    lbl_lines = [json.dumps(lbl, sort_keys=True) for lbl in LABELS]
     lbl_content = "\n".join(lbl_lines) + "\n"
     lbl_bytes = lbl_content.encode("utf-8")
     lbl_hash = hashlib.sha256(lbl_bytes).hexdigest()
@@ -1171,8 +1171,8 @@ def main() -> None:
         slice_counts[c["slice"]] = slice_counts.get(c["slice"], 0) + 1
 
     expected_counts: dict[str, int] = {}
-    for l in LABELS:
-        expected_counts[l["expected_status"]] = expected_counts.get(l["expected_status"], 0) + 1
+    for lbl in LABELS:
+        expected_counts[lbl["expected_status"]] = expected_counts.get(lbl["expected_status"], 0) + 1
 
     falsifier_counts: dict[str, int] = {}
     for c in CASES:

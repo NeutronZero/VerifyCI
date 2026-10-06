@@ -57,7 +57,7 @@ filterwarnings = [
 ]
 
 [tool.ruff]
-exclude = ["samples/"]
+exclude = ["samples/", "benchmarks/patch_real/cap005/base/"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]

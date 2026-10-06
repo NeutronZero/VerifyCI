@@ -1,0 +1,215 @@
+{
+  "experiment_id": "CAP-005",
+  "corpus_sha256": "ca475b33a385e8d1478afedf00d2eeeefdc8ae0f72c9e5527f20fc1fe814e17c",
+  "label_sha256": "589231d38fdf85a764eab85ba19f1ad9e2839fe63c043c3c9636d745f1893075",
+  "source_manifest_sha256": "f330fca7d317ec9a1e8398295d930c49f802e2cc25cf94b3906d7b9b0d47af8d",
+  "total_cases": 64,
+  "predicates": {
+    "P1_overall_agreement": {
+      "metric": 0.9688,
+      "target": ">= 0.9000",
+      "counts": "62/64",
+      "status": "PASS"
+    },
+    "P2_false_acceptance_rate": {
+      "metric": 0.0,
+      "target": "== 0.0000",
+      "counts": "0/24",
+      "status": "PASS"
+    },
+    "P3_false_confidence_rate": {
+      "metric": 0.0,
+      "target": "== 0.0000",
+      "counts": "0/2",
+      "status": "PASS"
+    },
+    "P4_violation_detection_recall": {
+      "metric": 1.0,
+      "target": "== 1.0000",
+      "counts": "24/24",
+      "status": "PASS"
+    },
+    "P5_falsifier_rediscovery": {
+      "metric": 1.0,
+      "target": "== 1.0000",
+      "counts": "9/9",
+      "status": "PASS"
+    },
+    "P6_compliant_verification_recall": {
+      "metric": 0.9474,
+      "target": ">= 0.9000",
+      "counts": "36/38",
+      "status": "PASS"
+    },
+    "P7_latency_p95_ms": {
+      "p50_ms": 19.71,
+      "p90_ms": 23.86,
+      "p95_ms": 27.19,
+      "p99_ms": 64.39,
+      "max_ms": 115.53,
+      "target": "<= 500.0ms",
+      "status": "PASS"
+    },
+    "P8_zero_infra_crashes": {
+      "crashes": 0,
+      "target": "== 0",
+      "status": "PASS"
+    },
+    "P9_license_provenance": {
+      "valid_sources": 5,
+      "total_sources": 5,
+      "status": "PASS"
+    },
+    "P10_clean_room_non_regression": {
+      "status": "PASS"
+    }
+  },
+  "confusion_matrix": {
+    "PASS": {
+      "PASS": 36,
+      "FAIL": 0,
+      "HUMAN_REVIEW": 0,
+      "INCONCLUSIVE": 2,
+      "INFRA_ERROR": 0
+    },
+    "FAIL": {
+      "PASS": 0,
+      "FAIL": 9,
+      "HUMAN_REVIEW": 0,
+      "INCONCLUSIVE": 0,
+      "INFRA_ERROR": 0
+    },
+    "HUMAN_REVIEW": {
+      "PASS": 0,
+      "FAIL": 0,
+      "HUMAN_REVIEW": 15,
+      "INCONCLUSIVE": 0,
+      "INFRA_ERROR": 0
+    },
+    "INCONCLUSIVE": {
+      "PASS": 0,
+      "FAIL": 0,
+      "HUMAN_REVIEW": 0,
+      "INCONCLUSIVE": 2,
+      "INFRA_ERROR": 0
+    }
+  },
+  "per_slice": {
+    "authentic_security_patches": {
+      "total": 8,
+      "correct": 8,
+      "accuracy": 1.0
+    },
+    "production_code_removals": {
+      "total": 8,
+      "correct": 6,
+      "accuracy": 0.75
+    },
+    "call_site_and_signature_evolution": {
+      "total": 8,
+      "correct": 8,
+      "accuracy": 1.0
+    },
+    "multi_file_feature_additions": {
+      "total": 8,
+      "correct": 8,
+      "accuracy": 1.0
+    },
+    "dynamic_runtime_idioms": {
+      "total": 8,
+      "correct": 8,
+      "accuracy": 1.0
+    },
+    "complex_composite_diffs": {
+      "total": 8,
+      "correct": 8,
+      "accuracy": 1.0
+    },
+    "agent_generated_hallucinations": {
+      "total": 8,
+      "correct": 8,
+      "accuracy": 1.0
+    },
+    "manifests_and_documentation": {
+      "total": 8,
+      "correct": 8,
+      "accuracy": 1.0
+    }
+  },
+  "falsifiers": [
+    {
+      "id": "REAL-SEC-03",
+      "falsifier_class": "secret_name_independence",
+      "gold": "FAIL",
+      "pred": "FAIL",
+      "matched": true,
+      "rationale": "blocking_check_failed"
+    },
+    {
+      "id": "REAL-SEC-05",
+      "falsifier_class": "secret_name_independence",
+      "gold": "FAIL",
+      "pred": "FAIL",
+      "matched": true,
+      "rationale": "blocking_check_failed"
+    },
+    {
+      "id": "REAL-SEC-08",
+      "falsifier_class": "secret_name_independence",
+      "gold": "FAIL",
+      "pred": "FAIL",
+      "matched": true,
+      "rationale": "blocking_check_failed"
+    },
+    {
+      "id": "REAL-REM-03",
+      "falsifier_class": "removal_provenance",
+      "gold": "FAIL",
+      "pred": "FAIL",
+      "matched": true,
+      "rationale": "blocking_check_failed"
+    },
+    {
+      "id": "REAL-REM-05",
+      "falsifier_class": "removal_provenance",
+      "gold": "INCONCLUSIVE",
+      "pred": "INCONCLUSIVE",
+      "matched": true,
+      "rationale": "checks_ran_but_nothing_established"
+    },
+    {
+      "id": "REAL-REM-07",
+      "falsifier_class": "removal_provenance",
+      "gold": "PASS",
+      "pred": "PASS",
+      "matched": true,
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "REAL-CALL-02",
+      "falsifier_class": "argument_value_blindness",
+      "gold": "HUMAN_REVIEW",
+      "pred": "HUMAN_REVIEW",
+      "matched": true,
+      "rationale": "non_blocking_failures"
+    },
+    {
+      "id": "REAL-CALL-04",
+      "falsifier_class": "argument_value_blindness",
+      "gold": "HUMAN_REVIEW",
+      "pred": "HUMAN_REVIEW",
+      "matched": true,
+      "rationale": "non_blocking_failures"
+    },
+    {
+      "id": "REAL-CALL-06",
+      "falsifier_class": "argument_value_blindness",
+      "gold": "HUMAN_REVIEW",
+      "pred": "HUMAN_REVIEW",
+      "matched": true,
+      "rationale": "non_blocking_failures"
+    }
+  ],
+  "adjudication_verdict": "PROMOTE",
+  "adjudication_status": "ESTABLISHED"
+}

@@ -38,6 +38,16 @@ def _normalize(content: str) -> str:
     return " ".join(content.strip().split())
 
 
+def _return_callee(text: str) -> str | None:
+    stripped = text.strip()
+    if not stripped.startswith("return "):
+        return None
+    expr = stripped[len("return "):].strip()
+    if "(" in expr and expr.endswith(")"):
+        return expr[:expr.find("(")].strip()
+    return None
+
+
 def swapped_returns(diff: str | None) -> list[str]:
     """`path:old_line` items where a return statement was swapped.
 
@@ -68,9 +78,27 @@ def swapped_returns(diff: str | None) -> list[str]:
                     added.append(_normalize(body[1:]))
             else:
                 old_ln += 1
+        if not removed or not added:
+            continue
         added_set = set(added)
         for ln, text in removed:
             if text not in added_set:
+                callee_rem = _return_callee(text)
+                if callee_rem and any(_return_callee(a) == callee_rem for a in added):
+                    # Same callee call; delegated to call semantics checker
+                    continue
+                rem_expr = text[len("return "):].strip()
+                if rem_expr and any(f"({rem_expr})" in a[len("return "):].strip() for a in added if a.startswith("return ")):
+                    # Wrapped expression (e.g. return self.message -> return strip_ansi(self.message))
+                    continue
+                added_text = "\n".join(b[1:] for b in h.lines if b.startswith("+") and not b.startswith("+++"))
+                if rem_expr and "def " in added_text and f"return {rem_expr}(" in added_text:
+                    # Decorator wrapper returned (e.g. def new_func: return f(*args, **kwargs); return new_func)
+                    continue
+                if rem_expr in ("{}", "[]", "()"):
+                    if any(a[len("return "):].strip().isidentifier() and f"{a[len('return '):].strip()} = {rem_expr}" in added_text for a in added if a.startswith("return ")):
+                        # Populated empty collection initialized in hunk
+                        continue
                 key = f"{h.file}:{ln}"
                 if key not in seen:
                     seen.add(key)
