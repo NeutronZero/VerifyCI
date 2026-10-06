@@ -1,0 +1,192 @@
+{
+  "frozen": {
+    "cases_sha256": "05c842c80a48364c"
+  },
+  "verdicts": [
+    {
+      "id": "N-C1",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "N-C2",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "N-C3",
+      "ground_truth": "correct",
+      "category": "human_review",
+      "expected": "HUMAN_REVIEW",
+      "status": "HUMAN_REVIEW",
+      "rationale": "non_blocking_failures"
+    },
+    {
+      "id": "N-C4",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "N-C5",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "N-C6",
+      "ground_truth": "correct",
+      "category": "inconclusive",
+      "expected": "INCONCLUSIVE",
+      "status": "INCONCLUSIVE",
+      "rationale": "checks_ran_but_nothing_established"
+    },
+    {
+      "id": "N-C7",
+      "ground_truth": "correct",
+      "category": "pass",
+      "expected": "PASS",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "N-W1",
+      "ground_truth": "wrong",
+      "category": "forbid_call",
+      "expected": "FAIL",
+      "status": "FAIL",
+      "rationale": "blocking_check_failed"
+    },
+    {
+      "id": "N-W2",
+      "ground_truth": "wrong",
+      "category": "forbid_import",
+      "expected": "FAIL",
+      "status": "FAIL",
+      "rationale": "blocking_check_failed"
+    },
+    {
+      "id": "N-W3",
+      "ground_truth": "wrong",
+      "category": "secret",
+      "expected": "FAIL",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "N-W4",
+      "ground_truth": "wrong",
+      "category": "fabricated_removal",
+      "expected": "FAIL",
+      "status": "INCONCLUSIVE",
+      "rationale": "unestablished_blocking_checks"
+    },
+    {
+      "id": "N-S1",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "HUMAN_REVIEW",
+      "status": "HUMAN_REVIEW",
+      "rationale": "non_blocking_failures"
+    },
+    {
+      "id": "N-S2",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "HUMAN_REVIEW",
+      "status": "HUMAN_REVIEW",
+      "rationale": "non_blocking_failures"
+    },
+    {
+      "id": "N-S3",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "HUMAN_REVIEW",
+      "status": "HUMAN_REVIEW",
+      "rationale": "non_blocking_failures"
+    },
+    {
+      "id": "N-S4",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "HUMAN_REVIEW",
+      "status": "PASS",
+      "rationale": "all_checks_passed_behavior_not_verified"
+    },
+    {
+      "id": "N-S5",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "HUMAN_REVIEW",
+      "status": "HUMAN_REVIEW",
+      "rationale": "non_blocking_failures"
+    },
+    {
+      "id": "N-S6",
+      "ground_truth": "wrong",
+      "category": "semantic",
+      "expected": "HUMAN_REVIEW",
+      "status": "HUMAN_REVIEW",
+      "rationale": "non_blocking_failures"
+    }
+  ],
+  "metrics": {
+    "counts": {
+      "PASS": 7,
+      "HUMAN_REVIEW": 6,
+      "INCONCLUSIVE": 2,
+      "FAIL": 2
+    },
+    "patch_equivalence": 1.0,
+    "overall_agreement": 0.8235,
+    "verification_precision": 1.0,
+    "deterministic_catch_rate": 0.5,
+    "semantic_false_accept_rate": 0.1667,
+    "semantic_decline_rate": 0.8333,
+    "false_reject_ids": [],
+    "false_positive_fail_ids": [],
+    "missed_deterministic_ids": [
+      "N-W3",
+      "N-W4"
+    ],
+    "wrong_accepted_ids": [
+      "N-W3",
+      "N-S4"
+    ],
+    "confusion": {
+      "wrong_all": {
+        "caught": 2,
+        "accepted": 2,
+        "declined": 6
+      },
+      "correct_all": {
+        "caught": 0,
+        "accepted": 5,
+        "declined": 2
+      },
+      "wrong_deterministic": {
+        "caught": 2,
+        "accepted": 1,
+        "declined": 1
+      },
+      "wrong_semantic": {
+        "caught": 0,
+        "accepted": 1,
+        "declined": 5
+      }
+    },
+    "n_correct": 7,
+    "n_wrong": 10,
+    "n_fail": 2
+  }
+}
