@@ -19,9 +19,8 @@ ROOT = HERE.parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from verifyci.verification.diffmap import iter_hunks, normalize_path, unattributed_removed_lines
-from verifyci.verification.removal import (
-    _classify_removed,
+from verifyci.verification.diffmap import iter_hunks, normalize_path, unattributed_removed_lines  # noqa: E402
+from verifyci.verification.removal import (  # noqa: E402
     _lines_match,
     _snippet_record,
     removal_provenance_check,
@@ -152,8 +151,8 @@ def evaluate_cap003a() -> dict[str, Any]:
 
     cases = [json.loads(line) for line in cases_file.read_text(encoding="utf-8").splitlines() if line.strip()]
     labels = {
-        l["id"]: l
-        for l in [
+        lbl["id"]: lbl
+        for lbl in [
             json.loads(line)
             for line in labels_file.read_text(encoding="utf-8").splitlines()
             if line.strip()
@@ -362,7 +361,7 @@ Integrity:
 ```
 """
     results_md.write_text(md_content, encoding="utf-8")
-    print(f"CAP-003A Evaluation Complete:")
+    print("CAP-003A Evaluation Complete:")
     print(f"R0 Agreement: {stats_r0['agreement']:.4f} ({stats_r0['correct_count']}/{stats_r0['total_count']})")
     print(f"R1 Agreement: {stats_r1['agreement']:.4f} ({stats_r1['correct_count']}/{stats_r1['total_count']})")
     return report

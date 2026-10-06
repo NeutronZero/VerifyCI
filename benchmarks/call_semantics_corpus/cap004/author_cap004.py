@@ -708,7 +708,7 @@ def main() -> None:
     (HERE / "cases.jsonl").write_bytes(cases_bytes)
 
     # 2. Write labels.jsonl
-    labels_lines = [json.dumps(l, sort_keys=True) for l in LABELS]
+    labels_lines = [json.dumps(lbl, sort_keys=True) for lbl in LABELS]
     labels_content = "\n".join(labels_lines) + "\n"
     labels_bytes = labels_content.encode("utf-8")
     labels_hash = hashlib.sha256(labels_bytes).hexdigest()
@@ -724,8 +724,8 @@ def main() -> None:
         slice_counts[c["slice"]] = slice_counts.get(c["slice"], 0) + 1
 
     expected_counts = {}
-    for l in LABELS:
-        expected_counts[l["expected"]] = expected_counts.get(l["expected"], 0) + 1
+    for lbl in LABELS:
+        expected_counts[lbl["expected"]] = expected_counts.get(lbl["expected"], 0) + 1
 
     # 5. Write config.json
     cfg = {

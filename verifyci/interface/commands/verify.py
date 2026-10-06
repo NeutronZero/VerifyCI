@@ -13,6 +13,7 @@ from verifyci.verification.policy import PolicyEvaluator
 from verifyci.verification.removal import removal_provenance_check
 from verifyci.verification.return_swap import return_statement_check
 from verifyci.verification.call_swap import call_target_check
+from verifyci.verification.call_semantics import call_semantics_check
 from verifyci.verification.semi_formal_reason import SemiFormalReasoner
 from verifyci.verification.verification_ir import build_semi_check, build_verification_report
 
@@ -83,6 +84,7 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
     checks.append(removal_provenance_check(diff, entities or []))
     checks.append(return_statement_check(diff))
     checks.append(call_target_check(diff))
+    checks.append(call_semantics_check(diff))
     inv_checks, _metrics = evaluate_invariants(
         diff, invariants, graph, evidence=list(cert.evidence))
     checks.extend(inv_checks)

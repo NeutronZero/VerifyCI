@@ -425,8 +425,15 @@ def _check_invariant(diff: str, invariant: Invariant, graph: Any, evidence: list
         return passed, why, established, hits
     if query == "provenance_check":
         return bool(evidence), f'evidence items={len(evidence)}', True, []
+    if query.startswith("check_call:"):
+        from verifyci.verification.call_semantics import evaluate_call_invariant_query
+        target = query[len("check_call:"):].strip()
+        return evaluate_call_invariant_query(diff, target, mode="require")
     if query.startswith("forbid_call:"):
         name = query[len("forbid_call:"):].strip()
+        if "(" in name and name.endswith(")"):
+            from verifyci.verification.call_semantics import evaluate_call_invariant_query
+            return evaluate_call_invariant_query(diff, name, mode="forbid")
         return _check_forbid(diff, graph, name, "CALLS", invariant=invariant)
     if query.startswith("forbid_import:"):
         name = query[len("forbid_import:"):].strip()

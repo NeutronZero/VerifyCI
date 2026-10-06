@@ -1,0 +1,641 @@
+{
+  "experiment_id": "CAP-004",
+  "title": "Argument-Value / Call-Semantics Verification",
+  "frozen": {
+    "corpus_sha256": "305da66ef4282c7537d9d0366f5d6726acb2b5557114823298e053dbf038c064",
+    "label_sha256": "1733902248e7bc4dcad51c01ffe6e10e362f1a34e899317f958aa4d04d95ab59",
+    "case_count": 36
+  },
+  "metrics": {
+    "c0_legacy": {
+      "total": 36,
+      "correct": 13,
+      "agreement": 0.3611,
+      "false_acceptance_rate": 1.0,
+      "false_confidence_rate": 1.0,
+      "recall_violations": 0.0,
+      "recall_verified": 1.0,
+      "recall_inconclusive": 0.0,
+      "confusion": {
+        "VERIFIED": {
+          "VERIFIED": 13,
+          "FAIL": 0,
+          "INCONCLUSIVE": 0
+        },
+        "FAIL": {
+          "VERIFIED": 13,
+          "FAIL": 0,
+          "INCONCLUSIVE": 0
+        },
+        "INCONCLUSIVE": {
+          "VERIFIED": 10,
+          "FAIL": 0,
+          "INCONCLUSIVE": 0
+        }
+      },
+      "per_slice": {
+        "keyword_argument_values": {
+          "total": 5,
+          "correct": 2
+        },
+        "positional_argument_values": {
+          "total": 5,
+          "correct": 2
+        },
+        "argument_order_swap": {
+          "total": 4,
+          "correct": 2
+        },
+        "dynamic_expression_args": {
+          "total": 5,
+          "correct": 1
+        },
+        "kwargs_unpacking": {
+          "total": 4,
+          "correct": 1
+        },
+        "default_arg_reliance": {
+          "total": 4,
+          "correct": 2
+        },
+        "overload_receiver_context": {
+          "total": 4,
+          "correct": 2
+        },
+        "call_routing_mutation": {
+          "total": 5,
+          "correct": 1
+        }
+      }
+    },
+    "c1_semantics": {
+      "total": 36,
+      "correct": 36,
+      "agreement": 1.0,
+      "false_acceptance_rate": 0.0,
+      "false_confidence_rate": 0.0,
+      "recall_violations": 1.0,
+      "recall_verified": 1.0,
+      "recall_inconclusive": 1.0,
+      "confusion": {
+        "VERIFIED": {
+          "VERIFIED": 13,
+          "FAIL": 0,
+          "INCONCLUSIVE": 0
+        },
+        "FAIL": {
+          "VERIFIED": 0,
+          "FAIL": 13,
+          "INCONCLUSIVE": 0
+        },
+        "INCONCLUSIVE": {
+          "VERIFIED": 0,
+          "FAIL": 0,
+          "INCONCLUSIVE": 10
+        }
+      },
+      "per_slice": {
+        "keyword_argument_values": {
+          "total": 5,
+          "correct": 5
+        },
+        "positional_argument_values": {
+          "total": 5,
+          "correct": 5
+        },
+        "argument_order_swap": {
+          "total": 4,
+          "correct": 4
+        },
+        "dynamic_expression_args": {
+          "total": 5,
+          "correct": 5
+        },
+        "kwargs_unpacking": {
+          "total": 4,
+          "correct": 4
+        },
+        "default_arg_reliance": {
+          "total": 4,
+          "correct": 4
+        },
+        "overload_receiver_context": {
+          "total": 4,
+          "correct": 4
+        },
+        "call_routing_mutation": {
+          "total": 5,
+          "correct": 5
+        }
+      }
+    }
+  },
+  "c0_verdicts": [
+    {
+      "id": "CALL-KWD-01",
+      "slice": "keyword_argument_values",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-KWD-02",
+      "slice": "keyword_argument_values",
+      "status": "VERIFIED",
+      "expected": "FAIL",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-KWD-03",
+      "slice": "keyword_argument_values",
+      "status": "VERIFIED",
+      "expected": "FAIL",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-KWD-04",
+      "slice": "keyword_argument_values",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-KWD-05",
+      "slice": "keyword_argument_values",
+      "status": "VERIFIED",
+      "expected": "INCONCLUSIVE",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-POS-01",
+      "slice": "positional_argument_values",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-POS-02",
+      "slice": "positional_argument_values",
+      "status": "VERIFIED",
+      "expected": "FAIL",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-POS-03",
+      "slice": "positional_argument_values",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-POS-04",
+      "slice": "positional_argument_values",
+      "status": "VERIFIED",
+      "expected": "FAIL",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-POS-05",
+      "slice": "positional_argument_values",
+      "status": "VERIFIED",
+      "expected": "INCONCLUSIVE",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-ORD-01",
+      "slice": "argument_order_swap",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-ORD-02",
+      "slice": "argument_order_swap",
+      "status": "VERIFIED",
+      "expected": "FAIL",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-ORD-03",
+      "slice": "argument_order_swap",
+      "status": "VERIFIED",
+      "expected": "FAIL",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-ORD-04",
+      "slice": "argument_order_swap",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-DYN-01",
+      "slice": "dynamic_expression_args",
+      "status": "VERIFIED",
+      "expected": "INCONCLUSIVE",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-DYN-02",
+      "slice": "dynamic_expression_args",
+      "status": "VERIFIED",
+      "expected": "INCONCLUSIVE",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-DYN-03",
+      "slice": "dynamic_expression_args",
+      "status": "VERIFIED",
+      "expected": "INCONCLUSIVE",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-DYN-04",
+      "slice": "dynamic_expression_args",
+      "status": "VERIFIED",
+      "expected": "FAIL",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-DYN-05",
+      "slice": "dynamic_expression_args",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-KWA-01",
+      "slice": "kwargs_unpacking",
+      "status": "VERIFIED",
+      "expected": "INCONCLUSIVE",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-KWA-02",
+      "slice": "kwargs_unpacking",
+      "status": "VERIFIED",
+      "expected": "INCONCLUSIVE",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-KWA-03",
+      "slice": "kwargs_unpacking",
+      "status": "VERIFIED",
+      "expected": "FAIL",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-KWA-04",
+      "slice": "kwargs_unpacking",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-DEF-01",
+      "slice": "default_arg_reliance",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-DEF-02",
+      "slice": "default_arg_reliance",
+      "status": "VERIFIED",
+      "expected": "FAIL",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-DEF-03",
+      "slice": "default_arg_reliance",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-DEF-04",
+      "slice": "default_arg_reliance",
+      "status": "VERIFIED",
+      "expected": "INCONCLUSIVE",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-RCV-01",
+      "slice": "overload_receiver_context",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-RCV-02",
+      "slice": "overload_receiver_context",
+      "status": "VERIFIED",
+      "expected": "FAIL",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-RCV-03",
+      "slice": "overload_receiver_context",
+      "status": "VERIFIED",
+      "expected": "INCONCLUSIVE",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-RCV-04",
+      "slice": "overload_receiver_context",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-MUT-01",
+      "slice": "call_routing_mutation",
+      "status": "VERIFIED",
+      "expected": "FAIL",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-MUT-02",
+      "slice": "call_routing_mutation",
+      "status": "VERIFIED",
+      "expected": "FAIL",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-MUT-03",
+      "slice": "call_routing_mutation",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-MUT-04",
+      "slice": "call_routing_mutation",
+      "status": "VERIFIED",
+      "expected": "INCONCLUSIVE",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    },
+    {
+      "id": "CALL-MUT-05",
+      "slice": "call_routing_mutation",
+      "status": "VERIFIED",
+      "expected": "FAIL",
+      "rationale": "legacy check: callee reference found (argument-blind)"
+    }
+  ],
+  "c1_verdicts": [
+    {
+      "id": "CALL-KWD-01",
+      "slice": "keyword_argument_values",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "call semantics and argument contracts verified"
+    },
+    {
+      "id": "CALL-KWD-02",
+      "slice": "keyword_argument_values",
+      "status": "FAIL",
+      "expected": "FAIL",
+      "rationale": "forbidden argument strict=False detected; argument strict=False contradicts required True"
+    },
+    {
+      "id": "CALL-KWD-03",
+      "slice": "keyword_argument_values",
+      "status": "FAIL",
+      "expected": "FAIL",
+      "rationale": "forbidden argument shell=True detected; argument shell=True contradicts required False"
+    },
+    {
+      "id": "CALL-KWD-04",
+      "slice": "keyword_argument_values",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "call semantics and argument contracts verified"
+    },
+    {
+      "id": "CALL-KWD-05",
+      "slice": "keyword_argument_values",
+      "status": "INCONCLUSIVE",
+      "expected": "INCONCLUSIVE",
+      "rationale": "argument 'mode' is dynamic expression 'config.get_mode()'"
+    },
+    {
+      "id": "CALL-POS-01",
+      "slice": "positional_argument_values",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "call semantics and argument contracts verified"
+    },
+    {
+      "id": "CALL-POS-02",
+      "slice": "positional_argument_values",
+      "status": "FAIL",
+      "expected": "FAIL",
+      "rationale": "forbidden argument use_ssl=False detected; argument use_ssl=False contradicts required True"
+    },
+    {
+      "id": "CALL-POS-03",
+      "slice": "positional_argument_values",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "call semantics and argument contracts verified"
+    },
+    {
+      "id": "CALL-POS-04",
+      "slice": "positional_argument_values",
+      "status": "FAIL",
+      "expected": "FAIL",
+      "rationale": "forbidden argument executable=True detected; argument executable=True contradicts required False"
+    },
+    {
+      "id": "CALL-POS-05",
+      "slice": "positional_argument_values",
+      "status": "INCONCLUSIVE",
+      "expected": "INCONCLUSIVE",
+      "rationale": "argument 'use_ssl' is dynamic expression 'get_ssl_flag()'"
+    },
+    {
+      "id": "CALL-ORD-01",
+      "slice": "argument_order_swap",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "call semantics and argument contracts verified"
+    },
+    {
+      "id": "CALL-ORD-02",
+      "slice": "argument_order_swap",
+      "status": "FAIL",
+      "expected": "FAIL",
+      "rationale": "forbidden argument source_acct='target_id' detected; argument source_acct='target_id' contradicts required 'source_id'; argument target_acct='source_id' contradicts required 'target_id'"
+    },
+    {
+      "id": "CALL-ORD-03",
+      "slice": "argument_order_swap",
+      "status": "FAIL",
+      "expected": "FAIL",
+      "rationale": "forbidden argument role='user_id' detected; argument role='user_id' contradicts required 'viewer'"
+    },
+    {
+      "id": "CALL-ORD-04",
+      "slice": "argument_order_swap",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "call semantics and argument contracts verified"
+    },
+    {
+      "id": "CALL-DYN-01",
+      "slice": "dynamic_expression_args",
+      "status": "INCONCLUSIVE",
+      "expected": "INCONCLUSIVE",
+      "rationale": "argument 'verify' is dynamic expression \"os.environ.get('VERIFY_SSL')\""
+    },
+    {
+      "id": "CALL-DYN-02",
+      "slice": "dynamic_expression_args",
+      "status": "INCONCLUSIVE",
+      "expected": "INCONCLUSIVE",
+      "rationale": "argument 'readonly' is dynamic expression 'session.is_readonly()'"
+    },
+    {
+      "id": "CALL-DYN-03",
+      "slice": "dynamic_expression_args",
+      "status": "INCONCLUSIVE",
+      "expected": "INCONCLUSIVE",
+      "rationale": "argument 'cipher' is dynamic expression 'choose_cipher(cfg)'"
+    },
+    {
+      "id": "CALL-DYN-04",
+      "slice": "dynamic_expression_args",
+      "status": "FAIL",
+      "expected": "FAIL",
+      "rationale": "conditional branch permits forbidden argument allow_builtins=True; conditional branch permits contradicting value for 'allow_builtins'"
+    },
+    {
+      "id": "CALL-DYN-05",
+      "slice": "dynamic_expression_args",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "call semantics and argument contracts verified"
+    },
+    {
+      "id": "CALL-KWA-01",
+      "slice": "kwargs_unpacking",
+      "status": "INCONCLUSIVE",
+      "expected": "INCONCLUSIVE",
+      "rationale": "dynamic **kwargs unpacking may override parameters: ['httponly', 'secure']"
+    },
+    {
+      "id": "CALL-KWA-02",
+      "slice": "kwargs_unpacking",
+      "status": "INCONCLUSIVE",
+      "expected": "INCONCLUSIVE",
+      "rationale": "parameter 'payload' may be supplied by dynamic *args unpacking; dynamic *args unpacking covers required parameters: ['payload']"
+    },
+    {
+      "id": "CALL-KWA-03",
+      "slice": "kwargs_unpacking",
+      "status": "FAIL",
+      "expected": "FAIL",
+      "rationale": "forbidden argument debug=True detected; argument debug=True contradicts required False"
+    },
+    {
+      "id": "CALL-KWA-04",
+      "slice": "kwargs_unpacking",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "call semantics and argument contracts verified"
+    },
+    {
+      "id": "CALL-DEF-01",
+      "slice": "default_arg_reliance",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "call semantics and argument contracts verified"
+    },
+    {
+      "id": "CALL-DEF-02",
+      "slice": "default_arg_reliance",
+      "status": "FAIL",
+      "expected": "FAIL",
+      "rationale": "forbidden argument tls=False detected; argument tls=False contradicts required True"
+    },
+    {
+      "id": "CALL-DEF-03",
+      "slice": "default_arg_reliance",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "call semantics and argument contracts verified"
+    },
+    {
+      "id": "CALL-DEF-04",
+      "slice": "default_arg_reliance",
+      "status": "INCONCLUSIVE",
+      "expected": "INCONCLUSIVE",
+      "rationale": "signature for callee 'third_party_call' is unmodeled"
+    },
+    {
+      "id": "CALL-RCV-01",
+      "slice": "overload_receiver_context",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "call semantics and argument contracts verified"
+    },
+    {
+      "id": "CALL-RCV-02",
+      "slice": "overload_receiver_context",
+      "status": "FAIL",
+      "expected": "FAIL",
+      "rationale": "forbidden receiver type 'InsecureStorage' matched; receiver type 'InsecureStorage' violates required 'SecureStorage'"
+    },
+    {
+      "id": "CALL-RCV-03",
+      "slice": "overload_receiver_context",
+      "status": "INCONCLUSIVE",
+      "expected": "INCONCLUSIVE",
+      "rationale": "receiver type for 'validate' is ungrounded"
+    },
+    {
+      "id": "CALL-RCV-04",
+      "slice": "overload_receiver_context",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "call semantics and argument contracts verified"
+    },
+    {
+      "id": "CALL-MUT-01",
+      "slice": "call_routing_mutation",
+      "status": "FAIL",
+      "expected": "FAIL",
+      "rationale": "forbidden argument recipient='b' detected; argument recipient='b' contradicts required 'a'"
+    },
+    {
+      "id": "CALL-MUT-02",
+      "slice": "call_routing_mutation",
+      "status": "FAIL",
+      "expected": "FAIL",
+      "rationale": "forbidden argument level='DEBUG' detected; argument level='DEBUG' contradicts required 'INFO'"
+    },
+    {
+      "id": "CALL-MUT-03",
+      "slice": "call_routing_mutation",
+      "status": "VERIFIED",
+      "expected": "VERIFIED",
+      "rationale": "call semantics and argument contracts verified"
+    },
+    {
+      "id": "CALL-MUT-04",
+      "slice": "call_routing_mutation",
+      "status": "INCONCLUSIVE",
+      "expected": "INCONCLUSIVE",
+      "rationale": "argument 'priority' is dynamic expression 'get_priority(msg)'"
+    },
+    {
+      "id": "CALL-MUT-05",
+      "slice": "call_routing_mutation",
+      "status": "FAIL",
+      "expected": "FAIL",
+      "rationale": "required argument 'role' missing"
+    }
+  ]
+}
