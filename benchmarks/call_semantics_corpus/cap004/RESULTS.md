@@ -14,7 +14,7 @@
 | **Overall Agreement** | 0.3611 (13/36) | **1.0000** (36/36) | ≥ 0.9500 | **MET** |
 | **False Acceptance Rate (FAR)** | 1.0000 | **0.0000** | = 0.0000 | **MET** |
 | **False Confidence Rate (FCR)** | 1.0000 | **0.0000** | = 0.0000 | **MET** |
-| **Violation Catch Recall** | 0.0000 | **1.0000** | = 1.0000 | **MET** |
+| **Violation Detection Recall** | 0.0000 | **1.0000** | = 1.0000 | **MET** |
 | **Compliant Verification Recall** | 1.0000 | **1.0000** | = 1.0000 | **MET** |
 | **Dynamic Inconclusive Recall** | 0.0000 | **1.0000** | = 1.0000 | **MET** |
 
@@ -36,7 +36,8 @@
 ### A. Resolution of CAP-002 N-S4 Falsifier (`CALL-MUT-01`)
 - **Historical Defect**: In CAP-002, held-out case `N-S4` (`send_email('a')` -> `send_email('b')`) passed silently because legacy checks inspected only callee node names and LHS assignment disappearance. Argument-value changes were completely invisible.
 - **C0 Result**: `VERIFIED` (False Acceptance). C0 observed `send_email` referenced and passed the diff.
-- **C1 Result**: `FAIL` (`call argument string literal mutated from 'a' to 'b'`). Argument mutation detected and rejected.
+- **C1 Result**: Violation detected (`call argument string literal mutated from 'a' to 'b'`).
+- **Policy Routing Distinction**: Detected argument-semantic violations never produced PASS. Policy routing escalates them to `HUMAN_REVIEW` under the default non-blocking call-semantics contract (or `FAIL` under blocking invariant contracts), preserving the invariant that absence of verified intent never produces a silent pass.
 
 ### B. Epistemic Invariant: Absence of Proof is Not Proof of Compliance
 - Across all 10 ungrounded dynamic cases (`os.environ.get`, `session.method()`, variable `**kwargs` / `*args`, unmodeled signatures), C0 falsely accepted them as `VERIFIED` with false confidence.
@@ -50,8 +51,10 @@
 - **Corpus & Labels Frozen**: PASS
 - **False Acceptance Rate = 0.0000**: PASS (0/13 violations accepted)
 - **False Confidence Rate = 0.0000**: PASS (0/10 ungrounded cases falsely verified)
-- **Violation Recall = 1.0000**: PASS (13/13 violations caught)
-- **Compliance Recall = 1.0000**: PASS (13/13 verified)
-- **Full Pytest Suite**: PASS (1076 passed, 6 skipped, 0 failed)
+- **Violation Detection Recall = 1.0000**: PASS (13/13 violations detected)
+- **Compliant Verification Recall = 1.0000**: PASS (13/13 verified)
+- **Dynamic Inconclusive Recall = 1.0000**: PASS (10/10 inconclusive)
+- **Policy Routing Safety**: PASS (Detected argument-semantic violations never produce PASS; default non-blocking tripwire escalates to HUMAN_REVIEW)
+- **Full Pytest Suite**: PASS (1084 passed, 6 skipped, 0 failed)
 - **Ruff Clean**: PASS (All checks passed)
 - **Adjudication Decision**: **PROMOTE — ESTABLISHED**
