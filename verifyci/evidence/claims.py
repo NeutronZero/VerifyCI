@@ -15,6 +15,7 @@ from typing import Any
 
 CLAIM_RESULT_PATHS = {
     "H1_retrieval_fusion": Path("benchmarks/beir/results.json"),
+    "H1_RR_reranked_hybrid": Path("benchmarks/beir/rerank_revision/results.json"),
     "patch_corpus_verifier": Path("benchmarks/patch_corpus/results.json"),
     "blast_radius_bounds": Path("benchmarks/blast_corpus/results.json"),
 }
@@ -23,6 +24,8 @@ CLAIM_RESULT_PATHS = {
 # predicates rather than copying numeric gates into separate implementations.
 H1_MIN_DELTA_NDCG = 0.05
 H1_MIN_QUERIES = 50
+H1_RR_MIN_DELTA_NDCG = 0.05
+H1_RR_MIN_QUERIES = 50
 PATCH_MIN_AGREEMENT = 0.90
 PATCH_MIN_DETERMINISTIC_CATCH = 0.95
 PATCH_MAX_SEMANTIC_FALSE_ACCEPT = 0.0
@@ -123,6 +126,56 @@ def _evaluate_h1(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _evaluate_h1_rr(data: dict[str, Any]) -> dict[str, Any]:
+    """H1-RR: reranked-hybrid claim. Same establishment shape as H1, but the
+    hybrid arm includes the cross-encoder rerank stage recorded in the
+    revision config. Recorded gate booleans are provenance only."""
+    metrics = _require_mapping(data, "metrics")
+    run = _require_mapping(data, "run")
+    validators = _require_mapping(data, "validators")
+    if metrics is None or run is None or validators is None:
+        return _missing_claim("missing_required_sections")
+
+    dense_block = _require_mapping(metrics, "dense")
+    hybrid_block = _require_mapping(metrics, "hybrid")
+    queries = run.get("queries")
+    errors = validators.get("errors")
+    drift = validators.get("drift")
+    dry_run = run.get("dry_run")
+
+    dense_ndcg = _require_number(dense_block or {}, "ndcg")
+    hybrid_ndcg = _require_number(hybrid_block or {}, "ndcg")
+    if dense_ndcg is None or hybrid_ndcg is None:
+        return _missing_claim("missing_required_metrics")
+    if not isinstance(queries, int) or isinstance(queries, bool):
+        return _missing_claim("missing_queries")
+    if not isinstance(errors, list) or not isinstance(drift, bool) or not isinstance(dry_run, bool):
+        return _missing_claim("missing_validator_state")
+
+    delta_ndcg = hybrid_ndcg - dense_ndcg
+    established = (
+        delta_ndcg >= H1_RR_MIN_DELTA_NDCG
+        and queries >= H1_RR_MIN_QUERIES
+        and not errors
+        and not drift
+        and not dry_run
+    )
+    frozen = _require_mapping(data, "frozen") or {}
+    gate = _require_mapping(data, "gate")
+    return {
+        "status": "ESTABLISHED" if established else "MEASURED",
+        "metric": "nDCG@10 delta (reranked hybrid)",
+        "delta_ndcg": delta_ndcg,
+        "recorded_delta_ndcg": metrics.get("delta_ndcg"),
+        "dense_ndcg": dense_ndcg,
+        "hybrid_ndcg": hybrid_ndcg,
+        "queries": queries,
+        "rerank_model": frozen.get("model_rerank"),
+        "rerank_depth": frozen.get("rerank_depth"),
+        "recorded_gate_established": gate.get("established") if gate is not None else None,
+    }
+
+
 def _evaluate_patch(data: dict[str, Any]) -> dict[str, Any]:
     metrics = _require_mapping(data, "metrics")
     if metrics is None:
@@ -180,6 +233,7 @@ def evaluate_claim(claim_name: str, evidence: EvidenceLoad | dict[str, Any] | No
 
     evaluators = {
         "H1_retrieval_fusion": _evaluate_h1,
+        "H1_RR_reranked_hybrid": _evaluate_h1_rr,
         "patch_corpus_verifier": _evaluate_patch,
         "blast_radius_bounds": _evaluate_blast,
     }

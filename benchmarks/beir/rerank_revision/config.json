@@ -1,0 +1,15 @@
+{
+  "claim": "H1-RR — Hybrid + Cross-Encoder Reranking (distinct from frozen H1 fusion claim)",
+  "lineage": "frozen H1 corpus/qrels/scoring/tiebreak unchanged; only the hybrid channel adds a rerank stage",
+  "frozen_before_measurement": true,
+  "dense_condition": "nomic-embed-text via frozen cache (identical to H1 gate dense arm)",
+  "hybrid_channel": ["dense (nomic, full-corpus cosine)", "bm25 (top-10)", "equal-weight RRF k=60 top-20", "cross-encoder/ms-marco-MiniLM-L-6-v2 rescore to top-10, (-score, docid) tiebreak"],
+  "rerank_pairs": "clean (query_text, doc_text); production CrossEncoderReranker doc-id prefix quirk explicitly NOT used (separate product review)",
+  "model_policy": "local_files_only=True; never downloads; measurement fails closed without a loadable local model",
+  "pass_rule": {
+    "target_delta_ndcg_abs": 0.05,
+    "min_queries": 50,
+    "note": "H1-RR established = (reranked_hybrid - dense) >= +0.05 AND queries >= 50 AND validators passed"
+  },
+  "relation_to_H1": "H1 fusion baseline (results.json, +0.0384 MEASURED) is untouched and remains the fusion claim; H1-RR is evaluated as a separate bundle claim with its own canonical predicate"
+}

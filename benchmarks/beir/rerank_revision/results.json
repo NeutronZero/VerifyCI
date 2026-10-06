@@ -1,0 +1,37 @@
+{
+  "frozen": {
+    "corpus_sha256": "cac3aa9750f2e6b8b73fa4d8599df02429d97f32e35ae06fc8265b3dd8006a44",
+    "qrels_sha256": "b1debc8b40663c9b655d94a2f3bce386ff2fbd0e7426d09750615259df593873",
+    "config_sha256": "fdde798524d295eeb9b586f30f57b91ae5ef773a2afb37949692015c4aed624e",
+    "revision_config_sha256": "2b372420265e16298ff1ce5e0d4bc5983e4315cbfaf5e1ce85dd649b352d2dcc",
+    "model_dense": "nomic-embed-text",
+    "model_rerank": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "rerank_depth": 20,
+    "rrf_k": 60,
+    "k_ndcg": 10
+  },
+  "run": {
+    "provider": "cached:nomic-embed-text+local-cross-encoder",
+    "queries": 62,
+    "documents": 60,
+    "dry_run": false
+  },
+  "metrics": {
+    "dense": {
+      "ndcg": 0.6219642456212527
+    },
+    "hybrid": {
+      "ndcg": 0.7103848369178659
+    },
+    "delta_ndcg": 0.08842059129661317
+  },
+  "validators": {
+    "errors": [],
+    "drift": false
+  },
+  "gate": {
+    "established": true,
+    "rule": "H1-RR: (hybrid_reranked - dense) >= +0.05 AND queries >= 50 AND validators passed",
+    "note": "recorded gate boolean is provenance only; canonical predicate derives establishment"
+  }
+}
