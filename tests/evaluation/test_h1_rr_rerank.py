@@ -34,6 +34,11 @@ def test_h1_rr_recorded_metrics_stable():
     assert rec["run"]["queries"] == 62
     assert rec["frozen"]["model_rerank"] == "cross-encoder/ms-marco-MiniLM-L-6-v2"
     assert rec["frozen"]["rerank_depth"] == 20
+    assert rec["frozen"]["model_snapshot_commit"] == "233902d25c440f23af6f7d6e94d2946bac0bee0a"
+    assert rec["frozen"]["model_snapshot_sha256"] == (
+        "db6ad87969c7dc78320152e68a16118aeb4b2a6f7d8cc979c57f61ddb5e2ab2a")
+    assert rec["frozen"]["model_files"]["model.safetensors"] == (
+        "821d1aa69520101d6e0737f78a042ae25b19e5cb9160701909d10434f4aeb0ae")
     assert rec["frozen"]["revision_config_sha256"] == _sha(REVISION / "config.json")
     assert evaluate_claim("H1_RR_reranked_hybrid", rec)["status"] == "ESTABLISHED"
 

@@ -3,9 +3,19 @@
     "corpus_sha256": "cac3aa9750f2e6b8b73fa4d8599df02429d97f32e35ae06fc8265b3dd8006a44",
     "qrels_sha256": "b1debc8b40663c9b655d94a2f3bce386ff2fbd0e7426d09750615259df593873",
     "config_sha256": "fdde798524d295eeb9b586f30f57b91ae5ef773a2afb37949692015c4aed624e",
-    "revision_config_sha256": "2b372420265e16298ff1ce5e0d4bc5983e4315cbfaf5e1ce85dd649b352d2dcc",
+    "revision_config_sha256": "a84bb9a148a5947289af088b748921b3d7d49c9a89c215d267c0662686606215",
     "model_dense": "nomic-embed-text",
     "model_rerank": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "model_snapshot_commit": "233902d25c440f23af6f7d6e94d2946bac0bee0a",
+    "model_snapshot_sha256": "db6ad87969c7dc78320152e68a16118aeb4b2a6f7d8cc979c57f61ddb5e2ab2a",
+    "model_files": {
+      "config.json": "380e02c93f431831be65d99a4e7e5f67c133985bf2e77d9d4eba46847190bacc",
+      "model.safetensors": "821d1aa69520101d6e0737f78a042ae25b19e5cb9160701909d10434f4aeb0ae",
+      "special_tokens_map.json": "3c3507f36dff57bce437223db3b3081d1e2b52ec3e56ee55438193ecb2c94dd6",
+      "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+      "tokenizer_config.json": "a5c2e5a7b1a29a0702cd28c08a399b5ecc110c263009d17f7e3b415f25905fd8",
+      "vocab.txt": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"
+    },
     "rerank_depth": 20,
     "rrf_k": 60,
     "k_ndcg": 10

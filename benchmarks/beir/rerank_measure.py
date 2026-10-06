@@ -29,6 +29,26 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
+def _model_provenance() -> dict:
+    """Resolve the local cross-encoder snapshot and hash its content.
+
+    Fails closed when no local snapshot resolves. The hash binds the exact
+    model bytes to the measurement (name-only provenance is insufficient
+    for an ESTABLISHED claim).
+    """
+    from huggingface_hub import snapshot_download  # type: ignore
+
+    snap = Path(snapshot_download(MODEL, local_files_only=True))
+    h = hashlib.sha256()
+    files = {}
+    for p in sorted([x for x in snap.iterdir() if x.is_file()], key=lambda x: x.name):
+        data = p.read_bytes()
+        files[p.name] = hashlib.sha256(data).hexdigest()
+        h.update(p.name.encode() + b"\x00" + data)
+    return {"model": MODEL, "snapshot_commit": snap.name,
+            "snapshot_sha256": h.hexdigest(), "files": files}
+
+
 def main() -> None:
     import importlib.util
 
@@ -42,6 +62,7 @@ def main() -> None:
     try:
         from sentence_transformers import CrossEncoder  # type: ignore
         ce = CrossEncoder(MODEL, local_files_only=True)
+        model_prov = _model_provenance()
     except Exception as e:  # noqa: BLE001
         raise SystemExit(f"H1-RR requires local model {MODEL!r}: {e}")
 
@@ -90,9 +111,13 @@ def main() -> None:
         "frozen": {"corpus_sha256": _sha(HERE / "corpus.jsonl"),
                    "qrels_sha256": _sha(HERE / "qrels.jsonl"),
                    "config_sha256": _sha(HERE / "config.json"),
-                   "revision_config_sha256": None,
+                   "revision_config_sha256": _sha(REVISION / "config.json"),
                    "model_dense": "nomic-embed-text",
-                   "model_rerank": MODEL, "rerank_depth": RERANK_DEPTH,
+                   "model_rerank": model_prov["model"],
+                   "model_snapshot_commit": model_prov["snapshot_commit"],
+                   "model_snapshot_sha256": model_prov["snapshot_sha256"],
+                   "model_files": model_prov["files"],
+                   "rerank_depth": RERANK_DEPTH,
                    "rrf_k": 60, "k_ndcg": 10},
         "run": {"provider": "cached:nomic-embed-text+local-cross-encoder",
                 "queries": len(queries), "documents": len(corpus), "dry_run": False},

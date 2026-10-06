@@ -172,6 +172,8 @@ def _evaluate_h1_rr(data: dict[str, Any]) -> dict[str, Any]:
         "queries": queries,
         "rerank_model": frozen.get("model_rerank"),
         "rerank_depth": frozen.get("rerank_depth"),
+        "model_snapshot_commit": frozen.get("model_snapshot_commit"),
+        "model_snapshot_sha256": frozen.get("model_snapshot_sha256"),
         "recorded_gate_established": gate.get("established") if gate is not None else None,
     }
 
