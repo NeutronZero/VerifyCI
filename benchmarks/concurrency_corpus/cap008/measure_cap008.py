@@ -330,9 +330,11 @@ def evaluate_single_case(case: dict[str, Any], label: dict[str, Any], temp_dir: 
         )
         processes.append(p)
 
-    # Launch concurrently
+    # Launch concurrently (in lock exhaustion tripwires, adversary establishes lock first)
     for p in processes:
         p.start()
+        if slice_name == "forced_lock_timeout_exhaustion_tripwires":
+            time.sleep(0.05)
 
     # Wait for completion with timeout
     timeout_s = 20.0
@@ -344,10 +346,13 @@ def evaluate_single_case(case: dict[str, Any], label: dict[str, Any], temp_dir: 
 
     case_duration_ms = (time.perf_counter() - case_start) * 1000.0
 
-    # 3. Collect worker outputs
+    # 3. Collect worker outputs (bounded drain until all workers accounted for)
     worker_results: list[dict[str, Any]] = []
-    while not result_queue.empty():
-        worker_results.append(result_queue.get())
+    while len(worker_results) < len(workers):
+        try:
+            worker_results.append(result_queue.get(timeout=0.2))
+        except Exception:
+            break
 
     # Contention & exception analysis
     lock_errors_count = 0
@@ -584,7 +589,15 @@ def run_benchmark(output_filename: str = "r0_baseline_results.json") -> dict[str
         "cases": results_list,
     }
 
-    out_path = BENCHMARK_DIR / output_filename
+    given_path = Path(output_filename)
+    if given_path.is_absolute():
+        out_path = given_path
+    elif str(given_path).startswith("benchmarks"):
+        out_path = Path.cwd() / given_path
+    else:
+        out_path = BENCHMARK_DIR / given_path.name
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(f"\nSaved results to {out_path}")
 
@@ -594,8 +607,11 @@ def run_benchmark(output_filename: str = "r0_baseline_results.json") -> dict[str
     meas_bytes = (BENCHMARK_DIR / "measure_cap008.py").read_bytes()
     meas_hash = hashlib.sha256(meas_bytes).hexdigest()
 
-    if output_filename == "r0_baseline_results.json":
+    if out_path.name == "r0_baseline_results.json":
         (BENCHMARK_DIR / "R0_RESULTS_SHA256").write_text(res_hash + "\n", encoding="utf-8")
+        (BENCHMARK_DIR / "HARNESS_SHA256").write_text(meas_hash + "\n", encoding="utf-8")
+    elif out_path.name == "r1_capability1_results.json":
+        (BENCHMARK_DIR / "R1_RESULTS_SHA256").write_text(res_hash + "\n", encoding="utf-8")
         (BENCHMARK_DIR / "HARNESS_SHA256").write_text(meas_hash + "\n", encoding="utf-8")
 
     return summary

@@ -1,3 +1,4 @@
+from collections import OrderedDict
 import json
 import os
 from pathlib import Path
@@ -246,16 +247,21 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
         conn.isolation_level = old_isolation
 
 
-class _CachedReadOnlyConnection(sqlite3.Connection):
-    """Process-local persistent read-only connection that ignores close() calls unless forced."""
+MAX_RO_CACHE_ENTRIES = 16
 
-    def close(self, force: bool = False):
-        if not force:
-            return
+
+class _CachedReadOnlyConnection(sqlite3.Connection):
+    """Process-local persistent read-only connection that cleans up cache on close."""
+
+    _db_path: str = ""
+
+    def close(self):
+        if self._db_path:
+            _PROCESS_RO_CACHE.pop(self._db_path, None)
         super().close()
 
 
-_PROCESS_RO_CACHE: dict[str, _CachedReadOnlyConnection] = {}
+_PROCESS_RO_CACHE: OrderedDict[str, tuple[_CachedReadOnlyConnection, tuple[int, int]]] = OrderedDict()
 
 
 class GraphStore:
@@ -279,27 +285,51 @@ class GraphStore:
             # acquisition, URI parsing, and schema inspection overhead
             # under concurrent worker contention.
             norm_key = os.path.abspath(db_path)
-            cached = _PROCESS_RO_CACHE.get(norm_key)
-            if cached is not None:
-                self.conn = cached
-                self._is_cached_ro = True
-                self._batch_depth = 0
-                return
+            try:
+                stat = os.stat(norm_key)
+                current_sig = (stat.st_mtime_ns, stat.st_size)
+            except OSError:
+                current_sig = (0, 0)
+
+            cached_item = _PROCESS_RO_CACHE.get(norm_key)
+            if cached_item is not None:
+                cached_conn, cached_sig = cached_item
+                if cached_sig == current_sig:
+                    try:
+                        cached_conn.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
+                        _PROCESS_RO_CACHE.move_to_end(norm_key)
+                        self.conn = cached_conn
+                        self._is_cached_ro = True
+                        self._batch_depth = 0
+                        return
+                    except Exception:
+                        pass
+                try:
+                    cached_conn.close()
+                except Exception:
+                    pass
+                _PROCESS_RO_CACHE.pop(norm_key, None)
 
             uri = _format_ro_uri(db_path)
             self.conn = sqlite3.connect(
                 uri, uri=True, timeout=5.0, factory=_CachedReadOnlyConnection
             )
+            self.conn._db_path = norm_key
             try:
                 self.conn.execute("PRAGMA busy_timeout = 5000;")
                 self.conn.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
             except BaseException:
-                # Construction failed after connecting (locked/corrupt):
-                # the half-open connection must not leak to GC — and the
-                # caller never receives a store to close.
-                self.conn.close(force=True)
+                self.conn.close()
                 raise
-            _PROCESS_RO_CACHE[norm_key] = self.conn
+
+            while len(_PROCESS_RO_CACHE) >= MAX_RO_CACHE_ENTRIES:
+                _, (old_conn, _) = _PROCESS_RO_CACHE.popitem(last=False)
+                try:
+                    old_conn.close()
+                except Exception:
+                    pass
+
+            _PROCESS_RO_CACHE[norm_key] = (self.conn, current_sig)
             self._is_cached_ro = True
             self._batch_depth = 0
             return
@@ -979,25 +1009,16 @@ class GraphStore:
         return n_entities, n_edges
 
     def close(self, force: bool = False):
-        if getattr(self, "_is_cached_ro", False) and not force:
-            return
-        if getattr(self, "_is_cached_ro", False) and force:
-            norm_key = os.path.abspath(self.db_path)
-            _PROCESS_RO_CACHE.pop(norm_key, None)
+        norm_key = os.path.abspath(self.db_path)
+        _PROCESS_RO_CACHE.pop(norm_key, None)
         if hasattr(self, "conn") and hasattr(self.conn, "close"):
-            if isinstance(self.conn, _CachedReadOnlyConnection):
-                self.conn.close(force=force)
-            else:
-                self.conn.close()
+            self.conn.close()
 
     @classmethod
     def clear_ro_cache(cls):
-        for conn in list(_PROCESS_RO_CACHE.values()):
+        for conn, _ in list(_PROCESS_RO_CACHE.values()):
             try:
-                if isinstance(conn, _CachedReadOnlyConnection):
-                    conn.close(force=True)
-                else:
-                    conn.close()
+                conn.close()
             except Exception:
                 pass
         _PROCESS_RO_CACHE.clear()
