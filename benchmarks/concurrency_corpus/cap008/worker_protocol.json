@@ -1,0 +1,34 @@
+{
+  "protocol_version": "1.0.0",
+  "concurrency_engine": "multiprocessing",
+  "process_start_method": "spawn",
+  "worker_counts": [2, 4, 8],
+  "action_types": [
+    "ingest_revision",
+    "query_latest_revision",
+    "query_entities_by_revision",
+    "query_edges_by_revision",
+    "append_ledger_event",
+    "verify_ledger_chain",
+    "hold_exclusive_lock_tripwire",
+    "crash_mid_commit_tripwire"
+  ],
+  "sqlite_pragmas": {
+    "journal_mode": "WAL",
+    "busy_timeout": 5000,
+    "synchronous": "NORMAL",
+    "foreign_keys": "ON"
+  },
+  "timeout_budgets": {
+    "case_timeout_seconds": 30.0,
+    "worker_action_timeout_seconds": 10.0,
+    "lock_contention_timeout_ms": 5000
+  },
+  "fail_closed_contract": {
+    "lock_exhaustion_verdict": "INCONCLUSIVE",
+    "partial_read_verdict": "INCONCLUSIVE",
+    "ledger_corruption_verdict": "INCONCLUSIVE",
+    "crash_anomaly_verdict": "INCONCLUSIVE",
+    "permit_partial_pass": false
+  }
+}

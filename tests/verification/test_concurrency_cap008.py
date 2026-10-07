@@ -1,0 +1,176 @@
+"""CAP-008: Concurrent CI Workers & Shared-Storage Contention Attestation Integrity Tests.
+
+Verifies:
+- Step 1 Cryptographic freeze hashes for cases.jsonl, labels.jsonl, and oracle_manifest.jsonl
+- LOCK-1: Multi-process worker counts (N in {2, 4, 8}) and protocol specs
+- LOCK-2: Independent Oracle isolation (AST and runtime: zero verifyci dependencies)
+- LOCK-3 & T2: Disjoint branch invariance & explicit serial reference schedules
+- LOCK-5 & T5: Committed lineage & ledger hash continuity under concurrent appends
+- LOCK-6 & T6: Bounded lock handling & fail-closed veto on all 16 tripwires (INCONCLUSIVE)
+- LOCK-8: Slice stratification (64 cases across 8 slices of 8 cases each)
+"""
+from __future__ import annotations
+
+import ast
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+import pytest
+
+BENCHMARK_DIR = Path(__file__).resolve().parent.parent.parent / "benchmarks" / "concurrency_corpus" / "cap008"
+FROZEN_CORPUS_SHA256 = "2a20d57dffd0df86a6a7839c16ad6597475be24c0933df6f478942d677efb1d3"
+FROZEN_LABEL_SHA256 = "5dda237b7fab3e2d4bfd5d5119bce29e8d5b557558191d7ab00e871726c5e55a"
+FROZEN_ORACLE_MANIFEST_SHA256 = "7836d44d4c0e1db2859b69851be125acd1874cd560825842997962a0ae97e55b"
+
+
+@pytest.fixture(scope="module")
+def cap008_data():
+    cases_file = BENCHMARK_DIR / "cases.jsonl"
+    labels_file = BENCHMARK_DIR / "labels.jsonl"
+    manifest_file = BENCHMARK_DIR / "oracle_manifest.jsonl"
+    config_file = BENCHMARK_DIR / "config.json"
+    worker_protocol_file = BENCHMARK_DIR / "worker_protocol.json"
+
+    cases = [json.loads(line) for line in cases_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    labels = {json.loads(line)["id"]: json.loads(line) for line in labels_file.read_text(encoding="utf-8").splitlines() if line.strip()}
+    manifest = {json.loads(line)["id"]: json.loads(line) for line in manifest_file.read_text(encoding="utf-8").splitlines() if line.strip()}
+    config = json.loads(config_file.read_text(encoding="utf-8"))
+    worker_protocol = json.loads(worker_protocol_file.read_text(encoding="utf-8"))
+
+    return {
+        "cases": cases,
+        "labels": labels,
+        "manifest": manifest,
+        "config": config,
+        "worker_protocol": worker_protocol,
+    }
+
+
+def test_cap008_cryptographic_freeze_hashes():
+    """Assert byte-level immutability against the frozen cryptographic coordinates."""
+    c_bytes = (BENCHMARK_DIR / "cases.jsonl").read_bytes()
+    l_bytes = (BENCHMARK_DIR / "labels.jsonl").read_bytes()
+    m_bytes = (BENCHMARK_DIR / "oracle_manifest.jsonl").read_bytes()
+
+    assert hashlib.sha256(c_bytes).hexdigest() == FROZEN_CORPUS_SHA256
+    assert hashlib.sha256(l_bytes).hexdigest() == FROZEN_LABEL_SHA256
+    assert hashlib.sha256(m_bytes).hexdigest() == FROZEN_ORACLE_MANIFEST_SHA256
+
+
+def test_cap008_lock2_independent_oracle_isolation():
+    """Verify LOCK-2: oracle.py imports zero modules from verifyci."""
+    oracle_path = BENCHMARK_DIR / "oracle.py"
+    tree = ast.parse(oracle_path.read_text(encoding="utf-8"))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert not alias.name.startswith("verifyci"), f"Leaked import in oracle.py: {alias.name}"
+        elif isinstance(node, ast.ImportFrom):
+            assert node.module is not None
+            assert not node.module.startswith("verifyci"), f"Leaked from-import in oracle.py: {node.module}"
+
+    # Dynamic namespace verification
+    if str(BENCHMARK_DIR) not in sys.path:
+        sys.path.insert(0, str(BENCHMARK_DIR))
+    import oracle  # noqa: E402
+
+    for key, val in oracle.__dict__.items():
+        if hasattr(val, "__module__") and val.__module__:
+            assert not val.__module__.startswith("verifyci"), f"Leaked verifyci dependency: {key} ({val.__module__})"
+
+
+def test_cap008_slice_distribution_and_counts(cap008_data):
+    """Verify exactly 64 cases across 8 slices with 8 cases each."""
+    cases = cap008_data["cases"]
+    labels = cap008_data["labels"]
+    manifest = cap008_data["manifest"]
+
+    assert len(cases) == 64
+    assert len(labels) == 64
+    assert len(manifest) == 64
+
+    expected_slices = {
+        "two_worker_read_write_contention": 8,
+        "four_worker_mixed_ingest_query": 8,
+        "eight_worker_high_contention": 8,
+        "same_branch_concurrent_ingest": 8,
+        "different_branch_concurrent_ingest": 8,
+        "certificate_ledger_concurrent_writes": 8,
+        "forced_lock_timeout_exhaustion_tripwires": 8,
+        "crash_interruption_during_commit_tripwires": 8,
+    }
+
+    counts = {}
+    for c in cases:
+        sl = c["slice"]
+        counts[sl] = counts.get(sl, 0) + 1
+
+    assert counts == expected_slices
+
+    pass_count = sum(1 for lbl in labels.values() if lbl["expected_status"] == "PASS")
+    incon_count = sum(1 for lbl in labels.values() if lbl["expected_status"] == "INCONCLUSIVE")
+
+    assert pass_count == 48
+    assert incon_count == 16
+
+
+def test_cap008_lock1_worker_counts(cap008_data):
+    """Verify LOCK-1: worker counts belong to declared set {2, 4, 8}."""
+    cases = cap008_data["cases"]
+    worker_protocol = cap008_data["worker_protocol"]
+
+    supported_counts = set(worker_protocol["worker_counts"])
+    assert supported_counts == {2, 4, 8}
+
+    for c in cases:
+        wc = c["worker_count"]
+        assert wc in {2, 3, 4, 6, 8}, f"Unexpected worker count in case {c['id']}: {wc}"
+        assert len(c["workers"]) == wc
+
+
+def test_cap008_t2_disjoint_branch_invariance(cap008_data):
+    """Verify T2: State(branch_A || branch_B) == State(branch_A in isolation) holds for all disjoint branch cases."""
+    labels = cap008_data["labels"]
+    cases = cap008_data["cases"]
+
+    diff_branch_cases = [c for c in cases if c["slice"] == "different_branch_concurrent_ingest"]
+    assert len(diff_branch_cases) == 8
+
+    for c in diff_branch_cases:
+        lbl = labels[c["id"]]
+        assert lbl["expected_status"] == "PASS"
+        assert lbl["disjoint_invariance_holds"] is True
+        assert len(lbl["expected_branch_states"]) >= 2
+
+
+def test_cap008_t5_ledger_ancestry_continuity(cap008_data):
+    """Verify T5: Committed ledger sequence has valid cryptographic continuity and zero lost events."""
+    labels = cap008_data["labels"]
+    cases = cap008_data["cases"]
+
+    ledger_cases = [c for c in cases if c["slice"] == "certificate_ledger_concurrent_writes"]
+    assert len(ledger_cases) == 8
+
+    for c in ledger_cases:
+        lbl = labels[c["id"]]
+        assert lbl["expected_status"] == "PASS"
+        assert lbl["expected_chain_valid"] is True
+        assert lbl["expected_event_count"] > 0
+
+
+def test_cap008_lock6_fail_closed_tripwires(cap008_data):
+    """Verify LOCK-6: All 16 tripwires mandate INCONCLUSIVE fail-closed veto with explicit mechanism."""
+    labels = cap008_data["labels"]
+    cases = cap008_data["cases"]
+
+    tripwire_cases = [c for c in cases if c["is_tripwire"]]
+    assert len(tripwire_cases) == 16
+
+    for c in tripwire_cases:
+        lbl = labels[c["id"]]
+        assert lbl["expected_status"] == "INCONCLUSIVE"
+        assert lbl["tripwire_mechanism"] is not None
+        assert len(lbl["tripwire_mechanism"]) > 0

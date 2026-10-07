@@ -1,0 +1,59 @@
+{
+  "benchmark_id": "CAP-008",
+  "name": "Concurrent CI Workers & Shared-Storage Contention Attestation",
+  "version": "1.0.0",
+  "protocol": "MODE_PROTOCOL.md",
+  "total_cases": 64,
+  "slices_count": 8,
+  "cases_per_slice": 8,
+  "pass_cases": 48,
+  "tripwire_cases": 16,
+  "worker_concurrency_tiers": {
+    "W2": {
+      "name": "Dual Worker Contention",
+      "worker_count": 2,
+      "description": "Basic reader/writer concurrency and snapshot isolation"
+    },
+    "W4": {
+      "name": "Quad Worker Mixed Workload",
+      "worker_count": 4,
+      "description": "Mixed ingest, query, and ledger appends across modules"
+    },
+    "W8": {
+      "name": "Octa Worker Heavy Contention",
+      "worker_count": 8,
+      "description": "High-throughput shared store contention storm"
+    }
+  },
+  "environment_profile": {
+    "python_version": "3.14.7",
+    "os_platform": "Windows-11-10.0.26300-SP0",
+    "cpu_count": 8,
+    "ram_total_gb": 7.73,
+    "storage_engine": "sqlite3",
+    "sqlite_journal_mode": "WAL",
+    "sqlite_busy_timeout_ms": 5000,
+    "sqlite_synchronous": "NORMAL",
+    "process_model": "os_multiprocessing"
+  },
+  "protocol_locks": [
+    "LOCK-1_real_process_concurrency",
+    "LOCK-2_independent_concurrency_oracle",
+    "LOCK-3_explicit_serial_reference",
+    "LOCK-4_atomic_visibility",
+    "LOCK-5_no_lost_updates",
+    "LOCK-6_bounded_lock_handling_fail_closed",
+    "LOCK-7_deterministic_ledger_identity",
+    "LOCK-8_corpus_immutability"
+  ],
+  "gates": [
+    "T1_snapshot_isolation_integrity",
+    "T2_disjoint_branch_invariance_serializability",
+    "T3_zero_lost_updates_write_completeness",
+    "T4_concurrent_read_throughput_non_blocking",
+    "T5_committed_lineage_ledger_order",
+    "T6_bounded_lock_handling_fail_closed_veto",
+    "T7_crash_interruption_atomicity",
+    "T8_concurrency_corpus_agreement"
+  ]
+}
