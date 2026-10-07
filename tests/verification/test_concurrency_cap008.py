@@ -23,6 +23,8 @@ BENCHMARK_DIR = Path(__file__).resolve().parent.parent.parent / "benchmarks" / "
 FROZEN_CORPUS_SHA256 = "2a20d57dffd0df86a6a7839c16ad6597475be24c0933df6f478942d677efb1d3"
 FROZEN_LABEL_SHA256 = "5dda237b7fab3e2d4bfd5d5119bce29e8d5b557558191d7ab00e871726c5e55a"
 FROZEN_ORACLE_MANIFEST_SHA256 = "7836d44d4c0e1db2859b69851be125acd1874cd560825842997962a0ae97e55b"
+FROZEN_HARNESS_SHA256 = "e4b0d2efe45f04cf63266cccdecac5ddf943a6371dca6605243be4484dcd3f9d"
+FROZEN_R0_RESULTS_SHA256 = "f246e480e96e8d95dc66eff382121761d5bc2ae2a7316c2d597a5087b350ceab"
 
 
 @pytest.fixture(scope="module")
@@ -32,12 +34,14 @@ def cap008_data():
     manifest_file = BENCHMARK_DIR / "oracle_manifest.jsonl"
     config_file = BENCHMARK_DIR / "config.json"
     worker_protocol_file = BENCHMARK_DIR / "worker_protocol.json"
+    r0_results_file = BENCHMARK_DIR / "r0_baseline_results.json"
 
     cases = [json.loads(line) for line in cases_file.read_text(encoding="utf-8").splitlines() if line.strip()]
     labels = {json.loads(line)["id"]: json.loads(line) for line in labels_file.read_text(encoding="utf-8").splitlines() if line.strip()}
     manifest = {json.loads(line)["id"]: json.loads(line) for line in manifest_file.read_text(encoding="utf-8").splitlines() if line.strip()}
     config = json.loads(config_file.read_text(encoding="utf-8"))
     worker_protocol = json.loads(worker_protocol_file.read_text(encoding="utf-8"))
+    r0_results = json.loads(r0_results_file.read_text(encoding="utf-8"))
 
     return {
         "cases": cases,
@@ -45,6 +49,7 @@ def cap008_data():
         "manifest": manifest,
         "config": config,
         "worker_protocol": worker_protocol,
+        "r0_results": r0_results,
     }
 
 
@@ -53,10 +58,14 @@ def test_cap008_cryptographic_freeze_hashes():
     c_bytes = (BENCHMARK_DIR / "cases.jsonl").read_bytes()
     l_bytes = (BENCHMARK_DIR / "labels.jsonl").read_bytes()
     m_bytes = (BENCHMARK_DIR / "oracle_manifest.jsonl").read_bytes()
+    h_bytes = (BENCHMARK_DIR / "measure_cap008.py").read_bytes()
+    r0_bytes = (BENCHMARK_DIR / "r0_baseline_results.json").read_bytes()
 
     assert hashlib.sha256(c_bytes).hexdigest() == FROZEN_CORPUS_SHA256
     assert hashlib.sha256(l_bytes).hexdigest() == FROZEN_LABEL_SHA256
     assert hashlib.sha256(m_bytes).hexdigest() == FROZEN_ORACLE_MANIFEST_SHA256
+    assert hashlib.sha256(h_bytes).hexdigest() == FROZEN_HARNESS_SHA256
+    assert hashlib.sha256(r0_bytes).hexdigest() == FROZEN_R0_RESULTS_SHA256
 
 
 def test_cap008_lock2_independent_oracle_isolation():
@@ -174,3 +183,31 @@ def test_cap008_lock6_fail_closed_tripwires(cap008_data):
         assert lbl["expected_status"] == "INCONCLUSIVE"
         assert lbl["tripwire_mechanism"] is not None
         assert len(lbl["tripwire_mechanism"]) > 0
+
+
+def test_cap008_r0_baseline_scorecard(cap008_data):
+    """Verify R0 Baseline Scorecard: 64/64 agreement, 0 lost updates, T4 latency deficit isolated."""
+    r0 = cap008_data["r0_results"]
+
+    assert r0["total_cases"] == 64
+    assert r0["agreement_count"] == 64
+    assert r0["agreement_rate"] == 1.0
+    assert r0["pass_count"] == 48
+    assert r0["inconclusive_count"] == 16
+    assert r0["fail_count"] == 0
+    assert r0["total_lost_updates"] == 0
+    assert r0["total_atomicity_violations"] == 0
+    assert r0["total_ledger_anomalies"] == 0
+    assert r0["total_lock_errors_caught"] == 8  # 8 tripwires
+
+    # Integrity gates pass
+    assert r0["gates"]["T1_snapshot_isolation"] == "PASS"
+    assert r0["gates"]["T2_disjoint_invariance"] == "PASS"
+    assert r0["gates"]["T3_zero_lost_updates"] == "PASS"
+    assert r0["gates"]["T5_ledger_order"] == "PASS"
+    assert r0["gates"]["T6_fail_closed_tripwire"] == "PASS"
+    assert r0["gates"]["T7_crash_atomicity"] == "PASS"
+    assert r0["gates"]["T8_concurrency_agreement"] == "PASS"
+
+    # T4 is the isolated deficit in R0 (p95 read latency under 8 workers reaches 109.1 ms > 50 ms)
+    assert r0["gates"]["T4_read_throughput"] == "FAIL"

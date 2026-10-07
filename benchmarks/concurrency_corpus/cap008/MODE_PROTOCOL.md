@@ -4,6 +4,8 @@
 **Corpus SHA-256**: `2a20d57dffd0df86a6a7839c16ad6597475be24c0933df6f478942d677efb1d3`  
 **Label SHA-256**: `5dda237b7fab3e2d4bfd5d5119bce29e8d5b557558191d7ab00e871726c5e55a`  
 **Oracle Manifest SHA-256**: `7836d44d4c0e1db2859b69851be125acd1874cd560825842997962a0ae97e55b`  
+**Harness SHA-256**: `e4b0d2efe45f04cf63266cccdecac5ddf943a6371dca6605243be4484dcd3f9d`  
+**R0 Results SHA-256**: `f246e480e96e8d95dc66eff382121761d5bc2ae2a7316c2d597a5087b350ceab`  
 **Total Cases**: 64  
 **Total Slices**: 8 (8 cases per slice)  
 **Distribution**: 48 PASS, 16 INCONCLUSIVE (tripwires)  
