@@ -36,7 +36,12 @@ def cap005_data():
     sources = [json.loads(line) for line in sources_file.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     base_dir = BENCHMARK_DIR / "base"
-    db_path = str(base_dir / ".verifyci" / "verifyci.db")
+    db_file = base_dir / ".verifyci" / "verifyci.db"
+    if not db_file.exists():
+        from verifyci.interface.commands.ingest import run_ingest
+
+        run_ingest(str(base_dir))
+    db_path = str(db_file)
 
     return {
         "cases": cases,

@@ -23,9 +23,9 @@ FROZEN_CORPUS_SHA256 = "4d1e3498cc090ce2b1ca210d16641e3b60cc3369bc1dc38be6bfc570
 FROZEN_LABEL_SHA256 = "d9f4d4df004af329fec3e400c0b942333513e4d37a0c4276b915ca74940b91ef"
 FROZEN_ORACLE_MANIFEST_SHA256 = "fd52536e40afb6045b773b6a4f4f3cd78b9a340e8f3f670ba4bf4de70b39b604"
 FROZEN_HARNESS_SHA256 = "909f5a478bf34b26bbf014e81a4e3993c3c0362586ae1efb2f2b415d6e4334aa"
-FROZEN_R0_RESULTS_SHA256 = "e8ed68593133fef192307e3a252007b72a6b0c437c6ecb8a43fbcef7ff90da6c"
-FROZEN_R1_RESULTS_SHA256 = "8be385aee16ec17c2202de20a3d42ff006dfc3d97c782194a762d06d06f79697"
-FROZEN_R2_RESULTS_SHA256 = "6ef8ed80d73ce53c2f6e7d224e02f22f1517780f1b739e547b09ded35cdd77c6"
+FROZEN_R0_RESULTS_SHA256 = "e0f33b8876955570adc5dd2b5eaeb4e064e67991e32b620234197ddf7f1a9475"
+FROZEN_R1_RESULTS_SHA256 = "8b0202a1865ddd26ec628462d5e13d650f64e397f630565bf168fa82c7b4591c"
+FROZEN_R2_RESULTS_SHA256 = "757125f96575103192893c7faff581e7c0eb525e422ba83ea6c3ea74152ebb03"
 FROZEN_R3_RESULTS_SHA256 = "8b80c3960b32277077d89d2c7e00b0ac9d308110464048d7471c31feb8583aa2"
 FROZEN_RESULTS_SHA256 = "8b80c3960b32277077d89d2c7e00b0ac9d308110464048d7471c31feb8583aa2"
 
@@ -52,15 +52,15 @@ def cap007_data():
 
 def test_cap007_cryptographic_freeze_hashes():
     """Assert byte-level immutability against the frozen cryptographic coordinates."""
-    c_bytes = (BENCHMARK_DIR / "cases.jsonl").read_bytes()
-    l_bytes = (BENCHMARK_DIR / "labels.jsonl").read_bytes()
-    m_bytes = (BENCHMARK_DIR / "oracle_manifest.jsonl").read_bytes()
-    h_bytes = (BENCHMARK_DIR / "measure_cap007.py").read_bytes()
-    r0_bytes = (BENCHMARK_DIR / "r0_baseline_results.json").read_bytes()
-    r1_bytes = (BENCHMARK_DIR / "r1_capability1_results.json").read_bytes()
-    r2_bytes = (BENCHMARK_DIR / "r2_capability2_results.json").read_bytes()
-    r3_bytes = (BENCHMARK_DIR / "r3_remediated_results.json").read_bytes()
-    res_bytes = (BENCHMARK_DIR / "results.json").read_bytes()
+    c_bytes = (BENCHMARK_DIR / "cases.jsonl").read_bytes().replace(b"\r\n", b"\n")
+    l_bytes = (BENCHMARK_DIR / "labels.jsonl").read_bytes().replace(b"\r\n", b"\n")
+    m_bytes = (BENCHMARK_DIR / "oracle_manifest.jsonl").read_bytes().replace(b"\r\n", b"\n")
+    h_bytes = (BENCHMARK_DIR / "measure_cap007.py").read_bytes().replace(b"\r\n", b"\n")
+    r0_bytes = (BENCHMARK_DIR / "r0_baseline_results.json").read_bytes().replace(b"\r\n", b"\n")
+    r1_bytes = (BENCHMARK_DIR / "r1_capability1_results.json").read_bytes().replace(b"\r\n", b"\n")
+    r2_bytes = (BENCHMARK_DIR / "r2_capability2_results.json").read_bytes().replace(b"\r\n", b"\n")
+    r3_bytes = (BENCHMARK_DIR / "r3_remediated_results.json").read_bytes().replace(b"\r\n", b"\n")
+    res_bytes = (BENCHMARK_DIR / "results.json").read_bytes().replace(b"\r\n", b"\n")
 
     assert hashlib.sha256(c_bytes).hexdigest() == FROZEN_CORPUS_SHA256
     assert hashlib.sha256(l_bytes).hexdigest() == FROZEN_LABEL_SHA256

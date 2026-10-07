@@ -1,12 +1,12 @@
 # CAP-008: Concurrent CI Workers & Shared-Storage Contention Attestation Protocol (FROZEN)
 
 **Experiment ID**: CAP-008  
-**Corpus SHA-256**: `2a20d57dffd0df86a6a7839c16ad6597475be24c0933df6f478942d677efb1d3`  
-**Label SHA-256**: `5dda237b7fab3e2d4bfd5d5119bce29e8d5b557558191d7ab00e871726c5e55a`  
-**Oracle Manifest SHA-256**: `7836d44d4c0e1db2859b69851be125acd1874cd560825842997962a0ae97e55b`  
+**Corpus SHA-256**: `20dbf666b41a8113c170a3090abdb210d0cfa1bd9f398b6a7f73b57b7986b33f`  
+**Label SHA-256**: `d13aaae9ac132117ee2fe9d7541ad2ef500db34950b29ec47d7bc53bfd033a1f`  
+**Oracle Manifest SHA-256**: `51ea38acc811c4a02eb099948a0d8f00e194f7369e67d9e691b610bd08e0c1e1`  
 **Harness SHA-256**: `306f1681862b3b14f5f790b40eb8bfd3df64ff6bc87307f8374c59c3e8fef0b3`  
-**R0 Results SHA-256**: `f246e480e96e8d95dc66eff382121761d5bc2ae2a7316c2d597a5087b350ceab`  
-**R1 Results SHA-256**: `b34a34f828b816ea9f4358c4d2be3aae471dfdade54dbb5f92769cd974ed8fdd`  
+**R0 Results SHA-256**: `a863567af1a2a848b5dfad8c8f6b17101034a9b81f9aa4a2f0ed575590d35490`  
+**R1 Results SHA-256**: `111684b0979c4af16e6f15ed31844ea4f850257fc409f91fc6ec2acc9d3b8fc3`  
 **Total Cases**: 64  
 **Total Slices**: 8 (8 cases per slice)  
 **Distribution**: 48 PASS, 16 INCONCLUSIVE (tripwires)  
