@@ -8,7 +8,8 @@
 **R0 Results SHA-256**: `e8ed68593133fef192307e3a252007b72a6b0c437c6ecb8a43fbcef7ff90da6c`  
 **R1 Results SHA-256**: `8be385aee16ec17c2202de20a3d42ff006dfc3d97c782194a762d06d06f79697`  
 **R2 Results SHA-256**: `6ef8ed80d73ce53c2f6e7d224e02f22f1517780f1b739e547b09ded35cdd77c6`  
-**Results SHA-256**: `6ef8ed80d73ce53c2f6e7d224e02f22f1517780f1b739e547b09ded35cdd77c6`  
+**R3 Results SHA-256**: `281b053a432457889cbfc92844b865c5d1b1e461a9cf3b3be67d64f75f4915c6`  
+**Results SHA-256**: `281b053a432457889cbfc92844b865c5d1b1e461a9cf3b3be67d64f75f4915c6`  
 **Total Cases**: 64 (56 PASS, 8 INCONCLUSIVE tripwires)  
 **Total Nodes**: 174,779 | **Total Edges**: 165,570  
 

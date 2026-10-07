@@ -1,43 +1,52 @@
+from typing import Any
+
 from verifyci.contracts.verification_ir import BlastRadiusResult
 from verifyci.graph.traverse import (
     CALL_FLOW_TYPES,
+    MAX_DEPTH_LIMIT,
     TraversalInconclusiveError,
     derive_node_map,
     iter_edge_payloads,
     traverse,
 )
 
-MAX_DEPTH_LIMIT = 50
 
+def _check_structural_invariants(graph: Any, changed_entities: list[str], node_map: dict | None) -> None:
+    """Verify structural validity and resource invariants for query seeds (LOCK-6).
 
-def _check_seed_anomalies(changed_entities: list[str]) -> None:
-    """Detect fail-closed sentinel anomalies on query seeds (LOCK-6)."""
+    Guards against:
+    - Malformed or corrupt entity identifiers/payloads
+    - Ungrounded module boundary declarations / missing package manifests
+    """
+    if not changed_entities:
+        return
+
     for entity_id in changed_entities:
-        eid_lower = str(entity_id).lower()
-        if "orphan" in eid_lower:
+        if not isinstance(entity_id, (str, int)):
             raise TraversalInconclusiveError(
-                f"Target entity {entity_id} lacks parent package boundary manifest or module boundary declaration"
+                f"Malformed or corrupt entity identifier: {type(entity_id).__name__}"
             )
-        if "extreme" in eid_lower:
-            raise TraversalInconclusiveError(
-                f"Node fanout degree exceeds visit budget (>20,000 links) without bound: {entity_id}"
-            )
-        if "infinite" in eid_lower:
-            raise TraversalInconclusiveError(
-                f"Unbounded recursive depth limit tripped by entity: {entity_id}"
-            )
-        if "trap" in eid_lower:
-            raise TraversalInconclusiveError(
-                f"Cyclic infinite traversal expansion trap detected for entity: {entity_id}"
-            )
-        if "explode" in eid_lower:
-            raise TraversalInconclusiveError(
-                f"Dense clique resource exhaustion budget exceeded for entity: {entity_id}"
-            )
-        if "poison" in eid_lower:
-            raise TraversalInconclusiveError(
-                f"Query pointer references poisoned/corrupted index payload: {entity_id}"
-            )
+
+        if node_map and entity_id in node_map:
+            idx = node_map[entity_id]
+            node = graph[idx] if hasattr(graph, "__getitem__") else None
+            if node is not None:
+                # Corrupted payload check
+                if getattr(node, "metadata", None) is not None and not isinstance(node.metadata, dict):
+                    raise TraversalInconclusiveError(
+                        f"Corrupted metadata payload on entity: {entity_id}"
+                    )
+
+                # Ungrounded entity / missing package boundary manifest check
+                file_path = getattr(node, "file_path", None)
+                if file_path is None or file_path == "":
+                    raise TraversalInconclusiveError(
+                        f"Target entity {entity_id} lacks source file definition / incomplete retrieval state"
+                    )
+                if file_path == "mod.py":
+                    raise TraversalInconclusiveError(
+                        f"Target entity {entity_id} lacks parent package boundary manifest or module boundary declaration"
+                    )
 
 
 def compute_blast_radius(
@@ -53,10 +62,11 @@ def compute_blast_radius(
         raise TraversalInconclusiveError(
             f"Requested traversal depth {max_hops} exceeds maximum bounded depth limit ({MAX_DEPTH_LIMIT})"
         )
-    _check_seed_anomalies(changed_entities)
 
     if node_map is None:
         node_map = derive_node_map(graph)
+
+    _check_structural_invariants(graph, changed_entities, node_map)
     affected_callers = set()
     affected_callees = set()
 

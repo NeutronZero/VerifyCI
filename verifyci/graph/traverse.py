@@ -12,6 +12,10 @@ from typing import Any
 #: REFERENCES is excluded to eliminate non-causal identifier fanout.
 CALL_FLOW_TYPES = frozenset({"CALLS", "IMPORTS", "INHERITS", "DEPENDS_ON"})
 
+MAX_DEPTH_LIMIT: int = 50
+DEFAULT_MAX_VISIT_BUDGET: int = 20_000
+DEFAULT_MAX_EXPANSION_BUDGET: int = 40_000
+
 
 def payload_id(payload: Any) -> str | None:
     for attr in ("revision_entity_id", "logical_entity_id", "name"):
@@ -30,7 +34,7 @@ class NodeMapError(Exception):
 
 
 class TraversalInconclusiveError(RuntimeError):
-    """Raised when graph traversal encounters bounded resource limits, path traps, or boundary anomalies."""
+    """Raised when graph traversal encounters bounded resource limits or boundary anomalies."""
 
 
 def derive_node_map(graph: Any) -> dict[str, int]:
@@ -94,7 +98,9 @@ def edge_allowed(graph: Any, src_idx: int, dst_idx: int, allowed: set[str] | fro
         for e in payloads:
             meta = getattr(e, "metadata", None)
             if isinstance(meta, dict):
-                if meta.get("cross_boundary") == "forbidden" or meta.get("security_boundary") == "isolated":
+                cross = meta.get("cross_boundary")
+                sec = meta.get("security_boundary")
+                if cross in ("forbidden", "denied", True) or sec in ("isolated", "restricted", "blocked", True):
                     raise TraversalInconclusiveError(
                         f"Forbidden cross-boundary traversal detected on edge ({meta})"
                     )
@@ -112,18 +118,23 @@ def traverse(
     max_hops: int,
     node_map: dict | None = None,
     allowed_types: set[str] | frozenset | None = None,
+    max_visit_budget: int = DEFAULT_MAX_VISIT_BUDGET,
+    max_expansion_budget: int = DEFAULT_MAX_EXPANSION_BUDGET,
 ) -> set[int]:
     """BFS from seed following predecessors (incoming) or successors.
 
     Returns visited indices excluding the seed.
+    Raises TraversalInconclusiveError on bounded contract violations or resource exhaustion.
     """
-    if max_hops > 50:
+    if max_hops > MAX_DEPTH_LIMIT:
         raise TraversalInconclusiveError(
-            f"Traversal depth limit exceeded (max_hops={max_hops} > 50)"
+            f"Traversal depth limit exceeded (max_hops={max_hops} > {MAX_DEPTH_LIMIT})"
         )
     node_map = node_map or {}
     visited = {seed_idx}
     current_level = {seed_idx}
+    total_expansions = 0
+
     for _ in range(max_hops):
         next_level = set()
         for idx in current_level:
@@ -133,26 +144,55 @@ def traverse(
             else:
                 neighbors = graph.successors(idx) if hasattr(graph, "successors") else []
                 pairs = [("out", n) for n in neighbors]
+
+            total_expansions += len(pairs)
+            if total_expansions > max_expansion_budget:
+                raise TraversalInconclusiveError(
+                    f"Traversal edge expansion budget exceeded: {total_expansions} > {max_expansion_budget}"
+                )
+
             for kind, neighbor in pairs:
                 nidx = as_index(neighbor, node_map)
-                if nidx is None or nidx in visited:
-                    continue
-                # Fail-closed guard: check for dangling unresolved entity pointer
-                n_eid = payload_id(neighbor)
-                if n_eid and ("ghost" in str(n_eid).lower() or "unresolved_999" in str(n_eid).lower()):
+                if nidx is None:
                     raise TraversalInconclusiveError(
-                        f"Dangling unresolved entity reference encountered: {n_eid}"
+                        f"Dangling unresolvable entity reference encountered during traversal: {payload_id(neighbor)}"
                     )
+
+                # Inspect neighbor payload for dangling external placeholder on code calls
+                n_payload = graph[nidx] if hasattr(graph, "__getitem__") else None
+                if n_payload is not None:
+                    meta = getattr(n_payload, "metadata", None) or {}
+                    file_path = getattr(n_payload, "file_path", None)
+                    if file_path == "" or meta.get("external"):
+                        src, dst = (nidx, idx) if kind == "in" else (idx, nidx)
+                        edge_list = _edge_payloads_between(graph, src, dst) or []
+                        for ed in edge_list:
+                            ename = _edge_type_name(ed)
+                            if ename == "CALLS":
+                                raise TraversalInconclusiveError(
+                                    f"Dangling unresolved entity reference encountered on traversal edge: {payload_id(neighbor)}"
+                                )
+
+                if nidx in visited:
+                    continue
+
                 if kind == "in":
                     ok = edge_allowed(graph, nidx, idx, allowed_types)
                 else:
                     ok = edge_allowed(graph, idx, nidx, allowed_types)
                 if ok:
                     next_level.add(nidx)
+
         visited.update(next_level)
+        if len(visited) > max_visit_budget:
+            raise TraversalInconclusiveError(
+                f"Traversal visit budget exceeded: visited {len(visited)} nodes > {max_visit_budget}"
+            )
+
         current_level = next_level
         if not current_level:
             break
+
     visited.discard(seed_idx)
     return visited
 

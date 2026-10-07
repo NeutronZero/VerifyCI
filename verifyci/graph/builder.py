@@ -112,16 +112,16 @@ class GraphBuilder:
                                 EntityType.PARAMETER):
                 continue
             by_name.setdefault(payload.name, []).append(eid)
+            meta = getattr(payload, "metadata", None)
+            meta_dict = meta if isinstance(meta, dict) else {}
             if payload.type in _BASE_TARGET_TYPES:
-                qualified = (getattr(payload, "metadata", None) or {}).get(
-                    "qualified_name")
+                qualified = meta_dict.get("qualified_name")
                 if qualified:
                     qual_index.setdefault(qualified, []).append(eid)
                 else:
                     top_index.setdefault(payload.name, []).append(eid)
             if payload.type in _CALL_TARGET_TYPES:
-                qualified = (getattr(payload, "metadata", None) or {}).get(
-                    "qualified_name")
+                qualified = meta_dict.get("qualified_name")
                 if qualified:
                     call_qual_index.setdefault(qualified, []).append(eid)
                 else:
