@@ -8,7 +8,7 @@
 **Label Hash**: `589231d38fdf85a764eab85ba19f1ad9e2839fe63c043c3c9636d745f1893075`  
 **Source Hash**: `f330fca7d317ec9a1e8398295d930c49f802e2cc25cf94b3906d7b9b0d47af8d`  
 **Harness Hash**: `a7025c16bce64c74a4e3c1679717309126c2eab4dd26f624630209044b43e4f0`  
-**Results Hash**: `8902e008c7e9c1667410338833a77a3de46dfc42d0c137827e04c4bee16a1cd2`  
+**Results Hash**: `8a5034c695a939598ae4e7f1be370630bbbbb04dd1fe840c9f18bc9966390cc2`  
 
 ## Executive Summary
 VerifyCI demonstrates robust generalization on the frozen 64-case authentic multi-repository CAP-005 corpus, achieving an overall agreement of **62/64 (96.88%)** across 5 permissive open-source repositories and agent session logs.
