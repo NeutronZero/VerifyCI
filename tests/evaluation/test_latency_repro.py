@@ -115,10 +115,11 @@ def test_frozen_sources_match_working_tree():
     #      get_entities_by_revision call site).
     #   CAP-006 added branch/parent scoping to lineage ingestion:
     #      insert_ingest, latest_revision_id, latest_ingest_id,
-    #      close_disappeared (all on ingest/write path, not timed query path).
+    #      close_disappeared, get_anchor (all on ingest/write path, not timed query path).
     accepted_drift = {"__init__", "insert_entity", "insert_edge", "insert_event", "close",
                       "get_entities_by_revision", "get_edges_by_revision",
-                      "insert_ingest", "latest_revision_id", "latest_ingest_id", "close_disappeared"}
+                      "insert_ingest", "latest_revision_id", "latest_ingest_id", "close_disappeared",
+                      "get_anchor"}
     assert set(lm) >= set(fm) - accepted_drift
     for name, fx_body in fm.items():
         if name in accepted_drift:

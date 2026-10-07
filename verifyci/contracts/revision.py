@@ -39,3 +39,11 @@ class Ingest:
     commit_id: Optional[str]
     timestamp: float
     branch: Optional[str] = None
+
+
+class LineageIntegrityError(RuntimeError):
+    """Raised when repository lineage, ancestry DAG, or anchor integrity is violated.
+
+    Enforces the fail-closed invariant: when lineage integrity cannot be proven,
+    the verifier must yield INCONCLUSIVE rather than fabricating a passing verdict.
+    """

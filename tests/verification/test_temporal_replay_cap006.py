@@ -20,6 +20,8 @@ BENCHMARK_DIR = Path(__file__).resolve().parent.parent.parent / "benchmarks" / "
 FROZEN_CORPUS_SHA256 = "d89ae5f9d641a209ef525f64dd6f0b060e3f8db8be1891944efdba3877298b1a"
 FROZEN_LABEL_SHA256 = "5bfa328a9f5f1f96cec1c3a1e674ee22358999dd9f69857603c95d34121a003c"
 FROZEN_ORACLE_MANIFEST_SHA256 = "99ea4c3b128f74d82338c9416f2929088de0185ac112d34cb68569b562c0baf8"
+FROZEN_MEASURE_SHA256 = "0a6c9b5947af381c330f482d9c93be1e6b3c81ade1956b64b9d83ac9b7eb690c"
+FROZEN_RESULTS_SHA256 = "19fe88bf5554711b838b4205943cc32b4823c37a79deff587245d374a82568e8"
 
 
 @pytest.fixture(scope="module")
@@ -44,10 +46,14 @@ def test_cap006_cryptographic_hashes():
     c_bytes = (BENCHMARK_DIR / "cases.jsonl").read_bytes()
     l_bytes = (BENCHMARK_DIR / "labels.jsonl").read_bytes()
     m_bytes = (BENCHMARK_DIR / "oracle_manifest.jsonl").read_bytes()
+    meas_bytes = (BENCHMARK_DIR / "measure_cap006.py").read_bytes()
+    res_bytes = (BENCHMARK_DIR / "results.json").read_bytes()
 
     assert hashlib.sha256(c_bytes).hexdigest() == FROZEN_CORPUS_SHA256
     assert hashlib.sha256(l_bytes).hexdigest() == FROZEN_LABEL_SHA256
     assert hashlib.sha256(m_bytes).hexdigest() == FROZEN_ORACLE_MANIFEST_SHA256
+    assert hashlib.sha256(meas_bytes).hexdigest() == FROZEN_MEASURE_SHA256
+    assert hashlib.sha256(res_bytes).hexdigest() == FROZEN_RESULTS_SHA256
 
 
 def test_cap006_slice_distribution_and_case_count(cap006_data):
@@ -140,3 +146,26 @@ def test_cap006_explicit_coordinates_lock5(cap006_data):
             assert "branch" in commit
             assert "files" in commit
             assert isinstance(commit["files"], dict)
+
+
+def test_cap006_r2_adjudication_metrics():
+    """Assert R2 final benchmark achieved 100% agreement, 0 hard vetoes, and all 8 gates PASS."""
+    res_file = BENCHMARK_DIR / "results.json"
+    res = json.loads(res_file.read_text(encoding="utf-8"))
+
+    assert res["total_cases"] == 64
+    assert res["agreed"] == 64
+    assert res["disagreed"] == 0
+    assert res["agreement_rate"] == 100.0
+    assert res["tripwires_caught"] == "8/8"
+    assert res["hard_veto_summary"]["cross_branch_contamination"] == 0
+    assert res["hard_veto_summary"]["overlapping_live_intervals"] == 0
+    assert res["hard_veto_summary"]["historical_anchor_drift"] == 0
+    assert res["hard_veto_summary"]["fabricated_lineage"] == 0
+    assert res["hard_veto_summary"]["fail_closed_tripwires_missed"] == 0
+    assert res["hard_veto_summary"]["replay_equivalence_failures"] == 0
+    assert res["hard_veto_summary"]["idempotent_ingest_failures"] == 0
+
+    for gate_name, gate_status in res["gates"].items():
+        assert gate_status == "PASS", f"Gate {gate_name} did not PASS"
+

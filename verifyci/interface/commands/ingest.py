@@ -187,7 +187,11 @@ def _carry_forward(store, carried_sources, carried_texts, revision_id, now, repo
 def run_ingest(path: str, incremental: bool = False,
                commit_id: str | None = None,
                branch: str | None = None,
-               parent_commit_id: str | None = None) -> dict:
+               parent_commit_id: str | None = None,
+               parent_commit_ids: list[str] | None = None,
+               expected_source_hashes: dict[str, str] | None = None,
+               revert_of: str | None = None,
+               unresolved_conflict: bool = False) -> dict:
     # Resolved identity: `ingest .` produced `Path('.').name == ''` as the
     # repository_id — an empty string that made every repo-scoped lookup
     # (latest_ingest_id, resolve_repository, close_disappeared) bind
@@ -205,6 +209,10 @@ def run_ingest(path: str, incremental: bool = False,
         return _run_ingest_inner(
             repo, db_path, store, meta, incremental,
             commit_id=commit_id, branch=branch, parent_commit_id=parent_commit_id,
+            parent_commit_ids=parent_commit_ids,
+            expected_source_hashes=expected_source_hashes,
+            revert_of=revert_of,
+            unresolved_conflict=unresolved_conflict,
         )
     finally:
         store.close()
@@ -224,9 +232,64 @@ def _ingest_revision_id(store, ingest_id: str) -> str:
 def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False,
                       commit_id: str | None = None,
                       branch: str | None = None,
-                      parent_commit_id: str | None = None) -> dict:
+                      parent_commit_id: str | None = None,
+                      parent_commit_ids: list[str] | None = None,
+                      expected_source_hashes: dict[str, str] | None = None,
+                      revert_of: str | None = None,
+                      unresolved_conflict: bool = False) -> dict:
         sources, texts, manifest = _collect(repo)
         collected = len(sources) + len(texts)
+
+        # Lineage & DAG validation checks (CAP-006 Capability 2: Fail-Closed Tripwires)
+        from verifyci.contracts.revision import LineageIntegrityError
+
+        # Check 1: Tampered source hash validation
+        if expected_source_hashes:
+            actual_hashes = dict(manifest)
+            for fpath, exp_hash in expected_source_hashes.items():
+                if fpath in actual_hashes and actual_hashes[fpath] != exp_hash:
+                    raise LineageIntegrityError(
+                        f"Tampered source content hash mismatch for {fpath}: expected {exp_hash}, computed {actual_hashes[fpath]}"
+                    )
+
+        # Check 2: Unresolved merge conflict markers
+        if unresolved_conflict:
+            raise LineageIntegrityError("Ambiguous unmerged parent lineage claims: unresolved conflict flag")
+        for rel, _, source_bytes in sources:
+            if b"<<<<<<< " in source_bytes and b"=======" in source_bytes and b">>>>>>>" in source_bytes:
+                raise LineageIntegrityError(
+                    f"Ambiguous unmerged parent lineage claims: unresolved conflict markers detected in {rel}"
+                )
+        for rel, text_content in texts:
+            if "<<<<<<< " in text_content and "=======" in text_content and ">>>>>>>" in text_content:
+                raise LineageIntegrityError(
+                    f"Ambiguous unmerged parent lineage claims: unresolved conflict markers detected in {rel}"
+                )
+
+        # Check 3: Ancestry DAG integrity (self-cycle & missing parent validation)
+        all_parents: list[str] = []
+        if parent_commit_id:
+            all_parents.append(parent_commit_id)
+        if parent_commit_ids:
+            all_parents.extend(p for p in parent_commit_ids if p not in all_parents)
+
+        if commit_id and commit_id in all_parents:
+            raise LineageIntegrityError(f"Self-cycle detected in commit ancestry: {commit_id}")
+
+        for pid in all_parents:
+            p_ingest = store.get_ingest_by_commit_id(repo.name, pid)
+            p_rev = store.get_revision_by_commit_id(repo.name, pid)
+            if not p_ingest and not p_rev:
+                raise LineageIntegrityError(f"Missing parent commit lineage: {pid}")
+
+        # Check 4: Fabricated revert target validation
+        if revert_of:
+            row = store.conn.execute(
+                "SELECT 1 FROM revisions WHERE revision_id = ? UNION SELECT 1 FROM ingests WHERE commit_id = ?",
+                (revert_of, revert_of),
+            ).fetchone()
+            if not row:
+                raise LineageIntegrityError(f"Fabricated revert target lineage claims: {revert_of}")
 
         if incremental:
             changed_paths = {
@@ -248,14 +311,15 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
         # hash); they ride along only as the revision row's first-
         # observation metadata. Lineage and commit are authoritative on
         # the append-only ingest record below.
-        if parent_commit_id:
-            parent_ingest = store.get_ingest_by_commit_id(repo.name, parent_commit_id)
+        effective_parent = parent_commit_id or (parent_commit_ids[0] if parent_commit_ids else None)
+        if effective_parent:
+            parent_ingest = store.get_ingest_by_commit_id(repo.name, effective_parent)
             if parent_ingest:
                 prev_ingest_id = parent_ingest.ingest_id
                 prev_revision_id = parent_ingest.revision_id
             else:
                 prev_ingest_id = ""
-                prev_revision_id = store.get_revision_by_commit_id(repo.name, parent_commit_id) or ""
+                prev_revision_id = store.get_revision_by_commit_id(repo.name, effective_parent) or ""
         elif branch:
             prev_ingest_id = store.latest_ingest_on_branch(repo.name, branch)
             prev_revision_id = _ingest_revision_id(store, prev_ingest_id)

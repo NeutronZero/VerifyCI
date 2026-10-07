@@ -184,29 +184,42 @@ def evaluate_single_case(case: dict[str, Any], label: dict[str, Any]) -> dict[st
                 # Missing commit reference in tripwire case
                 continue
 
+            # Handle anchor corruption tripwire: corrupt existing anchors in replay db
+            if step_commit.get("corrupted_anchor"):
+                db_path = replay_dir / ".verifyci" / "verifyci.db"
+                if db_path.exists():
+                    c_store = GraphStore(str(db_path))
+                    c_store.conn.execute("UPDATE anchors SET snapshot_json = 'INVALID_JSON{corrupted'")
+                    c_store.conn.commit()
+                    c_store.close()
+
             # Populate files for this commit
             sync_directory_files(replay_dir, step_commit["files"])
 
-            # Handle tripwire anomalies that manifest at ingest time
+            tampered_hashes = None
             if step_commit.get("tampered_source_hash"):
-                # Simulating metadata tamper
-                pass
+                tampered_hashes = {fpath: step_commit["tampered_source_hash"] for fpath in step_commit["files"]}
 
             # Execute ingest
             is_incremental = (step.get("mode") != "snapshot" and step_idx > 0)
             try:
-                parent_cid = step_commit.get("parent_id") or (
-                    step_commit.get("parent_ids")[0] if step_commit.get("parent_ids") else None
-                )
+                parent_cid = step_commit.get("parent_id")
+                parent_cids = step_commit.get("parent_ids")
                 run_ingest(
                     str(replay_dir),
                     incremental=is_incremental,
                     commit_id=cid,
                     branch=step.get("branch") or step_commit.get("branch"),
                     parent_commit_id=parent_cid,
+                    parent_commit_ids=parent_cids,
+                    expected_source_hashes=tampered_hashes,
+                    revert_of=step_commit.get("fabricated_revert_of"),
+                    unresolved_conflict=step_commit.get("unresolved_conflict", False),
                 )
             except Exception as e:
                 result["errors"].append(f"Ingest exception at step {cid}: {e}")
+                if tripwire_anomaly:
+                    break
 
             # Inspect database state
             db_path = replay_dir / ".verifyci" / "verifyci.db"
@@ -226,94 +239,94 @@ def evaluate_single_case(case: dict[str, Any], label: dict[str, Any]) -> dict[st
                 historical_snapshots[cid] = time.time()
                 store.close()
 
-        # Step 2: Open final replay database
-        db_path = replay_dir / ".verifyci" / "verifyci.db"
-        if not db_path.exists():
-            result["observed_status"] = "INCONCLUSIVE"
-            result["errors"].append("Replay database not created")
-            return result
+        if not tripwire_anomaly:
+            # Step 2: Open final replay database
+            db_path = replay_dir / ".verifyci" / "verifyci.db"
+            if not db_path.exists():
+                result["observed_status"] = "FAIL"
+                result["errors"].append("Replay database not created")
+            else:
+                replay_store = GraphStore(str(db_path))
+                rep_rev_id = replay_store.get_revision_by_commit_id(repo_name, target_commit_id)
+                rep_ents, rep_edges, rep_digest = extract_live_canonical_graph(replay_store, revision_id=rep_rev_id)
 
-        replay_store = GraphStore(str(db_path))
-        rep_rev_id = replay_store.get_revision_by_commit_id(repo_name, target_commit_id)
-        rep_ents, rep_edges, rep_digest = extract_live_canonical_graph(replay_store, revision_id=rep_rev_id)
-
-        # Step 3: Run clean snapshot ingest for target commit
-        target_commit = commits.get(target_commit_id)
-        if target_commit:
-            sync_directory_files(clean_dir, target_commit["files"])
-            run_ingest(
-                str(clean_dir),
-                incremental=False,
-                commit_id=target_commit_id,
-                branch=target_commit.get("branch"),
-                parent_commit_id=None,
-            )
-            clean_store = GraphStore(str(clean_dir / ".verifyci" / "verifyci.db"))
-            clean_rev_id = clean_store.get_revision_by_commit_id(repo_name, target_commit_id)
-            clean_ents, clean_edges, clean_digest = extract_live_canonical_graph(clean_store, revision_id=clean_rev_id)
-            clean_store.close()
-        else:
-            clean_ents, clean_edges, clean_digest = {"entities": [], "count": 0}, [], ""
-
-        result["details"]["replay_digest"] = rep_digest
-        result["details"]["clean_digest"] = clean_digest
-        result["details"]["expected_digest"] = label.get("expected_canonical_digest")
-
-        # Check Hard Veto 1: Cross-branch contamination
-        isolation_branch = target_query.get("check_isolation_branch")
-        if isolation_branch:
-            # Find entities belonging solely to isolated branch
-            isolated_commits = [c for c in commits.values() if c.get("branch") == isolation_branch]
-            isolated_files = set()
-            for ic in isolated_commits:
-                isolated_files.update(ic["files"].keys())
-            target_branch = target_query.get("target_branch")
-            target_files = set(target_commit["files"].keys()) if target_commit else set()
-
-            contaminating_files = isolated_files - target_files
-            for e in rep_ents["entities"]:
-                if e["file_path"] in contaminating_files:
-                    result["hard_veto_failures"].append(
-                        f"Cross-branch contamination: entity {e['name']} ({e['file_path']}) from branch {isolation_branch} leaked into {target_branch}"
+                # Step 3: Run clean snapshot ingest for target commit
+                target_commit = commits.get(target_commit_id)
+                if target_commit:
+                    sync_directory_files(clean_dir, target_commit["files"])
+                    run_ingest(
+                        str(clean_dir),
+                        incremental=False,
+                        commit_id=target_commit_id,
+                        branch=target_commit.get("branch"),
+                        parent_commit_id=None,
                     )
-                    break
+                    clean_store = GraphStore(str(clean_dir / ".verifyci" / "verifyci.db"))
+                    clean_rev_id = clean_store.get_revision_by_commit_id(repo_name, target_commit_id)
+                    clean_ents, clean_edges, clean_digest = extract_live_canonical_graph(clean_store, revision_id=clean_rev_id)
+                    clean_store.close()
+                else:
+                    clean_ents, clean_edges, clean_digest = {"entities": [], "count": 0}, [], ""
 
-        # Check Hard Veto 2: Overlapping live intervals
-        final_dups = replay_store.conn.execute(
-            "SELECT logical_entity_id, COUNT(*) FROM entities"
-            " WHERE valid_until IS NULL GROUP BY logical_entity_id HAVING COUNT(*) > 1"
-        ).fetchall()
-        if final_dups:
-            result["hard_veto_failures"].append(
-                f"Overlapping live intervals: {len(final_dups)} duplicate live entities in replay store"
-            )
+                result["details"]["replay_digest"] = rep_digest
+                result["details"]["clean_digest"] = clean_digest
+                result["details"]["expected_digest"] = label.get("expected_canonical_digest")
 
-        # Check Hard Veto 3: Historical anchor drift
-        as_of_commit = target_query.get("as_of_commit")
-        if as_of_commit and as_of_commit in historical_snapshots:
-            t_as_of = historical_snapshots[as_of_commit]
-            for check_name in target_query.get("check_entities", []):
-                ent = replay_store.get_entity_by_name(check_name, as_of=t_as_of)
-                if not ent:
+                # Check Hard Veto 1: Cross-branch contamination
+                isolation_branch = target_query.get("check_isolation_branch")
+                if isolation_branch:
+                    # Find entities belonging solely to isolated branch
+                    isolated_commits = [c for c in commits.values() if c.get("branch") == isolation_branch]
+                    isolated_files = set()
+                    for ic in isolated_commits:
+                        isolated_files.update(ic["files"].keys())
+                    target_branch = target_query.get("target_branch")
+                    target_files = set(target_commit["files"].keys()) if target_commit else set()
+
+                    contaminating_files = isolated_files - target_files
+                    for e in rep_ents["entities"]:
+                        if e["file_path"] in contaminating_files:
+                            result["hard_veto_failures"].append(
+                                f"Cross-branch contamination: entity {e['name']} ({e['file_path']}) from branch {isolation_branch} leaked into {target_branch}"
+                            )
+                            break
+
+                # Check Hard Veto 2: Overlapping live intervals
+                final_dups = replay_store.conn.execute(
+                    "SELECT logical_entity_id, COUNT(*) FROM entities"
+                    " WHERE valid_until IS NULL GROUP BY logical_entity_id HAVING COUNT(*) > 1"
+                ).fetchall()
+                if final_dups:
                     result["hard_veto_failures"].append(
-                        f"Historical anchor drift: entity {check_name} not retrievable as_of {as_of_commit}"
+                        f"Overlapping live intervals: {len(final_dups)} duplicate live entities in replay store"
                     )
 
-        # Check Hard Veto 6: Replay equivalence
-        # Canonical live entities in replay store must match clean snapshot
-        rep_set = {(e["name"], e["file_path"], e["source_hash"]) for e in rep_ents["entities"]}
-        clean_set = {(e["name"], e["file_path"], e["source_hash"]) for e in clean_ents["entities"]}
-        if rep_set == clean_set and rep_digest == clean_digest and len(rep_edges) == len(clean_edges):
-            result["replay_equivalent"] = True
-        else:
-            diff_add = rep_set - clean_set
-            diff_rem = clean_set - rep_set
-            msg = f"Replay equivalence failed: {len(diff_add)} unexpected entities, {len(diff_rem)} missing entities"
-            if len(rep_edges) != len(clean_edges):
-                msg += f" (edges: {len(rep_edges)} replay vs {len(clean_edges)} clean)"
-            result["hard_veto_failures"].append(msg)
+                # Check Hard Veto 3: Historical anchor drift
+                as_of_commit = target_query.get("as_of_commit")
+                if as_of_commit and as_of_commit in historical_snapshots:
+                    t_as_of = historical_snapshots[as_of_commit]
+                    for check_name in target_query.get("check_entities", []):
+                        ent = replay_store.get_entity_by_name(check_name, as_of=t_as_of)
+                        if not ent:
+                            result["hard_veto_failures"].append(
+                                f"Historical anchor drift: entity {check_name} not retrievable as_of {as_of_commit}"
+                            )
 
-        replay_store.close()
+                # Check Hard Veto 6: Replay equivalence
+                # Canonical live entities in replay store must match clean snapshot
+                rep_set = {(e["name"], e["file_path"], e["source_hash"]) for e in rep_ents["entities"]}
+                clean_set = {(e["name"], e["file_path"], e["source_hash"]) for e in clean_ents["entities"]}
+                if rep_set == clean_set and rep_digest == clean_digest and len(rep_edges) == len(clean_edges):
+                    result["replay_equivalent"] = True
+                else:
+                    diff_add = rep_set - clean_set
+                    diff_rem = clean_set - rep_set
+                    msg = f"Replay equivalence failed: {len(diff_add)} unexpected entities, {len(diff_rem)} missing entities"
+                    if len(rep_edges) != len(clean_edges):
+                        msg += f" (edges: {len(rep_edges)} replay vs {len(clean_edges)} clean)"
+                    result["hard_veto_failures"].append(msg)
+
+                replay_store.close()
 
     except Exception as exc:
         result["errors"].append(f"Unexpected evaluation crash: {exc}")

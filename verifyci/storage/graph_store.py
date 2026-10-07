@@ -476,7 +476,15 @@ class GraphStore:
             "SELECT snapshot_json FROM anchors WHERE revision_id = ? ORDER BY timestamp DESC LIMIT 1",
             (revision_id,),
         ).fetchone()
-        return json.loads(row[0]) if row else None
+        if not row:
+            return None
+        try:
+            return json.loads(row[0])
+        except Exception as exc:
+            from verifyci.contracts.revision import LineageIntegrityError
+            raise LineageIntegrityError(
+                f"Corrupted anchor snapshot record in storage for revision {revision_id}: {exc}"
+            ) from exc
 
     def close_disappeared(self, current_revision_id: str, parent_revision_id: str,
                             repository_id: str, now: float) -> tuple[int, int]:
