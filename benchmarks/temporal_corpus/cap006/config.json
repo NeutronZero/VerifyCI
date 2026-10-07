@@ -1,0 +1,34 @@
+{
+  "corpus_sha256": "d89ae5f9d641a209ef525f64dd6f0b060e3f8db8be1891944efdba3877298b1a",
+  "description": "Evaluation of VerifyCI temporal graph, lineage preservation, multi-branch isolation, and fail-closed tripwires",
+  "experiment_id": "CAP-006",
+  "gates": [
+    "T1_incremental_replay_equivalence",
+    "T2_rename_lineage_continuity",
+    "T3_revert_cycle_correctness",
+    "T4_branch_divergence_isolation",
+    "T5_merge_attestation_determinism",
+    "T6_anchor_point_in_time_stability",
+    "T7_temporal_fail_closed_integrity",
+    "T8_corpus_replay_agreement"
+  ],
+  "label_sha256": "5bfa328a9f5f1f96cec1c3a1e674ee22358999dd9f69857603c95d34121a003c",
+  "oracle_manifest_sha256": "99ea4c3b128f74d82338c9416f2929088de0185ac112d34cb68569b562c0baf8",
+  "slices": {
+    "cherry_pick_cross_branch": 8,
+    "criss_cross_merges": 8,
+    "delete_and_restore": 8,
+    "interleaved_branch_ingest": 8,
+    "rename_edit_rename_back": 8,
+    "revert_cycles": 8,
+    "stale_cache_and_idempotence": 8,
+    "truncated_lineage_tripwire": 8
+  },
+  "target_distribution": {
+    "FAIL": 0,
+    "INCONCLUSIVE": 8,
+    "PASS": 56
+  },
+  "title": "Temporal Lineage & Multi-Branch Replay Attestation Benchmark",
+  "total_cases": 64
+}
