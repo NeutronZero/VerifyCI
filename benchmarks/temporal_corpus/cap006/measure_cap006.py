@@ -428,7 +428,7 @@ def run_benchmark(run_label: str = "R0_baseline") -> dict[str, Any]:
         "T5_merge_attestation_determinism": "PASS" if slice_stats["criss_cross_merges"]["disagreed"] == 0 else "FAIL",
         "T6_anchor_point_in_time_stability": "PASS" if hard_veto_summary["historical_anchor_drift"] == 0 else "FAIL",
         "T7_temporal_fail_closed_integrity": "PASS" if tripwires_caught == 8 else "FAIL",
-        "T8_corpus_replay_agreement": "PASS" if agreement_rate >= 96.88 else "FAIL",
+        "T8_corpus_replay_agreement": "PASS" if agreed == total else "FAIL",
     }
 
     report = {

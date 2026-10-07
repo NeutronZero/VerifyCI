@@ -9,7 +9,7 @@
         "expected_digest": "a928749462f42a380df801a98bad686b441c04dbab008df532bcf22ce1ed384e",
         "replay_digest": "84543c46c0a28a619a702f0983ea6053ab8c2f6e47d97e58d101c5c83fd15b75"
       },
-      "elapsed_ms": 236.4988999979687,
+      "elapsed_ms": 409.2411000019638,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -24,7 +24,7 @@
         "expected_digest": "a73fdde4dfc08bc39cc0da843050947c8ffb8bdd129146eaaa42630603fc9079",
         "replay_digest": "e2e3203e91639d432604e641631fc48a062dc613cce5973be0e04d9796200b60"
       },
-      "elapsed_ms": 259.63680000131717,
+      "elapsed_ms": 249.68330000410788,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -39,7 +39,7 @@
         "expected_digest": "409d849ec1091189d28b1c708fe440dbcd0dea758411d787086a83de8afda444",
         "replay_digest": "f2cf9b4015727b4e463a7980209f5d68aa1222eefbecc1301ce52b62308ddb96"
       },
-      "elapsed_ms": 235.84970000229077,
+      "elapsed_ms": 244.2929999961052,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -54,7 +54,7 @@
         "expected_digest": "e71d6b7dbd04b69f988d5eb8cd3342ad91f02f8f2c472f8464ad62f1222acc9c",
         "replay_digest": "904536953c032fbf6404ddbaa850c3a93cd992553edba33e5e5b9c814ba1aaa6"
       },
-      "elapsed_ms": 211.5544000043883,
+      "elapsed_ms": 212.50110000255518,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -69,7 +69,7 @@
         "expected_digest": "bc2f53048c301c9feb006240ae0367924d9d99b38cf7c9538a2f9f87af9ff368",
         "replay_digest": "b6fa96abba4afc455384485ef4e17aa9c501691707f688e4bef2ef51e14d3cb1"
       },
-      "elapsed_ms": 298.6951999992016,
+      "elapsed_ms": 243.8387000001967,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -84,7 +84,7 @@
         "expected_digest": "45efdcf7b6a85462580755eb629b5edea12bf9ab777dab5d85436701e2e1afc9",
         "replay_digest": "34d4ebfc4c3111b169da688241f9b8193fa97613c742e303c28e9d9f46344a53"
       },
-      "elapsed_ms": 223.97469999850728,
+      "elapsed_ms": 264.02950000192504,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -99,7 +99,7 @@
         "expected_digest": "ff8f8ed118db1bfe75b3eb395767e99d0834a5932c92f6aefcd8d51bc8591b84",
         "replay_digest": "49295ede517b96653a47686189613681c134756132ae227f5ebd25af1a4a6210"
       },
-      "elapsed_ms": 249.34489999577636,
+      "elapsed_ms": 219.82630000275094,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -114,7 +114,7 @@
         "expected_digest": "a5fca435224107e71320aae6e6da2937760c2d538e5e28e0757bfe590b9904ed",
         "replay_digest": "9f679385b9a87b741f945a4d85eaac991ac1289daff727c8e30aa6b0d4ee1363"
       },
-      "elapsed_ms": 301.7420000032871,
+      "elapsed_ms": 290.86679999454645,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -129,7 +129,7 @@
         "expected_digest": "206fd4d72cd21b0d1dc3684226df5f491cd9acdd1718bdb57e34262b69566891",
         "replay_digest": "87124f693caaf4b38a9024de14331a91b1618f42972848c5c7dae07c6aba5d7c"
       },
-      "elapsed_ms": 216.48289999575354,
+      "elapsed_ms": 248.72649999451824,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -144,7 +144,7 @@
         "expected_digest": "547bc784944f3620107e97ca75c9c1d05fd1ebe437884682d492f325ea6022af",
         "replay_digest": "1ff89e59ef2a26441dc1aef19b5babaea13cd4326911ec4fe05441c5a703ffbe"
       },
-      "elapsed_ms": 217.77409999776864,
+      "elapsed_ms": 208.64370000344934,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -159,7 +159,7 @@
         "expected_digest": "0bb6428a87213d89f4d148bd4ec13b99b0cb475763575d7fd7004b3a8d68842a",
         "replay_digest": "6439ffd7035838c9b18983a8212eadbcf378d6c8153244ee2739667753a5a13d"
       },
-      "elapsed_ms": 224.0901999975904,
+      "elapsed_ms": 222.42249999544583,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -174,7 +174,7 @@
         "expected_digest": "b6078d8fa44fb7a7a617c5851255d3931a23f9d38b76fe729092e16099bb9bdc",
         "replay_digest": "de7718d8fa974808809adaa5e4091875d83599a6ec967ac43444e0b2c21a2e8b"
       },
-      "elapsed_ms": 217.38919999916106,
+      "elapsed_ms": 266.3512999934028,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -189,7 +189,7 @@
         "expected_digest": "74de33d0469bdf1cb77679cc58f6851fda74775c2dea211257d9d3ce264d534f",
         "replay_digest": "3939527119e32c87acb8953d8faed931db67eb957ed2834cdc70203c1edb1400"
       },
-      "elapsed_ms": 238.47309999837307,
+      "elapsed_ms": 261.14209999650484,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -204,7 +204,7 @@
         "expected_digest": "ba39f12f9abec2dc51b045a1073a6a41a35bfe714899683d9587665ab35c55cb",
         "replay_digest": "587ff98e386fb2c4a6424c7a0577af35dbbf91e6f66ada8976d6ae294de65e29"
       },
-      "elapsed_ms": 262.53770000039367,
+      "elapsed_ms": 366.81059999682475,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -219,7 +219,7 @@
         "expected_digest": "4bd065dcd832902e1bfe7e33ed9ab88de4668e33792d82817e77e2532415c756",
         "replay_digest": "2cb8b664d1e3973a4f42eca035fadd001a8160ede83c211ab16bc6236b043ae1"
       },
-      "elapsed_ms": 254.53160000324715,
+      "elapsed_ms": 379.0279000022565,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -234,7 +234,7 @@
         "expected_digest": "38a93c4ab27d12e012970d1ffdb8644b085377d3925dcfec86574b523ffc5b3b",
         "replay_digest": "6fb9779ac4ae5a37ef9a436c8afb811b2d57e468bf189d19c08a84bc89054a24"
       },
-      "elapsed_ms": 291.1242999980459,
+      "elapsed_ms": 536.8415999982972,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -249,7 +249,7 @@
         "expected_digest": "b8f69b9b21d26eb5977143be14ebccd5d6f1a226d159e3f503442141f28dd3ad",
         "replay_digest": "e851a30df4fe16dfe9d2f7125b4e20c962677019b26424939730d0e026e363e2"
       },
-      "elapsed_ms": 241.25450000428827,
+      "elapsed_ms": 417.5044000003254,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -264,7 +264,7 @@
         "expected_digest": "401c573339a24699661daa57a948bcbcc6c4356fc392bf1fa983de01292de7c1",
         "replay_digest": "13cc9c4087c25371885c766e05b98e3adae0a8f937149610c454f2fddcb184bf"
       },
-      "elapsed_ms": 284.1033000004245,
+      "elapsed_ms": 357.59660000621807,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -279,7 +279,7 @@
         "expected_digest": "f09564b1f2e27ff85ef46b57ba2604338f31e82dab2498157cc70f2824fa3c0e",
         "replay_digest": "5deb1253a64daed1671ca749c389b3c8c78003b9869e043d61a247e7dea232c1"
       },
-      "elapsed_ms": 278.41309999348596,
+      "elapsed_ms": 335.07519999693613,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -294,7 +294,7 @@
         "expected_digest": "5fa94049a7f27a9f34fc110c81a75cbd3aa4c093ead0af20fb5c4a00300855d0",
         "replay_digest": "37618293e1b798a6ca8ba87290da7c84ae5722e6a7a72d46a45a964b7196f674"
       },
-      "elapsed_ms": 237.18559999542776,
+      "elapsed_ms": 332.9985000018496,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -309,7 +309,7 @@
         "expected_digest": "fed1ebad9e1a1b7181770693b211a726f67e0b4e2272c710a935820ce4dd00f8",
         "replay_digest": "c8ca7204f26d12f7e2543b2d1e029f0dac20beef217e9e50fe02bbc41ba7941a"
       },
-      "elapsed_ms": 281.46040000137873,
+      "elapsed_ms": 328.80540000041947,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -324,7 +324,7 @@
         "expected_digest": "bbaa895ae6e219b060cb6cbb296fac07bbb18aef9c2d70179ad8c5d75c3f41f2",
         "replay_digest": "c84868f1f3a45637e85fa3ef9c8956ccd184c6dfc1cf4ee5dc6fe22e0844b5c8"
       },
-      "elapsed_ms": 271.30680000118446,
+      "elapsed_ms": 314.23379999614554,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -339,7 +339,7 @@
         "expected_digest": "dbc05971e6d9d35edf0232a43d3216f65e46c3accdee6a73b946d5211880f2f8",
         "replay_digest": "ad28364a59bf0c3980687e5c91ed01b25966dbcc42cfb24dc1b7d45ce3d906a7"
       },
-      "elapsed_ms": 306.98880000272766,
+      "elapsed_ms": 335.8114000002388,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -354,7 +354,7 @@
         "expected_digest": "ad54c9674e384c36e9b32d89bd1bef67cba4fe6eb77a915d9cf6fce29f94c085",
         "replay_digest": "c6c30f46b998b46919a84d1ac5edf5766d980fe9b42c4392cc693e88a8b763d9"
       },
-      "elapsed_ms": 319.3558999992092,
+      "elapsed_ms": 395.76349999697413,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -369,7 +369,7 @@
         "expected_digest": "dc2e70d629eafd885cecfd16a757887479fef60fd5492d1dd51ddb67e8d9773f",
         "replay_digest": "211412eb4d4906da4537993c479b0bb5fa538447c05d228caf8692991f089cc8"
       },
-      "elapsed_ms": 267.3051999954623,
+      "elapsed_ms": 319.32270000106655,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -384,7 +384,7 @@
         "expected_digest": "70fcf8f8ecce9858f7e9a3f6703e0867b3f4ab3ba93d5b0e448e9983d0ce682b",
         "replay_digest": "3cf1f1e271d1099dc3f0bbe28837d43f4e8618a306d1ad61df8fa082f93effbd"
       },
-      "elapsed_ms": 551.4972000019043,
+      "elapsed_ms": 492.7065000010771,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -399,7 +399,7 @@
         "expected_digest": "e1afcf00c55400a0fbf4a7e8b494b47124c88edbadf5031d7e0f76ea793a273f",
         "replay_digest": "cc0292cb20ffc2c878d2d92163c0529513557141a285e87c23744fe384e3802f"
       },
-      "elapsed_ms": 336.9740999987698,
+      "elapsed_ms": 404.77390000160085,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -414,7 +414,7 @@
         "expected_digest": "1a38abea2302d626a1ecfbbf7883498c4987af53e80406e4999befdeac6557c1",
         "replay_digest": "62ff193c1397a04280c66d4cf256795214b384fcf769cb86602344ef8dfccb9d"
       },
-      "elapsed_ms": 304.06000000220956,
+      "elapsed_ms": 304.4865999981994,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -429,7 +429,7 @@
         "expected_digest": "8af2b04e30f7e72e8e3c583ca60d52c0988e6181628b6e42717081c4102e6b47",
         "replay_digest": "89d7497a662c1d78332820ee3b5a65e0acae1f9d32309788bf66c929607659e6"
       },
-      "elapsed_ms": 282.54849999939324,
+      "elapsed_ms": 393.46759999898495,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -444,7 +444,7 @@
         "expected_digest": "4dd1a65c15de78227d0b3bd38bc1b27d644ed5709fa97bbc6932ceca7f052f2a",
         "replay_digest": "edd77ec7ab34bb5fffad5b7ef3cf6eaa4edd7687a29e9393b184952c440edf11"
       },
-      "elapsed_ms": 344.9670999980299,
+      "elapsed_ms": 443.08160000218777,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -459,7 +459,7 @@
         "expected_digest": "5670c4c84960021cc17c4db99908ca72f2b66fc449063eb78b012ee89606d20b",
         "replay_digest": "2915a1c0320aef85870bef47a815c9f908a0e7d3149dae1b283b97df601fcacc"
       },
-      "elapsed_ms": 252.442200006044,
+      "elapsed_ms": 326.98379999783356,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -474,7 +474,7 @@
         "expected_digest": "34948b0cffafea3334022a2b87f21e7ba737b267e96b3f433ea721187308af99",
         "replay_digest": "5f9914660ff2cf6b88acf5a34319cb8462d984bb88740c39320b07f9386b9f68"
       },
-      "elapsed_ms": 326.9728000013856,
+      "elapsed_ms": 322.5202999965404,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -489,7 +489,7 @@
         "expected_digest": "7679da2dde4c5b665d9df5d978e5e6ee54e211e443f8953e7d4d1849e83ee06a",
         "replay_digest": "b9836f69d3f7f44aafe4dfeda4064d11f4ecf06eb7e22dfeb3d42aba3503fdd0"
       },
-      "elapsed_ms": 284.50949999387376,
+      "elapsed_ms": 320.9586000011768,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -504,7 +504,7 @@
         "expected_digest": "2c5dfb701f6bb0508d5f9fbb2c35b92b7f5d077940c3d022f96db9c0c646dae8",
         "replay_digest": "34b9657512e6ff4e63882ec88dab8f28f8ec773f7812d04ba5f10b42c9ad1ad6"
       },
-      "elapsed_ms": 247.68360000598477,
+      "elapsed_ms": 297.51370000303723,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -519,7 +519,7 @@
         "expected_digest": "0210fbab1c26269ca886e536227ab6229507584466ad7c4b9c62baf0afd30b33",
         "replay_digest": "ec1fa818863b84278c098193f4bbdfd21604692e5d3cd57f3bd4e1b2cda50b40"
       },
-      "elapsed_ms": 269.0749999965192,
+      "elapsed_ms": 285.9946000025957,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -534,7 +534,7 @@
         "expected_digest": "9291b6c40fb6323c90ed31ac070cbfecc6ac66fcdd29fee5d72d1dfa8826b632",
         "replay_digest": "def0c71a94da9fee7f7bdd274f3ed653d852f63de8618900928de905de168ccb"
       },
-      "elapsed_ms": 280.86039999470813,
+      "elapsed_ms": 314.9340000018128,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -549,7 +549,7 @@
         "expected_digest": "cc0f401f5998f5f9ca5915451919b4b0eef44a18c51d5b5488c479563fe1c584",
         "replay_digest": "82e92cc743d00ba3fb51b17d778e4399b426e27f0aa6591e5a65a5dc9be285fb"
       },
-      "elapsed_ms": 312.21219999861205,
+      "elapsed_ms": 365.23959999613,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -564,7 +564,7 @@
         "expected_digest": "da97231cff50303ea397ec269c8d3e128697097b5fac1caa45ec32e92d5235c6",
         "replay_digest": "fbbf4c15482993af6e7f83feb3d29617beec1bddbe49071d21654d24ec722786"
       },
-      "elapsed_ms": 283.3022999984678,
+      "elapsed_ms": 325.13189999735914,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -579,7 +579,7 @@
         "expected_digest": "adb44d0de884ae924814dd2e79b1d81bbc32781e6b6156ad839cbd1adf4524f7",
         "replay_digest": "a04a09005f4de4f441bbb6e245e5cc72739eacde8039b9a75af884778770ac99"
       },
-      "elapsed_ms": 264.34810000500875,
+      "elapsed_ms": 299.2498000021442,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -594,7 +594,7 @@
         "expected_digest": "fd8a68ed3d1b8c641764be71e6f32a463732469852c8a478751b692e51bdd7f8",
         "replay_digest": "104de4485b380d10a4fbb70a6e8bbdf81c15f6f217731dc10fc512b035e433c7"
       },
-      "elapsed_ms": 271.2364999970305,
+      "elapsed_ms": 291.82959999889135,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -609,7 +609,7 @@
         "expected_digest": "56643eedfc808b2143277d81d61fc74868e81e62f0d7e1cdf6b7376a9df75bd8",
         "replay_digest": "81348ef2660f3d0f3f3f48c7101991297233f338de67d29dde226aa997f54585"
       },
-      "elapsed_ms": 279.9163999952725,
+      "elapsed_ms": 327.3356999998214,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -624,7 +624,7 @@
         "expected_digest": "b4e5ee7ae682d876dddb35d4fa8fa1128f0f2e20ce12d4dbebd60347265a7900",
         "replay_digest": "d805993f3eaa0eaed1a4e5e7416649dda395e6880dd5b571872c2e4ff009ef2a"
       },
-      "elapsed_ms": 348.54709999490296,
+      "elapsed_ms": 409.4725999966613,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -639,7 +639,7 @@
         "expected_digest": "789d38dc8ba043f201dabc0e375083d9b8ab763bdf4c2b1ef5133bbd59964536",
         "replay_digest": "080edc8689aa54ce917fd137725178efa6258adbc2d1eb6c805ebbedf4c10921"
       },
-      "elapsed_ms": 250.47710000217194,
+      "elapsed_ms": 278.63790000265,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -654,7 +654,7 @@
         "expected_digest": "80ce17d7df81cf1a5331ab942b5ff51d4b26397cad73d705134850008dfe707c",
         "replay_digest": "b48125d2af62508fd441cb4bdeb233ae4dbd0a75fd939cc3cb14f07793f55200"
       },
-      "elapsed_ms": 502.9410999995889,
+      "elapsed_ms": 348.5281000030227,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -669,7 +669,7 @@
         "expected_digest": "3525acda88ff501028fee75154f5397a6e2e5bb548b49826c7adf83ffc788076",
         "replay_digest": "e240270676e43a8ae5495a2b903bb7692ac79586a5359b16efa3cd89ed0fc27d"
       },
-      "elapsed_ms": 327.92130000598263,
+      "elapsed_ms": 336.6983000014443,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -684,7 +684,7 @@
         "expected_digest": "e4acf355e3fb0379356bc95468d801dfd05c83394782425c3c339a7fc6231e78",
         "replay_digest": "525aeaf64ded8f584f43250a4c47c52b42869cef79559b8d41e382646efa4b38"
       },
-      "elapsed_ms": 330.5192999978317,
+      "elapsed_ms": 366.76250000164146,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -699,7 +699,7 @@
         "expected_digest": "81a9b993a05df8f4b65a901d5499034f18d106eeb88efb7c733df88b249b6bf0",
         "replay_digest": "2399ce1cd7e1b3329f4ccfb4c8ab677ef19696ccfc3e587fc3130770670ef56f"
       },
-      "elapsed_ms": 277.0453000048292,
+      "elapsed_ms": 391.6867999942042,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -714,7 +714,7 @@
         "expected_digest": "b71d6755c40eaa2c5b976dc05ef9172cec87bfa65ebd7dc4fd3220eedd2a08be",
         "replay_digest": "e051fd4b64edab4ecc35fe95ddad092755cd01f3e40e7976fe7c8064baef7dd6"
       },
-      "elapsed_ms": 338.76900000177557,
+      "elapsed_ms": 702.3001999987173,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -729,7 +729,7 @@
         "expected_digest": "b3bd64119462bdeb41bb6169261bded9cb149b8ebd6ea27508365539f75ac4c8",
         "replay_digest": "5087b73ddd4c6775a33444824be0a33881ea4a16df6e8e46430fbedf074a3fc4"
       },
-      "elapsed_ms": 258.931999997003,
+      "elapsed_ms": 259.75479999760864,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -744,7 +744,7 @@
         "expected_digest": "fb740c794f724ed85dcdf5f9671616864ecdf38f5751c3ba654e0a65f8686ac3",
         "replay_digest": "2453f4a993bf913f24dd397ab6e9192079a6a47d5a67157015e94f6b0cae1dd1"
       },
-      "elapsed_ms": 238.0148999945959,
+      "elapsed_ms": 268.6133000024711,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -759,7 +759,7 @@
         "expected_digest": "ff78db4366b81aeb8b287b446f31bcdb4615a2667ccfd320a352c59421d2e82c",
         "replay_digest": "19413afbaffac0e548dff2548c77736a621c1212394944f04e838839b694f0db"
       },
-      "elapsed_ms": 274.2648999992525,
+      "elapsed_ms": 293.417100001534,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -774,7 +774,7 @@
         "expected_digest": "84212786a902c36bda1d13a773eedebde82b1f94f43c9d427fbae7fad48e07be",
         "replay_digest": "8167595b048cddc491af799b540ee6c495bb48c6cf09c5e19d6a0d421df3041a"
       },
-      "elapsed_ms": 373.87670000316575,
+      "elapsed_ms": 278.02569999767,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -789,7 +789,7 @@
         "expected_digest": "4cc02a39a4b367dbc6a0b1a8890ba6778892155a2f033c7c336dbc99c6f27be6",
         "replay_digest": "331cd51ae50cba25cdab162f31d01194df6e66698f68f82c4639acf86075e7a5"
       },
-      "elapsed_ms": 217.69070000300417,
+      "elapsed_ms": 214.4049000053201,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -804,7 +804,7 @@
         "expected_digest": "393476a6ec19b2c8080d5b1100202fed836c524bc4fa3c2f1986e2abfd354349",
         "replay_digest": "4aa3b92965dc80a0a44f4d6e9a62a8f0b3343332c75d3093e97435a528eed2da"
       },
-      "elapsed_ms": 252.2700999979861,
+      "elapsed_ms": 275.08970000053523,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -819,7 +819,7 @@
         "expected_digest": "8f4927018531876d5ae86a23c07460a35d44f1f6c0bae0a3ee4c583520459866",
         "replay_digest": "d5b8cd5913cf3fbda941b7910ce314728eee3b089e5898e989e5c0f0f9665569"
       },
-      "elapsed_ms": 225.63390000141226,
+      "elapsed_ms": 293.24110000015935,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -834,7 +834,7 @@
         "expected_digest": "35cae1ed2be673574b7b17c760fc2489f68f89c224a94368d583e388550ff82f",
         "replay_digest": "574c4d51c35b76a94ef1f21933a5bc68c79c8b2ddfc0d58d4329e6d878f1d59b"
       },
-      "elapsed_ms": 240.20640000526328,
+      "elapsed_ms": 272.2732000038377,
       "errors": [],
       "expected_status": "PASS",
       "hard_veto_failures": [],
@@ -845,7 +845,7 @@
     },
     {
       "details": {},
-      "elapsed_ms": 93.34310000122059,
+      "elapsed_ms": 103.27390000020387,
       "errors": [
         "Ingest exception at step orphan_c1: Missing parent commit lineage: unknown_parent_hash_9999"
       ],
@@ -858,7 +858,7 @@
     },
     {
       "details": {},
-      "elapsed_ms": 111.1218000005465,
+      "elapsed_ms": 113.56149999483023,
       "errors": [
         "Ingest exception at step c4: Missing parent commit lineage: missing_c3"
       ],
@@ -871,7 +871,7 @@
     },
     {
       "details": {},
-      "elapsed_ms": 91.11269999993965,
+      "elapsed_ms": 94.5205000025453,
       "errors": [
         "Ingest exception at step cycle_c1: Self-cycle detected in commit ancestry: cycle_c1"
       ],
@@ -884,7 +884,7 @@
     },
     {
       "details": {},
-      "elapsed_ms": 123.31719999929192,
+      "elapsed_ms": 126.14729999768315,
       "errors": [
         "Ingest exception at step c2: Corrupted anchor snapshot record in storage for revision 0f0969b0f0a9049472e9013322fe585347422f86554d18329934952e43208fb0: Expecting value: line 1 column 1 (char 0)"
       ],
@@ -897,7 +897,7 @@
     },
     {
       "details": {},
-      "elapsed_ms": 118.87779999960912,
+      "elapsed_ms": 104.77810000156751,
       "errors": [
         "Ingest exception at step c2: Fabricated revert target lineage claims: ghost_revision_0000"
       ],
@@ -910,7 +910,7 @@
     },
     {
       "details": {},
-      "elapsed_ms": 100.01709999778541,
+      "elapsed_ms": 95.4009999986738,
       "errors": [
         "Ingest exception at step c1: Tampered source content hash mismatch for src/t.py: expected deadbeef00000000000000000000000000000000000000000000000000000000, computed bdb12f730fc3b4fe69eed5bcc69a920c63c48da032ed713f7ff8cd4dfa8fd560"
       ],
@@ -923,7 +923,7 @@
     },
     {
       "details": {},
-      "elapsed_ms": 140.0532999978168,
+      "elapsed_ms": 146.9571999987238,
       "errors": [
         "Ingest exception at step ambig_c3: Ambiguous unmerged parent lineage claims: unresolved conflict flag"
       ],
@@ -936,7 +936,7 @@
     },
     {
       "details": {},
-      "elapsed_ms": 99.39740000118036,
+      "elapsed_ms": 123.9759000018239,
       "errors": [
         "Ingest exception at step alien_root: Missing parent commit lineage: foreign_repo_root_commit"
       ],
@@ -1011,7 +1011,7 @@
       "total": 8
     }
   },
-  "timestamp": "2026-10-07T03:17:38.579713+00:00",
+  "timestamp": "2026-10-07T03:30:10.831004+00:00",
   "total_cases": 64,
   "tripwires_caught": "8/8"
 }
