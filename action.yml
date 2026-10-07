@@ -1,0 +1,173 @@
+name: "VerifyCI Gate"
+description: "Deterministic, local-first code verification for agentic pull requests and diffs"
+author: "VerifyCI Contributors"
+
+branding:
+  icon: "check-shield"
+  color: "blue"
+
+inputs:
+  path:
+    description: "Path to repository or code root"
+    required: false
+    default: "."
+  db:
+    description: "Path to VerifyCI database (defaults to <path>/.verifyci/verifyci.db)"
+    required: false
+    default: ""
+  base-ref:
+    description: "Base git ref/commit to diff against (defaults to PR base SHA or HEAD~1)"
+    required: false
+    default: ""
+  head-ref:
+    description: "Head git ref/commit to diff (defaults to HEAD)"
+    required: false
+    default: "HEAD"
+  format:
+    description: "Output format: sarif, json, or text"
+    required: false
+    default: "sarif"
+  output-file:
+    description: "File path to save the verification report"
+    required: false
+    default: "verifyci-results.sarif"
+  fail-on-inconclusive:
+    description: "Whether INCONCLUSIVE or HUMAN_REVIEW verdicts (exit code 2) fail the action (fail-closed by default)"
+    required: false
+    default: "true"
+
+outputs:
+  status:
+    description: "Verification verdict: PASS, FAIL, HUMAN_REVIEW, INCONCLUSIVE, INFRA_ERROR, TIMEOUT"
+    value: ${{ steps.run-verifyci.outputs.status }}
+  rationale:
+    description: "Verdict explanation or invariant rationale"
+    value: ${{ steps.run-verifyci.outputs.rationale }}
+  exit-code:
+    description: "VerifyCI CLI exit code (0=PASS, 1=FAIL, 2=UNCERTAIN/REVIEW, 3=INFRA_ERROR/TIMEOUT)"
+    value: ${{ steps.run-verifyci.outputs.exit_code }}
+  report-file:
+    description: "Path to generated report file"
+    value: ${{ inputs.output-file }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run VerifyCI Verification Gate
+      id: run-verifyci
+      shell: bash
+      run: |
+        set +e
+
+        REPO_PATH="${{ inputs.path }}"
+        DB_ARG="${{ inputs.db }}"
+        BASE_REF="${{ inputs.base-ref }}"
+        HEAD_REF="${{ inputs.head-ref }}"
+        FORMAT="${{ inputs.format }}"
+        OUT_FILE="${{ inputs.output-file }}"
+        FAIL_ON_INC="${{ inputs.fail-on-inconclusive }}"
+
+        # Ensure VerifyCI CLI is available
+        if ! command -v verifyci &> /dev/null; then
+          echo "::group::Installing VerifyCI"
+          python -m pip install --upgrade pip
+          python -m pip install "${{ github.action_path }}"
+          echo "::endgroup::"
+        fi
+
+        # Resolve Database Path
+        if [ -z "$DB_ARG" ]; then
+          DB_PATH="$REPO_PATH/.verifyci/verifyci.db"
+        else
+          DB_PATH="$DB_ARG"
+        fi
+
+        # Initialize and ingest codebase if graph database is not yet present
+        if [ ! -f "$DB_PATH" ]; then
+          echo "::group::Initializing and Ingesting Codebase"
+          verifyci init "$REPO_PATH"
+          verifyci ingest "$REPO_PATH"
+          echo "::endgroup::"
+        fi
+
+        # Determine git base reference for PR diff
+        if [ -z "$BASE_REF" ]; then
+          if [ -n "$GITHUB_BASE_REF" ]; then
+            git fetch origin "$GITHUB_BASE_REF" --depth=1 || true
+            BASE_REF="origin/$GITHUB_BASE_REF"
+          else
+            BASE_REF="HEAD~1"
+          fi
+        fi
+
+        DIFF_FILE=$(mktemp)
+        trap 'rm -f "$DIFF_FILE"' EXIT
+
+        if ! git diff "$BASE_REF" "$HEAD_REF" > "$DIFF_FILE"; then
+          echo "::error::Failed to compute git diff between '$BASE_REF' and '$HEAD_REF'. Ensure references are fetched and valid."
+          exit 3
+        fi
+        echo "Computed diff against $BASE_REF ($(wc -l < "$DIFF_FILE") lines)"
+
+        # Execute VerifyCI verify-diff
+        echo "::group::Executing VerifyCI Verification"
+        verifyci verify-diff --diff-file "$DIFF_FILE" --db "$DB_PATH" --format "$FORMAT" --output "$OUT_FILE"
+        EXIT_CODE=$?
+        echo "::endgroup::"
+
+        # Read verdict details from generated report if available
+        STATUS="UNKNOWN"
+        RATIONALE=""
+        if [ "$FORMAT" = "json" ] && [ -f "$OUT_FILE" ]; then
+          STATUS=$(python -c "import sys, json; d=json.load(open(sys.argv[1], encoding='utf-8')); print(d.get('verdict', {}).get('status', 'UNKNOWN'))" "$OUT_FILE" 2>/dev/null || echo "UNKNOWN")
+          RATIONALE=$(python -c "import sys, json; d=json.load(open(sys.argv[1], encoding='utf-8')); print(d.get('verdict', {}).get('rationale', ''))" "$OUT_FILE" 2>/dev/null || echo "")
+        elif [ "$FORMAT" = "sarif" ] && [ -f "$OUT_FILE" ]; then
+          STATUS=$(python -c "import sys, json; d=json.load(open(sys.argv[1], encoding='utf-8')); inv=d.get('runs', [{}])[0].get('invocations', [{}])[0]; print(inv.get('properties', {}).get('verdict', 'UNKNOWN'))" "$OUT_FILE" 2>/dev/null || echo "UNKNOWN")
+          RATIONALE=$(python -c "import sys, json; d=json.load(open(sys.argv[1], encoding='utf-8')); inv=d.get('runs', [{}])[0].get('invocations', [{}])[0]; print(inv.get('properties', {}).get('rationale', ''))" "$OUT_FILE" 2>/dev/null || echo "")
+        fi
+
+        # Fallback status from exit code if unparsed
+        if [ "$STATUS" = "UNKNOWN" ]; then
+          case "$EXIT_CODE" in
+            0) STATUS="PASS" ;;
+            1) STATUS="FAIL" ;;
+            2) STATUS="UNCERTAIN" ;;
+            3) STATUS="INFRA_ERROR" ;;
+            *) STATUS="UNKNOWN" ;;
+          esac
+        fi
+
+        # Write output variables to GITHUB_OUTPUT safely
+        echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+        echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+        echo "rationale<<EOF_VERIFYCI" >> "$GITHUB_OUTPUT"
+        echo "$RATIONALE" >> "$GITHUB_OUTPUT"
+        echo "EOF_VERIFYCI" >> "$GITHUB_OUTPUT"
+
+        echo "VerifyCI Verdict: $STATUS (exit code: $EXIT_CODE)"
+        if [ -n "$RATIONALE" ]; then
+          echo "Rationale: $RATIONALE"
+        fi
+
+        # Enforce Honest Exit Semantics
+        if [ "$EXIT_CODE" -eq 0 ]; then
+          echo "::notice::VerifyCI PASSED: $RATIONALE"
+          exit 0
+        elif [ "$EXIT_CODE" -eq 1 ]; then
+          echo "::error::VerifyCI FAILED: Blocking invariant or verification check failed ($RATIONALE)"
+          exit 1
+        elif [ "$EXIT_CODE" -eq 3 ]; then
+          echo "::error::VerifyCI INFRA_ERROR/TIMEOUT: Infrastructure substrate unavailable or verification deadline exceeded ($RATIONALE)"
+          exit 3
+        elif [ "$EXIT_CODE" -eq 2 ]; then
+          if [ "$FAIL_ON_INC" = "true" ]; then
+            echo "::error::VerifyCI $STATUS: Uncertain or human-review required ($RATIONALE)"
+            exit 2
+          else
+            echo "::warning::VerifyCI $STATUS: Routed to human review / ungrounded ($RATIONALE) - advisory mode (fail-on-inconclusive is false)"
+            exit 0
+          fi
+        else
+          echo "::error::VerifyCI returned unexpected exit code $EXIT_CODE"
+          exit "$EXIT_CODE"
+        fi

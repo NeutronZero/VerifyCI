@@ -22,6 +22,7 @@ SAFE_TEST_DIR_RE = re.compile(r"tests/(?:[A-Za-z0-9_.-]+/)*")
 # Source path to test directory mapping
 PATH_MAPPING = {
     "verifyci/contracts/": ["tests/contracts/"],
+    "verifyci/export/": ["tests/export/"],
     "verifyci/graph/": ["tests/graph/"],
     "verifyci/ingestion/": ["tests/ingestion/"],
     "verifyci/interface/": ["tests/interface/", "tests/integration/"],

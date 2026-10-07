@@ -1,6 +1,34 @@
 # Changelog
 
-## Unreleased — ingest recursion guard; naming and doc corrections
+## [0.1.0] - 2026-10-07 — First Open Source Release & Adoption Surface
+
+- **Machine-readable Certificate JSON Export**: Added `--format json` and `--output`
+  flags to `verifyci verify-diff`. Exports canonical machine-readable verification
+  payload containing authoritative `Certificate`, `VerificationReport`, `VerificationDecision`,
+  policy, provenance metadata, and exit code while enforcing strict secret redaction.
+- **OASIS SARIF v2.1.0 Exporter**: Added `--format sarif` to `verifyci verify-diff`
+  supporting direct integration with GitHub Code Scanning. Maps checks to standard
+  SARIF rules, alerts, and physical source locations while preserving honest semantic
+  distinctions: `FAIL` (level: error, kind: fail), `HUMAN_REVIEW` (level: warning, kind: review),
+  `INCONCLUSIVE` (level: note, kind: open), and `INFRA_ERROR`/`TIMEOUT` (executionSuccessful: false).
+- **Composite GitHub Action (`action.yml`)**: Implemented local-first GitHub Action
+  for CI pull-request diff verification. Preserves the full exit-code ladder (0, 1, 2, 3),
+  exports SARIF/JSON artifacts, and operates without hosted services, SaaS dependencies,
+  or GitHub Apps.
+- **Pre-commit Integration (`.pre-commit-hooks.yaml`)**: Added lightweight pre-commit
+  hook configuration for verifying staged diffs locally.
+- **Adoption & System Documentation**: Added comprehensive guides:
+  - `docs/quickstart.md`: 5-minute end-to-end getting started walkthrough.
+  - `docs/verdicts.md`: Detailed semantics, causes, and remediation for every verdict (PASS, FAIL, HUMAN_REVIEW, INCONCLUSIVE, INFRA_ERROR, TIMEOUT).
+  - `docs/architecture.md`: In-depth pipeline architecture with Mermaid diagrams.
+  - `docs/extension.md`: Guide to implementing, registering, and testing new verification checkers.
+  - `docs/benchmarks.md`: Benchmark catalog, SHA-256 verification, and evidence reproduction protocols.
+  - `STABILITY.md`: Public API stability tiers and SemVer deprecation policies.
+  - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`: Community standards, contribution guidelines, and security reporting.
+- **Packaging Metadata**: Enhanced `pyproject.toml` with MIT license, classifiers,
+  project URLs, and keywords. Validated clean build via `uv build`.
+
+## Previous — ingest recursion guard; naming and doc corrections
 
 - **CAP-008: Concurrent CI Workers & Shared-Storage Contention Attestation.**
   Frozen 64-case concurrency corpus (`benchmarks/concurrency_corpus/cap008/`,

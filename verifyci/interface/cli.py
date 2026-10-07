@@ -199,12 +199,47 @@ def _exit_for_status(status: str) -> None:
 def verify_diff(diff: str = typer.Argument("", help="Unified diff (or use --diff-file)"),
                 diff_file: str = typer.Option("", "--diff-file",
                  help="Read the diff from a file (or - for stdin) instead of argv"),
-                revision_id: str = "", db: str = ""):
+                revision_id: str = "", db: str = "",
+                format: str = typer.Option("text", "--format", "-f",
+                 help="Output format: text, json, or sarif"),
+                output: str = typer.Option("", "--output", "-o",
+                 help="Write output to a file instead of stdout")):
     from verifyci.interface.commands.verify import run_verify
-    result = run_verify(_read_diff(diff, diff_file), revision_id, db_path=db or None)
-    typer.echo(f"{result['status']}: {result['rationale']} ({result['report_id']})")
-    if result.get("files"):
-        typer.echo(f"files: {', '.join(result['files'])}")
+    fmt = (format or "text").lower()
+    if fmt not in ("text", "json", "sarif"):
+        typer.echo(f"Error: Unknown format '{format}'. Must be 'text', 'json', or 'sarif'", err=True)
+        raise typer.Exit(code=3)
+
+    need_artifacts = fmt in ("json", "sarif")
+    result = run_verify(_read_diff(diff, diff_file), revision_id, db_path=db or None,
+                        return_artifacts=need_artifacts)
+
+    if fmt == "text":
+        out_text = f"{result['status']}: {result['rationale']} ({result['report_id']})"
+        if result.get("files"):
+            out_text += f"\nfiles: {', '.join(result['files'])}"
+        if output:
+            with open(output, "w", encoding="utf-8") as fh:
+                fh.write(out_text + "\n")
+        else:
+            typer.echo(out_text)
+    elif fmt == "json":
+        from verifyci.export.json import export_certificate_json
+        rendered = export_certificate_json(result)
+        if output:
+            with open(output, "w", encoding="utf-8") as fh:
+                fh.write(rendered + "\n")
+        else:
+            typer.echo(rendered)
+    elif fmt == "sarif":
+        from verifyci.export.sarif import export_sarif
+        rendered = export_sarif(result)
+        if output:
+            with open(output, "w", encoding="utf-8") as fh:
+                fh.write(rendered + "\n")
+        else:
+            typer.echo(rendered)
+
     _exit_for_status(result["status"])
 
 

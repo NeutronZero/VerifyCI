@@ -15,3 +15,5 @@ benchmarks/beir/__pycache__/
 *.tmp
 opencode.json
 /evidence/
+dist/
+*.egg-info/

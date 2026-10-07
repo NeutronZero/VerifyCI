@@ -1,8 +1,22 @@
 [project]
 name = "verifyci"
 version = "0.1.0"
-description = "Verification-first agentic code intelligence platform"
+description = "Deterministic, local-first code verification for agentic pull requests and diffs"
 readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "VerifyCI Contributors" }]
+keywords = ["verification", "code-intelligence", "static-analysis", "ast", "sarif", "ci-cd", "deterministic"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Security",
+]
 requires-python = ">=3.12"
 
 dependencies = [
@@ -32,6 +46,12 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0", "pytest-xdist>=
 [project.scripts]
 verifyci = "verifyci.interface.cli:app"
 aci = "verifyci.interface.cli:app"  # legacy alias; same app, both on PATH
+
+[project.urls]
+Homepage = "https://github.com/NeutronZero/VerifyCI"
+Repository = "https://github.com/NeutronZero/VerifyCI"
+Documentation = "https://github.com/NeutronZero/VerifyCI/tree/main/docs"
+Changelog = "https://github.com/NeutronZero/VerifyCI/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]

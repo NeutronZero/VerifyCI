@@ -1,0 +1,7 @@
+- id: verifyci
+  name: VerifyCI Diff Verification Gate
+  description: Verify staged code changes using VerifyCI deterministic verification
+  entry: verifyci verify-diff --format text
+  language: python
+  types: [text]
+  pass_filenames: false

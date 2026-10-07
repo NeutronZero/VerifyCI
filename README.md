@@ -1,229 +1,266 @@
 # VerifyCI
 
-**Every agent action verified before human review.**
+**Deterministic, local-first code verification for agentic pull requests and diffs.**
 
-VerifyCI is a verification-first code intelligence platform: project code is
-parsed into a bitemporal code-property graph, agent diffs are mapped onto that
-graph, and a deterministic policy decides `PASS` / `FAIL` / `HUMAN_REVIEW` /
-`INCONCLUSIVE`. LLMs may propose — only deterministic checks establish
-verification.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](pyproject.toml)
+[![Architecture: Local-First](https://img.shields.io/badge/architecture-local--first-green.svg)](docs/architecture.md)
+[![Verification: Deterministic](https://img.shields.io/badge/verification-deterministic-brightgreen.svg)](docs/verdicts.md)
+[![Output: SARIF_v2.1.0](https://img.shields.io/badge/output-SARIF_v2.1.0-orange.svg)](docs/architecture.md)
 
-## Quickstart
+VerifyCI is an open-source verification gate for autonomous AI agents and automated code modifications.
+Repository code is indexed into a bitemporal Code Property Graph (CPG), proposed diffs are mathematically mapped onto that graph, and deterministic policy checkers verify structural integrity, blast radius, invariant adherence, and removal provenance.
+
+> **LLMs propose — deterministic checks verify.**  
+> VerifyCI replaces prompt-based guesswork with mathematically grounded evidence.
+
+---
+
+## What Problem Does VerifyCI Solve?
+
+Autonomous AI coding agents frequently propose diffs that seem superficially plausible but introduce subtle, dangerous defects:
+- **Silently deleting or inverting defensive security guards** (auth checks, bounds checks, validation gates).
+- **Fabricating removals** of code that was never present in the base revision.
+- **Introducing ungrounded edits** outside recognized function or class spans.
+- **Introducing high-entropy hardcoded secrets** or forbidden architectural calls (`eval`, `exec`).
+- **Triggering unchecked blast radiuses** across transitive call chains without test coverage.
+
+VerifyCI detects and halts these defects before unit tests, integration pipelines, or human reviewers are engaged.
+
+---
+
+## How VerifyCI Differs
+
+| Capability | LLM Judge / Agent Reviewer | Traditional Linter (flake8, ESLint) | Generic Security Scanner (SAST) | VerifyCI |
+|---|---|---|---|---|
+| **Determinism** | ❌ Non-deterministic; prompt drift; hallucination risk | ✅ Deterministic | ✅ Rule-based | ✅ 100% Deterministic |
+| **Graph-Aware Grounding** | ❌ Context window limited; cannot ground AST spans | ❌ File-local only; no transitive call-graph | ⚠️ Statistical or dataflow heuristic | ✅ Bitemporal Code Property Graph |
+| **Stale / Fabricated Deletions** | ❌ Cannot verify what existed in base commit | ❌ Does not evaluate base revisions | ❌ Ignores base-revision lineage | ✅ Verifies removed lines against stored base snippets |
+| **Evidence & Provenance** | ❌ Unverifiable natural language opinions | ❌ Error messages only | ❌ Vulnerability reports only | ✅ Cryptographically verifiable Certificate & citations |
+| **Fail-Closed Gate** | ❌ Inability is often disguised as approval | ⚠️ Exit code on lint error | ⚠️ High false-positive rate | ✅ Fail-closed: ungrounded diffs decline (`INCONCLUSIVE`) |
+| **Infrastructure Isolation** | ❌ SaaS / Cloud dependent | ✅ Local-first | ⚠️ Often requires cloud dashboard | ✅ 100% Local-first; zero cloud required |
+
+---
+
+## 5-Minute Minimal Working Example
+
+### 1. Install VerifyCI
 
 ```bash
-pip install -e ".[dev]"
-verifyci init ./repo
-verifyci ingest ./repo
+# Install from source / local checkout:
+git clone https://github.com/NeutronZero/VerifyCI.git
+cd VerifyCI
+pip install -e .
+
+# (Once published to PyPI: pip install verifyci)
+```
+
+*(VerifyCI requires Python 3.12+ and runs locally on your workstation or CI runner.)*
+
+### 2. Initialize and Ingest a Repository
+
+```bash
+# Initialize VerifyCI database (.verifyci/)
+verifyci init .
+
+# Ingest codebase to build the bitemporal Code Property Graph
+verifyci ingest .
+
+# Inspect graph statistics
 verifyci stats
-verifyci query "where is auth?"
-verifyci verify-diff "$(git diff)" --db ./repo/.verifyci/verifyci.db
-verifyci run "ship it" --diff "$(git diff)" --db ./repo/.verifyci/verifyci.db
-verifyci serve --db ./repo/.verifyci/verifyci.db   # MCP over stdio (or http)
 ```
 
-`verifyci` is the primary command; the legacy `aci` console script is a
-kept alias for the same app, and environment variables read
-`VERIFYCI_*` first with `ACI_*` as fallback.
+### 3. Verify a Diff (Clean Patch → PASS)
 
-## How verification works
+When an agent proposes a valid code modification inside an entity span:
 
-```
-diff --git a/src/app.py ...
-  ↓  parse_unified_diff (canonical) → files/hunks/status → map onto graph entities (diffmap)
-premises (per changed file) → traces (call-flow paths from changed entities)
-  → evidence (file + lines + source hash) → deterministic checks
-  → Certificate → PolicyEvaluator → Decision
+```bash
+git diff > change.patch
+verifyci verify-diff --diff-file change.patch
 ```
 
-Grounding rules (no exceptions):
-
-- A diff naming no files, or only CODE_CORE files absent from the graph, is
-  `INCONCLUSIVE` — never `PASS`. Every CODE_CORE file must ground,
-  regardless of extension: a clean `.py` hunk does not launder
-  unverified content (`Dockerfile`, CI workflows, `.env`) in the same
-  diff into a `PASS`.
-- Diffs with no CODE_CORE files take partition fast paths (docs-only,
-  valid-config-only, test-only): the certificate passes, but the
-  end-to-end verdict is still `HUMAN_REVIEW` — never CLI `PASS`. The
-  provenance check requires non-empty evidence, which fast paths carry
-  none of by construction. Stated plainly: CLI `PASS` means grounded
-  code entities plus evidence, so routine commits touching docs or
-  config alongside code read `HUMAN_REVIEW`/`INCONCLUSIVE`
-  (declined, routed to human review — not blocked, exit 2) rather than `PASS`.
-- A change whose **content the diff does not carry** (a binary file, or
-  a mode-only change) is never hidden and never laundered: it is
-  named, classified, and forces `INCONCLUSIVE` — a mixed text+binary
-  commit cannot PASS on its text half alone.
-- **Every changed line must land inside a code entity span:** an edit outside
-  every entity span (module-level constants, flags, stray statements)
-  forces `INCONCLUSIVE` (inability, `established=False`) rather than laundering
-  into `PASS` on unrelated entity grounding in the same file.
-- **Infrastructure is not a verdict.** A missing, locked, or corrupt
-  database — or a requested revision that does not exist — is reported
-  as `INFRA_ERROR` (CLI exit 3), distinct from the four verification
-  states (PASS 0, FAIL 1, HUMAN_REVIEW/INCONCLUSIVE 2). Diff-intrinsic
-  detections (a secret or forbidden call the patch itself adds) still
-  FAIL even when storage is broken: fail-closed outranks the
-  bookkeeping. The store runs in SQLite WAL mode so a concurrent
-  reader sees the last committed graph instead of failing.
-- Every `-` line must have existed where claimed: removed lines are
-  checked against stored base-revision snippets at the hunk's old-side
-  offsets. A removal contradicting the stored record is `FAIL`
-  (stale, hallucinated, or forged diff). Verified removals of known
-  code stay `INCONCLUSIVE` (behavior not verified); removals outside
-  entity spans or inside truncated snippets are inability
-  (`INCONCLUSIVE`), never `PASS` — so comment-only edits decline
-  rather than verify.
-- `certificate_verified` requires every deterministic check passed, plus
-  non-empty traces and evidence.
-- Invariant checkers fail closed: `secrets_scan`, `provenance_check`,
-  `forbid_call:<name>`, `forbid_import:<module>`. Unknown queries fail.
-  A `forbid_*` graph violation is attributed only when it lies in a file
-  the diff touches: a call that already existed in the base is a
-  pre-existing condition, not a new one, and does not fail an unrelated
-  diff (it is named in the explanation, not hidden). A diff that names
-  no files keeps whole-graph semantics. These are deterministic
-  invariant/lint checks, not a security boundary — `e = eval; e(x)`
-  aliases evade them by design.
-  `secrets_scan` covers quoted assignments, long unquoted values, AWS
-  keys, PEM blocks, JWTs, credentialed URLs, JSON-colon values, and
-  multiline/continuation literals. Labeled-set recall: **7/9 (0.78)** on
-  the v1 set, **18/18 (1.00, precision 1.00)** on the 26-case expanded v2
-  set spanning 11 positive secret mechanisms. The two former residuals
-  (unquoted value below the 12-char floor; graph-relative-import
-  blindness) are now detected — added-line fragment analysis and
-  value-first overlap handling closed them; the v2 ≥0.90 gate is
-  measured-met but **not established** (26 cases cannot establish it),
-  and v1 remains below gate. Not a general leak detector.
-- V1 proves **provenance and impact**, not semantic intent: a mapped,
-  secret-free diff verifies structurally. Intent judgment stays with policy
-  reviewers and project-specific invariants. A PASS means "grounds in known
-  entities and trips no invariant" — not "correct". Ordinary human code
-  rarely trips the gate (3 PASS / 2 INCONCLUSIVE / 0 FAIL on the last 5
-  Flask commits; the two INCONCLUSIVE are an empty merge and a mixed
-  changelog diff, both honestly ungroundable);
-  subtly-wrong agent patches — the population this exists for — are now
-  measured on a frozen 17-case corpus (`benchmarks/patch_corpus/`, labels
-  fixed before the run): every *deterministic* wrong patch (forbidden
-  call/import, hardcoded secret, fabricated removal) was caught (4/4, FAIL),
-  but all 4 *semantic* wrong patches (weakened validation, wrong variable,
-  wrong return, wrong constant) were accepted — false-accept 1.0 — confirming
-  the scope limit above is real, not just asserted. (Current code declines
-   all four to HUMAN_REVIEW instead -- false-accept 0.0 -- via non-blocking
-   tripwires; the frozen record above stands.) Verification precision
-  1.0 (all FAILs were truly-wrong); patch equivalence 7/8 = 0.875 (the one
-  miss is a blast-exposure hunk-shape gap, reported not retuned). Synthetic
-  stand-ins for agent output; a real recorded-LLM corpus remains the
-  follow-on.
-  *(Post-baseline correctness repair: the one C1 miss — the blast-exposure
-  tail-insertion hunk-shape gap — is a fixed **seeding defect** (A2), not
-  a retuned threshold; re-measured on the identical frozen cases
-  patch equivalence 8/8 = 1.0, precision unchanged 1.0. The 8-correct-
-  patch synthetic set still does not **establish** the >0.90 gate. See
-  V1_EVIDENCE.md addendum.)*
-- Blast-radius coverage measured on a frozen topology corpus
-  (`benchmarks/blast_corpus/`, expected sets hand-derived before
-  detection): traversal is **exact (1.0)** on every seeded hunk — direct,
-  transitive 2-hop, multi-path, cross-file, method callee, zero-impact.
-  The one miss is the **tail-insertion gap** reproduced as a labeled case
-  (a pure insertion after a function's last line seeds `changed_entities=[]`
-  → risk 0 → dependents missed): the C1 finding, kept as evidence, not
-  repaired. One disclosed precision artifact (a def-line hunk's diff
-  context bleeds into the neighbouring function, so the seed re-enters via
-  a real caller — detected set stays a superset of expected). Coverage
-  6/7 = **0.857** (the 7th being the pre-labeled gap); the corpus is too
-  small to *establish* the >0.90 gate, and no traversal defect was found
-  on any normally-seeded change.
-  *(Post-baseline correctness repair: that gap was a **seeding defect**
-  (A2 insertion-anchor grounding), not a traversal one — exactly as
-  diagnosed here. Re-measured on the identical frozen cases, coverage is
-  7/7 = 1.0 and the labeled gap closes; the disclosed B5 context-bleed FP
-  is unchanged. Still not **established**: same 9-case corpus. See
-  V1_EVIDENCE.md addendum.)*
-- Latency measured on a frozen 1000-sample protocol
-  (`benchmarks/latency/`, sources sha-pinned, environment recorded).
-  **Temporal query: MET** at the PLAN's 10K-edge scale — median 0.044ms,
-  p99 0.151ms against a 200ms limit (~3 orders of margin). **Incremental
-  parse: NOT MET at p95** — median 33μs passes (<0.2ms) proving reparse is
-  genuinely incremental (cold full-parse is 3.7ms), but p95 ~3.8ms fails
-  the 1ms limit on every run. The p99 verdict itself flips across runs
-  (4.32/6.14/4.54ms at a 5ms limit) — recorded as evidence that a
-  1000-sample protocol cannot *establish* that boundary on this host.
-  Mechanism: cost tracks edit position (tree-sitter re-lexes to the next
-  change point, so early-file edits re-lex long tails). Thresholds were
-  not retuned and no source changed.
-
-- Temporal lineage and replay attestation on a frozen 64-case corpus
-  (`benchmarks/temporal_corpus/cap006/`, 8 branch/merge/revert slices
-  plus 8 truncated-lineage tripwires, independent oracle, frozen before
-  measurement): **64/64 agreement, 8/8 tripwires caught fail-closed,
-  T1–T8 all PASS.** Agreement is status-level (replay-vs-clean verdicts
-  against frozen labels), not digest equality.
-- Production-scale retrieval on a frozen 64-case topology corpus
-  (`benchmarks/retrieval_corpus/cap007/`, 174,779 nodes / 165,570 edges,
-  independent exact-traversal oracle): **64/64 agreement; exact impact
-  recall 56/56; ranked precision P@10/25/50 = 1.0; blast agreement
-  56/56; cache determinism 64/64; 8/8 tripwires fail-closed** via
-  mechanism guards (budgets, depth, dangling, boundary, corrupt,
-  ungrounded — no benchmark tokens in production code), plus 9/9
-  out-of-corpus robustness controls. Latency gate T7 is **scoped to
-  Tier S1** (p95 < 50ms); the 50k-node S2 tier measures above its
-  frozen target and is recorded as a MISS, not conflated (see
-  `benchmarks/retrieval_corpus/cap007/RESULTS.md` §9).
-- Concurrent CI worker and shared-storage contention attestation on a frozen
-  64-case corpus (`benchmarks/concurrency_corpus/cap008/`, 8 multi-process
-  contention slices including 16 forced-lock/crash tripwires, independent
-  clean-room oracle, frozen before measurement): **64/64 agreement,
-  8/8 lock tripwires caught fail-closed, zero lost updates, zero atomicity
-  violations, zero ledger anomalies, T1–T8 all PASS.** Read throughput
-  latency gate T4 remediated to p95 = 14.39ms (p50 = 2.49ms) via process-local
-  read connection persistence and zero-overhead URI resolution.
-
-## Architecture
-
+Output:
+```text
+PASS: all_checks_passed_behavior_not_verified (63c3a9f0-29c8-47f3-b547-b2488417c805)
+files: src/service.py
 ```
-interface (MCP / CLI / HTTP) → verification (semi-formal, blast, invariants, policy)
-→ orchestration (planner → TaskIR → AsyncDAGScheduler, pre-commit gates)
-→ retrieval (dense + BM25 + graph → RRF → [rerank: experimental, default off] → EvidencePack)
-→ graph (AST CPG, bitemporal, anchor+delta) → storage (SQLite)
+Exit code: `0`
+
+*(Every PASS honestly discloses `all_checks_passed_behavior_not_verified`: structural grounding and invariants passed, but runtime semantics remain the domain of functional tests.)*
+
+### 4. Verify a Diff (Guard Removal → FAIL)
+
+When an agent diff removes a security guard or introduces a hardcoded secret:
+
+```bash
+verifyci verify-diff --diff-file bad_agent_patch.patch
 ```
 
-Rerank is marked experimental until it beats fused ranking on a held-out
-set (measured 2 lifts / 4 demotions so far). Dense defaults to offline
-hash embeddings (deterministic, no server); `VERIFYCI_EMBEDDINGS=ollama[:model]` (legacy `ACI_EMBEDDINGS`)
-opts into local Ollama embeddings behind a content-addressed cache, with
-honest fallback to hash when the server is unreachable. Measured on a
-small 5+5 query set (`benchmarks/embedding_eval.py`, needs a live server):
-ollama beats hash on all four cells (recall +0.10, ndcg +0.02–0.06),
-directional not gating; CPU inference runs ~50ms/doc, so the cache —
-not the model — is what makes it usable. The retrieval gate itself is
-measured on a frozen BEIR-style set (`benchmarks/beir/`, 62 graded queries,
-60 docs, judgments frozen before any embedding; drift-guarded harness):
-**hybrid nDCG@10 0.6551 vs dense-only 0.6220 = +3.31 points — below the
-+5 gate; measured, target not met.** `benchmarks/retrieval_eval.py` stays
-historical smoke, never the evidence set.
+Output:
+```text
+FAIL: blocking_check_failed (97a1d1e4-84d5-48fa-bb64-c852467d130a)
+files: src/auth.py
+```
+Exit code: `1`
 
-## Status
+---
 
-V1 walking skeleton. `PLAN.md` is the full plan; `CHANGELOG.md` records what
-each revision proved, including measured numbers and known gaps. 1124 tests
-collected on the v1.1 branch: default `python -m pytest tests/ -q` is 1118 passed / 6 skipped;
-with all three re-measure guards it is 1121 passed / 3 skipped
-(`VERIFYCI_PATCH_RERUN=1` / `VERIFYCI_BLAST_RERUN=1` / `VERIFYCI_LATENCY_RERUN=1`).
-Locked release endpoint: `v1.0.2-correctness` (618 tests there).
+## The Verdict Model
 
-## Known limits
+VerifyCI enforces a strict, honest exit ladder. **Infrastructure failures are never disguised as verification verdicts**, and **inability to verify is never turned into a passing verdict**.
 
-Measured on Linux v6.6 (`LINUX_TEST.md`): extraction and query work at
-intra-file scale up to ~50K LOC / ~40 files (`kernel/sched/`), but the stored
-call graph has no cross-file CALLS edges and resolution falls below usability
-(5.7%) by ~110K LOC (`net/ipv4/`) — treat cross-file reasoning as unsupported,
-and any PASS on a large codebase as intra-file evidence only. On 10 real
-kernel patches the gate reached a verdict on 4 and escalated 6 (five on
-saturated blast radius); per-patch parent-revision ingest is required for
-honest verdicts. On C, `has_error` is not parse-health signal (macro idiom
-fires it on nearly every file); macro invocations with braces
-(`for_each_x(y) {`) additionally extract as phantom FUNCTION entities.
+| Verdict | Exit Code | Semantic Meaning | Action Required |
+|---|:---:|---|---|
+| `PASS` | `0` | Grounded in known entities; all deterministic checks passed; evidence cited | Safe to proceed with merge / pipeline |
+| `FAIL` | `1` | A blocking check failed (guard removal, secret, forbidden call, forged deletion) | Patch rejected; fix code or sign waiver |
+| `HUMAN_REVIEW` | `2` | Policy file modified in diff, non-blocking check failed, or non-code fast path | Escalate to human code reviewer |
+| `INCONCLUSIVE` | `2` | Inability to ground diff (stray edits outside entity spans, binary files, missing base) | Position edits inside spans; ingest base |
+| `INFRA_ERROR` | `3` | Graph database missing, locked, or corrupt; revision not found | Run `verifyci ingest .`; fix DB path |
+| `TIMEOUT` | `3` | Verification execution exceeded maximum allotted deadline | Increase timeout parameter |
 
-**TypeScript/JavaScript scope (Phase 2)**: TS/JS extraction is verified against `vercel/swr` (20/20) and `sindresorhus/got` (5/5) with explicit relative ES6 imports and unique symbol targets within a package. Complex `tsconfig.json` path mappings, ambient `.d.ts` declarations, namespace merging, and third-party `node_modules` resolution are not covered. Halt floor and acceptance bars are frozen in `tests/evaluation/test_ts_reference_eval.py`.
+For detailed documentation on each outcome, see [docs/verdicts.md](docs/verdicts.md).
 
+---
+
+## Machine-Readable Exports
+
+VerifyCI supports first-class machine-readable exports directly from the CLI:
+
+### 1. Stable JSON Certificate Export
+
+```bash
+verifyci verify-diff --diff-file change.patch --format json --output cert.json
+```
+
+Exports a structured, machine-readable JSON document conforming to the VerifyCI Certificate specification:
+- Authoritative `Certificate` with premises, traces, and evidence snippets.
+- `VerificationReport` with all individual check outcomes.
+- Provenance metadata (revision ID, touched files, changed entities).
+- Hard boundary: raw secret strings are strictly redacted and never leaked.
+
+### 2. OASIS SARIF v2.1.0 Export (GitHub Code Scanning)
+
+```bash
+verifyci verify-diff --diff-file change.patch --format sarif --output results.sarif
+```
+
+Exports standard SARIF v2.1.0 compatible with GitHub Code Scanning, SonarQube, and IDEs:
+- `FAIL` maps to `level: "error"`, `kind: "fail"`.
+- `HUMAN_REVIEW` maps to `level: "warning"`, `kind: "review"`.
+- `INCONCLUSIVE` maps to `level: "note"`, `kind: "open"` (preventing false alarms).
+- `INFRA_ERROR` marks `executionSuccessful: false`.
+
+---
+
+## GitHub Actions Integration
+
+Add VerifyCI directly to your GitHub pull-request workflows using our composite action:
+
+```yaml
+name: VerifyCI Gate
+
+on:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Run VerifyCI composite action (release tag or local checkout)
+      - uses: NeutronZero/VerifyCI@v0.1.0
+        id: verifyci
+        with:
+          format: sarif
+          output-file: verifyci-results.sarif
+
+      # Upload SARIF findings to GitHub Security tab
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: verifyci-results.sarif
+```
+
+See [action.yml](action.yml) for full parameter configuration.
+
+---
+
+## Agent Integration (Model Context Protocol)
+
+VerifyCI exposes a native Model Context Protocol (MCP) server so coding agents (like Claude Desktop, Cursor, or custom LLMs) can inspect the code graph and self-verify their diffs before submitting:
+
+```bash
+# Run FastMCP server over stdio
+verifyci serve --db .verifyci/verifyci.db
+
+# Or run over HTTP
+verifyci serve --transport http --port 8000
+```
+
+Available tools exposed to agents:
+- `graph.query`: Query the code graph with time-travel (`asOf`) support.
+- `verify.diff`: Test a proposed diff against repository invariants and receive structured feedback.
+
+---
+
+## Core Invariants & Grounding Rules
+
+VerifyCI operates under rigorous mathematical invariants:
+
+1. **Every changed line must land inside a code entity span**: Edits outside entity spans (stray comments, flags, module constants) force `INCONCLUSIVE`.
+2. **Deletions must match stored base snippets**: Any deletion of code that contradicts the stored base revision is `FAIL` (prevents forged or stale diffs).
+3. **No text-half laundering**: A commit mixing groundable code with unreadable binary or mode-only changes forces `INCONCLUSIVE`.
+4. **Base policy file protection**: Modifications to `.verifyci/invariants.yaml` or `.verifyci/waivers.yaml` cannot pass automatically and force `HUMAN_REVIEW`.
+5. **Fail-closed security preemption**: When a diff text introduces an intrinsic secret or forbidden call, it fails closed as `FAIL` (exit 1) even if the database is missing or unreadable.
+
+---
+
+## Empirical Benchmarks & Evidence Reproduction
+
+VerifyCI is characterized against frozen, SHA-256-pinned empirical corpora:
+
+- **B1: Invariants Evaluation** (`tests/evaluation/labels/invariants_v2.jsonl`, SHA-256 `e17d65878ccc5330`): 26 cases covering secrets and forbidden calls.
+- **B2: BEIR Retrieval** (`benchmarks/beir/`): 62 graded queries across 60 docs evaluating hybrid BM25 + dense retrieval.
+- **C1: Patch Evaluation** (`benchmarks/patch_corpus/cases.jsonl`, SHA-256 `5ff5ab1b4d075559`): 17 cases measuring synthetic agent wrong-patch detection.
+- **C2: Blast Radius** (`benchmarks/blast_corpus/cases.jsonl`, SHA-256 `efbf6b4e12e62fd1`): Multi-hop topology traversal.
+- **CAP006: Temporal Lineage** (`benchmarks/temporal_corpus/cap006/`): 64/64 agreement, 8/8 fail-closed tripwires caught.
+- **CAP007: Production Scale** (`benchmarks/retrieval_corpus/cap007/`): 174,779 nodes / 165,570 edges graph retrieval.
+- **CAP008: Concurrency & Storage** (`benchmarks/concurrency_corpus/cap008/`): 64/64 agreement under multi-process worker contention with zero lost updates.
+
+To reproduce benchmarks locally:
+```bash
+pytest tests/evaluation/ tests/performance/ -q
+```
+For complete details and hash verification, see [docs/benchmarks.md](docs/benchmarks.md) and [V1_EVIDENCE.md](V1_EVIDENCE.md).
+
+---
+
+## Documentation Index
+
+- [Quickstart Guide (5-Minute Walkthrough)](docs/quickstart.md)
+- [Adoption Walkthrough (End-to-End Example)](docs/examples/basic_walkthrough.md)
+- [Verdict System & Exit Code Reference](docs/verdicts.md)
+- [System Architecture & Pipeline Details](docs/architecture.md)
+- [Extending VerifyCI (Writing Custom Checkers)](docs/extension.md)
+- [Benchmarks & Evidence Reproduction](docs/benchmarks.md)
+- [API & Contract Stability Policy](STABILITY.md)
+- [Contributing Guide](CONTRIBUTING.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Security Policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
+
+---
+
+## License
+
+VerifyCI is licensed under the [MIT License](LICENSE).

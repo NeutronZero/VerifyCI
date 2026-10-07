@@ -19,7 +19,7 @@ from verifyci.verification.verification_ir import build_semi_check, build_verifi
 
 
 def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
-               db_path: str | None = None) -> dict:
+               db_path: str | None = None, return_artifacts: bool = False) -> dict:
     db = resolve_db(db_path)
     # Storage availability is its own axis, checked without ever
     # suppressing a diff-intrinsic verdict: a forbidden pattern or secret
@@ -63,7 +63,7 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
             waivers = load_trusted_base_waivers(db, diff=diff)
         except ValueError:
             files = parse_diff_files(diff)
-            return {
+            res = {
                 "report_id": "",
                 "status": "FAIL",
                 "rationale": "invalid_invariants_config",
@@ -71,6 +71,12 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
                 "files": files,
                 "changed_entities": [],
             }
+            if return_artifacts:
+                res["certificate"] = None
+                res["report"] = None
+                res["decision"] = None
+                res["policy"] = None
+            return res
     reasoner = SemiFormalReasoner()
     cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map or None,
                            entities=entities or None, waivers=waivers)
@@ -108,33 +114,53 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
             # Explicit contract: diff-intrinsic security/contract violation preempts
             # infrastructure error to guarantee fail-closed security gating (exit 1),
             # while explicitly recording that an infrastructure failure co-occurred.
-            return {"report_id": report.report_id, "status": "FAIL",
-                    "rationale": decision.rationale,
-                    "infra_error": infra_error,
-                    "contract": "security_violation_preempts_infra_error",
-                    "revision_id": resolved_revision,
-                    "files": files, "changed_entities": changed}
-        # Required verification substrate failure dominates over PASS,
-        # INCONCLUSIVE, and HUMAN_REVIEW — missing/broken storage must NEVER return PASS.
-        return {"report_id": report.report_id, "status": "INFRA_ERROR",
-                "error": infra_error,
-                "rationale": f"storage_unavailable:{infra_error}",
-                "revision_id": resolved_revision,
-                "files": files, "changed_entities": changed}
+            res = {"report_id": report.report_id, "status": "FAIL",
+                   "rationale": decision.rationale,
+                   "infra_error": infra_error,
+                   "contract": "security_violation_preempts_infra_error",
+                   "revision_id": resolved_revision,
+                   "files": files, "changed_entities": changed}
+        else:
+            # Required verification substrate failure dominates over PASS,
+            # INCONCLUSIVE, and HUMAN_REVIEW — missing/broken storage must NEVER return PASS.
+            res = {"report_id": report.report_id, "status": "INFRA_ERROR",
+                   "error": infra_error,
+                   "rationale": f"storage_unavailable:{infra_error}",
+                   "revision_id": resolved_revision,
+                   "files": files, "changed_entities": changed}
+        if return_artifacts:
+            res["certificate"] = cert
+            res["report"] = report
+            res["decision"] = decision
+            res["policy"] = policy
+        return res
 
     if policy_modified:
         if decision.status == "FAIL":
             # Invariant violation under trusted base configuration preempts; fails closed.
-            return {"report_id": report.report_id, "status": "FAIL",
-                    "rationale": decision.rationale, "revision_id": resolved_revision,
-                    "files": files, "changed_entities": changed}
-        # Base-Ref Policy Integrity: gate configuration was modified in the diff;
-        # policy changes cannot be silently accepted and require explicit human review.
-        return {"report_id": report.report_id, "status": "HUMAN_REVIEW",
-                "rationale": "unverified_policy_change: gate configuration modified in diff",
-                "revision_id": resolved_revision,
-                "files": files, "changed_entities": changed}
+            res = {"report_id": report.report_id, "status": "FAIL",
+                   "rationale": decision.rationale, "revision_id": resolved_revision,
+                   "files": files, "changed_entities": changed}
+        else:
+            # Base-Ref Policy Integrity: gate configuration was modified in the diff;
+            # policy changes cannot be silently accepted and require explicit human review.
+            res = {"report_id": report.report_id, "status": "HUMAN_REVIEW",
+                   "rationale": "unverified_policy_change: gate configuration modified in diff",
+                   "revision_id": resolved_revision,
+                   "files": files, "changed_entities": changed}
+        if return_artifacts:
+            res["certificate"] = cert
+            res["report"] = report
+            res["decision"] = decision
+            res["policy"] = policy
+        return res
 
-    return {"report_id": report.report_id, "status": decision.status,
-            "rationale": decision.rationale, "revision_id": resolved_revision,
-            "files": files, "changed_entities": changed}
+    res = {"report_id": report.report_id, "status": decision.status,
+           "rationale": decision.rationale, "revision_id": resolved_revision,
+           "files": files, "changed_entities": changed}
+    if return_artifacts:
+        res["certificate"] = cert
+        res["report"] = report
+        res["decision"] = decision
+        res["policy"] = policy
+    return res

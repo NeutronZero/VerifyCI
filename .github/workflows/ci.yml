@@ -26,6 +26,8 @@ jobs:
           python-version: "3.12"
       - run: uv sync --frozen --extra dev
       - run: uv run --no-sync ruff check .
+      - name: Validate packaging build
+        run: uv build
 
   # ------------------------------------------------------------------
   # TIER 1: PR FAST GATE (< 30s target, runs on every pull request)
