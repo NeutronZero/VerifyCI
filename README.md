@@ -16,6 +16,66 @@ Repository code is indexed into a bitemporal Code Property Graph (CPG), proposed
 
 ---
 
+## Installation
+
+```bash
+pip install verifyci
+```
+
+*(VerifyCI requires Python 3.12+ and runs locally on your workstation or CI runner. To install from source for development: `git clone https://github.com/NeutronZero/VerifyCI.git && cd VerifyCI && pip install -e .`)*
+
+---
+
+## 30-Second Example
+
+### 1. Initialize and Ingest a Repository
+
+```bash
+# Initialize VerifyCI database (.verifyci/)
+verifyci init .
+
+# Ingest codebase to build the bitemporal Code Property Graph
+verifyci ingest .
+
+# Inspect graph statistics
+verifyci stats
+```
+
+### 2. Verify a Diff (Clean Patch → PASS)
+
+When an agent proposes a valid code modification inside an entity span:
+
+```bash
+git diff > change.patch
+verifyci verify-diff --diff-file change.patch
+```
+
+Output:
+```text
+PASS: all_checks_passed_behavior_not_verified (63c3a9f0-29c8-47f3-b547-b2488417c805)
+files: src/service.py
+```
+Exit code: `0`
+
+*(Every PASS honestly discloses `all_checks_passed_behavior_not_verified`: structural grounding and invariants passed, but runtime semantics remain the domain of functional tests.)*
+
+### 3. Verify a Diff (Guard Removal → FAIL)
+
+When an agent diff removes a security guard or introduces a hardcoded secret:
+
+```bash
+verifyci verify-diff --diff-file bad_agent_patch.patch
+```
+
+Output:
+```text
+FAIL: blocking_check_failed (97a1d1e4-84d5-48fa-bb64-c852467d130a)
+files: src/auth.py
+```
+Exit code: `1`
+
+---
+
 ## What Problem Does VerifyCI Solve?
 
 Autonomous AI coding agents frequently propose diffs that seem superficially plausible but introduce subtle, dangerous defects:
@@ -39,69 +99,6 @@ VerifyCI detects and halts these defects before unit tests, integration pipeline
 | **Evidence & Provenance** | ❌ Unverifiable natural language opinions | ❌ Error messages only | ❌ Vulnerability reports only | ✅ Cryptographically verifiable Certificate & citations |
 | **Fail-Closed Gate** | ❌ Inability is often disguised as approval | ⚠️ Exit code on lint error | ⚠️ High false-positive rate | ✅ Fail-closed: ungrounded diffs decline (`INCONCLUSIVE`) |
 | **Infrastructure Isolation** | ❌ SaaS / Cloud dependent | ✅ Local-first | ⚠️ Often requires cloud dashboard | ✅ 100% Local-first; zero cloud required |
-
----
-
-## 5-Minute Minimal Working Example
-
-### 1. Install VerifyCI
-
-```bash
-# Install from source / local checkout:
-git clone https://github.com/NeutronZero/VerifyCI.git
-cd VerifyCI
-pip install -e .
-
-# (Once published to PyPI: pip install verifyci)
-```
-
-*(VerifyCI requires Python 3.12+ and runs locally on your workstation or CI runner.)*
-
-### 2. Initialize and Ingest a Repository
-
-```bash
-# Initialize VerifyCI database (.verifyci/)
-verifyci init .
-
-# Ingest codebase to build the bitemporal Code Property Graph
-verifyci ingest .
-
-# Inspect graph statistics
-verifyci stats
-```
-
-### 3. Verify a Diff (Clean Patch → PASS)
-
-When an agent proposes a valid code modification inside an entity span:
-
-```bash
-git diff > change.patch
-verifyci verify-diff --diff-file change.patch
-```
-
-Output:
-```text
-PASS: all_checks_passed_behavior_not_verified (63c3a9f0-29c8-47f3-b547-b2488417c805)
-files: src/service.py
-```
-Exit code: `0`
-
-*(Every PASS honestly discloses `all_checks_passed_behavior_not_verified`: structural grounding and invariants passed, but runtime semantics remain the domain of functional tests.)*
-
-### 4. Verify a Diff (Guard Removal → FAIL)
-
-When an agent diff removes a security guard or introduces a hardcoded secret:
-
-```bash
-verifyci verify-diff --diff-file bad_agent_patch.patch
-```
-
-Output:
-```text
-FAIL: blocking_check_failed (97a1d1e4-84d5-48fa-bb64-c852467d130a)
-files: src/auth.py
-```
-Exit code: `1`
 
 ---
 
@@ -242,6 +239,14 @@ To reproduce benchmarks locally:
 pytest tests/evaluation/ tests/performance/ -q
 ```
 For complete details and hash verification, see [docs/benchmarks.md](docs/benchmarks.md) and [V1_EVIDENCE.md](V1_EVIDENCE.md).
+
+---
+
+## Known Limitations
+
+- **Language Scope**: Deep semantic CPG entity extraction currently supports Python, TypeScript, JavaScript, C, and C++. Non-code files (markdown, plaintext) route to human review or bypass without semantic claims.
+- **Base Graph Dependency**: Diff verification requires an initialized graph database ingested from the base revision to evaluate removal provenance and entity anchors.
+- **Deterministic Scope**: VerifyCI verifies invariant adherence, entity grounding, and structural blast radius; runtime semantics and functional logic remain the domain of execution tests.
 
 ---
 
