@@ -22,6 +22,8 @@ BENCHMARK_DIR = Path(__file__).resolve().parent.parent.parent / "benchmarks" / "
 FROZEN_CORPUS_SHA256 = "f9ddbe38bd94caee762dedb430c04edb6678f6850736431562a47394593fe688"
 FROZEN_LABEL_SHA256 = "d6bbad336244bb95529a54cb877cad548075d94ef8aec597112c50bc44dc5f48"
 FROZEN_ORACLE_MANIFEST_SHA256 = "ab071128211cb366879d8c7fa8ef147ed54c2b57887a4b8dea1357b9905e97d4"
+FROZEN_HARNESS_SHA256 = "2f8705231bcad86069b8f8b0a28b6e245a9a950501a1d9ca797939cc3a2e72c2"
+FROZEN_RESULTS_SHA256 = "90f565f20203075018df5ba32744d02f33b8dba2e63c875369ac0704861ba279"
 
 
 @pytest.fixture(scope="module")
@@ -49,10 +51,14 @@ def test_cap007_cryptographic_freeze_hashes():
     c_bytes = (BENCHMARK_DIR / "cases.jsonl").read_bytes()
     l_bytes = (BENCHMARK_DIR / "labels.jsonl").read_bytes()
     m_bytes = (BENCHMARK_DIR / "oracle_manifest.jsonl").read_bytes()
+    h_bytes = (BENCHMARK_DIR / "measure_cap007.py").read_bytes()
+    r_bytes = (BENCHMARK_DIR / "results.json").read_bytes()
 
     assert hashlib.sha256(c_bytes).hexdigest() == FROZEN_CORPUS_SHA256
     assert hashlib.sha256(l_bytes).hexdigest() == FROZEN_LABEL_SHA256
     assert hashlib.sha256(m_bytes).hexdigest() == FROZEN_ORACLE_MANIFEST_SHA256
+    assert hashlib.sha256(h_bytes).hexdigest() == FROZEN_HARNESS_SHA256
+    assert hashlib.sha256(r_bytes).hexdigest() == FROZEN_RESULTS_SHA256
 
 
 def test_cap007_lock1_independent_oracle_isolation():

@@ -1,0 +1,1940 @@
+{
+  "benchmark_id": "CAP-007",
+  "timestamp_utc": "2026-10-07T04:55:08.884146+00:00",
+  "total_cases": 64,
+  "overall_agreement": {
+    "agreed": 56,
+    "total": 64,
+    "rate": 0.875
+  },
+  "correctness": {
+    "exact_impact_agreement": "56/56",
+    "exact_impact_recall": 1.0,
+    "rankings": {
+      "mean_recall_at_10": 0.8167,
+      "mean_recall_at_25": 0.9585,
+      "mean_recall_at_50": 0.9901,
+      "mean_precision_at_10": 0.8931,
+      "mean_precision_at_25": 0.8752,
+      "mean_precision_at_50": 0.8752
+    },
+    "blast_radius_agreement": true,
+    "cache_equivalence": "64/64",
+    "tripwires_caught": "0/8"
+  },
+  "performance": {
+    "all_latencies_ms": {
+      "p50": 0.179,
+      "p90": 0.34,
+      "p95": 0.467,
+      "p99": 0.536,
+      "max": 0.671
+    },
+    "s1_s2_latencies_ms": {
+      "p50": 0.159,
+      "p90": 0.34,
+      "p95": 0.467,
+      "p99": 0.536,
+      "max": 0.671
+    },
+    "peak_memory_kb": 12.09,
+    "timeout_or_resource_failures": 0
+  },
+  "slice_breakdown": {
+    "cyclic_dependencies": {
+      "total": 8,
+      "agreed": 7,
+      "rate": 0.875
+    },
+    "deep_call_chains": {
+      "total": 8,
+      "agreed": 7,
+      "rate": 0.875
+    },
+    "dense_clusters_generated": {
+      "total": 8,
+      "agreed": 7,
+      "rate": 0.875
+    },
+    "dense_sparse_disagreement": {
+      "total": 8,
+      "agreed": 7,
+      "rate": 0.875
+    },
+    "god_node_fanout": {
+      "total": 8,
+      "agreed": 7,
+      "rate": 0.875
+    },
+    "modular_package_hierarchy": {
+      "total": 8,
+      "agreed": 7,
+      "rate": 0.875
+    },
+    "monorepo_cross_boundary": {
+      "total": 8,
+      "agreed": 7,
+      "rate": 0.875
+    },
+    "sparse_distant_targets": {
+      "total": 8,
+      "agreed": 7,
+      "rate": 0.875
+    }
+  },
+  "gates": {
+    "T1_exact_impact_set_recall": {
+      "metric": 1.0,
+      "target": "1.0000 (56/56)",
+      "status": "PASS",
+      "evidence": "56/56 exact matches"
+    },
+    "T2_top_k_ranking_precision": {
+      "precision_10": 0.8931,
+      "precision_25": 0.8752,
+      "precision_50": 0.8752,
+      "target": ">= 0.9500 at K in {10, 25, 50}",
+      "status": "FAIL",
+      "evidence": "P@10=0.8931, P@25=0.8752, P@50=0.8752"
+    },
+    "T3_multihop_blast_radius_agreement": {
+      "callers_match": "56/56",
+      "callees_match": "56/56",
+      "target": "100% callers, callees, and dependencies match",
+      "status": "PASS",
+      "evidence": "Callers: 56/56, Callees: 56/56"
+    },
+    "T4_cache_determinism_attestation": {
+      "metric": "64/64",
+      "target": "100% cold == warm across all queries",
+      "status": "PASS",
+      "evidence": "64/64 queries strictly deterministic"
+    },
+    "T5_dense_sparse_fusion_integrity": {
+      "disagreement_slice_passed": 7,
+      "target": "7/7 valid disagreement cases reached without omitting paths",
+      "status": "PASS",
+      "evidence": "7/8 in disagreement slice"
+    },
+    "T6_bounded_resource_no_silent_truncation": {
+      "tripwires_caught": "0/8",
+      "target": "8/8 tripwires caught fail-closed with INCONCLUSIVE",
+      "status": "FAIL",
+      "evidence": "0/8 caught fail-closed"
+    },
+    "T7_production_latency_compliance": {
+      "p95_s1_s2_ms": 0.467,
+      "target": "p95 < 50.0ms on Tiers S1 and S2",
+      "status": "PASS",
+      "evidence": "p95 = 0.467ms on S1/S2 (p50=0.159ms, max=0.671ms)"
+    },
+    "T8_overall_corpus_agreement": {
+      "metric": 0.875,
+      "target": "1.0000 (64/64 = 100.00%)",
+      "status": "FAIL",
+      "evidence": "56/64 (87.50%)"
+    }
+  },
+  "environment": {
+    "python_version": "3.14.7",
+    "os_platform": "Windows-11-10.0.26300-SP0",
+    "cpu_count": 8,
+    "ram_total_gb": 7.73,
+    "concurrency_mode": "sequential_deterministic",
+    "cache_policy": "explicit_cold_warm_pair"
+  },
+  "cases": [
+    {
+      "id": "SCALE-MOD-01",
+      "slice": "modular_package_hierarchy",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.7142857142857143,
+        "recall_at_25": 0.7142857142857143,
+        "recall_at_50": 0.7142857142857143
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.8333333333333334,
+        "precision_at_25": 0.8333333333333334,
+        "precision_at_50": 0.8333333333333334
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": false,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.33989999792538583,
+      "peak_bytes": 7232,
+      "predicted_rationale": "Traversal completed with 7 impacted entities"
+    },
+    {
+      "id": "SCALE-MOD-02",
+      "slice": "modular_package_hierarchy",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.875,
+        "recall_at_25": 0.875,
+        "recall_at_50": 0.875
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.7777777777777778,
+        "precision_at_25": 0.7777777777777778,
+        "precision_at_50": 0.7777777777777778
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": false,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.23400000645779073,
+      "peak_bytes": 6576,
+      "predicted_rationale": "Traversal completed with 8 impacted entities"
+    },
+    {
+      "id": "SCALE-MOD-03",
+      "slice": "modular_package_hierarchy",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.8,
+        "precision_at_25": 0.8,
+        "precision_at_50": 0.8
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": false,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.2119999990100041,
+      "peak_bytes": 6184,
+      "predicted_rationale": "Traversal completed with 8 impacted entities"
+    },
+    {
+      "id": "SCALE-MOD-04",
+      "slice": "modular_package_hierarchy",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.8,
+        "precision_at_25": 0.8,
+        "precision_at_50": 0.8
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.21099999139551073,
+      "peak_bytes": 6240,
+      "predicted_rationale": "Traversal completed with 8 impacted entities"
+    },
+    {
+      "id": "SCALE-MOD-05",
+      "slice": "modular_package_hierarchy",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.8,
+        "precision_at_25": 0.8,
+        "precision_at_50": 0.8
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.2077999961329624,
+      "peak_bytes": 6240,
+      "predicted_rationale": "Traversal completed with 8 impacted entities"
+    },
+    {
+      "id": "SCALE-MOD-06",
+      "slice": "modular_package_hierarchy",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.8,
+        "precision_at_25": 0.8,
+        "precision_at_50": 0.8
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.21510000806301832,
+      "peak_bytes": 6240,
+      "predicted_rationale": "Traversal completed with 8 impacted entities"
+    },
+    {
+      "id": "SCALE-MOD-07",
+      "slice": "modular_package_hierarchy",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.8,
+        "precision_at_25": 0.8,
+        "precision_at_50": 0.8
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.20530000620055944,
+      "peak_bytes": 6240,
+      "predicted_rationale": "Traversal completed with 8 impacted entities"
+    },
+    {
+      "id": "SCALE-MOD-08",
+      "slice": "modular_package_hierarchy",
+      "tier": "S1",
+      "scenario_type": "tripwire",
+      "tripwire_anomaly": "missing_package_manifest_tripwire",
+      "predicted_status": "PASS",
+      "gold_status": "INCONCLUSIVE",
+      "status_agreed": false,
+      "exact_impact_agreed": false,
+      "recall_at_k": {},
+      "precision_at_k": {},
+      "blast_callers_agreed": false,
+      "blast_callees_agreed": false,
+      "blast_deps_agreed": false,
+      "blast_risk_agreed": false,
+      "cache_deterministic": true,
+      "latency_ms": 0.050099988584406674,
+      "peak_bytes": 2008,
+      "predicted_rationale": "Un-remediated VerifyCI completed traversal without tripping missing_package_manifest_tripwire"
+    },
+    {
+      "id": "SCALE-MONO-01",
+      "slice": "monorepo_cross_boundary",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.5714285714285714,
+        "recall_at_25": 0.8571428571428571,
+        "recall_at_50": 0.8571428571428571
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.4,
+        "precision_at_25": 0.3157894736842105,
+        "precision_at_50": 0.3157894736842105
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": false,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.21630000264849514,
+      "peak_bytes": 6336,
+      "predicted_rationale": "Traversal completed with 7 impacted entities"
+    },
+    {
+      "id": "SCALE-MONO-02",
+      "slice": "monorepo_cross_boundary",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.7142857142857143,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.5,
+        "precision_at_25": 0.35,
+        "precision_at_50": 0.35
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": false,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.23580000561196357,
+      "peak_bytes": 6304,
+      "predicted_rationale": "Traversal completed with 7 impacted entities"
+    },
+    {
+      "id": "SCALE-MONO-03",
+      "slice": "monorepo_cross_boundary",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.7142857142857143,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.5,
+        "precision_at_25": 0.35,
+        "precision_at_50": 0.35
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.23040000814944506,
+      "peak_bytes": 6304,
+      "predicted_rationale": "Traversal completed with 7 impacted entities"
+    },
+    {
+      "id": "SCALE-MONO-04",
+      "slice": "monorepo_cross_boundary",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.7142857142857143,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.5,
+        "precision_at_25": 0.3333333333333333,
+        "precision_at_50": 0.3333333333333333
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.23879999935161322,
+      "peak_bytes": 6336,
+      "predicted_rationale": "Traversal completed with 7 impacted entities"
+    },
+    {
+      "id": "SCALE-MONO-05",
+      "slice": "monorepo_cross_boundary",
+      "tier": "S3",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.7142857142857143,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.5,
+        "precision_at_25": 0.35,
+        "precision_at_50": 0.35
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.23379999038297683,
+      "peak_bytes": 6336,
+      "predicted_rationale": "Traversal completed with 7 impacted entities"
+    },
+    {
+      "id": "SCALE-MONO-06",
+      "slice": "monorepo_cross_boundary",
+      "tier": "S3",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.7142857142857143,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.5,
+        "precision_at_25": 0.35,
+        "precision_at_50": 0.35
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.2514999941922724,
+      "peak_bytes": 6336,
+      "predicted_rationale": "Traversal completed with 7 impacted entities"
+    },
+    {
+      "id": "SCALE-MONO-07",
+      "slice": "monorepo_cross_boundary",
+      "tier": "S3",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.7142857142857143,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.5,
+        "precision_at_25": 0.35,
+        "precision_at_50": 0.35
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.25349999486934394,
+      "peak_bytes": 6304,
+      "predicted_rationale": "Traversal completed with 7 impacted entities"
+    },
+    {
+      "id": "SCALE-MONO-08",
+      "slice": "monorepo_cross_boundary",
+      "tier": "S2",
+      "scenario_type": "tripwire",
+      "tripwire_anomaly": "cross_boundary_security_tripwire",
+      "predicted_status": "PASS",
+      "gold_status": "INCONCLUSIVE",
+      "status_agreed": false,
+      "exact_impact_agreed": false,
+      "recall_at_k": {},
+      "precision_at_k": {},
+      "blast_callers_agreed": false,
+      "blast_callees_agreed": false,
+      "blast_deps_agreed": false,
+      "blast_risk_agreed": false,
+      "cache_deterministic": true,
+      "latency_ms": 0.0540999899385497,
+      "peak_bytes": 2008,
+      "predicted_rationale": "Un-remediated VerifyCI completed traversal without tripping cross_boundary_security_tripwire"
+    },
+    {
+      "id": "SCALE-GOD-01",
+      "slice": "god_node_fanout",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.5,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.2702000056160614,
+      "peak_bytes": 7464,
+      "predicted_rationale": "Traversal completed with 20 impacted entities"
+    },
+    {
+      "id": "SCALE-GOD-02",
+      "slice": "god_node_fanout",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.4,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.30949999927543104,
+      "peak_bytes": 8320,
+      "predicted_rationale": "Traversal completed with 25 impacted entities"
+    },
+    {
+      "id": "SCALE-GOD-03",
+      "slice": "god_node_fanout",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.3333333333333333,
+        "recall_at_25": 0.8333333333333334,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.371300004189834,
+      "peak_bytes": 8376,
+      "predicted_rationale": "Traversal completed with 30 impacted entities"
+    },
+    {
+      "id": "SCALE-GOD-04",
+      "slice": "god_node_fanout",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.2857142857142857,
+        "recall_at_25": 0.7142857142857143,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.6708000000799075,
+      "peak_bytes": 11392,
+      "predicted_rationale": "Traversal completed with 35 impacted entities"
+    },
+    {
+      "id": "SCALE-GOD-05",
+      "slice": "god_node_fanout",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.25,
+        "recall_at_25": 0.625,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.4670999915106222,
+      "peak_bytes": 11224,
+      "predicted_rationale": "Traversal completed with 40 impacted entities"
+    },
+    {
+      "id": "SCALE-GOD-06",
+      "slice": "god_node_fanout",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.2222222222222222,
+        "recall_at_25": 0.5555555555555556,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.5014000053051859,
+      "peak_bytes": 12376,
+      "predicted_rationale": "Traversal completed with 45 impacted entities"
+    },
+    {
+      "id": "SCALE-GOD-07",
+      "slice": "god_node_fanout",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.2,
+        "recall_at_25": 0.5,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.5355000030249357,
+      "peak_bytes": 12320,
+      "predicted_rationale": "Traversal completed with 50 impacted entities"
+    },
+    {
+      "id": "SCALE-GOD-08",
+      "slice": "god_node_fanout",
+      "tier": "S4",
+      "scenario_type": "tripwire",
+      "tripwire_anomaly": "unbounded_fanout_exhaustion_tripwire",
+      "predicted_status": "PASS",
+      "gold_status": "INCONCLUSIVE",
+      "status_agreed": false,
+      "exact_impact_agreed": false,
+      "recall_at_k": {},
+      "precision_at_k": {},
+      "blast_callers_agreed": false,
+      "blast_callees_agreed": false,
+      "blast_deps_agreed": false,
+      "blast_risk_agreed": false,
+      "cache_deterministic": true,
+      "latency_ms": 0.054499992984347045,
+      "peak_bytes": 2008,
+      "predicted_rationale": "Un-remediated VerifyCI completed traversal without tripping unbounded_fanout_exhaustion_tripwire"
+    },
+    {
+      "id": "SCALE-CHAIN-01",
+      "slice": "deep_call_chains",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.10550000297371298,
+      "peak_bytes": 2624,
+      "predicted_rationale": "Traversal completed with 3 impacted entities"
+    },
+    {
+      "id": "SCALE-CHAIN-02",
+      "slice": "deep_call_chains",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.10620000830385834,
+      "peak_bytes": 2624,
+      "predicted_rationale": "Traversal completed with 3 impacted entities"
+    },
+    {
+      "id": "SCALE-CHAIN-03",
+      "slice": "deep_call_chains",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.11069999891333282,
+      "peak_bytes": 2624,
+      "predicted_rationale": "Traversal completed with 3 impacted entities"
+    },
+    {
+      "id": "SCALE-CHAIN-04",
+      "slice": "deep_call_chains",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.10769999062176794,
+      "peak_bytes": 3160,
+      "predicted_rationale": "Traversal completed with 3 impacted entities"
+    },
+    {
+      "id": "SCALE-CHAIN-05",
+      "slice": "deep_call_chains",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.11280000035185367,
+      "peak_bytes": 3160,
+      "predicted_rationale": "Traversal completed with 3 impacted entities"
+    },
+    {
+      "id": "SCALE-CHAIN-06",
+      "slice": "deep_call_chains",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.10910000128205866,
+      "peak_bytes": 3160,
+      "predicted_rationale": "Traversal completed with 3 impacted entities"
+    },
+    {
+      "id": "SCALE-CHAIN-07",
+      "slice": "deep_call_chains",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.10969999129883945,
+      "peak_bytes": 3160,
+      "predicted_rationale": "Traversal completed with 3 impacted entities"
+    },
+    {
+      "id": "SCALE-CHAIN-08",
+      "slice": "deep_call_chains",
+      "tier": "S4",
+      "scenario_type": "tripwire",
+      "tripwire_anomaly": "unbounded_depth_limit_tripwire",
+      "predicted_status": "PASS",
+      "gold_status": "INCONCLUSIVE",
+      "status_agreed": false,
+      "exact_impact_agreed": false,
+      "recall_at_k": {},
+      "precision_at_k": {},
+      "blast_callers_agreed": false,
+      "blast_callees_agreed": false,
+      "blast_deps_agreed": false,
+      "blast_risk_agreed": false,
+      "cache_deterministic": true,
+      "latency_ms": 0.04959999932907522,
+      "peak_bytes": 2008,
+      "predicted_rationale": "Un-remediated VerifyCI completed traversal without tripping unbounded_depth_limit_tripwire"
+    },
+    {
+      "id": "SCALE-CYCLE-01",
+      "slice": "cyclic_dependencies",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.8571428571428571,
+        "precision_at_25": 0.8571428571428571,
+        "precision_at_50": 0.8571428571428571
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.1343000039923936,
+      "peak_bytes": 2872,
+      "predicted_rationale": "Traversal completed with 6 impacted entities"
+    },
+    {
+      "id": "SCALE-CYCLE-02",
+      "slice": "cyclic_dependencies",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.8571428571428571,
+        "precision_at_25": 0.8571428571428571,
+        "precision_at_50": 0.8571428571428571
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.13040000339969993,
+      "peak_bytes": 3152,
+      "predicted_rationale": "Traversal completed with 6 impacted entities"
+    },
+    {
+      "id": "SCALE-CYCLE-03",
+      "slice": "cyclic_dependencies",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.8571428571428571,
+        "precision_at_25": 0.8571428571428571,
+        "precision_at_50": 0.8571428571428571
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.12909999350085855,
+      "peak_bytes": 3152,
+      "predicted_rationale": "Traversal completed with 6 impacted entities"
+    },
+    {
+      "id": "SCALE-CYCLE-04",
+      "slice": "cyclic_dependencies",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.8571428571428571,
+        "precision_at_25": 0.8571428571428571,
+        "precision_at_50": 0.8571428571428571
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.12929999502375722,
+      "peak_bytes": 3152,
+      "predicted_rationale": "Traversal completed with 6 impacted entities"
+    },
+    {
+      "id": "SCALE-CYCLE-05",
+      "slice": "cyclic_dependencies",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.8571428571428571,
+        "precision_at_25": 0.8571428571428571,
+        "precision_at_50": 0.8571428571428571
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.13159999798517674,
+      "peak_bytes": 3152,
+      "predicted_rationale": "Traversal completed with 6 impacted entities"
+    },
+    {
+      "id": "SCALE-CYCLE-06",
+      "slice": "cyclic_dependencies",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.8571428571428571,
+        "precision_at_25": 0.8571428571428571,
+        "precision_at_50": 0.8571428571428571
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.13250000483822078,
+      "peak_bytes": 3152,
+      "predicted_rationale": "Traversal completed with 6 impacted entities"
+    },
+    {
+      "id": "SCALE-CYCLE-07",
+      "slice": "cyclic_dependencies",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 0.8571428571428571,
+        "precision_at_25": 0.8571428571428571,
+        "precision_at_50": 0.8571428571428571
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.13470000703819096,
+      "peak_bytes": 3688,
+      "predicted_rationale": "Traversal completed with 6 impacted entities"
+    },
+    {
+      "id": "SCALE-CYCLE-08",
+      "slice": "cyclic_dependencies",
+      "tier": "S4",
+      "scenario_type": "tripwire",
+      "tripwire_anomaly": "cyclic_infinite_traversal_tripwire",
+      "predicted_status": "PASS",
+      "gold_status": "INCONCLUSIVE",
+      "status_agreed": false,
+      "exact_impact_agreed": false,
+      "recall_at_k": {},
+      "precision_at_k": {},
+      "blast_callers_agreed": false,
+      "blast_callees_agreed": false,
+      "blast_deps_agreed": false,
+      "blast_risk_agreed": false,
+      "cache_deterministic": true,
+      "latency_ms": 0.04980000085197389,
+      "peak_bytes": 2008,
+      "predicted_rationale": "Un-remediated VerifyCI completed traversal without tripping cyclic_infinite_traversal_tripwire"
+    },
+    {
+      "id": "SCALE-GEN-01",
+      "slice": "dense_clusters_generated",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.15249999705702066,
+      "peak_bytes": 2528,
+      "predicted_rationale": "Traversal completed with 3 impacted entities"
+    },
+    {
+      "id": "SCALE-GEN-02",
+      "slice": "dense_clusters_generated",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.15910000365693122,
+      "peak_bytes": 2872,
+      "predicted_rationale": "Traversal completed with 3 impacted entities"
+    },
+    {
+      "id": "SCALE-GEN-03",
+      "slice": "dense_clusters_generated",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.1951000012923032,
+      "peak_bytes": 3680,
+      "predicted_rationale": "Traversal completed with 4 impacted entities"
+    },
+    {
+      "id": "SCALE-GEN-04",
+      "slice": "dense_clusters_generated",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.2423999976599589,
+      "peak_bytes": 4928,
+      "predicted_rationale": "Traversal completed with 5 impacted entities"
+    },
+    {
+      "id": "SCALE-GEN-05",
+      "slice": "dense_clusters_generated",
+      "tier": "S3",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.25710000772960484,
+      "peak_bytes": 5056,
+      "predicted_rationale": "Traversal completed with 5 impacted entities"
+    },
+    {
+      "id": "SCALE-GEN-06",
+      "slice": "dense_clusters_generated",
+      "tier": "S3",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.3021999873453751,
+      "peak_bytes": 5272,
+      "predicted_rationale": "Traversal completed with 6 impacted entities"
+    },
+    {
+      "id": "SCALE-GEN-07",
+      "slice": "dense_clusters_generated",
+      "tier": "S3",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.3588999970816076,
+      "peak_bytes": 6672,
+      "predicted_rationale": "Traversal completed with 7 impacted entities"
+    },
+    {
+      "id": "SCALE-GEN-08",
+      "slice": "dense_clusters_generated",
+      "tier": "S4",
+      "scenario_type": "tripwire",
+      "tripwire_anomaly": "dense_clique_resource_exhaustion_tripwire",
+      "predicted_status": "PASS",
+      "gold_status": "INCONCLUSIVE",
+      "status_agreed": false,
+      "exact_impact_agreed": false,
+      "recall_at_k": {},
+      "precision_at_k": {},
+      "blast_callers_agreed": false,
+      "blast_callees_agreed": false,
+      "blast_deps_agreed": false,
+      "blast_risk_agreed": false,
+      "cache_deterministic": true,
+      "latency_ms": 0.05160000000614673,
+      "peak_bytes": 2008,
+      "predicted_rationale": "Un-remediated VerifyCI completed traversal without tripping dense_clique_resource_exhaustion_tripwire"
+    },
+    {
+      "id": "SCALE-SPARSE-01",
+      "slice": "sparse_distant_targets",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.11000000813510269,
+      "peak_bytes": 3152,
+      "predicted_rationale": "Traversal completed with 4 impacted entities"
+    },
+    {
+      "id": "SCALE-SPARSE-02",
+      "slice": "sparse_distant_targets",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.1142999972216785,
+      "peak_bytes": 3688,
+      "predicted_rationale": "Traversal completed with 4 impacted entities"
+    },
+    {
+      "id": "SCALE-SPARSE-03",
+      "slice": "sparse_distant_targets",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.11310000263620168,
+      "peak_bytes": 3704,
+      "predicted_rationale": "Traversal completed with 4 impacted entities"
+    },
+    {
+      "id": "SCALE-SPARSE-04",
+      "slice": "sparse_distant_targets",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.11510000331327319,
+      "peak_bytes": 3704,
+      "predicted_rationale": "Traversal completed with 4 impacted entities"
+    },
+    {
+      "id": "SCALE-SPARSE-05",
+      "slice": "sparse_distant_targets",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.1171000039903447,
+      "peak_bytes": 3768,
+      "predicted_rationale": "Traversal completed with 4 impacted entities"
+    },
+    {
+      "id": "SCALE-SPARSE-06",
+      "slice": "sparse_distant_targets",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.11989999620709568,
+      "peak_bytes": 3600,
+      "predicted_rationale": "Traversal completed with 4 impacted entities"
+    },
+    {
+      "id": "SCALE-SPARSE-07",
+      "slice": "sparse_distant_targets",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 1.0,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.1235999952768907,
+      "peak_bytes": 4792,
+      "predicted_rationale": "Traversal completed with 4 impacted entities"
+    },
+    {
+      "id": "SCALE-SPARSE-08",
+      "slice": "sparse_distant_targets",
+      "tier": "S1",
+      "scenario_type": "tripwire",
+      "tripwire_anomaly": "dangling_unresolved_pointer_tripwire",
+      "predicted_status": "PASS",
+      "gold_status": "INCONCLUSIVE",
+      "status_agreed": false,
+      "exact_impact_agreed": false,
+      "recall_at_k": {},
+      "precision_at_k": {},
+      "blast_callers_agreed": false,
+      "blast_callees_agreed": false,
+      "blast_deps_agreed": false,
+      "blast_risk_agreed": false,
+      "cache_deterministic": true,
+      "latency_ms": 0.0720000098226592,
+      "peak_bytes": 2104,
+      "predicted_rationale": "Un-remediated VerifyCI completed traversal without tripping dangling_unresolved_pointer_tripwire"
+    },
+    {
+      "id": "SCALE-DISAGREE-01",
+      "slice": "dense_sparse_disagreement",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.8333333333333334,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.16969999705906957,
+      "peak_bytes": 4392,
+      "predicted_rationale": "Traversal completed with 12 impacted entities"
+    },
+    {
+      "id": "SCALE-DISAGREE-02",
+      "slice": "dense_sparse_disagreement",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.7142857142857143,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.17929999739862978,
+      "peak_bytes": 4392,
+      "predicted_rationale": "Traversal completed with 14 impacted entities"
+    },
+    {
+      "id": "SCALE-DISAGREE-03",
+      "slice": "dense_sparse_disagreement",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.625,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.1905999961309135,
+      "peak_bytes": 5928,
+      "predicted_rationale": "Traversal completed with 16 impacted entities"
+    },
+    {
+      "id": "SCALE-DISAGREE-04",
+      "slice": "dense_sparse_disagreement",
+      "tier": "S1",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.5555555555555556,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.2074999938486144,
+      "peak_bytes": 5928,
+      "predicted_rationale": "Traversal completed with 18 impacted entities"
+    },
+    {
+      "id": "SCALE-DISAGREE-05",
+      "slice": "dense_sparse_disagreement",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.5,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.22590000298805535,
+      "peak_bytes": 8000,
+      "predicted_rationale": "Traversal completed with 20 impacted entities"
+    },
+    {
+      "id": "SCALE-DISAGREE-06",
+      "slice": "dense_sparse_disagreement",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.45454545454545453,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.23890000011306256,
+      "peak_bytes": 8000,
+      "predicted_rationale": "Traversal completed with 22 impacted entities"
+    },
+    {
+      "id": "SCALE-DISAGREE-07",
+      "slice": "dense_sparse_disagreement",
+      "tier": "S2",
+      "scenario_type": "standard",
+      "tripwire_anomaly": null,
+      "predicted_status": "PASS",
+      "gold_status": "PASS",
+      "status_agreed": true,
+      "exact_impact_agreed": true,
+      "recall_at_k": {
+        "recall_at_10": 0.4166666666666667,
+        "recall_at_25": 1.0,
+        "recall_at_50": 1.0
+      },
+      "precision_at_k": {
+        "precision_at_10": 1.0,
+        "precision_at_25": 1.0,
+        "precision_at_50": 1.0
+      },
+      "blast_callers_agreed": true,
+      "blast_callees_agreed": true,
+      "blast_deps_agreed": true,
+      "blast_risk_agreed": true,
+      "cache_deterministic": true,
+      "latency_ms": 0.26020000223070383,
+      "peak_bytes": 8000,
+      "predicted_rationale": "Traversal completed with 24 impacted entities"
+    },
+    {
+      "id": "SCALE-DISAGREE-08",
+      "slice": "dense_sparse_disagreement",
+      "tier": "S2",
+      "scenario_type": "tripwire",
+      "tripwire_anomaly": "poisoned_retrieval_pointer_tripwire",
+      "predicted_status": "PASS",
+      "gold_status": "INCONCLUSIVE",
+      "status_agreed": false,
+      "exact_impact_agreed": false,
+      "recall_at_k": {},
+      "precision_at_k": {},
+      "blast_callers_agreed": false,
+      "blast_callees_agreed": false,
+      "blast_deps_agreed": false,
+      "blast_risk_agreed": false,
+      "cache_deterministic": true,
+      "latency_ms": 0.050699993153102696,
+      "peak_bytes": 2008,
+      "predicted_rationale": "Un-remediated VerifyCI completed traversal without tripping poisoned_retrieval_pointer_tripwire"
+    }
+  ]
+}
