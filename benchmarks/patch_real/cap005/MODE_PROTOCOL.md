@@ -4,6 +4,8 @@
 **Corpus SHA-256**: `ca475b33a385e8d1478afedf00d2eeeefdc8ae0f72c9e5527f20fc1fe814e17c`  
 **Label SHA-256**: `589231d38fdf85a764eab85ba19f1ad9e2839fe63c043c3c9636d745f1893075`  
 **Source Manifest SHA-256**: `f330fca7d317ec9a1e8398295d930c49f802e2cc25cf94b3906d7b9b0d47af8d`  
+**Harness SHA-256**: `a7025c16bce64c74a4e3c1679717309126c2eab4dd26f624630209044b43e4f0`  
+**Results SHA-256**: `8902e008c7e9c1667410338833a77a3de46dfc42d0c137827e04c4bee16a1cd2`  
 **Total Cases**: 64  
 **Total Sources**: 5  
 

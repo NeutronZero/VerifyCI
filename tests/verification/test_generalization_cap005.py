@@ -21,6 +21,8 @@ BENCHMARK_DIR = Path(__file__).resolve().parent.parent.parent / "benchmarks" / "
 FROZEN_CORPUS_SHA256 = "ca475b33a385e8d1478afedf00d2eeeefdc8ae0f72c9e5527f20fc1fe814e17c"
 FROZEN_LABEL_SHA256 = "589231d38fdf85a764eab85ba19f1ad9e2839fe63c043c3c9636d745f1893075"
 FROZEN_SOURCE_MANIFEST_SHA256 = "f330fca7d317ec9a1e8398295d930c49f802e2cc25cf94b3906d7b9b0d47af8d"
+FROZEN_HARNESS_SHA256 = "a7025c16bce64c74a4e3c1679717309126c2eab4dd26f624630209044b43e4f0"
+FROZEN_RESULTS_SHA256 = "8902e008c7e9c1667410338833a77a3de46dfc42d0c137827e04c4bee16a1cd2"
 
 
 @pytest.fixture(scope="module")
@@ -48,10 +50,14 @@ def test_cap005_cryptographic_hashes():
     c_hash = hashlib.sha256((BENCHMARK_DIR / "cases.jsonl").read_bytes()).hexdigest()
     l_hash = hashlib.sha256((BENCHMARK_DIR / "labels.jsonl").read_bytes()).hexdigest()
     s_hash = hashlib.sha256((BENCHMARK_DIR / "sources.jsonl").read_bytes()).hexdigest()
+    h_hash = hashlib.sha256((BENCHMARK_DIR / "measure_cap005.py").read_bytes()).hexdigest()
+    r_hash = hashlib.sha256((BENCHMARK_DIR / "results.json").read_bytes()).hexdigest()
 
     assert c_hash == FROZEN_CORPUS_SHA256
     assert l_hash == FROZEN_LABEL_SHA256
     assert s_hash == FROZEN_SOURCE_MANIFEST_SHA256
+    assert h_hash == FROZEN_HARNESS_SHA256
+    assert r_hash == FROZEN_RESULTS_SHA256
 
 
 def test_cap005_license_provenance(cap005_data):
