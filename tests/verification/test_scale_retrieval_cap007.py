@@ -22,8 +22,9 @@ BENCHMARK_DIR = Path(__file__).resolve().parent.parent.parent / "benchmarks" / "
 FROZEN_CORPUS_SHA256 = "4d1e3498cc090ce2b1ca210d16641e3b60cc3369bc1dc38be6bfc570f35e428b"
 FROZEN_LABEL_SHA256 = "d9f4d4df004af329fec3e400c0b942333513e4d37a0c4276b915ca74940b91ef"
 FROZEN_ORACLE_MANIFEST_SHA256 = "fd52536e40afb6045b773b6a4f4f3cd78b9a340e8f3f670ba4bf4de70b39b604"
-FROZEN_HARNESS_SHA256 = "836dcc3617e0550ed1be95771461dce3fbd65ef4424939563bb3db9d894747a9"
-FROZEN_RESULTS_SHA256 = "e8ed68593133fef192307e3a252007b72a6b0c437c6ecb8a43fbcef7ff90da6c"
+FROZEN_HARNESS_SHA256 = "eda4b886da6ed4323e29b40a0c8fca1473528d8f6b06693dbd07aef7639b7073"
+FROZEN_R0_RESULTS_SHA256 = "e8ed68593133fef192307e3a252007b72a6b0c437c6ecb8a43fbcef7ff90da6c"
+FROZEN_R1_RESULTS_SHA256 = "8be385aee16ec17c2202de20a3d42ff006dfc3d97c782194a762d06d06f79697"
 
 
 @pytest.fixture(scope="module")
@@ -52,13 +53,15 @@ def test_cap007_cryptographic_freeze_hashes():
     l_bytes = (BENCHMARK_DIR / "labels.jsonl").read_bytes()
     m_bytes = (BENCHMARK_DIR / "oracle_manifest.jsonl").read_bytes()
     h_bytes = (BENCHMARK_DIR / "measure_cap007.py").read_bytes()
-    r_bytes = (BENCHMARK_DIR / "results.json").read_bytes()
+    r0_bytes = (BENCHMARK_DIR / "r0_baseline_results.json").read_bytes()
+    r1_bytes = (BENCHMARK_DIR / "r1_capability1_results.json").read_bytes()
 
     assert hashlib.sha256(c_bytes).hexdigest() == FROZEN_CORPUS_SHA256
     assert hashlib.sha256(l_bytes).hexdigest() == FROZEN_LABEL_SHA256
     assert hashlib.sha256(m_bytes).hexdigest() == FROZEN_ORACLE_MANIFEST_SHA256
     assert hashlib.sha256(h_bytes).hexdigest() == FROZEN_HARNESS_SHA256
-    assert hashlib.sha256(r_bytes).hexdigest() == FROZEN_RESULTS_SHA256
+    assert hashlib.sha256(r0_bytes).hexdigest() == FROZEN_R0_RESULTS_SHA256
+    assert hashlib.sha256(r1_bytes).hexdigest() == FROZEN_R1_RESULTS_SHA256
 
 
 def test_cap007_lock1_independent_oracle_isolation():

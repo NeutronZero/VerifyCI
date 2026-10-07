@@ -139,8 +139,9 @@ def evaluate_single_case(case: dict[str, Any], gold_label: dict[str, Any]) -> di
         warm_callers = sorted(list(warm_res.affected_callers))
         warm_callees = sorted(list(warm_res.affected_callees))
         cache_deterministic = (cold_callers == warm_callers and cold_callees == warm_callees)
-    except Exception:  # noqa: BLE001
-        cache_deterministic = False
+    except Exception as warm_exc:  # noqa: BLE001
+        warm_err = f"{type(warm_exc).__name__}: {warm_exc}"
+        cache_deterministic = (execution_error is not None and execution_error == warm_err)
 
     # Ranked retrieval evaluation via GraphRetriever
     retriever = GraphRetriever(graph, node_map)
@@ -151,11 +152,12 @@ def evaluate_single_case(case: dict[str, Any], gold_label: dict[str, Any]) -> di
 
     # Determine predicted status:
     # Tripwires should fail closed with INCONCLUSIVE.
-    # Un-remediated VerifyCI does not yet intercept resource/topology tripwires,
-    # returning a silent success (PASS) instead of INCONCLUSIVE.
     if execution_error is not None:
         predicted_status = "INCONCLUSIVE"
         predicted_rationale = f"Traversal halted with error: {execution_error}"
+    elif getattr(blast_res, "status", None) == "INCONCLUSIVE":
+        predicted_status = "INCONCLUSIVE"
+        predicted_rationale = f"Fail-closed tripwire intercepted: {blast_res.inconclusive_reason}"
     elif scenario_type == "tripwire":
         # Does the current implementation fail closed on tripwires?
         # Un-remediated VerifyCI does not detect anomaly, emitting normal pass

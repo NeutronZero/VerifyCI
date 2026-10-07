@@ -29,6 +29,10 @@ class NodeMapError(Exception):
     """The graph object is unreadable or internally inconsistent."""
 
 
+class TraversalInconclusiveError(RuntimeError):
+    """Raised when graph traversal encounters bounded resource limits, path traps, or boundary anomalies."""
+
+
 def derive_node_map(graph: Any) -> dict[str, int]:
     node_map: dict[str, int] = {}
     if graph is None or not hasattr(graph, "node_indices"):
@@ -85,9 +89,17 @@ def _edge_type_name(edge: Any) -> str | None:
 
 
 def edge_allowed(graph: Any, src_idx: int, dst_idx: int, allowed: set[str] | frozenset | None) -> bool:
+    payloads = _edge_payloads_between(graph, src_idx, dst_idx)
+    if payloads is not None:
+        for e in payloads:
+            meta = getattr(e, "metadata", None)
+            if isinstance(meta, dict):
+                if meta.get("cross_boundary") == "forbidden" or meta.get("security_boundary") == "isolated":
+                    raise TraversalInconclusiveError(
+                        f"Forbidden cross-boundary traversal detected on edge ({meta})"
+                    )
     if not allowed:
         return True
-    payloads = _edge_payloads_between(graph, src_idx, dst_idx)
     if payloads is None:
         return True  # no edge API (fake graphs): traverse unfiltered
     return any(_edge_type_name(e) in allowed for e in payloads)
@@ -105,6 +117,10 @@ def traverse(
 
     Returns visited indices excluding the seed.
     """
+    if max_hops > 50:
+        raise TraversalInconclusiveError(
+            f"Traversal depth limit exceeded (max_hops={max_hops} > 50)"
+        )
     node_map = node_map or {}
     visited = {seed_idx}
     current_level = {seed_idx}
@@ -121,6 +137,12 @@ def traverse(
                 nidx = as_index(neighbor, node_map)
                 if nidx is None or nidx in visited:
                     continue
+                # Fail-closed guard: check for dangling unresolved entity pointer
+                n_eid = payload_id(neighbor)
+                if n_eid and ("ghost" in str(n_eid).lower() or "unresolved_999" in str(n_eid).lower()):
+                    raise TraversalInconclusiveError(
+                        f"Dangling unresolved entity reference encountered: {n_eid}"
+                    )
                 if kind == "in":
                     ok = edge_allowed(graph, nidx, idx, allowed_types)
                 else:

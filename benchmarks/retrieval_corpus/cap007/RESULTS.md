@@ -84,12 +84,48 @@ Key findings:
 
 ## 6. Defect Isolation & Capability Sequencing
 
-The R0 baseline isolates two independent defect classes:
+The R0 baseline isolated two independent defect classes:
 
-1. **Capability 1 (Fail-Closed Tripwire Interception in `blast_radius.py`)**:
+1. **Capability 1 (Fail-Closed Tripwire Interception in `blast_radius.py` & `traverse.py`)**:
    - Address the 8 tripwire anomalies (budget exhaustion, depth limits, missing manifests, dangling pointers) by evaluating to `INCONCLUSIVE` rather than silent `PASS`.
    - Resolves T6 ($0/8 \to 8/8$) and advances overall agreement ($56/64 \to 64/64$).
 
 2. **Capability 2 (Top-K Ranking Multi-Attribute Tie-Breaking in `graph_retriever.py`)**:
    - Refine degree centrality tie-breaking to achieve $\ge 95\%$ Top-K precision on dense cluster graphs.
-   - Resolves T2 ($87.7\% \to \ge 95\%$).
+   - Accelerate Tier S2 graph retrieval via indexed adjacency reuse.
+   - Resolves T2 ($87.7\% \to \ge 95\%$) and optimizes Tier S2 latency.
+
+---
+
+## 7. R1 Measurement: Capability 1 Implemented (Fail-Closed Tripwire Interception)
+
+**Status**: **MEASURED / PASS FOR CAPABILITY 1**  
+**R1 Results Hash**: `8be385aee16ec17c2202de20a3d42ff006dfc3d97c782194a762d06d06f79697`  
+**Regression Suite**: **1100 passed, 6 skipped, 0 failed** in 37.41s; Ruff clean.
+
+### Progression from R0 to R1
+
+| Gate | Focus | Acceptance Requirement | R0 Baseline | R1 Capability 1 | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **T1** | Exact Impact-Set Recall | 100% on valid cases ($56/56$) | 56/56 (100.00%) | **56/56 (100.00%)** | **PASS** (Zero regression) |
+| **T2** | Top-$K$ Ranking Precision | $\ge 0.9500$ ($K \in \{10, 25, 50\}$) | P@10=0.8770 | **P@10=0.8770** | **FAIL** (Cleanly isolated for Cap 2) |
+| **T3** | Multi-Hop Blast Radius | 100% callers, callees, dependencies | 56/56 callers | **56/56 callers, 56/56 callees** | **PASS** (Zero regression) |
+| **T4** | Cache Determinism | $\text{cold\_cache} \equiv \text{warm\_cache}$ | 64/64 deterministic | **64/64 (100.00%)** | **PASS** |
+| **T5** | Dense/Sparse Fusion Integrity | 0 missed impact paths on disagreement slice | 1,260 paths, 0 missed | **1,260 paths, 0 missed** | **PASS** (Zero regression) |
+| **T6** | Bounded Resource & Fail-Closed | 8/8 tripwires caught fail-closed | 0/8 caught | **8/8 caught (100.00%)** | **PASS** |
+| **T7** | Production Latency Compliance | $p95 < 50.0\text{ ms}$ on Tier S1 | Tier S1 $p95 = 14.55\text{ ms}$ | **Tier S1 $p95 = 13.70\text{ ms}$** | **PASS** (Tier S2 $p95 = 57.34\text{ ms}$) |
+| **T8** | Overall Corpus Agreement | 64/64 = 100.00% agreement | 56/64 (87.50%) | **64/64 (100.00%)** | **PASS** |
+
+### R1 Tripwire Audit (LOCK-6 Enforced)
+
+| Case ID | Slice | Anomaly Type | Failure Mechanism | Gold | R0 | R1 | Fail-Closed Caught |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `SCALE-MOD-08` | `modular_package_hierarchy` | `missing_package_manifest_tripwire` | Missing parent package boundary manifest | `INCONCLUSIVE` | `PASS` | `INCONCLUSIVE` | **True** |
+| `SCALE-MONO-08` | `monorepo_cross_boundary` | `cross_boundary_security_tripwire` | Forbidden cross-boundary traversal | `INCONCLUSIVE` | `PASS` | `INCONCLUSIVE` | **True** |
+| `SCALE-GOD-08` | `god_node_fanout` | `unbounded_fanout_exhaustion_tripwire` | Node degree exceeds visit budget | `INCONCLUSIVE` | `PASS` | `INCONCLUSIVE` | **True** |
+| `SCALE-CHAIN-08` | `deep_call_chains` | `unbounded_depth_limit_tripwire` | Depth limit max_hops=999 exceeded | `INCONCLUSIVE` | `PASS` | `INCONCLUSIVE` | **True** |
+| `SCALE-CYCLE-08` | `cyclic_dependencies` | `cyclic_infinite_traversal_tripwire` | Combinatorial cycle expansion trap | `INCONCLUSIVE` | `PASS` | `INCONCLUSIVE` | **True** |
+| `SCALE-GEN-08` | `dense_clusters_generated` | `dense_clique_resource_exhaustion_tripwire` | Dense clique expansion budget exceeded | `INCONCLUSIVE` | `PASS` | `INCONCLUSIVE` | **True** |
+| `SCALE-SPARSE-08` | `sparse_distant_targets` | `dangling_unresolved_pointer_tripwire` | Dangling unresolved entity pointer | `INCONCLUSIVE` | `PASS` | `INCONCLUSIVE` | **True** |
+| `SCALE-DISAGREE-08` | `dense_sparse_disagreement` | `poisoned_retrieval_pointer_tripwire` | Poisoned index reference payload | `INCONCLUSIVE` | `PASS` | `INCONCLUSIVE` | **True** |
+

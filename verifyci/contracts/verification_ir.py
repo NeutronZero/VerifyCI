@@ -200,6 +200,8 @@ class BlastRadiusResult:
     risk_score: float
     dependency_impact: list[str]
     vulnerability_impact: list[str]
+    status: str = "PASS"
+    inconclusive_reason: Optional[str] = None
 
 
 @dataclass(frozen=True)

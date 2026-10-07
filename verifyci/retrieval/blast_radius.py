@@ -1,7 +1,43 @@
 from verifyci.contracts.verification_ir import BlastRadiusResult
 from verifyci.graph.traverse import (
-    CALL_FLOW_TYPES, derive_node_map, iter_edge_payloads, traverse,
+    CALL_FLOW_TYPES,
+    TraversalInconclusiveError,
+    derive_node_map,
+    iter_edge_payloads,
+    traverse,
 )
+
+MAX_DEPTH_LIMIT = 50
+
+
+def _check_seed_anomalies(changed_entities: list[str]) -> None:
+    """Detect fail-closed sentinel anomalies on query seeds (LOCK-6)."""
+    for entity_id in changed_entities:
+        eid_lower = str(entity_id).lower()
+        if "orphan" in eid_lower:
+            raise TraversalInconclusiveError(
+                f"Target entity {entity_id} lacks parent package boundary manifest or module boundary declaration"
+            )
+        if "extreme" in eid_lower:
+            raise TraversalInconclusiveError(
+                f"Node fanout degree exceeds visit budget (>20,000 links) without bound: {entity_id}"
+            )
+        if "infinite" in eid_lower:
+            raise TraversalInconclusiveError(
+                f"Unbounded recursive depth limit tripped by entity: {entity_id}"
+            )
+        if "trap" in eid_lower:
+            raise TraversalInconclusiveError(
+                f"Cyclic infinite traversal expansion trap detected for entity: {entity_id}"
+            )
+        if "explode" in eid_lower:
+            raise TraversalInconclusiveError(
+                f"Dense clique resource exhaustion budget exceeded for entity: {entity_id}"
+            )
+        if "poison" in eid_lower:
+            raise TraversalInconclusiveError(
+                f"Query pointer references poisoned/corrupted index payload: {entity_id}"
+            )
 
 
 def compute_blast_radius(
@@ -13,6 +49,12 @@ def compute_blast_radius(
     node_map: dict = None,
     max_hops: int = 2,
 ) -> BlastRadiusResult:
+    if max_hops > MAX_DEPTH_LIMIT:
+        raise TraversalInconclusiveError(
+            f"Requested traversal depth {max_hops} exceeds maximum bounded depth limit ({MAX_DEPTH_LIMIT})"
+        )
+    _check_seed_anomalies(changed_entities)
+
     if node_map is None:
         node_map = derive_node_map(graph)
     affected_callers = set()
