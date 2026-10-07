@@ -1,0 +1,68 @@
+{
+  "benchmark_id": "CAP-007",
+  "name": "High-Node Topology & Production-Scale Retrieval Attestation",
+  "version": "1.0.0",
+  "protocol": "MODE_PROTOCOL.md",
+  "total_cases": 64,
+  "slices_count": 8,
+  "cases_per_slice": 8,
+  "scale_tiers": {
+    "S1": {
+      "name": "Standard Modular",
+      "min_nodes": 10000,
+      "max_nodes": 25000,
+      "p95_target_ms": 10.0,
+      "description": "Standard multi-module repository service"
+    },
+    "S2": {
+      "name": "Production Scale",
+      "min_nodes": 50000,
+      "max_nodes": 100000,
+      "p95_target_ms": 50.0,
+      "description": "Production multi-package scale repository"
+    },
+    "S3": {
+      "name": "Enterprise Monorepo",
+      "min_nodes": 100000,
+      "max_nodes": 250000,
+      "p95_target_ms": 100.0,
+      "description": "Large multi-project enterprise monorepo"
+    },
+    "S4": {
+      "name": "Stress & Pathological",
+      "min_nodes": 250000,
+      "max_nodes": 500000,
+      "p95_target_ms": null,
+      "description": "High fan-out, deep chains, cyclic stress, fail-closed bounded"
+    }
+  },
+  "ranking_evaluation": {
+    "k_values": [10, 25, 50],
+    "metrics": ["recall_at_k", "precision_at_k", "mrr", "ndcg"]
+  },
+  "correctness_evaluation": {
+    "exact_impact_set_recall": 1.0,
+    "cache_determinism": true,
+    "no_silent_truncation": true
+  },
+  "environment_profile": {
+    "python_version": "3.14.7",
+    "os_platform": "Windows-11-10.0.26300-SP0",
+    "cpu_count": 8,
+    "ram_total_gb": 7.73,
+    "concurrency_mode": "sequential_deterministic",
+    "cache_policy": "explicit_cold_warm_pair"
+  },
+  "protocol_locks": [
+    "LOCK-1_exact_retrieval_oracle",
+    "LOCK-2_separate_correctness_from_ranking",
+    "LOCK-3_no_synthetic_only_success",
+    "LOCK-4_frozen_scale_tiers",
+    "LOCK-5_performance_distribution_not_single_run",
+    "LOCK-6_no_silent_truncation_fail_closed",
+    "LOCK-7_cache_correctness_cold_equals_warm",
+    "LOCK-8_dense_sparse_independence",
+    "LOCK-9_adversarial_topology_first_class",
+    "LOCK-10_no_benchmark_driven_architecture_leakage"
+  ]
+}
