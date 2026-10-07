@@ -1,0 +1,9 @@
+invariants:
+  - id: no-eval
+    rule: forbid eval
+    query: forbid_call:eval
+    blocking: true
+  - id: no-subprocess
+    rule: forbid subprocess
+    query: forbid_import:subprocess
+    blocking: true

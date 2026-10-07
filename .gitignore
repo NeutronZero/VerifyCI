@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .verifyci/
+!benchmarks/patch_real/cap005/base/.verifyci/invariants.yaml
 storage/verifyci.db
 storage/vuln_cache.db
 storage/embedding_cache_*.json

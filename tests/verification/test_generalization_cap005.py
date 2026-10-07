@@ -36,7 +36,23 @@ def cap005_data():
     sources = [json.loads(line) for line in sources_file.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     base_dir = BENCHMARK_DIR / "base"
-    db_file = base_dir / ".verifyci" / "verifyci.db"
+    verifyci_dir = base_dir / ".verifyci"
+    verifyci_dir.mkdir(parents=True, exist_ok=True)
+    invariants_file = verifyci_dir / "invariants.yaml"
+    if not invariants_file.exists():
+        invariants_file.write_text(
+            "invariants:\n"
+            "  - id: no-eval\n"
+            "    rule: forbid eval\n"
+            "    query: forbid_call:eval\n"
+            "    blocking: true\n"
+            "  - id: no-subprocess\n"
+            "    rule: forbid subprocess\n"
+            "    query: forbid_import:subprocess\n"
+            "    blocking: true\n",
+            encoding="utf-8",
+        )
+    db_file = verifyci_dir / "verifyci.db"
     if not db_file.exists():
         from verifyci.interface.commands.ingest import run_ingest
 
