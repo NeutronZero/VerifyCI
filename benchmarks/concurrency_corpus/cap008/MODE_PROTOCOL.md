@@ -6,6 +6,7 @@
 **Oracle Manifest SHA-256**: `7836d44d4c0e1db2859b69851be125acd1874cd560825842997962a0ae97e55b`  
 **Harness SHA-256**: `e4b0d2efe45f04cf63266cccdecac5ddf943a6371dca6605243be4484dcd3f9d`  
 **R0 Results SHA-256**: `f246e480e96e8d95dc66eff382121761d5bc2ae2a7316c2d597a5087b350ceab`  
+**R1 Results SHA-256**: `c3085a54b71911f4707e830eea0638adebad5cc2af52fd4576c3b54f4ba217cc`  
 **Total Cases**: 64  
 **Total Slices**: 8 (8 cases per slice)  
 **Distribution**: 48 PASS, 16 INCONCLUSIVE (tripwires)  

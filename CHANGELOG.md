@@ -2,6 +2,17 @@
 
 ## Unreleased — ingest recursion guard; naming and doc corrections
 
+- **CAP-008: Concurrent CI Workers & Shared-Storage Contention Attestation.**
+  Frozen 64-case concurrency corpus (`benchmarks/concurrency_corpus/cap008/`,
+  8 multi-process worker contention slices with $N \in \{2, 4, 8\}$, 16 forced-lock
+  and crash tripwires, independent clean-room oracle). Capability 1 remediated
+  the isolated Gate T4 Read Throughput deficit via process-local read-only connection
+  persistence (`_PROCESS_RO_CACHE`), non-blocking connection reuse
+  (`_CachedReadOnlyConnection`), zero-overhead URI resolution (`_format_ro_uri`
+  using `pathname2url`), and constant-time connection probing (`SELECT 1 LIMIT 1`).
+  Result: 64/64 oracle agreement (100%), 0 lost updates, 0 atomicity violations,
+  0 ledger anomalies, 8/8 tripwires caught fail-closed, p95 read latency dropped
+  from 109.15ms to 14.39ms (p50 = 2.49ms, max = 27.09ms). All gates T1–T8 PASS.
 - **Pathological nesting no longer aborts ingest.** 2000-deep nesting
   exhausts the recursive extractor (tree-sitter caps with ERROR nodes,
   then extraction blows the Python stack), killing the whole run. One
@@ -45,7 +56,7 @@
   `certificate_verified`, but partition fast paths (docs / valid config /
   test-only) verify with both empty by construction. Docstring now states
   the CODE_CORE vs fast-path conditions; README grounding rules and suite
-  counts updated to match (1115 collected on this branch; end-to-end
+  counts updated to match (1123 collected on this branch; end-to-end
   non-code verdicts remain HUMAN_REVIEW, exit 2). No behavior changed.
 - **Headerless INI fragments decline instead of rejecting.**
   `_validate_configuration_diff` parsed hunk new-side lines as standalone
@@ -65,8 +76,8 @@
   83%→99%), `test_semi_formal_units` (semi_formal 84%→100%).
   Remaining misses are proven-unreachable defensive branches, each
   marked with a NOTE (triple-quote `elif`s after the `bare>=3` gate;
-  no-overlap deletion verdict; empty AST body). Suite 1112 passed /
-  3 skipped with all three rerun guards (1109 passed / 6 skipped
+  no-overlap deletion verdict; empty AST body). Suite 1120 passed /
+  3 skipped with all three rerun guards (1117 passed / 6 skipped
   default), total coverage 94%, ruff clean, zero warnings; new files
   ruff-format clean (repo-wide format stays unenforced, pre-existing
   files untouched).

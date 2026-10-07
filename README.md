@@ -87,12 +87,14 @@ Grounding rules (no exceptions):
   aliases evade them by design.
   `secrets_scan` covers quoted assignments, long unquoted values, AWS
   keys, PEM blocks, JWTs, credentialed URLs, JSON-colon values, and
-  multiline/continuation literals. Labeled-set recall: **6/9 (0.67)** on
-  the v1 set, **16/18 (0.89, precision 1.00)** on the 26-case expanded v2
-  set spanning 11 positive secret mechanisms; the ≥0.90 gate is **not
-  met** and neither corpus establishes it. Misses are two documented
-  residuals (unquoted value below the 12-char floor; graph-relative-import
-  blindness). Not a general leak detector.
+  multiline/continuation literals. Labeled-set recall: **7/9 (0.78)** on
+  the v1 set, **18/18 (1.00, precision 1.00)** on the 26-case expanded v2
+  set spanning 11 positive secret mechanisms. The two former residuals
+  (unquoted value below the 12-char floor; graph-relative-import
+  blindness) are now detected — added-line fragment analysis and
+  value-first overlap handling closed them; the v2 ≥0.90 gate is
+  measured-met but **not established** (26 cases cannot establish it),
+  and v1 remains below gate. Not a general leak detector.
 - V1 proves **provenance and impact**, not semantic intent: a mapped,
   secret-free diff verifies structurally. Intent judgment stays with policy
   reviewers and project-specific invariants. A PASS means "grounds in known
@@ -106,7 +108,9 @@ Grounding rules (no exceptions):
   call/import, hardcoded secret, fabricated removal) was caught (4/4, FAIL),
   but all 4 *semantic* wrong patches (weakened validation, wrong variable,
   wrong return, wrong constant) were accepted — false-accept 1.0 — confirming
-  the scope limit above is real, not just asserted. Verification precision
+  the scope limit above is real, not just asserted. (Current code declines
+   all four to HUMAN_REVIEW instead -- false-accept 0.0 -- via non-blocking
+   tripwires; the frozen record above stands.) Verification precision
   1.0 (all FAILs were truly-wrong); patch equivalence 7/8 = 0.875 (the one
   miss is a blast-exposure hunk-shape gap, reported not retuned). Synthetic
   stand-ins for agent output; a real recorded-LLM corpus remains the
@@ -149,6 +153,32 @@ Grounding rules (no exceptions):
   change point, so early-file edits re-lex long tails). Thresholds were
   not retuned and no source changed.
 
+- Temporal lineage and replay attestation on a frozen 64-case corpus
+  (`benchmarks/temporal_corpus/cap006/`, 8 branch/merge/revert slices
+  plus 8 truncated-lineage tripwires, independent oracle, frozen before
+  measurement): **64/64 agreement, 8/8 tripwires caught fail-closed,
+  T1–T8 all PASS.** Agreement is status-level (replay-vs-clean verdicts
+  against frozen labels), not digest equality.
+- Production-scale retrieval on a frozen 64-case topology corpus
+  (`benchmarks/retrieval_corpus/cap007/`, 174,779 nodes / 165,570 edges,
+  independent exact-traversal oracle): **64/64 agreement; exact impact
+  recall 56/56; ranked precision P@10/25/50 = 1.0; blast agreement
+  56/56; cache determinism 64/64; 8/8 tripwires fail-closed** via
+  mechanism guards (budgets, depth, dangling, boundary, corrupt,
+  ungrounded — no benchmark tokens in production code), plus 9/9
+  out-of-corpus robustness controls. Latency gate T7 is **scoped to
+  Tier S1** (p95 < 50ms); the 50k-node S2 tier measures above its
+  frozen target and is recorded as a MISS, not conflated (see
+  `benchmarks/retrieval_corpus/cap007/RESULTS.md` §9).
+- Concurrent CI worker and shared-storage contention attestation on a frozen
+  64-case corpus (`benchmarks/concurrency_corpus/cap008/`, 8 multi-process
+  contention slices including 16 forced-lock/crash tripwires, independent
+  clean-room oracle, frozen before measurement): **64/64 agreement,
+  8/8 lock tripwires caught fail-closed, zero lost updates, zero atomicity
+  violations, zero ledger anomalies, T1–T8 all PASS.** Read throughput
+  latency gate T4 remediated to p95 = 14.39ms (p50 = 2.49ms) via process-local
+  read connection persistence and zero-overhead URI resolution.
+
 ## Architecture
 
 ```
@@ -176,9 +206,9 @@ historical smoke, never the evidence set.
 ## Status
 
 V1 walking skeleton. `PLAN.md` is the full plan; `CHANGELOG.md` records what
-each revision proved, including measured numbers and known gaps. 1115 tests
-collected on the v1.1 branch: default `python -m pytest tests/ -q` is 1109 passed / 6 skipped;
-with all three re-measure guards it is 1112 passed / 3 skipped
+each revision proved, including measured numbers and known gaps. 1124 tests
+collected on the v1.1 branch: default `python -m pytest tests/ -q` is 1118 passed / 6 skipped;
+with all three re-measure guards it is 1121 passed / 3 skipped
 (`VERIFYCI_PATCH_RERUN=1` / `VERIFYCI_BLAST_RERUN=1` / `VERIFYCI_LATENCY_RERUN=1`).
 Locked release endpoint: `v1.0.2-correctness` (618 tests there).
 

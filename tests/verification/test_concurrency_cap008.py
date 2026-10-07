@@ -25,6 +25,7 @@ FROZEN_LABEL_SHA256 = "5dda237b7fab3e2d4bfd5d5119bce29e8d5b557558191d7ab00e87172
 FROZEN_ORACLE_MANIFEST_SHA256 = "7836d44d4c0e1db2859b69851be125acd1874cd560825842997962a0ae97e55b"
 FROZEN_HARNESS_SHA256 = "e4b0d2efe45f04cf63266cccdecac5ddf943a6371dca6605243be4484dcd3f9d"
 FROZEN_R0_RESULTS_SHA256 = "f246e480e96e8d95dc66eff382121761d5bc2ae2a7316c2d597a5087b350ceab"
+FROZEN_R1_RESULTS_SHA256 = "c3085a54b71911f4707e830eea0638adebad5cc2af52fd4576c3b54f4ba217cc"
 
 
 @pytest.fixture(scope="module")
@@ -35,6 +36,7 @@ def cap008_data():
     config_file = BENCHMARK_DIR / "config.json"
     worker_protocol_file = BENCHMARK_DIR / "worker_protocol.json"
     r0_results_file = BENCHMARK_DIR / "r0_baseline_results.json"
+    r1_results_file = BENCHMARK_DIR / "r1_capability1_results.json"
 
     cases = [json.loads(line) for line in cases_file.read_text(encoding="utf-8").splitlines() if line.strip()]
     labels = {json.loads(line)["id"]: json.loads(line) for line in labels_file.read_text(encoding="utf-8").splitlines() if line.strip()}
@@ -42,6 +44,7 @@ def cap008_data():
     config = json.loads(config_file.read_text(encoding="utf-8"))
     worker_protocol = json.loads(worker_protocol_file.read_text(encoding="utf-8"))
     r0_results = json.loads(r0_results_file.read_text(encoding="utf-8"))
+    r1_results = json.loads(r1_results_file.read_text(encoding="utf-8")) if r1_results_file.exists() else {}
 
     return {
         "cases": cases,
@@ -50,6 +53,7 @@ def cap008_data():
         "config": config,
         "worker_protocol": worker_protocol,
         "r0_results": r0_results,
+        "r1_results": r1_results,
     }
 
 
@@ -60,12 +64,14 @@ def test_cap008_cryptographic_freeze_hashes():
     m_bytes = (BENCHMARK_DIR / "oracle_manifest.jsonl").read_bytes()
     h_bytes = (BENCHMARK_DIR / "measure_cap008.py").read_bytes()
     r0_bytes = (BENCHMARK_DIR / "r0_baseline_results.json").read_bytes()
+    r1_bytes = (BENCHMARK_DIR / "r1_capability1_results.json").read_bytes()
 
     assert hashlib.sha256(c_bytes).hexdigest() == FROZEN_CORPUS_SHA256
     assert hashlib.sha256(l_bytes).hexdigest() == FROZEN_LABEL_SHA256
     assert hashlib.sha256(m_bytes).hexdigest() == FROZEN_ORACLE_MANIFEST_SHA256
     assert hashlib.sha256(h_bytes).hexdigest() == FROZEN_HARNESS_SHA256
     assert hashlib.sha256(r0_bytes).hexdigest() == FROZEN_R0_RESULTS_SHA256
+    assert hashlib.sha256(r1_bytes).hexdigest() == FROZEN_R1_RESULTS_SHA256
 
 
 def test_cap008_lock2_independent_oracle_isolation():
@@ -211,3 +217,35 @@ def test_cap008_r0_baseline_scorecard(cap008_data):
 
     # T4 is the isolated deficit in R0 (p95 read latency under 8 workers reaches 109.1 ms > 50 ms)
     assert r0["gates"]["T4_read_throughput"] == "FAIL"
+
+
+def test_cap008_r1_capability1_scorecard(cap008_data):
+    """Verify R1 Capability 1 Scorecard: T1-T8 all PASS with T4 read latency deficit closed."""
+    r1 = cap008_data["r1_results"]
+    assert r1, "R1 results must be present"
+
+    assert r1["total_cases"] == 64
+    assert r1["agreement_count"] == 64
+    assert r1["agreement_rate"] == 1.0
+    assert r1["pass_count"] == 48
+    assert r1["inconclusive_count"] == 16
+    assert r1["fail_count"] == 0
+    assert r1["total_lost_updates"] == 0
+    assert r1["total_atomicity_violations"] == 0
+    assert r1["total_ledger_anomalies"] == 0
+    assert r1["total_lock_errors_caught"] == 8
+
+    # All gates T1-T8 PASS in R1
+    assert r1["gates"]["T1_snapshot_isolation"] == "PASS"
+    assert r1["gates"]["T2_disjoint_invariance"] == "PASS"
+    assert r1["gates"]["T3_zero_lost_updates"] == "PASS"
+    assert r1["gates"]["T4_read_throughput"] == "PASS"
+    assert r1["gates"]["T5_ledger_order"] == "PASS"
+    assert r1["gates"]["T6_fail_closed_tripwire"] == "PASS"
+    assert r1["gates"]["T7_crash_atomicity"] == "PASS"
+    assert r1["gates"]["T8_concurrency_agreement"] == "PASS"
+
+    # Verify read latencies across cases with queries are strictly < 50.0 ms
+    for c in r1["cases"]:
+        if c["p95_read_ms"] > 0:
+            assert c["p95_read_ms"] < 50.0, f"Case {c['id']} exceeded 50ms read latency: {c['p95_read_ms']}ms"
