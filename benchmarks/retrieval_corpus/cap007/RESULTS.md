@@ -1,8 +1,8 @@
 # CAP-007 Final Adjudication Record: High-Node Topology & Production-Scale Retrieval Attestation
 
 **Experiment ID**: CAP-007  
-**Phase**: Step 2E (R3 Remediation Adjudication & Formal Promotion Evaluation)  
-**Status**: **PROMOTION READY / ALL GATES PASS**  
+**Phase**: Step 2E (R3 Remediation Adjudication & Formal Promotion Closure)  
+**Status**: **PROMOTED / ESTABLISHED / FROZEN / CLOSED**  
 **Corpus Hash**: `4d1e3498cc090ce2b1ca210d16641e3b60cc3369bc1dc38be6bfc570f35e428b`  
 **Label Hash**: `d9f4d4df004af329fec3e400c0b942333513e4d37a0c4276b915ca74940b91ef`  
 **Oracle Manifest Hash**: `fd52536e40afb6045b773b6a4f4f3cd78b9a340e8f3f670ba4bf4de70b39b604`  
@@ -134,9 +134,17 @@ Across the full CAP-007 evaluation:
 
 ---
 
-## 8. Final Adjudication Verdict & Promotion Recommendation
+## 8. Final Formal Adjudication Verdict
 
-**Status: PROMOTE / READY FOR CLOSURE**
+**Status: PROMOTE / ESTABLISHED / FROZEN / CLOSED**
+
+### Bounded Invariant Claim
+> **VerifyCI demonstrates correct and deterministic retrieval, blast-radius analysis, cache behavior, and mechanism-derived fail-closed traversal on the frozen CAP-007 high-node topology corpus, with the declared S1 latency contract satisfied.**
+
+### Empirical Qualification & Scope Invariants
+- **Fail-Closed Traversal**: CAP-007 establishes mechanism-derived fail-closed behavior on the frozen 64-case corpus, supplemented by 9 independent out-of-corpus robustness controls.
+- **Latency Scope**: Tier S1 ($p95 = 19.46\text{ ms}$) satisfies the production contract ($< 50.0\text{ ms}$). Tier S2 ($p95 = 90.02\text{ ms}$) remains an explicit scale observation on the host environment (8 CPUs, 7.73 GB RAM).
+- **Not Established**: Universal retrieval correctness, universal ranking quality, universal resource safety, or S2 latency compliance beyond the measured population.
 
 1. **All 8 Gates Passing**: T1 (100%), T2 (100%), T3 (100%), T4 (100%), T5 (100%), T6 (100% mechanism-derived), T7 (19.46 ms < 50 ms), T8 (100%).
 2. **Cryptographic Integrity Maintained**: All frozen step artifacts (`cases.jsonl`, `labels.jsonl`, `oracle_manifest.jsonl`, `measure_cap007.py`, `r0_baseline_results.json`, `r1_capability1_results.json`, `r2_capability2_results.json`, `r3_remediated_results.json`) verified byte-for-byte.
