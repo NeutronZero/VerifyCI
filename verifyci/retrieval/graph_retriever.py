@@ -1,19 +1,23 @@
+from typing import Any
+
 from verifyci.contracts.edge import EdgeType
 from verifyci.retrieval.dense import SearchResult
 
 #: Relationship edges that mean "related code" for retrieval expansion.
-#: Structural edges (CONTAINS file<->symbol, DOCUMENTS, DEFINES) and
-#: SBOM DEPENDS_ON are excluded: a two-hop expansion that traversed
-#: CONTAINS pulled in an entire module for every seed, drowning the
-#: graph channel's signal in file rows.
+#: Structural edges (CONTAINS file<->symbol, DOCUMENTS, DEFINES) are excluded:
+#: a two-hop expansion that traversed CONTAINS pulled in an entire module for every seed,
+#: drowning the graph channel's signal in file rows.
 TRAVERSABLE_EDGE_TYPES = frozenset({
     EdgeType.CALLS, EdgeType.CALLS_UNRESOLVED,
     EdgeType.IMPORTS, EdgeType.INHERITS, EdgeType.INHERITS_UNRESOLVED,
+    EdgeType.DEPENDS_ON,
     EdgeType.IMPLEMENTS, EdgeType.REFERENCES, EdgeType.USES,
     EdgeType.RETURNS, EdgeType.DECORATES,
 })
 
-_TRAVERSABLE_VALUES = frozenset(t.value for t in TRAVERSABLE_EDGE_TYPES)
+_TRAVERSABLE_VALUES = frozenset(
+    t.value if hasattr(t, "value") else str(t) for t in TRAVERSABLE_EDGE_TYPES
+)
 
 
 def _traversable(payload) -> bool:
@@ -29,19 +33,25 @@ class GraphRetriever:
     """Expand a seed set along *semantic* edges, scored by hop distance.
 
     Primary path: when the graph exposes `edge_index_map()` (rustworkx
-    PyDiGraph and the test doubles), adjacency is built from edge
-    payloads filtered to TRAVERSABLE_EDGE_TYPES, so containment/document
-    edges never carry a seed into its whole module. Fallback: graphs that
-    only expose successor/predecessor neighbors are expanded through
-    those callables, unfiltered (still distance-scored, still
-    deterministic) so retrieval never breaks on an unfamiliar adapter.
-    Results are ordered by (-score, id): closer hops beat farther ones,
-    ties break on id.
+    PyDiGraph and the test doubles), pre-indexed (outgoing, incoming)
+    adjacency is built once from edge payloads filtered to TRAVERSABLE_EDGE_TYPES
+    and cached for zero-overhead index reuse.
+    
+    Traversal follows canonical semantic influence:
+    - Outgoing BFS from seeds reaches direct/transitive callees
+    - Incoming BFS from seeds reaches direct/transitive callers
+    Combining both directions at each node preserves directed influence
+    without leaking into unrelated caller-of-callee clusters.
+    
+    Results are ordered by multi-attribute ranking: (-score, id),
+    ensuring closer hops beat farther ones and equidistant ties break
+    deterministically by entity ID.
     """
 
     def __init__(self, graph, node_map: dict = None):
         self.graph = graph
         self.node_map = node_map or {}
+        self._cached_adj = None
 
     def retrieve(self, seed_entity_ids: list[str], max_hops: int = 2) -> list[SearchResult]:
         if self.graph is None or max_hops <= 0 or not seed_entity_ids:
@@ -50,102 +60,138 @@ class GraphRetriever:
         from verifyci.graph.traverse import as_index, edge_allowed
         edge_adj = self._adjacency_from_edges()
         if edge_adj is not None:
+            outgoing_adj, incoming_adj = edge_adj
             seeds = [self.node_map[eid] for eid in seed_entity_ids
                       if eid in self.node_map]
+            if not seeds:
+                return []
             reverse = {v: k for k, v in self.node_map.items()}
-            adj, neighbors = edge_adj, None
             to_id = lambda node: reverse.get(node, str(node))  # noqa: E731
+
+            seed_set = set(seeds)
+
+            def _bfs_dir(adj_map: dict[int, set[int]]) -> dict[int, int]:
+                visited = set(seed_set)
+                current = set(seed_set)
+                hop_map: dict[int, int] = {}
+                for h in range(1, max_hops + 1):
+                    nxt = set()
+                    for u in current:
+                        for v in adj_map.get(u, ()):
+                            if v not in visited:
+                                visited.add(v)
+                                hop_map[v] = h
+                                nxt.add(v)
+                    current = nxt
+                    if not current:
+                        break
+                return hop_map
+
+            callee_hops = _bfs_dir(outgoing_adj)
+            caller_hops = _bfs_dir(incoming_adj)
+
+            all_impacted = set(callee_hops.keys()) | set(caller_hops.keys())
+            distances = {
+                node: min(callee_hops.get(node, 999), caller_hops.get(node, 999))
+                for node in all_impacted
+            }
         else:
             successors = getattr(self.graph, "successors", None)
             predecessors = getattr(self.graph, "predecessors", None)
             if not (callable(successors) or callable(predecessors)):
                 return []
-            # Hybrid seeds: mapped ids expand by index (rustworkx
-            # successors take indices and yield PAYLOADS, normalized
-            # via as_index exactly like traverse); unmapped ids pass
-            # through verbatim so old id-based adapters keep working.
             seeds = ([self.node_map[eid] for eid in seed_entity_ids
                       if eid in self.node_map]
                      + [eid for eid in seed_entity_ids
                         if eid not in self.node_map])
-            adj, neighbors = None, (successors, predecessors)
+            if not seeds:
+                return []
             reverse = {v: k for k, v in self.node_map.items()}
             to_id = lambda node: reverse.get(node, str(node))  # noqa: E731
-        if not seeds:
-            return []
+            seed_set = set(seeds)
 
-        seed_set = set(seeds)
-        distances = {}
-        frontier = seed_set
-        for hop in range(1, max_hops + 1):
-            nxt = set()
-            for node in frontier:
-                for raw in self._expand(adj, neighbors, node):
-                    neighbor = raw
-                    if adj is None:
-                        # Fallback yields PAYLOADS (rustworkx included),
-                        # not indices: normalize exactly like
-                        # traverse.as_index. Raw string ids from
-                        # old id-based adapters pass through verbatim.
-                        neighbor = as_index(raw, self.node_map)
-                        if neighbor is None and isinstance(raw, str):
-                            neighbor = raw
-                    if neighbor is None or neighbor in seed_set or neighbor in distances:
-                        continue
-                    if adj is None and isinstance(node, int) and isinstance(neighbor, int):
-                        # Fallback relation filter (same rule as
-                        # traverse.edge_allowed): semantic edges expand,
-                        # containment/docs do not. Graphs without an
-                        # edge API bypass unfiltered; unmapped string
-                        # ids bypass below this check entirely.
+            def _bfs_fn(fn, is_incoming: bool) -> dict[Any, int]:
+                if not callable(fn):
+                    return {}
+                visited = set(seed_set)
+                current = set(seed_set)
+                hop_map: dict[Any, int] = {}
+                for h in range(1, max_hops + 1):
+                    nxt = set()
+                    for u in current:
                         try:
-                            if not (edge_allowed(self.graph, node, neighbor,
-                                                 _TRAVERSABLE_VALUES)
-                                    or edge_allowed(self.graph, neighbor, node,
-                                                    _TRAVERSABLE_VALUES)):
-                                continue
-                        except RuntimeError:
+                            neighbors = fn(u)
+                        except Exception:  # noqa: BLE001
                             continue
-                    distances[neighbor] = hop
-                    nxt.add(neighbor)
-            frontier = nxt
-            if not frontier:
-                break
+                        for raw in neighbors:
+                            neighbor = as_index(raw, self.node_map)
+                            if neighbor is None and isinstance(raw, str):
+                                neighbor = raw
+                            if neighbor is None or neighbor in visited:
+                                continue
+                            if isinstance(u, int) and isinstance(neighbor, int):
+                                try:
+                                    src, dst = (neighbor, u) if is_incoming else (u, neighbor)
+                                    if not edge_allowed(self.graph, src, dst, _TRAVERSABLE_VALUES):
+                                        continue
+                                except RuntimeError:
+                                    continue
+                            visited.add(neighbor)
+                            hop_map[neighbor] = h
+                            nxt.add(neighbor)
+                    current = nxt
+                    if not current:
+                        break
+                return hop_map
 
-        results = [SearchResult(id=to_id(node), score=1.0 / dist,
-                                metadata={"hops": dist})
-                   for node, dist in distances.items()]
+            callee_hops = _bfs_fn(successors, is_incoming=False)
+            caller_hops = _bfs_fn(predecessors, is_incoming=True)
+
+            all_impacted = set(callee_hops.keys()) | set(caller_hops.keys())
+            distances = {
+                node: min(callee_hops.get(node, 999), caller_hops.get(node, 999))
+                for node in all_impacted
+            }
+
+        results = [
+            SearchResult(
+                id=to_id(node),
+                score=round(1.0 / dist, 6),
+                metadata={"hops": dist},
+            )
+            for node, dist in distances.items()
+        ]
         results.sort(key=lambda r: (-r.score, r.id))
         return results
 
-    def _expand(self, adj, neighbors, node) -> list:
-        if adj is not None:
-            return adj.get(node, ())
-        successors, predecessors = neighbors
-        out = []
-        for fn in (successors, predecessors):
-            if callable(fn):
-                try:
-                    out.extend(fn(node))
-                except Exception:  # noqa: BLE001 - adapter-specific shapes
-                    continue
-        return out
-
     def _adjacency_from_edges(self):
-        """(src->dst, dst->src) from edge payloads, filtered to semantic
-        edges. Returns None when the graph does not expose
-        edge_index_map, so the caller falls back to neighbor expansion."""
+        """(outgoing, incoming) adjacency indices built from traversable edge payloads.
+        Cached on the graph instance for zero-overhead index reuse across queries.
+        """
+        cached = getattr(self.graph, "_verifyci_adj_cache", None)
+        if cached is not None:
+            return cached
+        if self._cached_adj is not None:
+            return self._cached_adj
+
         index = getattr(self.graph, "edge_index_map", None)
         if not callable(index):
             return None
-        adj: dict = {}
+        outgoing: dict[int, set[int]] = {}
+        incoming: dict[int, set[int]] = {}
         try:
             for _eidx, entry in index().items():
                 src, dst, payload = entry[0], entry[1], entry[2]
                 if not _traversable(payload):
                     continue
-                adj.setdefault(src, set()).add(dst)
-                adj.setdefault(dst, set()).add(src)
+                outgoing.setdefault(src, set()).add(dst)
+                incoming.setdefault(dst, set()).add(src)
         except Exception:  # noqa: BLE001 - unfamiliar adapter shape
             return None
-        return adj
+        result = (outgoing, incoming)
+        self._cached_adj = result
+        try:
+            self.graph._verifyci_adj_cache = result
+        except Exception:
+            pass
+        return result
