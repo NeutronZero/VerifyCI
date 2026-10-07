@@ -12,11 +12,14 @@ from verifyci.contracts.scheduler import (
 
 logger = logging.getLogger(__name__)
 
-# Bounded worker pool for node execution. asyncio.to_thread uses the
-# loop's default executor (unbounded for our purposes and shared with
-# unrelated work); an explicit pool caps lingering-thread pileup when
-# nodes block past their deadline, and gives the linger a name in
-# thread dumps.
+# Node execution offload: `AsyncDAGScheduler._run_node` uses
+# `asyncio.to_thread` (the loop's default executor, unbounded for our
+# purposes and shared with unrelated work) under `asyncio.wait_for` for
+# the deadline. `_NODE_POOL` below is reserved for future bounding of
+# linger pileup when nodes block past their deadline; it is intentionally
+# unused while the `to_thread` contract is locked by
+# `tests/integration/test_robustness.py::test_run_node_uses_to_thread`.
+# See `_run_node` for the timeout/linger semantics.
 _NODE_POOL = ThreadPoolExecutor(
     max_workers=min(32, (os.cpu_count() or 1) + 4),
     thread_name_prefix="verifyci-node",
@@ -214,6 +217,12 @@ class AsyncDAGScheduler(Scheduler):
                     nodes = _topo_order(task["dag"]["nodes"])
                     budget = task["dag"].get("budget_nano_usd")
                     if budget is not None and len(nodes) * self.NODE_COST_NANO_USD > budget:
+                        # Taxonomy: budget breach is a FAILED run with
+                        # error "BUDGET_BREACHED" plus a BUDGET_BREACHED
+                        # ledger event (persisted below) — not a separate
+                        # TaskStatus, so exit mapping stays on the
+                        # FAILED channel (CLI exit 1) and the head is
+                        # still pinned in the finally.
                         task["status"] = TaskStatus.FAILED
                         task["error"] = "BUDGET_BREACHED"
                         self._emit("BUDGET_BREACHED", task_id, conversation_id,
@@ -230,12 +239,17 @@ class AsyncDAGScheduler(Scheduler):
                             return
                         outcomes = await self._run_level(
                             executor, level, task_id, conversation_id, shared)
-                        # Precedence within a level: a verification block
-                        # or review decision must win over error/cancelled
-                        # noise from siblings. Outcomes arrive in node
-                        # order, so a cancelled sibling sorted first used
-                        # to fail the task as "node_error: cancelled" and
-                        # drop the verification decision entirely.
+                        # Precedence within a level: block > review > timeout >
+                        # error > ok. A verification block or review decision
+                        # must win over timeout/error/cancelled noise from
+                        # siblings. Outcomes arrive in node order, so a
+                        # cancelled sibling sorted first used to fail the
+                        # task as "node_error: cancelled" and drop the
+                        # verification decision entirely. Matches the
+                        # ordering below (block, review, timeout, error,
+                        # ok) and _run_level, which preempts siblings only
+                        # on block/timeout/error — review is ordered but
+                        # non-preempting by design.
                         ordered = [o for o in outcomes if o[0] == "block"]
                         ordered += [o for o in outcomes if o[0] == "review"]
                         ordered += [o for o in outcomes if o[0] == "timeout"]
@@ -393,15 +407,14 @@ class AsyncDAGScheduler(Scheduler):
         if timeout is None:
             timeout = shared.get("node_timeout", 300)
         # Timeout bounds the wait, not the work: asyncio cannot kill a
-        # thread once started, so after a timeout the pool worker may
-        # linger until _invoke returns. The pool is bounded (_NODE_POOL)
-        # so lingerers pile up only to max_workers; the timeout is
-        # configurable per node (config "timeout", else shared
-        # "node_timeout", default 300s); the loop never blocks on the
-        # lingerer, so a slow node cannot deadlock the scheduler — but
-        # treat node side effects past the deadline as at-most-once,
-        # not cancelled (surfaced as "at_most_once": True on TIMEOUT
-        # result dicts).
+        # thread once started, so after a timeout the to_thread worker may
+        # linger until _invoke returns. to_thread uses the loop's default
+        # executor (unbounded, shared); the timeout is configurable per
+        # node (config "timeout", else shared "node_timeout", default
+        # 300s); the loop never blocks on the lingerer, so a slow node
+        # cannot deadlock the scheduler — but treat node side effects
+        # past the deadline as at-most-once, not cancelled (surfaced as
+        # "at_most_once": True on TIMEOUT result dicts).
         try:
             def _invoke():
                 return asyncio.run(executor.execute_node(node_obj, ctx))
@@ -427,7 +440,10 @@ class AsyncDAGScheduler(Scheduler):
         sqlite, and cross-thread use corrupts it. A persist failure is
         reported on stderr and recorded on the task — never swallowed,
         since a verification product that silently drops its audit trail
-        is worse than one that errors loudly.
+        is worse than one that errors loudly. Surfaced outward via
+        `audit_degraded`/`persist_error` (see `run_task._audit_notes`):
+        the run status/exit is unchanged — a degraded audit trail is
+        not a verification verdict.
         """
         task = self._tasks.get(task_id)
         if not task:

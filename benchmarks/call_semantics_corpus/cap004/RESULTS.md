@@ -48,13 +48,13 @@
 - C1 detected conditional expressions permitting forbidden branches (`allow_builtins=True if debug else False`) and routed them to `FAIL`.
 
 ## 5. Adjudication Predicates Matrix
-- **Corpus & Labels Frozen**: PASS
+- **Corpus & Labels Frozen**: PASS (SHA-256 asserted pre-measurement)
 - **False Acceptance Rate = 0.0000**: PASS (0/13 violations accepted)
 - **False Confidence Rate = 0.0000**: PASS (0/10 ungrounded cases falsely verified)
 - **Violation Detection Recall = 1.0000**: PASS (13/13 violations detected)
 - **Compliant Verification Recall = 1.0000**: PASS (13/13 verified)
 - **Dynamic Inconclusive Recall = 1.0000**: PASS (10/10 inconclusive)
 - **Policy Routing Safety**: PASS (Detected argument-semantic violations never produce PASS; default non-blocking tripwire escalates to HUMAN_REVIEW)
-- **Full Pytest Suite**: PASS (1084 passed, 6 skipped, 0 failed)
-- **Ruff Clean**: PASS (All checks passed)
+- **Full Pytest Suite**: attested, see CI
+- **Ruff Clean**: attested, see CI
 - **Adjudication Decision**: **PROMOTE — ESTABLISHED**

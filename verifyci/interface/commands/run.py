@@ -3,7 +3,7 @@ import asyncio
 from verifyci.contracts.scheduler import TERMINAL_STATUSES
 from verifyci.interface.commands import resolve_db
 from verifyci.interface.commands.graph_loader import load_graph
-from verifyci.verification.config import load_repo_invariants, load_repo_waivers
+from verifyci.verification.config import load_trusted_base_invariants, load_trusted_base_waivers
 from verifyci.memory.ledger import EventLedger
 from verifyci.orchestration.compiler.validation import validate_task_ir
 from verifyci.orchestration.intent import build_intent_package
@@ -56,8 +56,8 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
                     "ledger_head": None}
         db = resolve_db(db_path)
         try:
-            repo_invariants = load_repo_invariants(db)
-            repo_waivers = load_repo_waivers(db)
+            repo_invariants = load_trusted_base_invariants(db, diff=diff)
+            repo_waivers = load_trusted_base_waivers(db, diff=diff)
         except ValueError:
             return {"task": task, "task_id": "", "status": "FAILED", "error": "invalid_invariants_config",
                     "decision": "FAIL", "rationale": "invalid_invariants_config", "ledger_head": None}

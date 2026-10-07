@@ -12,9 +12,7 @@ from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-
-MAX_DIFF_CHARS = 1_000_000
-MAX_TASK_DIFF_CHARS = 100_000
+from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_TASK_DIFF_CHARS
 
 
 def create_fastmcp_server(db_path: str, name: str = "verifyci"):

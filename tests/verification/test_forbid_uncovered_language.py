@@ -78,13 +78,12 @@ def test_js_forbid_evasion_is_now_a_hit():
 
 
 def test_js_benign_addition_vetoes_absence():
-    """.js with no forbidden name stays unestablished — scanned, never clean-by-extension."""
+    """Benign .js is tree-examined like covered code: clean scan establishes."""
     diff = DIFF_JS_EVASION.replace("eval(userInput);", "console.log(userInput);")
     results, _ = evaluate_invariants(diff, [_rule()], _graph_with_call())
     assert len(results) == 1
     assert results[0].passed is True
-    assert results[0].established is False
-    assert "app.js" in results[0].explanation
+    assert results[0].established is True
 
 
 readme_only = DIFF_DOCS_AND_CLEAN_CODE.split("diff --git a/verifyci/")[0]
@@ -140,7 +139,7 @@ def test_covered_violation_still_fails():
 
 
 def test_mixed_diff_graph_fail_survives_unexamined_file():
-    """An unexamined-file hunk must not veto a graph-established rejection."""
+    """A vacuous graph must not establish: passed stays unestablished, never silent."""
     from verifyci.ingestion.extractor import extract_entities as _ee
 
     parser = TreeSitterParser()
@@ -167,9 +166,10 @@ def test_mixed_diff_graph_fail_survives_unexamined_file():
         "+    b();\n"
     )
     results, _ = evaluate_invariants(diff, [_rule()], graph)
-    # Without a graph violation in the touched span this passes unestablished;
-    # the regression we pin is: passed=True comes WITH established=False,
-    # never the old silent established=True.
+    # app.js is now tree-examined (clean b() call), so no unexamined-file veto
+    # remains; establishment is refused instead by graph vacuity (zero CALLS
+    # edges to examine). The pinned regression: passed=True never comes WITH
+    # established=True on an empty graph.
     assert results[0].passed is True
     assert results[0].established is False
 

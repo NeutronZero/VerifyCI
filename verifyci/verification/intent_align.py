@@ -563,7 +563,7 @@ def _added_hits(diff: str, kind: str, name: str) -> tuple[list[str], bool]:
 # Languages the forbid checkers (tree + lexical) can examine. Mirrors the
 # gate in added_refs.extract_added_refs_status; files outside this set are
 # unexaminable, never implicitly clean.
-_FORBID_COVERED_LANGUAGES = frozenset({"python", "c", "cpp"})
+_FORBID_COVERED_LANGUAGES = frozenset({"python", "c", "cpp", "typescript", "tsx", "javascript"})
 
 
 def _unexamined_forbid_files(diff: str | None) -> list[str]:
@@ -677,6 +677,10 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
             pat = _secret_pat_name(content)
             hits.append(f'{_lineno(fname, lineno)}:{pat}')
         if st[0] is not None or st[1] > 0 or st[2]:
+            if len(st[3]) >= 200 or (sum(len(x) for x in st[3]) + len(content) > 32_768):
+                # Multiline buffer cap (mirrors secrets/engine.py limits):
+                # fail closed as unestablished rather than grow unbounded.
+                return False, 'secret scan resource limit exceeded: multiline buffer', False, []
             st[3].append(content)
             joined = ' '.join(st[3])
             found = False

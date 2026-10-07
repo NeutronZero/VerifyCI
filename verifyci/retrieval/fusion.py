@@ -16,7 +16,7 @@ def rrf_fusion_with_scores(
         scores[result.id] = scores.get(result.id, 0) + 1.0 / (k + rank + 1)
     for rank, result in enumerate(graph_results):
         scores[result.id] = scores.get(result.id, 0) + 1.0 / (k + rank + 1)
-    return sorted(scores.items(), key=lambda t: t[1], reverse=True)
+    return sorted(scores.items(), key=lambda t: (-t[1], t[0]))
 
 
 def rrf_fusion(

@@ -116,10 +116,21 @@ def test_frozen_sources_match_working_tree():
     #   CAP-006 added branch/parent scoping to lineage ingestion:
     #      insert_ingest, latest_revision_id, latest_ingest_id,
     #      close_disappeared, get_anchor (all on ingest/write path, not timed query path).
+    #   Post-006 audit fix routed get_latest_revision through the
+    #      append-only ingests chain (read-path revision lookup, not the timed
+    #      get_entity_as_of primitive — measure.py has no get_latest_revision
+    #      call site).
+    #   Full-repo audit fix added an optional repository_id scope to
+    #      close_superseded_entities (ingest/build setup; the temporal gate
+    #      times get_entity_as_of only).
+    #   Full-repo audit fix added an optional repository_id scope to
+    #      get_entity_by_name (default None preserves the exact prior
+    #      queries; measure.py has no get_entity_by_name call site).
     accepted_drift = {"__init__", "insert_entity", "insert_edge", "insert_event", "close",
                       "get_entities_by_revision", "get_edges_by_revision",
                       "insert_ingest", "latest_revision_id", "latest_ingest_id", "close_disappeared",
-                      "get_anchor"}
+                      "get_anchor", "get_latest_revision", "close_superseded_entities",
+                      "get_entity_by_name"}
     assert set(lm) >= set(fm) - accepted_drift
     for name, fx_body in fm.items():
         if name in accepted_drift:

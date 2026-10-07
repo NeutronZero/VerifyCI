@@ -38,13 +38,13 @@ def extract_dependencies(file_path: str, source: str, revision_id: str = "",
         if dep_type == "pypi":
             if Path(file_path).name == "pyproject.toml":
                 return _parse_pyproject_toml(source, file_path, revision_id, errors)
-            return _parse_pypi(source, file_path, revision_id)
+            return _parse_pypi(source, file_path, revision_id, errors)
         if dep_type == "cargo":
-            return _parse_cargo(source, file_path, revision_id)
+            return _parse_cargo(source, file_path, revision_id, errors)
         if dep_type == "maven":
-            return _parse_maven(source, file_path, revision_id)
+            return _parse_maven(source, file_path, revision_id, errors)
         if dep_type == "go":
-            return _parse_go(source, file_path, revision_id)
+            return _parse_go(source, file_path, revision_id, errors)
     except Exception as e:  # noqa: BLE001
         if errors is not None:
             errors.append(f"{file_path}: {type(e).__name__}: {e}")
@@ -80,7 +80,14 @@ def _parse_npm(source: str, file_path: str, revision_id: str,
             errors.append(f"{file_path}: JSONDecodeError: {e}")
         return []
     if not isinstance(data, dict):
-        # Top-level list (or scalar) has no sections to read.
+        # Top-level list (or scalar) has no sections to read. A valid
+        # document with no dependencies is honest-empty; a non-dict root
+        # is still recorded so "no dependencies" and "unreadable
+        # manifest" stay distinguishable.
+        if errors is not None:
+            errors.append(
+                f"{file_path}: TypeError: expected JSON object, "
+                f"got {type(data).__name__}")
         return []
     edges = []
     for section in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
@@ -129,7 +136,8 @@ def _pypi_spec_name_version(spec: str) -> tuple[str, str] | None:
     return match.group(1), version
 
 
-def _parse_pypi(source: str, file_path: str, revision_id: str) -> list[Edge]:
+def _parse_pypi(source: str, file_path: str, revision_id: str,
+                errors: list | None = None) -> list[Edge]:
     edges = []
     for line in source.splitlines():
         line = line.strip()
@@ -138,7 +146,12 @@ def _parse_pypi(source: str, file_path: str, revision_id: str) -> list[Edge]:
             # directives, not packages. Recursive -r inclusion is out of
             # scope; silently treating them as packages was worse.
             continue
-        parsed = _pypi_spec_name_version(line)
+        try:
+            parsed = _pypi_spec_name_version(line)
+        except Exception as e:  # noqa: BLE001
+            if errors is not None:
+                errors.append(f"{file_path}: ValueError: {e}")
+            continue
         if parsed is None:
             continue
         name, version = parsed
@@ -182,7 +195,8 @@ def _subtable_package(header: str) -> str | None:
     return pkg or None
 
 
-def _parse_cargo(source: str, file_path: str, revision_id: str) -> list[Edge]:
+def _parse_cargo(source: str, file_path: str, revision_id: str,
+               errors: list | None = None) -> list[Edge]:
     edges = []
     in_deps = False
     subtable_pkg: str | None = None
@@ -196,79 +210,96 @@ def _parse_cargo(source: str, file_path: str, revision_id: str) -> list[Edge]:
                                    subtable_version, revision_id))
         subtable_pkg, subtable_version, subtable_saw_attr = None, "latest", False
 
-    for line in source.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("["):
-            _flush()
-            in_deps = _dep_section(stripped)
-            subtable_pkg = _subtable_package(stripped) if in_deps else None
-            continue
-        if in_deps:
-            match = re.match(r"^([A-Za-z0-9_-]+)\s*=\s*(.*)$", stripped)
-            if not match:
+    try:
+        for line in source.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("["):
+                _flush()
+                in_deps = _dep_section(stripped)
+                subtable_pkg = _subtable_package(stripped) if in_deps else None
                 continue
-            name, value = match.group(1), match.group(2).strip()
-            if subtable_pkg is not None and name in _CARGO_DEP_ATTRS:
-                subtable_saw_attr = True
-                if name == "version":
-                    version_match = re.search(r'"([^"]+)"|\'([^\']+)\'', value)
-                    if version_match:
-                        subtable_version = (version_match.group(1)
-                                            or version_match.group(2))
-                    elif value:
-                        subtable_version = value.strip('"\'').strip() or "latest"
-                continue
-            if value.startswith("{"):
-                # Inline table: `serde = { version = "1", ... }`.
-                # The old regex captured "{" as the version.
-                version_match = re.search(r'version\s*=\s*"([^"]+)"', value)
-                version = version_match.group(1) if version_match else "latest"
-            else:
-                version = value.strip('"').strip() or "latest"
-            edges.append(_dep_edge(file_path, "cargo", name, version, revision_id))
-    _flush()
+            if in_deps:
+                match = re.match(r"^([A-Za-z0-9_-]+)\s*=\s*(.*)$", stripped)
+                if not match:
+                    continue
+                name, value = match.group(1), match.group(2).strip()
+                if subtable_pkg is not None and name in _CARGO_DEP_ATTRS:
+                    subtable_saw_attr = True
+                    if name == "version":
+                        version_match = re.search(r'"([^"]+)"|\'([^\']+)\'', value)
+                        if version_match:
+                            subtable_version = (version_match.group(1)
+                                                or version_match.group(2))
+                        elif value:
+                            subtable_version = value.strip('"\'').strip() or "latest"
+                    continue
+                if value.startswith("{"):
+                    # Inline table: `serde = { version = "1", ... }`.
+                    # The old regex captured "{" as the version.
+                    version_match = re.search(r'version\s*=\s*"([^"]+)"', value)
+                    version = version_match.group(1) if version_match else "latest"
+                else:
+                    version = value.strip('"').strip() or "latest"
+                edges.append(_dep_edge(file_path, "cargo", name, version, revision_id))
+        _flush()
+    except Exception as e:  # noqa: BLE001
+        if errors is not None:
+            errors.append(f"{file_path}: {type(e).__name__}: {e}")
+        return []
     return edges
 
 
-def _parse_maven(source: str, file_path: str, revision_id: str) -> list[Edge]:
+def _parse_maven(source: str, file_path: str, revision_id: str,
+               errors: list | None = None) -> list[Edge]:
     # Strip comments first: commented-out <dependency> blocks parsed as
     # live dependencies. Then match the version per block — a lazy
     # optional group preferred empty, so the old single regex reported
     # "latest" for every pretty-printed pom.
-    clean = re.sub(r"<!--.*?-->", "", source, flags=re.DOTALL)
-    edges = []
-    for block in re.finditer(r"<dependency\b[^>]*>(.*?)</dependency>", clean, re.DOTALL):
-        body = block.group(1)
+    try:
+        clean = re.sub(r"<!--.*?-->", "", source, flags=re.DOTALL)
+        edges = []
+        for block in re.finditer(r"<dependency\b[^>]*>(.*?)</dependency>", clean, re.DOTALL):
+            body = block.group(1)
 
-        def _tag(tag: str) -> str:
-            found = re.search(rf"<{tag}>(.*?)</{tag}>", body, re.DOTALL)
-            return found.group(1).strip() if found else ""
+            def _tag(tag: str) -> str:
+                found = re.search(rf"<{tag}>(.*?)</{tag}>", body, re.DOTALL)
+                return found.group(1).strip() if found else ""
 
-        group, artifact, version = _tag("groupId"), _tag("artifactId"), _tag("version")
-        if group and artifact:
-            edges.append(_dep_edge(file_path, "maven", f"{group}:{artifact}",
-                                   version or "latest", revision_id))
+            group, artifact, version = _tag("groupId"), _tag("artifactId"), _tag("version")
+            if group and artifact:
+                edges.append(_dep_edge(file_path, "maven", f"{group}:{artifact}",
+                                       version or "latest", revision_id))
+    except Exception as e:  # noqa: BLE001
+        if errors is not None:
+            errors.append(f"{file_path}: {type(e).__name__}: {e}")
+        return []
     return edges
 
 
-def _parse_go(source: str, file_path: str, revision_id: str) -> list[Edge]:
+def _parse_go(source: str, file_path: str, revision_id: str,
+              errors: list | None = None) -> list[Edge]:
     edges = []
     in_require = False
-    for line in source.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("//"):
-            continue
-        if stripped.startswith("require ("):
-            in_require = True
-            continue
-        if in_require and stripped == ")":
-            in_require = False
-            continue
-        target = stripped if in_require else (stripped[len("require "):] if stripped.startswith("require ") else "")
-        if target:
-            parts = target.split()
-            if len(parts) >= 2:
-                edges.append(_dep_edge(file_path, "go", parts[0], parts[1], revision_id))
+    try:
+        for line in source.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("//"):
+                continue
+            if stripped.startswith("require ("):
+                in_require = True
+                continue
+            if in_require and stripped == ")":
+                in_require = False
+                continue
+            target = stripped if in_require else (stripped[len("require "):] if stripped.startswith("require ") else "")
+            if target:
+                parts = target.split()
+                if len(parts) >= 2:
+                    edges.append(_dep_edge(file_path, "go", parts[0], parts[1], revision_id))
+    except Exception as e:  # noqa: BLE001
+        if errors is not None:
+            errors.append(f"{file_path}: {type(e).__name__}: {e}")
+        return []
     return edges
 
 

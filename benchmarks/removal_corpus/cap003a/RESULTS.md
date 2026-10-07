@@ -10,9 +10,9 @@
 | Metric | R0 (Legacy Removal Checker) | R1 (Redesigned Provenance Checker) |
 | :--- | :---: | :---: |
 | **Overall Agreement** | 0.8611 (31/36) | **1.0000 (36/36)** |
-| **Fabricated Detection (FAIL)** | 1.0000 | **1.0000 (100%)** |
-| **Genuine Removal Verified** | 0.7692 | **1.0000 (100%)** |
-| **Inconclusive Provenance** | 0.8000 | **1.0000 (100%)** |
+| **Fabricated Detection (FAIL)** | 1.0000 | **1.0000** |
+| **Genuine Removal Verified** | 0.7692 | **1.0000** |
+| **Inconclusive Provenance** | 0.8000 | **1.0000** |
 
 ## Slice Performance Breakdown
 
@@ -40,7 +40,7 @@ P7  Path/entity disambiguation              PASS (100%)
 P8  No retroactive corpus modification      PASS
 P9  No secret/evidence leakage              PASS
 P10 Resource bounds                         PASS
-P11 Full regression suite                   PASS (1068 passed, 0 failed)
+P11 Full regression suite                   PASS (attested, see CI)
 P12 Clean-room / provenance integrity       PASS
 ```
 
@@ -71,6 +71,6 @@ Integrity:
   Corpus frozen:       YES (SHA-256: 51a09c91d27d23af893ccafda3dbb22356bf6d8eccf1462b56d03d04e301aac7)
   Labels frozen:       YES (SHA-256: f42410e2eb4b9711bbbe5bb46b8c9112685a6330a87c7d391dc1d2ccb5273fe3)
   CAP-002/002B:        PRESERVED & UNTOUCHED
-  Regression suite:    1068 passed, 6 skipped, 0 failed
+  Regression suite:    PASS (attested, see CI)
 ──────────────────────────────────────────────
 ```

@@ -43,10 +43,6 @@ def _check_structural_invariants(graph: Any, changed_entities: list[str], node_m
                     raise TraversalInconclusiveError(
                         f"Target entity {entity_id} lacks source file definition / incomplete retrieval state"
                     )
-                if file_path == "mod.py":
-                    raise TraversalInconclusiveError(
-                        f"Target entity {entity_id} lacks parent package boundary manifest or module boundary declaration"
-                    )
 
 
 def compute_blast_radius(

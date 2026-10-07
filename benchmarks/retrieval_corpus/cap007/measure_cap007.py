@@ -82,7 +82,7 @@ def evaluate_single_case(case: dict[str, Any], gold_label: dict[str, Any]) -> di
             revision_entity_id=n["id"],
             type=EntityType[n.get("type", "FUNCTION")],
             name=n.get("name", n["id"]),
-            file_path=f"{n.get('module', 'mod')}.py",
+            file_path=(f"{n['module']}.py" if n.get("module") else ""),
             line_start=1,
             line_end=1,
             language="python",
@@ -465,7 +465,7 @@ def run_benchmark(output_json: Path | None = None) -> dict[str, Any]:
     }
 
     if output_json:
-        output_json.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        output_json.write_text(json.dumps(report, indent=2), encoding="utf-8", newline="\n")
 
     return report
 

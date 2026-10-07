@@ -70,4 +70,9 @@ class CompositeSignalEngine:
             target_line = lineno + line_offset
             if target_line in context_signals:
                 supporting.extend(context_signals[target_line])
+            if len(supporting) > self.max_combinations:
+                raise ResourceLimitExceeded(
+                    f"Supporting-signal fan-out exceeded limit ({self.max_combinations})",
+                    limit_type="combination_count",
+                )
         return supporting

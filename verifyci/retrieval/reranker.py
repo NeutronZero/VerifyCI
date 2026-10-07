@@ -88,7 +88,7 @@ class OfflineReranker(Reranker):
                 metadata=r.metadata)
             for r in results
         ]
-        scored.sort(key=lambda r: r.score, reverse=True)
+        scored.sort(key=lambda r: (-r.score, r.id))
         return scored[:k]
 
 
@@ -131,6 +131,6 @@ class CrossEncoderReranker(Reranker):
                     metadata=r.metadata)
                 for r in results
             ]
-            scored.sort(key=lambda r: r.score, reverse=True)
+            scored.sort(key=lambda r: (-r.score, r.id))
             return scored[:k]
         return self._delegate.rerank(query, results, k=k)

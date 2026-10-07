@@ -7,8 +7,8 @@
 **Corpus Hash**: `ca475b33a385e8d1478afedf00d2eeeefdc8ae0f72c9e5527f20fc1fe814e17c`  
 **Label Hash**: `589231d38fdf85a764eab85ba19f1ad9e2839fe63c043c3c9636d745f1893075`  
 **Source Hash**: `f330fca7d317ec9a1e8398295d930c49f802e2cc25cf94b3906d7b9b0d47af8d`  
-**Harness Hash**: `a7025c16bce64c74a4e3c1679717309126c2eab4dd26f624630209044b43e4f0`  
-**Results Hash**: `8a5034c695a939598ae4e7f1be370630bbbbb04dd1fe840c9f18bc9966390cc2`  
+**Harness Hash**: `8e8874bea2c45fc941472a921b0c24329e0053fb47f95b68279fdd05a172ef4f`  
+**Results Hash**: `e7ed2033774e27646232eb8e9ce82b0ee891186acfb35cd2f6529e74fa0133ba`  
 
 ## Executive Summary
 VerifyCI demonstrates robust generalization on the frozen 64-case authentic multi-repository CAP-005 corpus, achieving an overall agreement of **62/64 (96.88%)** across 5 permissive open-source repositories and agent session logs.
@@ -32,10 +32,10 @@ Crucially:
 | **P4: Violation Detection Recall** | $1.0000$ | **1.0000** (24/24) | **PASS** | Established |
 | **P5: Falsifier Rediscovery Recall** | $1.0000$ (9/9) | **1.0000** (9/9) | **PASS** | Established |
 | **P6: Compliant Verification Recall** | $\ge 0.9000$ | **0.9474** (36/38) | **PASS** | Established |
-| **P7: Latency p95** | $\le 500\text{ms}$ | **23.9ms** (p50=17.7ms, max=218.8ms) | **PASS** | Established |
+| **P7: Latency p95** | $\le 500\text{ms}$ | **23.5ms** (p50=18.2ms, max=135.3ms) | **PASS** | Established |
 | **P8: Zero Infrastructure Crashes** | $0$ crashes | **0** crashes | **PASS** | Established |
 | **P9: Multi-Repo License Provenance** | $5/5$ permissive | **5/5** audited | **PASS** | Established |
-| **P10: Clean-Room Non-Regression** | 0 regressions | Clean test suite | **PASS** | Established |
+| **P10: Clean-Room Non-Regression** | 0 regressions | attested, see CI | **PASS** | Established |
 
 ## Confusion Matrix
 

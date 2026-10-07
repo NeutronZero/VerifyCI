@@ -169,16 +169,16 @@ directional not gating; CPU inference runs ~50ms/doc, so the cache —
 not the model — is what makes it usable. The retrieval gate itself is
 measured on a frozen BEIR-style set (`benchmarks/beir/`, 62 graded queries,
 60 docs, judgments frozen before any embedding; drift-guarded harness):
-**hybrid nDCG@10 0.6603 vs dense-only 0.6220 = +3.84 points — below the
+**hybrid nDCG@10 0.6551 vs dense-only 0.6220 = +3.31 points — below the
 +5 gate; measured, target not met.** `benchmarks/retrieval_eval.py` stays
 historical smoke, never the evidence set.
 
 ## Status
 
 V1 walking skeleton. `PLAN.md` is the full plan; `CHANGELOG.md` records what
-each revision proved, including measured numbers and known gaps. 760 tests
-collected on the v1.1 branch: default `python -m pytest tests/ -q` is 757 passed / 3 skipped;
-with all three re-measure guards it is 760 passed / 0 skipped
+each revision proved, including measured numbers and known gaps. 1115 tests
+collected on the v1.1 branch: default `python -m pytest tests/ -q` is 1109 passed / 6 skipped;
+with all three re-measure guards it is 1112 passed / 3 skipped
 (`VERIFYCI_PATCH_RERUN=1` / `VERIFYCI_BLAST_RERUN=1` / `VERIFYCI_LATENCY_RERUN=1`).
 Locked release endpoint: `v1.0.2-correctness` (618 tests there).
 

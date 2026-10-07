@@ -17,8 +17,8 @@ RECORDED = {
     "dense_recall": 0.6465053763440861,
     "dense_ndcg": 0.6219642456212527,
     "hybrid_recall": 0.6706989247311829,
-    "hybrid_ndcg": 0.6603443467936309,
-    "delta_ndcg": 0.03838010117237811,
+    "hybrid_ndcg": 0.655068925437755,
+    "delta_ndcg": 0.033104679816502225,
     "queries": 62,
     "documents": 60,
 }

@@ -105,7 +105,8 @@ def query(question: str, db: str = "", k: int = 10,
           rerank: bool = typer.Option(False, "--rerank",
             help="Opt-in overlap rerank; off by default (measured net-negative)")):
     from verifyci.interface.commands.query import run_query
-    result = run_query(question, db or None, k=k, rerank=rerank)
+    from verifyci.interface.limits import MAX_K
+    result = run_query(question, db or None, k=max(1, min(int(k or 10), MAX_K)), rerank=rerank)
     if "error" in result:
         # Empty results with an honest error key already; the exit code
         # must match, or a CI step that pipes query output reads a

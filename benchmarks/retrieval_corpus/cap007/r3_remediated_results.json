@@ -1,6 +1,6 @@
 {
   "benchmark_id": "CAP-007",
-  "timestamp_utc": "2026-10-07T06:01:25.426178+00:00",
+  "timestamp_utc": "2026-10-07T07:39:04.797859+00:00",
   "total_cases": 64,
   "total_nodes": 174779,
   "total_edges": 165570,
@@ -107,11 +107,11 @@
   },
   "performance": {
     "overall_latencies_ms": {
-      "p50": 0.498,
-      "p90": 15.172,
-      "p95": 19.464,
-      "p99": 84.695,
-      "max": 90.019
+      "p50": 0.345,
+      "p90": 10.769,
+      "p95": 12.321,
+      "p99": 59.217,
+      "max": 71.569
     },
     "by_tier": {
       "S0_micro": {
@@ -123,11 +123,11 @@
         "max_edges": 207,
         "avg_edges": 70.3,
         "latencies_ms": {
-          "p50": 0.466,
-          "p90": 1.051,
-          "p95": 1.186,
-          "p99": 1.364,
-          "max": 1.364
+          "p50": 0.328,
+          "p90": 0.747,
+          "p95": 0.849,
+          "p99": 1.331,
+          "max": 1.331
         },
         "peak_memory_kb": 12.16
       },
@@ -140,11 +140,11 @@
         "max_edges": 10099,
         "avg_edges": 4482.5,
         "latencies_ms": {
-          "p50": 4.052,
-          "p90": 19.464,
-          "p95": 19.464,
-          "p99": 32.05,
-          "max": 32.05
+          "p50": 2.237,
+          "p90": 12.321,
+          "p95": 12.321,
+          "p99": 16.482,
+          "max": 16.482
         },
         "peak_memory_kb": 470.62
       },
@@ -157,11 +157,11 @@
         "max_edges": 50001,
         "avg_edges": 50000.0,
         "latencies_ms": {
-          "p50": 84.695,
-          "p90": 90.019,
-          "p95": 90.019,
-          "p99": 90.019,
-          "max": 90.019
+          "p50": 59.217,
+          "p90": 71.569,
+          "p95": 71.569,
+          "p99": 71.569,
+          "max": 71.569
         },
         "peak_memory_kb": 3840.57
       },
@@ -174,11 +174,11 @@
         "max_edges": 1,
         "avg_edges": 0.2,
         "latencies_ms": {
-          "p50": 0.121,
-          "p90": 0.134,
-          "p95": 0.246,
-          "p99": 0.246,
-          "max": 0.246
+          "p50": 0.056,
+          "p90": 0.06,
+          "p95": 0.139,
+          "p99": 0.139,
+          "max": 0.139
         },
         "peak_memory_kb": 4.33
       }
@@ -272,10 +272,10 @@
       "evidence": "8/8 caught fail-closed"
     },
     "T7_production_latency_compliance": {
-      "s1_p95_ms": 19.464,
+      "s1_p95_ms": 12.321,
       "target": "p95 < 50.0ms on Production Tier S1 (>=10,000 nodes)",
       "status": "PASS",
-      "evidence": "Tier S1 p95 = 19.464ms (Tier S2 p95 = 90.019ms)"
+      "evidence": "Tier S1 p95 = 12.321ms (Tier S2 p95 = 71.569ms)"
     },
     "T8_overall_corpus_agreement": {
       "metric": 1.0,
@@ -323,7 +323,7 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.6263999966904521,
+      "latency_ms": 1.3312999944901094,
       "peak_bytes": 7088,
       "predicted_rationale": "Traversal completed with 7 impacted entities"
     },
@@ -357,7 +357,7 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.43459999142214656,
+      "latency_ms": 1.004700010525994,
       "peak_bytes": 6632,
       "predicted_rationale": "Traversal completed with 8 impacted entities"
     },
@@ -391,7 +391,7 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.4507999983616173,
+      "latency_ms": 0.23750000400468707,
       "peak_bytes": 8608,
       "predicted_rationale": "Traversal completed with 8 impacted entities"
     },
@@ -425,7 +425,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.4594000056385994,
+      "latency_ms": 0.24359999224543571,
       "peak_bytes": 8664,
       "predicted_rationale": "Traversal completed with 8 impacted entities"
     },
@@ -459,7 +459,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.46409999777097255,
+      "latency_ms": 0.25440000172238797,
       "peak_bytes": 8728,
       "predicted_rationale": "Traversal completed with 8 impacted entities"
     },
@@ -493,7 +493,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 2.441700009512715,
+      "latency_ms": 1.3384000048972666,
       "peak_bytes": 111176,
       "predicted_rationale": "Traversal completed with 4 impacted entities"
     },
@@ -527,7 +527,7 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 14.74640000378713,
+      "latency_ms": 10.828200000105426,
       "peak_bytes": 442952,
       "predicted_rationale": "Traversal completed with 5 impacted entities"
     },
@@ -553,9 +553,9 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": false,
       "cache_deterministic": true,
-      "latency_ms": 0.07090000144671649,
-      "peak_bytes": 2098,
-      "predicted_rationale": "Traversal halted with error: TraversalInconclusiveError: Target entity mod.orphan lacks parent package boundary manifest or module boundary declaration"
+      "latency_ms": 0.05699999746866524,
+      "peak_bytes": 2074,
+      "predicted_rationale": "Traversal halted with error: TraversalInconclusiveError: Target entity mod.orphan lacks source file definition / incomplete retrieval state"
     },
     {
       "id": "SCALE-MONO-01",
@@ -587,7 +587,7 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.4685000021709129,
+      "latency_ms": 0.3360999980941415,
       "peak_bytes": 6232,
       "predicted_rationale": "Traversal completed with 7 impacted entities"
     },
@@ -621,7 +621,7 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.44979999074712396,
+      "latency_ms": 0.3043000033358112,
       "peak_bytes": 6304,
       "predicted_rationale": "Traversal completed with 7 impacted entities"
     },
@@ -655,7 +655,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.44249999336898327,
+      "latency_ms": 0.4104999970877543,
       "peak_bytes": 8952,
       "predicted_rationale": "Traversal completed with 7 impacted entities"
     },
@@ -689,7 +689,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.4391999973449856,
+      "latency_ms": 0.3296000068075955,
       "peak_bytes": 9176,
       "predicted_rationale": "Traversal completed with 7 impacted entities"
     },
@@ -723,7 +723,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.46699999074917287,
+      "latency_ms": 0.3321999975014478,
       "peak_bytes": 9432,
       "predicted_rationale": "Traversal completed with 7 impacted entities"
     },
@@ -757,7 +757,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 3.408000004128553,
+      "latency_ms": 2.145799997379072,
       "peak_bytes": 111176,
       "predicted_rationale": "Traversal completed with 4 impacted entities"
     },
@@ -791,7 +791,7 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 84.69489999697544,
+      "latency_ms": 71.56870000471827,
       "peak_bytes": 3932744,
       "predicted_rationale": "Traversal completed with 5 impacted entities"
     },
@@ -817,7 +817,7 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": false,
       "cache_deterministic": true,
-      "latency_ms": 0.2457999944454059,
+      "latency_ms": 0.13929999840911478,
       "peak_bytes": 4434,
       "predicted_rationale": "Traversal halted with error: TraversalInconclusiveError: Forbidden cross-boundary traversal detected on edge ({'cross_boundary': 'forbidden', 'security_boundary': 'isolated'})"
     },
@@ -851,7 +851,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.6512000109069049,
+      "latency_ms": 0.45519998820964247,
       "peak_bytes": 9088,
       "predicted_rationale": "Traversal completed with 23 impacted entities"
     },
@@ -885,7 +885,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.7631999906152487,
+      "latency_ms": 0.5197999998927116,
       "peak_bytes": 9472,
       "predicted_rationale": "Traversal completed with 31 impacted entities"
     },
@@ -919,7 +919,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.9108999947784469,
+      "latency_ms": 0.6192000000737607,
       "peak_bytes": 11408,
       "predicted_rationale": "Traversal completed with 39 impacted entities"
     },
@@ -953,7 +953,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 1.0506999969948083,
+      "latency_ms": 0.7470999989891425,
       "peak_bytes": 12448,
       "predicted_rationale": "Traversal completed with 47 impacted entities"
     },
@@ -987,7 +987,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 1.2962000037077814,
+      "latency_ms": 0.8491000044159591,
       "peak_bytes": 12448,
       "predicted_rationale": "Traversal completed with 55 impacted entities"
     },
@@ -1021,7 +1021,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 2.1185999939916655,
+      "latency_ms": 1.2934999977005646,
       "peak_bytes": 111176,
       "predicted_rationale": "Traversal completed with 1 impacted entities"
     },
@@ -1055,7 +1055,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 18.135000005713664,
+      "latency_ms": 9.021599995321594,
       "peak_bytes": 442952,
       "predicted_rationale": "Traversal completed with 1 impacted entities"
     },
@@ -1081,9 +1081,9 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": false,
       "cache_deterministic": true,
-      "latency_ms": 0.13359999866224825,
-      "peak_bytes": 2100,
-      "predicted_rationale": "Traversal halted with error: TraversalInconclusiveError: Target entity hub.extreme lacks parent package boundary manifest or module boundary declaration"
+      "latency_ms": 0.06040000880602747,
+      "peak_bytes": 2076,
+      "predicted_rationale": "Traversal halted with error: TraversalInconclusiveError: Target entity hub.extreme lacks source file definition / incomplete retrieval state"
     },
     {
       "id": "SCALE-CHAIN-01",
@@ -1115,7 +1115,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.4661999992094934,
+      "latency_ms": 0.20120000408496708,
       "peak_bytes": 2624,
       "predicted_rationale": "Traversal completed with 3 impacted entities"
     },
@@ -1149,7 +1149,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.36360000376589596,
+      "latency_ms": 0.16929999401327223,
       "peak_bytes": 3160,
       "predicted_rationale": "Traversal completed with 3 impacted entities"
     },
@@ -1183,7 +1183,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.39000000106170774,
+      "latency_ms": 0.19249999604653567,
       "peak_bytes": 3160,
       "predicted_rationale": "Traversal completed with 3 impacted entities"
     },
@@ -1217,7 +1217,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.4271000070730224,
+      "latency_ms": 0.16349999350495636,
       "peak_bytes": 3200,
       "predicted_rationale": "Traversal completed with 3 impacted entities"
     },
@@ -1251,7 +1251,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.3868000057991594,
+      "latency_ms": 0.1931000006152317,
       "peak_bytes": 3160,
       "predicted_rationale": "Traversal completed with 3 impacted entities"
     },
@@ -1285,7 +1285,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 2.381400001468137,
+      "latency_ms": 2.6480999949853867,
       "peak_bytes": 111176,
       "predicted_rationale": "Traversal completed with 6 impacted entities"
     },
@@ -1319,7 +1319,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 19.463899996480905,
+      "latency_ms": 12.320699999690987,
       "peak_bytes": 442952,
       "predicted_rationale": "Traversal completed with 6 impacted entities"
     },
@@ -1345,7 +1345,7 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": false,
       "cache_deterministic": true,
-      "latency_ms": 0.06880000000819564,
+      "latency_ms": 0.05490001058205962,
       "peak_bytes": 1794,
       "predicted_rationale": "Traversal halted with error: TraversalInconclusiveError: Requested traversal depth 999 exceeds maximum bounded depth limit (50)"
     },
@@ -1379,7 +1379,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.32530000316910446,
+      "latency_ms": 0.24110000231303275,
       "peak_bytes": 3208,
       "predicted_rationale": "Traversal completed with 6 impacted entities"
     },
@@ -1413,7 +1413,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.27900001441594213,
+      "latency_ms": 0.19859999883919954,
       "peak_bytes": 3152,
       "predicted_rationale": "Traversal completed with 6 impacted entities"
     },
@@ -1447,7 +1447,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.27260000933893025,
+      "latency_ms": 0.19629999587778002,
       "peak_bytes": 3688,
       "predicted_rationale": "Traversal completed with 6 impacted entities"
     },
@@ -1481,7 +1481,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.49819999549072236,
+      "latency_ms": 0.19789999350905418,
       "peak_bytes": 3704,
       "predicted_rationale": "Traversal completed with 6 impacted entities"
     },
@@ -1515,7 +1515,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.338099998771213,
+      "latency_ms": 0.20009999570902437,
       "peak_bytes": 3704,
       "predicted_rationale": "Traversal completed with 6 impacted entities"
     },
@@ -1549,7 +1549,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 2.5191999884555116,
+      "latency_ms": 1.743100001476705,
       "peak_bytes": 111176,
       "predicted_rationale": "Traversal completed with 4 impacted entities"
     },
@@ -1583,7 +1583,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 15.584900000249036,
+      "latency_ms": 10.768799998913892,
       "peak_bytes": 442952,
       "predicted_rationale": "Traversal completed with 4 impacted entities"
     },
@@ -1609,9 +1609,9 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": false,
       "cache_deterministic": true,
-      "latency_ms": 0.08209999941755086,
-      "peak_bytes": 2098,
-      "predicted_rationale": "Traversal halted with error: TraversalInconclusiveError: Target entity cycle.trap lacks parent package boundary manifest or module boundary declaration"
+      "latency_ms": 0.05199998850002885,
+      "peak_bytes": 2074,
+      "predicted_rationale": "Traversal halted with error: TraversalInconclusiveError: Target entity cycle.trap lacks source file definition / incomplete retrieval state"
     },
     {
       "id": "SCALE-GEN-01",
@@ -1643,7 +1643,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.6439999997382984,
+      "latency_ms": 0.35489999572746456,
       "peak_bytes": 3624,
       "predicted_rationale": "Traversal completed with 4 impacted entities"
     },
@@ -1677,7 +1677,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.7932000007713214,
+      "latency_ms": 0.4393999988678843,
       "peak_bytes": 5056,
       "predicted_rationale": "Traversal completed with 5 impacted entities"
     },
@@ -1711,7 +1711,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 1.0889999975915998,
+      "latency_ms": 0.5303000070853159,
       "peak_bytes": 5400,
       "predicted_rationale": "Traversal completed with 6 impacted entities"
     },
@@ -1745,7 +1745,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 1.1855000047944486,
+      "latency_ms": 0.6373999931383878,
       "peak_bytes": 6800,
       "predicted_rationale": "Traversal completed with 7 impacted entities"
     },
@@ -1779,7 +1779,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 1.3639999961014837,
+      "latency_ms": 0.7526999979745597,
       "peak_bytes": 7224,
       "predicted_rationale": "Traversal completed with 8 impacted entities"
     },
@@ -1813,7 +1813,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 4.052000003866851,
+      "latency_ms": 2.237400010926649,
       "peak_bytes": 111176,
       "predicted_rationale": "Traversal completed with 4 impacted entities"
     },
@@ -1847,7 +1847,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 90.01949999947101,
+      "latency_ms": 59.21669999952428,
       "peak_bytes": 3932744,
       "predicted_rationale": "Traversal completed with 4 impacted entities"
     },
@@ -1873,9 +1873,9 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": false,
       "cache_deterministic": true,
-      "latency_ms": 0.1213000068673864,
-      "peak_bytes": 2184,
-      "predicted_rationale": "Traversal halted with error: TraversalInconclusiveError: Target entity dense.explode lacks parent package boundary manifest or module boundary declaration"
+      "latency_ms": 0.05560000136028975,
+      "peak_bytes": 2160,
+      "predicted_rationale": "Traversal halted with error: TraversalInconclusiveError: Target entity dense.explode lacks source file definition / incomplete retrieval state"
     },
     {
       "id": "SCALE-SPARSE-01",
@@ -1907,7 +1907,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.33990001247730106,
+      "latency_ms": 0.18540000019129366,
       "peak_bytes": 3704,
       "predicted_rationale": "Traversal completed with 4 impacted entities"
     },
@@ -1941,7 +1941,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.35000000207219273,
+      "latency_ms": 0.1551000023027882,
       "peak_bytes": 3768,
       "predicted_rationale": "Traversal completed with 4 impacted entities"
     },
@@ -1975,7 +1975,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.3544999926816672,
+      "latency_ms": 0.15589999384246767,
       "peak_bytes": 4792,
       "predicted_rationale": "Traversal completed with 4 impacted entities"
     },
@@ -2009,7 +2009,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.33409999741706997,
+      "latency_ms": 0.15659999917261302,
       "peak_bytes": 4792,
       "predicted_rationale": "Traversal completed with 4 impacted entities"
     },
@@ -2043,7 +2043,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.33310000435449183,
+      "latency_ms": 0.16129999130498618,
       "peak_bytes": 4888,
       "predicted_rationale": "Traversal completed with 4 impacted entities"
     },
@@ -2077,7 +2077,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 2.872400000342168,
+      "latency_ms": 1.600000003236346,
       "peak_bytes": 111176,
       "predicted_rationale": "Traversal completed with 6 impacted entities"
     },
@@ -2111,7 +2111,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 15.171899998676963,
+      "latency_ms": 11.360100004822016,
       "peak_bytes": 442952,
       "predicted_rationale": "Traversal completed with 6 impacted entities"
     },
@@ -2137,9 +2137,9 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": false,
       "cache_deterministic": true,
-      "latency_ms": 0.12229999992996454,
-      "peak_bytes": 2182,
-      "predicted_rationale": "Traversal halted with error: TraversalInconclusiveError: Target entity sparse.valid lacks parent package boundary manifest or module boundary declaration"
+      "latency_ms": 0.052799994591623545,
+      "peak_bytes": 2158,
+      "predicted_rationale": "Traversal halted with error: TraversalInconclusiveError: Target entity sparse.valid lacks source file definition / incomplete retrieval state"
     },
     {
       "id": "SCALE-DISAGREE-01",
@@ -2171,7 +2171,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.5174999969312921,
+      "latency_ms": 0.29830000130459666,
       "peak_bytes": 5432,
       "predicted_rationale": "Traversal completed with 14 impacted entities"
     },
@@ -2205,7 +2205,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.46799999836366624,
+      "latency_ms": 0.3446999908192083,
       "peak_bytes": 6560,
       "predicted_rationale": "Traversal completed with 18 impacted entities"
     },
@@ -2239,7 +2239,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.5311999993864447,
+      "latency_ms": 0.32750000536907464,
       "peak_bytes": 8128,
       "predicted_rationale": "Traversal completed with 22 impacted entities"
     },
@@ -2273,7 +2273,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 1.0073000012198463,
+      "latency_ms": 0.367300002835691,
       "peak_bytes": 8128,
       "predicted_rationale": "Traversal completed with 26 impacted entities"
     },
@@ -2307,7 +2307,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 0.6896000122651458,
+      "latency_ms": 0.41229999624192715,
       "peak_bytes": 8128,
       "predicted_rationale": "Traversal completed with 30 impacted entities"
     },
@@ -2341,7 +2341,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 4.194300010567531,
+      "latency_ms": 1.9694999937200919,
       "peak_bytes": 115672,
       "predicted_rationale": "Traversal completed with 150 impacted entities"
     },
@@ -2375,7 +2375,7 @@
       "blast_deps_agreed": true,
       "blast_risk_agreed": true,
       "cache_deterministic": true,
-      "latency_ms": 32.049899993580766,
+      "latency_ms": 16.482100007124245,
       "peak_bytes": 481912,
       "predicted_rationale": "Traversal completed with 1000 impacted entities"
     },
@@ -2401,9 +2401,9 @@
       "blast_deps_agreed": false,
       "blast_risk_agreed": false,
       "cache_deterministic": true,
-      "latency_ms": 0.09859999408945441,
-      "peak_bytes": 2100,
-      "predicted_rationale": "Traversal halted with error: TraversalInconclusiveError: Target entity poison.seed lacks parent package boundary manifest or module boundary declaration"
+      "latency_ms": 0.04769999941345304,
+      "peak_bytes": 2076,
+      "predicted_rationale": "Traversal halted with error: TraversalInconclusiveError: Target entity poison.seed lacks source file definition / incomplete retrieval state"
     }
   ]
 }

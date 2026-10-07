@@ -10,6 +10,9 @@ def run_deps(path: str = ".") -> dict:
     Uses `iter_repo_files` so a manifest under node_modules/, a
     virtualenv, `.git/`, or a `.verifyciignore`d path is excluded here
     exactly as it is during ingest (the two paths used to disagree).
+    `file_path` passed to extraction is the repo-relative path (same as
+    ingest), so edge ids, src ids, and manifest_errors agree across
+    both discovery paths.
     """
     repo = Path(path)
     result: dict[str, list] = {}
@@ -18,14 +21,15 @@ def run_deps(path: str = ".") -> dict:
         if file.name not in DEPENDENCY_FILES:
             continue
         ecosystem = DEPENDENCY_FILES[file.name]
+        rel = file.relative_to(repo).as_posix()
         edges = extract_dependencies(
-            file.name,
+            rel,
             # Same deterministic decode as ingest (utf-8-sig, BOM-safe):
             # the two discovery paths must agree on manifest bytes or
             # deps and the graph disagree about what the manifest says.
             file.read_text(encoding="utf-8-sig", errors="replace"),
             errors=errors)
-        result[file.relative_to(repo).as_posix()] = [
+        result[rel] = [
             {"package": e.metadata.get("package"), "version": e.metadata.get("version"), "ecosystem": ecosystem}
             for e in edges
         ]

@@ -34,6 +34,28 @@ from verifyci.secrets.rules import RuleRegistry, get_default_rules
 from verifyci.verification.diffmap import iter_added_lines_with_lineno
 
 
+#: Cap on a single scanned line/buffer: matches BoundedDecoder's 2048
+#: posture so per-line regex evaluation stays linear-time.
+_MAX_LINE_SCAN_BYTES = 2048
+#: Caps on the multiline continuation buffer (count and total bytes).
+_MAX_MULTILINE_LINES = 200
+_MAX_MULTILINE_BYTES = 32_768
+
+
+def _spans_intersect(
+    a: tuple[int | None, int | None],
+    b: tuple[int | None, int | None],
+) -> bool:
+    """True when two [start, end) column spans overlap.
+
+    A missing (None) bound is treated as intersecting (fail-closed):
+    without coordinates we cannot prove disjointness.
+    """
+    if a[0] is None or a[1] is None or b[0] is None or b[1] is None:
+        return True
+    return max(a[0], b[0]) < min(a[1], b[1])
+
+
 class SecretDetector:
     """Provenance-aware, multi-signal secret detector."""
 
@@ -42,14 +64,16 @@ class SecretDetector:
         registry: RuleRegistry | None = None,
         max_diff_bytes: int = 2_000_000,
         max_candidates: int = 1000,
+        max_decode_depth: int = 2,
         timeout_seconds: float = 10.0,
     ):
         self.registry = registry or RuleRegistry(get_default_rules())
         self.prefilter = PrefilterIndex(self.registry.rules)
-        self.decoder = BoundedDecoder(max_depth=2)
+        self.decoder = BoundedDecoder(max_depth=max_decode_depth)
         self.composite_engine = CompositeSignalEngine()
         self.max_diff_bytes = max_diff_bytes
         self.max_candidates = max_candidates
+        self.max_decode_depth = max_decode_depth
         self.timeout_seconds = timeout_seconds
         self.rule_config_hash = compute_rule_config_hash(self.registry.rules)
 
@@ -67,7 +91,15 @@ class SecretDetector:
                 limit_type="diff_size",
             )
 
-        ctx = context or DetectorContext(timeout_seconds=self.timeout_seconds)
+        ctx = context or DetectorContext(
+            timeout_seconds=self.timeout_seconds,
+            max_candidates=self.max_candidates,
+            max_decode_depth=self.max_decode_depth,
+        )
+        # Honor caller-supplied limits: decoder depth and composite fan-out
+        # follow the active context, not just constructor defaults.
+        self.decoder.max_depth = ctx.max_decode_depth
+        self.composite_engine.max_combinations = ctx.max_component_combinations
         raw_candidates: list[SecretFinding] = []
 
         # 1. Parse added lines grouped by file
@@ -114,6 +146,14 @@ class SecretDetector:
                 # Multiline tracking
                 in_multiline = st[0] is not None or st[1] > 0 or st[2]
                 if in_multiline:
+                    if len(st[3]) >= _MAX_MULTILINE_LINES or (
+                        sum(len(x) for x in st[3]) + len(content) > _MAX_MULTILINE_BYTES
+                    ):
+                        raise ResourceLimitExceeded(
+                            "Multiline buffer exceeded "
+                            f"({_MAX_MULTILINE_LINES} lines / {_MAX_MULTILINE_BYTES} bytes)",
+                            limit_type="multiline_buffer",
+                        )
                     st[3].append(content)
                     joined = " ".join(st[3])
                     clean_joined = re.sub(r"\\\s*", "", joined)
@@ -200,6 +240,11 @@ class SecretDetector:
         context_signals_map: dict[int, list[DetectionSignal]],
     ) -> list[SecretFinding]:
         """Scan a single content line or joined multiline buffer."""
+        if len(content) > _MAX_LINE_SCAN_BYTES:
+            raise ResourceLimitExceeded(
+                f"Line length {len(content)} exceeds limit {_MAX_LINE_SCAN_BYTES}",
+                limit_type="line_length",
+            )
         findings: list[SecretFinding] = []
         eligible_rules = self.prefilter.eligible_rules_for_line(content)
 
@@ -409,7 +454,11 @@ class SecretDetector:
         return results
 
     def _resolve_overlaps(self, candidates: list[SecretFinding]) -> list[SecretFinding]:
-        """Resolve competing overlapping findings by specificity while retaining all in evidence."""
+        """Resolve competing overlapping findings by specificity while retaining all in evidence.
+
+        Only findings whose column spans actually intersect are superseded;
+        non-overlapping findings on the same line stay active.
+        """
         if not candidates:
             return []
 
@@ -434,11 +483,22 @@ class SecretDetector:
                 return r.specificity if r else 0
 
             active.sort(key=_spec, reverse=True)
-            winner = active[0]
-            final_findings.append(winner)
+            kept: list[SecretFinding] = []
+            demoted: list[tuple[SecretFinding, SecretFinding]] = []
+            for cand in active:
+                cand_span = (cand.col_start, cand.col_end)
+                blocker = next(
+                    (k for k in kept if _spans_intersect((k.col_start, k.col_end), cand_span)),
+                    None,
+                )
+                if blocker is None:
+                    kept.append(cand)
+                else:
+                    demoted.append((cand, blocker))
+            final_findings.extend(kept)
 
-            # Mark other overlapping active candidates as superseded
-            for loser in active[1:]:
+            # Mark only genuinely intersecting active candidates as superseded
+            for loser, winner in demoted:
                 new_suppression = SuppressionDecision(
                     suppressed=True,
                     reason="superseded_by_specific_rule",

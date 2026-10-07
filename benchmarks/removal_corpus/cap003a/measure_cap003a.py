@@ -281,7 +281,35 @@ def evaluate_cap003a() -> dict[str, Any]:
     results_json = HERE / "results.json"
     results_md = HERE / "RESULTS.md"
 
-    results_json.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    all_predicates_pass = all(predicates.values())
+    decision = "PROMOTE" if all_predicates_pass else "HOLD"
+    status = "ESTABLISHED" if all_predicates_pass else "MEASURED"
+    report["adjudication_verdict"] = decision
+    report["adjudication_status"] = status
+
+    fab_total = sum(1 for c in cases if labels[c["id"]]["expected"] == "FABRICATED")
+    fab_caught = sum(
+        1
+        for c in cases
+        if labels[c["id"]]["expected"] == "FABRICATED"
+        and r1_results[c["id"]][0] == "FABRICATED"
+    )
+    ver_total = sum(1 for c in cases if labels[c["id"]]["expected"] == "VERIFIED")
+    ver_caught = sum(
+        1
+        for c in cases
+        if labels[c["id"]]["expected"] == "VERIFIED"
+        and r1_results[c["id"]][0] == "VERIFIED"
+    )
+    inc_total = sum(1 for c in cases if labels[c["id"]]["expected"] == "INCONCLUSIVE")
+    inc_caught = sum(
+        1
+        for c in cases
+        if labels[c["id"]]["expected"] == "INCONCLUSIVE"
+        and r1_results[c["id"]][0] == "INCONCLUSIVE"
+    )
+
+    results_json.write_text(json.dumps(report, indent=2), encoding="utf-8", newline="\n")
 
     md_content = f"""# CAP-003A Benchmark Results: Path-Sensitive Removal Provenance
 
@@ -295,9 +323,9 @@ def evaluate_cap003a() -> dict[str, Any]:
 | Metric | R0 (Legacy Removal Checker) | R1 (Redesigned Provenance Checker) |
 | :--- | :---: | :---: |
 | **Overall Agreement** | {stats_r0['agreement']:.4f} ({stats_r0['correct_count']}/{stats_r0['total_count']}) | **{stats_r1['agreement']:.4f} ({stats_r1['correct_count']}/{stats_r1['total_count']})** |
-| **Fabricated Detection (FAIL)** | {stats_r0['fabricated_rate']:.4f} | **{stats_r1['fabricated_rate']:.4f} (100%)** |
-| **Genuine Removal Verified** | {stats_r0['genuine_verified_rate']:.4f} | **{stats_r1['genuine_verified_rate']:.4f} (100%)** |
-| **Inconclusive Provenance** | {stats_r0['inconclusive_rate']:.4f} | **{stats_r1['inconclusive_rate']:.4f} (100%)** |
+| **Fabricated Detection (FAIL)** | {stats_r0['fabricated_rate']:.4f} | **{stats_r1['fabricated_rate']:.4f}** |
+| **Genuine Removal Verified** | {stats_r0['genuine_verified_rate']:.4f} | **{stats_r1['genuine_verified_rate']:.4f}** |
+| **Inconclusive Provenance** | {stats_r0['inconclusive_rate']:.4f} | **{stats_r1['inconclusive_rate']:.4f}** |
 
 ## Slice Performance Breakdown
 
@@ -322,11 +350,11 @@ P4  Fabricated removal -> FAIL              {'PASS' if predicates['P4_fabricated
 P5  Genuine removal -> VERIFIED             {'PASS' if predicates['P5_genuine_removal_verified_gte_95'] else 'FAIL'} (100% >= 95%)
 P6  Unknown/incomplete provenance           {'PASS' if predicates['P6_incomplete_provenance_never_pass'] else 'FAIL'} (never PASS)
 P7  Path/entity disambiguation              {'PASS' if predicates['P7_path_disambiguation_100_percent'] else 'FAIL'} (100%)
-P8  No retroactive corpus modification      PASS
-P9  No secret/evidence leakage              PASS
-P10 Resource bounds                         PASS
-P11 Full regression suite                   PASS (1068 passed, 0 failed)
-P12 Clean-room / provenance integrity       PASS
+P8  No retroactive corpus modification      {'PASS' if predicates['P8_no_retroactive_modification'] else 'FAIL'}
+P9  No secret/evidence leakage              {'PASS' if predicates['P9_no_secret_leakage'] else 'FAIL'}
+P10 Resource bounds                         {'PASS' if predicates['P10_resource_bounds_enforced'] else 'FAIL'}
+P11 Full regression suite                   {'PASS' if predicates['P11_full_regression_suite'] else 'FAIL'} (attested, see CI)
+P12 Clean-room / provenance integrity       {'PASS' if predicates['P12_clean_room_integrity'] else 'FAIL'}
 ```
 
 ## Final Audit Conclusion Gate
@@ -334,18 +362,18 @@ P12 Clean-room / provenance integrity       PASS
 ```text
 CAP-003A
 ──────────────────────────────────────────────
-Decision:              PROMOTE
-Status:                ESTABLISHED
+Decision:              {decision}
+Status:                {status}
 
 R1:
-  Overall Agreement:   1.0000 (36/36)
-  Fabricated Catch:    1.0000 (13/13) -> FAIL
-  Genuine Verified:    1.0000 (13/13) -> VERIFIED
-  Inconclusive Prov:   1.0000 (10/10) -> INCONCLUSIVE
+  Overall Agreement:   {stats_r1['agreement']:.4f} ({stats_r1['correct_count']}/{stats_r1['total_count']})
+  Fabricated Catch:    {stats_r1['fabricated_rate']:.4f} ({fab_caught}/{fab_total}) -> FAIL
+  Genuine Verified:    {stats_r1['genuine_verified_rate']:.4f} ({ver_caught}/{ver_total}) -> VERIFIED
+  Inconclusive Prov:   {stats_r1['inconclusive_rate']:.4f} ({inc_caught}/{inc_total}) -> INCONCLUSIVE
 
 Resolved Limitations:
   Path Suffix Collision: RESOLVED (zero false matches across bare filenames)
-  2,000-char Snippet Cap: RESOLVED (unbounded per-line provenance hashes)
+  2,000-char Snippet Cap: RESOLVED (per-line provenance hashes remove fixed 2,000-char coverage boundary, subject to resource limits)
   Enclosing Hierarchy:   RESOLVED (innermost & nested scope verification)
 
 Safety & Invariants:
@@ -356,11 +384,11 @@ Integrity:
   Corpus frozen:       YES (SHA-256: {c_hash})
   Labels frozen:       YES (SHA-256: {l_hash})
   CAP-002/002B:        PRESERVED & UNTOUCHED
-  Regression suite:    1068 passed, 6 skipped, 0 failed
+  Regression suite:    {'PASS (attested, see CI)' if predicates['P11_full_regression_suite'] else 'FAIL'}
 ──────────────────────────────────────────────
 ```
 """
-    results_md.write_text(md_content, encoding="utf-8")
+    results_md.write_text(md_content, encoding="utf-8", newline="\n")
     print("CAP-003A Evaluation Complete:")
     print(f"R0 Agreement: {stats_r0['agreement']:.4f} ({stats_r0['correct_count']}/{stats_r0['total_count']})")
     print(f"R1 Agreement: {stats_r1['agreement']:.4f} ({stats_r1['correct_count']}/{stats_r1['total_count']})")

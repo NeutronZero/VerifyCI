@@ -52,6 +52,7 @@ class GraphRetriever:
         self.graph = graph
         self.node_map = node_map or {}
         self._cached_adj = None
+        self._cached_adj_size: int | None = None
 
     def retrieve(self, seed_entity_ids: list[str], max_hops: int = 2) -> list[SearchResult]:
         if self.graph is None or max_hops <= 0 or not seed_entity_ids:
@@ -100,6 +101,14 @@ class GraphRetriever:
             predecessors = getattr(self.graph, "predecessors", None)
             if not (callable(successors) or callable(predecessors)):
                 return []
+            # Fail-closed fallback: without edge payloads the traversable
+            # filter cannot be enforced for index-addressed graphs. Str-id
+            # legacy graphs (old test fakes) traverse unfiltered by
+            # explicit legacy contract below; int-index graphs without an
+            # edge-data API return no unfiltered partials — they skip
+            # per-edge (fail closed) instead of silently mixing CONTAINS
+            # and DOCUMENTS neighbours into semantic results.
+            has_edge_api = callable(getattr(self.graph, "get_all_edge_data", None))
             seeds = ([self.node_map[eid] for eid in seed_entity_ids
                       if eid in self.node_map]
                      + [eid for eid in seed_entity_ids
@@ -126,10 +135,26 @@ class GraphRetriever:
                         for raw in neighbors:
                             neighbor = as_index(raw, self.node_map)
                             if neighbor is None and isinstance(raw, str):
+                                # Legacy str-id graphs only: no edge payloads
+                                # exist to filter on, so traversal is
+                                # explicitly unfiltered (old-shape contract,
+                                # covered by test). Int-index graphs never
+                                # take this path — see below.
                                 neighbor = raw
                             if neighbor is None or neighbor in visited:
                                 continue
                             if isinstance(u, int) and isinstance(neighbor, int):
+                                if not has_edge_api and isinstance(raw, int):
+                                    # Raw index-addressed graph without an
+                                    # edge-data API: traversability
+                                    # unverifiable — fail closed per-edge
+                                    # (skip) instead of emitting a silent
+                                    # unfiltered partial. Payload-resolved
+                                    # neighbours (adapter yields payload
+                                    # objects mapped via node_map) keep the
+                                    # established no-API contract
+                                    # (edge_allowed traverses unfiltered).
+                                    continue
                                 try:
                                     src, dst = (neighbor, u) if is_incoming else (u, neighbor)
                                     if not edge_allowed(self.graph, src, dst, _TRAVERSABLE_VALUES):
@@ -167,20 +192,29 @@ class GraphRetriever:
     def _adjacency_from_edges(self):
         """(outgoing, incoming) adjacency indices built from traversable edge payloads.
         Cached on the graph instance for zero-overhead index reuse across queries.
+        Cache key is the edge-index size: a mutated graph (new edges) must
+        not reuse a stale adjacency — size change invalidates both the
+        instance and graph-attached caches.
         """
-        cached = getattr(self.graph, "_verifyci_adj_cache", None)
-        if cached is not None:
-            return cached
-        if self._cached_adj is not None:
-            return self._cached_adj
-
         index = getattr(self.graph, "edge_index_map", None)
         if not callable(index):
             return None
+        try:
+            raw_index = index()
+            live_size = len(raw_index)
+        except Exception:  # noqa: BLE001 - unfamiliar adapter shape
+            return None
+        cached = getattr(self.graph, "_verifyci_adj_cache", None)
+        cached_size = getattr(self.graph, "_verifyci_adj_cache_size", None)
+        if cached is not None and cached_size == live_size:
+            return cached
+        if self._cached_adj is not None and self._cached_adj_size == live_size:
+            return self._cached_adj
+
         outgoing: dict[int, set[int]] = {}
         incoming: dict[int, set[int]] = {}
         try:
-            for _eidx, entry in index().items():
+            for _eidx, entry in raw_index.items():
                 src, dst, payload = entry[0], entry[1], entry[2]
                 if not _traversable(payload):
                     continue
@@ -190,8 +224,10 @@ class GraphRetriever:
             return None
         result = (outgoing, incoming)
         self._cached_adj = result
+        self._cached_adj_size = live_size
         try:
             self.graph._verifyci_adj_cache = result
+            self.graph._verifyci_adj_cache_size = live_size
         except Exception:
             pass
         return result

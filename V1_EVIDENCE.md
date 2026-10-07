@@ -127,8 +127,11 @@ stays exactly as frozen: the corpora, labels, first-run numbers, and the
 "mechanism 1 not repaired" classification are historically reproducible
 against tag `v1.0-evidence-baseline`. This addendum records a separate,
 later campaign that fixed demonstrated **correctness defects** (not
-tuning), and reports the measured deltas honestly. No frozen corpus,
-label, or threshold was altered; historical `results.json` files are
+tuning), and reports the measured deltas honestly. For the B1->C3
+baseline record, no frozen corpus, label, or threshold was altered,
+except the reviewed CAP-003 blast re-baseline (`benchmarks/blast_corpus/config.json:25`
+review note, commit d25f8a6), which re-derived the B6/B7 expected sets
+under the frozen mode protocol; other historical `results.json` files are
 byte-unchanged and their guards now dual-pin (historical + post-repair).
 
 Source drift since baseline: yes — this was a correctness campaign, so

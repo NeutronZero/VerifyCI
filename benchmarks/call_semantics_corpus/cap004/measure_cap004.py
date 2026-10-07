@@ -180,6 +180,17 @@ def main() -> None:
     c0_metrics = compute_slice_metrics(c0_verdicts, labels)
     c1_metrics = compute_slice_metrics(c1_verdicts, labels)
 
+    g_agreement = c1_metrics["agreement"] >= 0.95
+    g_far = c1_metrics["false_acceptance_rate"] == 0.0
+    g_fcr = c1_metrics["false_confidence_rate"] == 0.0
+    g_recall_fail = c1_metrics["recall_violations"] == 1.0
+    g_recall_ver = c1_metrics["recall_verified"] == 1.0
+    g_recall_inc = c1_metrics["recall_inconclusive"] == 1.0
+    all_gates_pass = all([
+        g_agreement, g_far, g_fcr, g_recall_fail, g_recall_ver, g_recall_inc,
+    ])
+    adjudication = "PROMOTE — ESTABLISHED" if all_gates_pass else "HOLD — MEASURED"
+
     report = {
         "experiment_id": "CAP-004",
         "title": "Argument-Value / Call-Semantics Verification",
@@ -194,9 +205,11 @@ def main() -> None:
         },
         "c0_verdicts": c0_verdicts,
         "c1_verdicts": c1_verdicts,
+        "adjudication": adjudication,
+        "all_gates_pass": all_gates_pass,
     }
 
-    results_json.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    results_json.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8", newline="\n")
 
     # Generate RESULTS.md
     md_lines = [
@@ -213,12 +226,12 @@ def main() -> None:
         "",
         "| Metric | C0 (Legacy Argument-Blind) | C1 (Call-Semantics Engine) | Target Gate Predicate | Status |",
         "|---|---:|---:|---:|---|",
-        f"| **Overall Agreement** | {c0_metrics['agreement']:.4f} ({c0_metrics['correct']}/{c0_metrics['total']}) | **{c1_metrics['agreement']:.4f}** ({c1_metrics['correct']}/{c1_metrics['total']}) | ≥ 0.9500 | **MET** |",
-        f"| **False Acceptance Rate (FAR)** | {c0_metrics['false_acceptance_rate']:.4f} | **{c1_metrics['false_acceptance_rate']:.4f}** | = 0.0000 | **MET** |",
-        f"| **False Confidence Rate (FCR)** | {c0_metrics['false_confidence_rate']:.4f} | **{c1_metrics['false_confidence_rate']:.4f}** | = 0.0000 | **MET** |",
-        f"| **Violation Detection Recall** | {c0_metrics['recall_violations']:.4f} | **{c1_metrics['recall_violations']:.4f}** | = 1.0000 | **MET** |",
-        f"| **Compliant Verification Recall** | {c0_metrics['recall_verified']:.4f} | **{c1_metrics['recall_verified']:.4f}** | = 1.0000 | **MET** |",
-        f"| **Dynamic Inconclusive Recall** | {c0_metrics['recall_inconclusive']:.4f} | **{c1_metrics['recall_inconclusive']:.4f}** | = 1.0000 | **MET** |",
+        f"| **Overall Agreement** | {c0_metrics['agreement']:.4f} ({c0_metrics['correct']}/{c0_metrics['total']}) | **{c1_metrics['agreement']:.4f}** ({c1_metrics['correct']}/{c1_metrics['total']}) | ≥ 0.9500 | **{'MET' if g_agreement else 'MISSED'}** |",
+        f"| **False Acceptance Rate (FAR)** | {c0_metrics['false_acceptance_rate']:.4f} | **{c1_metrics['false_acceptance_rate']:.4f}** | = 0.0000 | **{'MET' if g_far else 'MISSED'}** |",
+        f"| **False Confidence Rate (FCR)** | {c0_metrics['false_confidence_rate']:.4f} | **{c1_metrics['false_confidence_rate']:.4f}** | = 0.0000 | **{'MET' if g_fcr else 'MISSED'}** |",
+        f"| **Violation Detection Recall** | {c0_metrics['recall_violations']:.4f} | **{c1_metrics['recall_violations']:.4f}** | = 1.0000 | **{'MET' if g_recall_fail else 'MISSED'}** |",
+        f"| **Compliant Verification Recall** | {c0_metrics['recall_verified']:.4f} | **{c1_metrics['recall_verified']:.4f}** | = 1.0000 | **{'MET' if g_recall_ver else 'MISSED'}** |",
+        f"| **Dynamic Inconclusive Recall** | {c0_metrics['recall_inconclusive']:.4f} | **{c1_metrics['recall_inconclusive']:.4f}** | = 1.0000 | **{'MET' if g_recall_inc else 'MISSED'}** |",
         "",
         "## 3. Slice Breakdown",
         "",
@@ -251,19 +264,19 @@ def main() -> None:
         "- C1 detected conditional expressions permitting forbidden branches (`allow_builtins=True if debug else False`) and routed them to `FAIL`.",
         "",
         "## 5. Adjudication Predicates Matrix",
-        "- **Corpus & Labels Frozen**: PASS",
-        "- **False Acceptance Rate = 0.0000**: PASS (0/13 violations accepted)",
-        "- **False Confidence Rate = 0.0000**: PASS (0/10 ungrounded cases falsely verified)",
-        "- **Violation Detection Recall = 1.0000**: PASS (13/13 violations detected)",
-        "- **Compliant Verification Recall = 1.0000**: PASS (13/13 verified)",
-        "- **Dynamic Inconclusive Recall = 1.0000**: PASS (10/10 inconclusive)",
+        "- **Corpus & Labels Frozen**: PASS (SHA-256 asserted pre-measurement)",
+        f"- **False Acceptance Rate = 0.0000**: {'PASS' if g_far else 'FAIL'} ({c1_metrics['confusion']['FAIL']['VERIFIED']}/13 violations accepted)",
+        f"- **False Confidence Rate = 0.0000**: {'PASS' if g_fcr else 'FAIL'} (0/10 ungrounded cases falsely verified)",
+        f"- **Violation Detection Recall = 1.0000**: {'PASS' if g_recall_fail else 'FAIL'} ({c1_metrics['confusion']['FAIL']['FAIL']}/13 violations detected)",
+        f"- **Compliant Verification Recall = 1.0000**: {'PASS' if g_recall_ver else 'FAIL'} ({c1_metrics['confusion']['VERIFIED']['VERIFIED']}/13 verified)",
+        f"- **Dynamic Inconclusive Recall = 1.0000**: {'PASS' if g_recall_inc else 'FAIL'} ({c1_metrics['confusion']['INCONCLUSIVE']['INCONCLUSIVE']}/10 inconclusive)",
         "- **Policy Routing Safety**: PASS (Detected argument-semantic violations never produce PASS; default non-blocking tripwire escalates to HUMAN_REVIEW)",
-        "- **Full Pytest Suite**: PASS (1084 passed, 6 skipped, 0 failed)",
-        "- **Ruff Clean**: PASS (All checks passed)",
-        "- **Adjudication Decision**: **PROMOTE — ESTABLISHED**",
+        "- **Full Pytest Suite**: attested, see CI",
+        "- **Ruff Clean**: attested, see CI",
+        f"- **Adjudication Decision**: **{adjudication}**",
     ])
 
-    results_md.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
+    results_md.write_text("\n".join(md_lines) + "\n", encoding="utf-8", newline="\n")
     print("CAP-004 Evaluation Complete!")
     print(f"C0 Agreement: {c0_metrics['agreement']:.4f} ({c0_metrics['correct']}/{c0_metrics['total']}) | FAR: {c0_metrics['false_acceptance_rate']:.4f}")
     print(f"C1 Agreement: {c1_metrics['agreement']:.4f} ({c1_metrics['correct']}/{c1_metrics['total']}) | FAR: {c1_metrics['false_acceptance_rate']:.4f}")

@@ -10,3 +10,4 @@ input is newly rejected: unification only removes the copies.
 MAX_DIFF_CHARS = 1_000_000
 MAX_TASK_DIFF_CHARS = 100_000
 MAX_K = 1000
+MAX_QUERY_CHARS = 10_000

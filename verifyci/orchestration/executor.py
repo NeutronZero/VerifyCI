@@ -53,11 +53,15 @@ class Executor:
             from verifyci.verification.semi_formal_reason import SemiFormalReasoner
             from verifyci.verification.intent_align import evaluate_invariants
             from verifyci.verification.blast_radius import blast_radius_check
+            from verifyci.verification.config import is_policy_file
             from verifyci.verification.defaults import default_invariants
             from verifyci.verification.diffmap import parse_diff_files, seed_entities_for_diff
             from verifyci.verification.removal import removal_provenance_check
             from verifyci.verification.return_swap import return_statement_check
             from verifyci.verification.call_swap import call_target_check
+            from verifyci.verification.call_semantics import call_semantics_check
+            from verifyci.verification.guard_inversion import guard_condition_check
+            from verifyci.verification.import_resolution import import_resolution_check
             from verifyci.contracts.verification_ir import (
                 VerificationPolicy,
             )
@@ -102,6 +106,9 @@ class Executor:
             checks.append(removal_provenance_check(diff, graph_entities))
             checks.append(return_statement_check(diff))
             checks.append(call_target_check(diff))
+            checks.append(call_semantics_check(diff))
+            checks.append(guard_condition_check(diff))
+            checks.append(import_resolution_check(diff))
 
             if invariants:
                 inv_checks, _metrics = evaluate_invariants(
@@ -122,10 +129,22 @@ class Executor:
             )
             decision = evaluator.evaluate(report, policy)
 
+            import dataclasses
+            if decision.status != "FAIL" and any(
+                is_policy_file(f) for f in parse_diff_files(diff)
+            ):
+                # Base-Ref Policy Integrity, same as CLI verify: a diff
+                # that touches gate configuration cannot self-approve.
+                # FAIL preempts (fail-closed); anything else escalates.
+                decision = dataclasses.replace(
+                    decision,
+                    status="HUMAN_REVIEW",
+                    rationale="unverified_policy_change: gate configuration modified in diff",
+                )
+
             if decision.status == "FAIL":
                 raise VerificationBlocker(report, decision)
             if decision.status in ("HUMAN_REVIEW", "INCONCLUSIVE"):
                 raise HumanReviewRequired(report, decision)
 
-            import dataclasses
             return dataclasses.replace(result, decision=decision)

@@ -19,9 +19,10 @@ Narrow by construction:
   identical added callee fires (`f(a)` → `f(a) + g(b)` keeps `f`
   and stays silent; argument-only changes keep every callee and
   stay silent).
-- CODE_CORE exact hunks only (partition-gated like every other
-  diff-text check). Approximate (`@@@`) hunks are skipped, as are
-  comment/string-looking lines (`#`, `//`, `*`, quotes) and lines
+- CODE_CORE hunks only (partition-gated like every other
+  diff-text check). Approximate (`@@@`) hunks read as their stripped
+  lines, same as the return tripwire. Comment/string-looking lines
+  (`#`, `//`, `*`, quotes) and lines
   without an assignment split. Residual: trailing comments and
   multi-line block comments can misread — fail-closed review
   absorbs it (HUMAN_REVIEW, never FAIL).
@@ -69,8 +70,6 @@ def swapped_call_targets(diff: str | None) -> list[str]:
         if h.file is None:
             continue
         if classify_path(h.file) != FilePartition.CODE_CORE:
-            continue
-        if getattr(h, "approximate", False):
             continue
         removed: list[tuple[int, str]] = []
         added: list[str] = []

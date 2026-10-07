@@ -21,7 +21,8 @@ from verifyci.env import get_env
 from verifyci.interface.commands.query import run_query
 from verifyci.interface.commands.stats import run_stats
 from verifyci.interface.commands.verify import run_verify
-from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_K, MAX_TASK_DIFF_CHARS as MAX_TASK_CHARS
+from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_K, MAX_QUERY_CHARS
+from verifyci.interface.limits import MAX_TASK_DIFF_CHARS as MAX_TASK_CHARS
 
 app = FastAPI(title="VerifyCI")
 
@@ -86,6 +87,8 @@ def stats(db: str = "", _auth: None = Depends(require_auth)):
 @app.get("/search")
 def search(q: str, k: int = Query(default=10, ge=1, le=MAX_K), db: str = "",
            _auth: None = Depends(require_auth)):
+    if len(q) > MAX_QUERY_CHARS:
+        raise HTTPException(status_code=400, detail="query_too_large")
     return run_query(q, _sanitize_db(db), k=k)
 
 

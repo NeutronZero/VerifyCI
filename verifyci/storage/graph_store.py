@@ -438,6 +438,24 @@ class GraphStore:
 
     def get_latest_revision(self, repository_id: str):
         from verifyci.contracts.revision import Revision
+        # Route through the append-only ingests chain (same rule as
+        # latest_revision_id): ordering revisions by timestamp freezes
+        # "latest" at first observation, so a revert (old content
+        # reappearing) would never report the old revision as latest.
+        # Falls back to timestamp ordering only when the ingest log is
+        # empty (legacy/test DBs without ingest rows).
+        rev_id = latest_revision_id(self.conn, repository_id)
+        if rev_id:
+            row = self.conn.execute(
+                "SELECT * FROM revisions WHERE revision_id = ?",
+                (rev_id,),
+            ).fetchone()
+            if row is not None:
+                return Revision(
+                    revision_id=row[0], repository_id=row[1], commit_id=row[2],
+                    parent_revision_id=row[3], source_hash=row[4], timestamp=row[5],
+                    ingestion_config_hash=row[6],
+                )
         row = self.conn.execute(
             "SELECT * FROM revisions WHERE repository_id = ? ORDER BY timestamp DESC LIMIT 1",
             (repository_id,),
@@ -550,9 +568,11 @@ class GraphStore:
         return n_entities, len(gone)
 
     def close_superseded_entities(self, logical_ids: list[str], current_revision_id: str,
-                                   now: float) -> int:
+                                   now: float, repository_id: Optional[str] = None) -> int:
         """Close prior live versions (valid_until/t_expired) superseded by the
-        current revision. Chunked UPDATEs to avoid SQLITE_MAX_VARIABLE_NUMBER. Returns rows closed."""
+        current revision. Chunked UPDATEs to avoid SQLITE_MAX_VARIABLE_NUMBER. Returns rows closed.
+        Scoped by repository_id when provided so multi-repo DBs never close
+        each other's live rows."""
         ids = list(set(logical_ids))
         if not ids:
             return 0
@@ -560,12 +580,16 @@ class GraphStore:
         for i in range(0, len(ids), 500):
             chunk = ids[i:i + 500]
             placeholders = ",".join("?" for _ in chunk)
-            cur = self.conn.execute(
+            sql = (
                 "UPDATE entities SET valid_until = ?, t_expired = ?"
                 f" WHERE logical_entity_id IN ({placeholders}) AND revision_id != ?"
-                " AND valid_until IS NULL",
-                (now, now, *chunk, current_revision_id),
+                " AND valid_until IS NULL"
             )
+            params: list = [now, now, *chunk, current_revision_id]
+            if repository_id:
+                sql += " AND repository_id = ?"
+                params.append(repository_id)
+            cur = self.conn.execute(sql, params)
             total_closed += cur.rowcount
         self._maybe_commit()
         return total_closed
@@ -741,29 +765,44 @@ class GraphStore:
         return self._row_to_entity(row) if row else None
 
     def get_entity_by_name(self, name: str, revision_id: Optional[str] = None,
-                           as_of: Optional[float] = None) -> Optional[Entity]:
+                           as_of: Optional[float] = None,
+                           repository_id: Optional[str] = None) -> Optional[Entity]:
         # Without a revision this answers "latest live" deterministically —
         # never an arbitrary row across revisions (revision-scoping audit).
         # With as_of it answers valid-time travel instead, so renamed or
         # deleted names resolve per timestamp rather than to the live row.
+        # repository_id scopes all three branches so a shared multi-repo DB
+        # never resolves a name against another repository's rows.
         if revision_id is not None:
-            row = self.conn.execute(
-                "SELECT * FROM entities WHERE name = ? AND revision_id = ? LIMIT 1",
-                (name, revision_id),
-            ).fetchone()
+            sql = "SELECT * FROM entities WHERE name = ? AND revision_id = ?"
+            params: list = [name, revision_id]
+            if repository_id:
+                sql += " AND repository_id = ?"
+                params.append(repository_id)
+            row = self.conn.execute(sql + " LIMIT 1", params).fetchone()
         elif as_of is not None:
-            row = self.conn.execute(
+            sql = (
                 "SELECT * FROM entities WHERE name = ?"
                 " AND (valid_from IS NULL OR valid_from <= ?)"
                 " AND (valid_until IS NULL OR valid_until > ?)"
-                " ORDER BY valid_from DESC NULLS LAST LIMIT 1",
-                (name, as_of, as_of),
+            )
+            params = [name, as_of, as_of]
+            if repository_id:
+                sql += " AND repository_id = ?"
+                params.append(repository_id)
+            row = self.conn.execute(
+                sql + " ORDER BY valid_from DESC NULLS LAST LIMIT 1",
+                params,
             ).fetchone()
         else:
+            sql = "SELECT * FROM entities WHERE name = ? AND (t_expired IS NULL)"
+            params = [name]
+            if repository_id:
+                sql += " AND repository_id = ?"
+                params.append(repository_id)
             row = self.conn.execute(
-                "SELECT * FROM entities WHERE name = ? AND (t_expired IS NULL)"
-                " ORDER BY valid_from DESC NULLS LAST LIMIT 1",
-                (name,),
+                sql + " ORDER BY valid_from DESC NULLS LAST LIMIT 1",
+                params,
             ).fetchone()
         return self._row_to_entity(row) if row else None
 

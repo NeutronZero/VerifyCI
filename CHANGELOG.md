@@ -45,7 +45,7 @@
   `certificate_verified`, but partition fast paths (docs / valid config /
   test-only) verify with both empty by construction. Docstring now states
   the CODE_CORE vs fast-path conditions; README grounding rules and suite
-  counts updated to match (760 collected on this branch; end-to-end
+  counts updated to match (1115 collected on this branch; end-to-end
   non-code verdicts remain HUMAN_REVIEW, exit 2). No behavior changed.
 - **Headerless INI fragments decline instead of rejecting.**
   `_validate_configuration_diff` parsed hunk new-side lines as standalone
@@ -65,8 +65,8 @@
   83%→99%), `test_semi_formal_units` (semi_formal 84%→100%).
   Remaining misses are proven-unreachable defensive branches, each
   marked with a NOTE (triple-quote `elif`s after the `bare>=3` gate;
-  no-overlap deletion verdict; empty AST body). Suite 873 passed /
-  0 skipped with all three rerun guards (870 passed / 3 skipped
+  no-overlap deletion verdict; empty AST body). Suite 1112 passed /
+  3 skipped with all three rerun guards (1109 passed / 6 skipped
   default), total coverage 94%, ruff clean, zero warnings; new files
   ruff-format clean (repo-wide format stays unenforced, pre-existing
   files untouched).

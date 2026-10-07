@@ -3,7 +3,7 @@ import time as _time
 from typing import Any
 
 from verifyci.contracts.scheduler import TERMINAL_STATUSES
-from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_K, MAX_TASK_DIFF_CHARS
+from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_K, MAX_QUERY_CHARS, MAX_TASK_DIFF_CHARS
 
 
 class MCPServer:
@@ -161,6 +161,11 @@ class MCPServerHandlers:
 
         with start_agent_span("code.search", conversation_id, "code.search"):
             k = max(1, min(int(k or 10), MAX_K))
+            if len(query) > MAX_QUERY_CHARS:
+                _qstatus = "query_too_large"
+                _r = {"results": [], "query": query, "methods": [], "error": "query_too_large"}
+                _emit_log(_r)
+                return _r
             if self.graph is None:
                 _qstatus = "no_graph_loaded"
                 _r = {"results": [], "query": query, "methods": [], "error": "no_graph_loaded"}
@@ -206,6 +211,8 @@ class MCPServerHandlers:
             return out
 
     async def code_definition(self, symbol: str) -> dict:
+        if len(symbol) > MAX_QUERY_CHARS:
+            return {"symbol": symbol, "definition": None, "error": "query_too_large"}
         if self.store is None and symbol not in self.by_revision_id:
             return {"symbol": symbol, "definition": None, "error": "no_store_loaded"}
         entity = self._resolve_symbol(symbol)
@@ -216,6 +223,8 @@ class MCPServerHandlers:
         return {"symbol": symbol, "definition": None}
 
     async def graph_query(self, query: str, asOf: float | None = None) -> dict:
+        if len(query) > MAX_QUERY_CHARS:
+            return {"query": query, "asOf": asOf, "results": [], "error": "query_too_large"}
         if self.store is None and query not in self.by_revision_id:
             return {"query": query, "asOf": asOf, "results": [], "error": "no_store_loaded"}
         entity = self._resolve_symbol(query, asOf=asOf)
@@ -236,6 +245,14 @@ class MCPServerHandlers:
         from verifyci.verification.removal import removal_provenance_check
         from verifyci.verification.return_swap import return_statement_check
         from verifyci.verification.call_swap import call_target_check
+        from verifyci.verification.call_semantics import call_semantics_check
+        from verifyci.verification.guard_inversion import guard_condition_check
+        from verifyci.verification.import_resolution import import_resolution_check
+        from verifyci.verification.config import (
+            is_policy_file,
+            load_trusted_base_invariants,
+            load_trusted_base_waivers,
+        )
         from verifyci.verification.semi_formal_reason import SemiFormalReasoner
         from verifyci.verification.verification_ir import build_semi_check, build_verification_report
 
@@ -260,8 +277,21 @@ class MCPServerHandlers:
                     "changed_entities": [],
                 }
             reasoner = SemiFormalReasoner()
+            try:
+                _db_path = getattr(self.store, "db_path", None)
+                repo_invariants = load_trusted_base_invariants(_db_path, diff=diff)
+                repo_waivers = load_trusted_base_waivers(_db_path, diff=diff)
+            except ValueError:
+                return {
+                    "revision_id": revision_id,
+                    "status": "FAIL",
+                    "report_id": "",
+                    "rationale": "invalid_invariants_config",
+                    "files": parse_diff_files(diff),
+                    "changed_entities": [],
+                }
             cert = reasoner.verify(diff=diff, graph=self.graph, node_map=self.node_map,
-                                   entities=self.entities or None, waivers=self._repo_waivers)
+                                   entities=self.entities or None, waivers=repo_waivers)
             files = parse_diff_files(diff)
             checks = [build_semi_check(cert, files, self.entities or [], diff=diff)]
             mapping = seed_entities_for_diff(files, self.entities or [], diff)
@@ -272,8 +302,11 @@ class MCPServerHandlers:
             checks.append(removal_provenance_check(diff, self.entities or []))
             checks.append(return_statement_check(diff))
             checks.append(call_target_check(diff))
+            checks.append(call_semantics_check(diff))
+            checks.append(guard_condition_check(diff))
+            checks.append(import_resolution_check(diff))
             inv_checks, _metrics = evaluate_invariants(
-                diff, self._repo_invariants, self.graph, evidence=list(cert.evidence))
+                diff, repo_invariants, self.graph, evidence=list(cert.evidence))
             checks.extend(inv_checks)
             report = build_verification_report(task_id="mcp_verify", policy_id="default",
                                                checks=checks, blast_radius=blast)
@@ -290,6 +323,11 @@ class MCPServerHandlers:
                         "report_id": report.report_id,
                         "error": "no_store_loaded",
                         "rationale": "storage_unavailable:no_store_loaded",
+                        "files": files, "changed_entities": changed}
+            if decision.status != "FAIL" and any(is_policy_file(f) for f in files):
+                return {"revision_id": used_revision, "status": "HUMAN_REVIEW",
+                        "report_id": report.report_id,
+                        "rationale": "unverified_policy_change: gate configuration modified in diff",
                         "files": files, "changed_entities": changed}
             return {"revision_id": used_revision, "status": decision.status,
                     "report_id": report.report_id, "rationale": decision.rationale,
@@ -315,10 +353,19 @@ class MCPServerHandlers:
                 return {"task": task, "task_id": None, "status": "FAILED", "steps": 0, "decision": None, "error": "invalid_task_ir",
                         "ledger_head": None}
             from verifyci.interface.commands.run import _dedupe_invariants
+            from verifyci.verification.config import (
+                load_trusted_base_invariants, load_trusted_base_waivers,
+            )
+            try:
+                _db_path = getattr(self.store, "db_path", None)
+                repo_invariants = load_trusted_base_invariants(_db_path, diff=diff)
+                repo_waivers = load_trusted_base_waivers(_db_path, diff=diff)
+            except ValueError:
+                return {"task": task, "task_id": None, "status": "FAILED", "steps": 0, "decision": None, "error": "invalid_invariants_config", "ledger_head": None}
             context = {
                 "graph": self.graph, "node_map": self.node_map, "entities": self.entities,
-                "invariants": _dedupe_invariants(intent.invariants + self._repo_invariants),
-                "waivers": list(self._repo_waivers),
+                "invariants": _dedupe_invariants(intent.invariants + repo_invariants),
+                "waivers": list(repo_waivers),
                 "diff": diff, "store": self.rw_store or self.store,
             }
             task_id = await self.scheduler.submit(task_ir, conversation_id=conversation_id,

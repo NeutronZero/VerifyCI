@@ -5,7 +5,7 @@
     "vector_store.py": "f0d31cbc9594be0233950d4924cc3aac48f075757f7059921be6d85ea74483e9",
     "dense.py": "3db2257d1cb39a92249e5b8831229d44ab9d7dc0e6fefa7a5112db798c33331a",
     "sparse.py": "db0f8cdddf914e944006149c90c24ee1596b4687634e12300d1b96e0939ff1eb",
-    "fusion.py": "7ccc5a04a857ace99160b819f066de117e4b294b518259bb5dca8bd0e3af60aa"
+    "fusion.py": "d44f672b3cf23ac3395ae85630079fc619dba95e0c65afa479a098cd3d41397b"
   },
   "environment": {
     "python": "3.14.7",
@@ -28,19 +28,19 @@
       "dense_search": {
         "n": 100,
         "us": {
-          "median": 76255.1,
-          "p95": 103533.0,
-          "p99": 111927.7,
-          "max": 114690.9
+          "median": 46956.8,
+          "p95": 66577.7,
+          "p99": 70884.2,
+          "max": 80344.2
         }
       },
       "sparse_search": {
         "n": 100,
         "us": {
-          "median": 1042.8,
-          "p95": 1406.4,
-          "p99": 1557.9,
-          "max": 2333.1
+          "median": 913.5,
+          "p95": 1786.1,
+          "p99": 1821.3,
+          "max": 2494.5
         }
       },
       "fusion_us_avg": 12.4
@@ -49,22 +49,22 @@
       "dense_search": {
         "n": 100,
         "us": {
-          "median": 554393.6,
-          "p95": 604399.7,
-          "p99": 682292.4,
-          "max": 697279.3
+          "median": 550931.8,
+          "p95": 609463.9,
+          "p99": 753750.9,
+          "max": 765368.9
         }
       },
       "sparse_search": {
         "n": 100,
         "us": {
-          "median": 11849.1,
-          "p95": 17997.9,
-          "p99": 19729.5,
-          "max": 20479.3
+          "median": 11295.2,
+          "p95": 19396.9,
+          "p99": 20671.8,
+          "max": 20681.2
         }
       },
-      "fusion_us_avg": 11.6
+      "fusion_us_avg": 14.1
     }
   }
 }

@@ -247,36 +247,35 @@ def test_actual_ungrounded_entity_missing_module_container():
 
 
 def test_token_renaming_invariance_diagnostic():
-    """Demonstrate that renaming adversarial tokens (poison -> benign_seed_17, explode -> seed_42, etc.)
+    """Renaming entity IDs changes nothing about grounding: identical IDs with a
+    valid module path traverse normally, while the same IDs with an empty path
+    fail closed — proving the guard keys on grounding state, not on tokens."""
 
-    produces the exact same fail-closed TraversalInconclusiveError results.
-    """
-    renamed_pairs = [
-        ("benign_seed_17", "mod.py"),   # renamed missing manifest / stub
-        ("seed_42", "mod.py"),          # renamed stub
-        ("seed_99", "mod.py"),          # renamed stub
-    ]
+    for seed_name in ("benign_seed_17", "seed_42", "seed_99"):
+        for file_path, should_raise in (("pkg/service.py", False), ("", True)):
+            entity = Entity(
+                repository_id="scale_repo",
+                logical_entity_id=seed_name,
+                revision_entity_id=seed_name,
+                type=EntityType.FUNCTION,
+                name=seed_name,
+                file_path=file_path,
+                line_start=1,
+                line_end=1,
+                language="python",
+                source_hash="h000",
+                revision_id="rev_0",
+            )
+            builder = GraphBuilder()
+            graph = builder.build([entity], [])
+            node_map = builder.get_node_map()
 
-    for seed_name, file_path in renamed_pairs:
-        entity = Entity(
-            repository_id="scale_repo",
-            logical_entity_id=seed_name,
-            revision_entity_id=seed_name,
-            type=EntityType.FUNCTION,
-            name=seed_name,
-            file_path=file_path,
-            line_start=1,
-            line_end=1,
-            language="python",
-            source_hash="h000",
-            revision_id="rev_0",
-        )
-        builder = GraphBuilder()
-        graph = builder.build([entity], [])
-        node_map = builder.get_node_map()
-
-        with pytest.raises(TraversalInconclusiveError):
-            compute_blast_radius(graph, [seed_name], set(), node_map=node_map, max_hops=2)
+            if should_raise:
+                with pytest.raises(TraversalInconclusiveError):
+                    compute_blast_radius(graph, [seed_name], set(), node_map=node_map, max_hops=2)
+            else:
+                res = compute_blast_radius(graph, [seed_name], set(), node_map=node_map, max_hops=2)
+                assert res is not None
 
 
 def test_positive_control_high_scale_within_budget_passes():

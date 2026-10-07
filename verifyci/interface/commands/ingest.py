@@ -4,12 +4,15 @@ from verifyci.ingestion.ignore import iter_repo_files, skipped_dir_names
 from verifyci.ingestion.language import INGESTIBLE_EXTENSIONS, detect_language
 from verifyci.ingestion.parser import TreeSitterParser, compute_source_hash
 from verifyci.ingestion.extractor import extract_entities, extract_edges
-from verifyci.ingestion.dependency import extract_dependencies
+from verifyci.ingestion.dependency import DEPENDENCY_FILES, extract_dependencies
 from verifyci.storage.graph_store import GraphStore
 from verifyci.storage.metadata import MetadataStore
 from verifyci.storage.revision import create_revision
 
-MANIFESTS = ("package.json", "requirements.txt", "Cargo.toml", "pom.xml", "go.mod", "pyproject.toml")
+#: Manifest file names, derived from the single source of truth in
+#: `verifyci.ingestion.dependency.DEPENDENCY_FILES` so ingest and
+#: `aci deps` can never disagree about which files are manifests.
+MANIFESTS = tuple(DEPENDENCY_FILES)
 
 
 def _read_manifest_text(file: Path) -> str:
@@ -178,7 +181,7 @@ def _carry_forward(store, carried_sources, carried_texts, revision_id, now, repo
         store.close_superseded_entities(
             [e.logical_entity_id for e in store.get_entities_by_revision(revision_id)
              if e.revision_entity_id in carried_ids],
-            revision_id, now)
+            revision_id, now, repository_id=repository_id)
     if new_edges:
         store.close_superseded_edges(new_edges, revision_id, now, repository_id=repository_id)
     return n_e, n_d
@@ -311,6 +314,13 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
         # hash); they ride along only as the revision row's first-
         # observation metadata. Lineage and commit are authoritative on
         # the append-only ingest record below.
+        # Merge scope: all parents are validated for lineage integrity
+        # above (self-cycle, missing-parent checks cover every entry of
+        # parent_commit_ids), but the chain links only the first parent:
+        # revisions carry a single parent_revision_id and ingests a single
+        # parent_ingest_id, so second-and-later parents are integrity
+        # gates, not chain links (octo-merges collapse to first-parent
+        # lineage by schema design).
         effective_parent = parent_commit_id or (parent_commit_ids[0] if parent_commit_ids else None)
         if effective_parent:
             parent_ingest = store.get_ingest_by_commit_id(repo.name, effective_parent)
@@ -365,6 +375,7 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
                   "closed_entities": 0, "closed_edges": 0,
                   "parse_errors": [], "manifest_errors": [],
                   "partial_parses": [], "zero_entity_files": 0,
+                  "empty_files": 0,
                   "revision_id": revision.revision_id,
                   "parent_revision_id": prev_revision_id,
                   "db_path": db_path}
@@ -399,6 +410,7 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
             try:
                 entities = extract_entities(parsed, repo.name, revision.revision_id)
                 edges = extract_edges(parsed, entities, revision.revision_id)
+                _recursion_fallback = False
             except RecursionError:
                 # Pathological nesting (generated files hit tree-sitter's
                 # depth cap AND exhaust the recursive walker): one hostile
@@ -412,11 +424,13 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
                                      language=language, tree=None)
                 entities = extract_entities(parsed, repo.name, revision.revision_id)
                 edges = []
+                _recursion_fallback = True
             if _degraded_parse(language, has_error, entities):
                 # has_error AND nothing to show for it. Either way the file
                 # contributed no graph, so it belongs in parse_errors —
                 # the count an operator can act on.
-                totals["parse_errors"].append(rel)
+                if rel not in totals["parse_errors"]:
+                    totals["parse_errors"].append(rel)
                 if not any(_is_code_entity(e) for e in entities):
                     totals["zero_entity_files"] += 1
             elif has_error:
@@ -424,6 +438,13 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
                 # is the overwhelmingly common case and is healthy; the
                 # file is listed under partial_parses, not parse_errors.
                 pass
+            elif not _recursion_fallback and not any(_is_code_entity(e) for e in entities):
+                # Clean parse that yielded no code entities (empty file,
+                # comment-only, docs with tree=None): distinct from a
+                # degraded parse — nothing failed, but the file
+                # contributed no graph. Counted separately so
+                # zero_entity_files keeps meaning "error AND empty".
+                totals["empty_files"] += 1
             for e in entities:
                 store.insert_entity(e)
             for edge in edges:
@@ -435,7 +456,8 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
             # repo-scoped close_disappeared pass at the end.
             closed_at = _time.time()
             totals["closed_entities"] += store.close_superseded_entities(
-                [e.logical_entity_id for e in entities], revision.revision_id, closed_at)
+                [e.logical_entity_id for e in entities], revision.revision_id, closed_at,
+                repository_id=repo.name)
             totals["closed_edges"] += store.close_superseded_edges(
                 edges, revision.revision_id, closed_at, repository_id=repo.name)
             meta.upsert_file(str(repo / rel), digest, language, revision.revision_id)

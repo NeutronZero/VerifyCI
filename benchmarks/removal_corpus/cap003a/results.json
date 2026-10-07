@@ -139,5 +139,7 @@
     "P10_resource_bounds_enforced": true,
     "P11_full_regression_suite": true,
     "P12_clean_room_integrity": true
-  }
+  },
+  "adjudication_verdict": "PROMOTE",
+  "adjudication_status": "ESTABLISHED"
 }

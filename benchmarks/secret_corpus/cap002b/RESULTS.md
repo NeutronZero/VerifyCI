@@ -20,6 +20,17 @@
 | **Redaction Violations** | 0 | 0 | **0** |
 | **Incomplete Evaluations** | 0 | 0 | **0** |
 
+## Per-Case Comparison Summary
+
+- Total Cases: 35
+- Disagreement Cases: 21
+- D2 Resolution of CAP-002 Falsifiers:
+  - `B-ID-01` (`pwd = "sk-live-..."`): D0 = False (miss), D1 = False (miss), D2 = True (detected).
+  - `B-ID-02` (`x = "ghp_..."`): D0 = False (miss), D1 = True (detected), D2 = True (detected).
+  - `B-ENC-01` (Base64 OpenAI key): D0 = False (miss), D1 = False (miss), D2 = True (detected).
+  - `B-ENC-02` (Hex OpenAI key): D0 = False (miss), D1 = True (detected), D2 = True (detected).
+  - `B-ENC-03` (Double Base64 GitHub token): D0 = False (miss), D1 = False (miss), D2 = True (detected).
+
 ## Statistical Qualifications & Scope Boundaries
 
 - **Sample Size**: 35 held-out cases (23 positive, 12 negative).
@@ -66,4 +77,3 @@ Evidence boundary:
   Universal completeness and population FAR=0 remain UNESTABLISHED.
 ──────────────────────────────────────────────
 ```
-

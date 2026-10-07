@@ -29,8 +29,13 @@ class PrefilterIndex:
 
         if all_keywords:
             escaped = [re.escape(k) for k in sorted(all_keywords, key=len, reverse=True)]
+            # Alphanumeric-adjacent boundaries (not strict \b): affixed
+            # keywords such as db_password / api_key stay eligible while
+            # pure-substring hosts such as "monkey" (for "key") do not.
+            # Strict \b would break affixed keywords ("_" is a word char)
+            # and cause false negatives on yaml/unquoted rules.
             self._keyword_re: re.Pattern | None = re.compile(
-                r"(?i)(?:" + "|".join(escaped) + r")"
+                r"(?i)(?<![A-Za-z0-9])(?:" + "|".join(escaped) + r")(?![A-Za-z0-9])"
             )
         else:
             self._keyword_re = None

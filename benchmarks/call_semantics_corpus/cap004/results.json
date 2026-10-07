@@ -637,5 +637,7 @@
       "expected": "FAIL",
       "rationale": "required argument 'role' missing"
     }
-  ]
+  ],
+  "adjudication": "PROMOTE \u2014 ESTABLISHED",
+  "all_gates_pass": true
 }

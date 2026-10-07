@@ -10,8 +10,8 @@
     "sha256": "41a3dc5e75712d52d25aa7203b0b6bc2fa9c796fe5109d3835c60226a9a69352"
   },
   "d2_detector": {
-    "config_hash": "2b7ae5b660accf5c63735d18482547c3ae89a071cc0b039cb838e0bb144f08a7",
-    "rules_count": 15
+    "config_hash": "38b72f3f78e13adf043b92eb841712102c46c5f18ee2a4d39e74cbd5095d5649",
+    "rules_count": 16
   },
   "metrics": {
     "D0": {
@@ -535,5 +535,7 @@
       "d1_detected": false,
       "d2_detected": false
     }
-  ]
+  ],
+  "adjudication_verdict": "PROMOTE",
+  "adjudication_status": "ESTABLISHED"
 }
