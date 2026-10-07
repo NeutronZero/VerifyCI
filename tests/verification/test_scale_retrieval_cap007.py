@@ -19,11 +19,11 @@ import sys
 import pytest
 
 BENCHMARK_DIR = Path(__file__).resolve().parent.parent.parent / "benchmarks" / "retrieval_corpus" / "cap007"
-FROZEN_CORPUS_SHA256 = "f9ddbe38bd94caee762dedb430c04edb6678f6850736431562a47394593fe688"
-FROZEN_LABEL_SHA256 = "d6bbad336244bb95529a54cb877cad548075d94ef8aec597112c50bc44dc5f48"
-FROZEN_ORACLE_MANIFEST_SHA256 = "ab071128211cb366879d8c7fa8ef147ed54c2b57887a4b8dea1357b9905e97d4"
-FROZEN_HARNESS_SHA256 = "2f8705231bcad86069b8f8b0a28b6e245a9a950501a1d9ca797939cc3a2e72c2"
-FROZEN_RESULTS_SHA256 = "90f565f20203075018df5ba32744d02f33b8dba2e63c875369ac0704861ba279"
+FROZEN_CORPUS_SHA256 = "4d1e3498cc090ce2b1ca210d16641e3b60cc3369bc1dc38be6bfc570f35e428b"
+FROZEN_LABEL_SHA256 = "d9f4d4df004af329fec3e400c0b942333513e4d37a0c4276b915ca74940b91ef"
+FROZEN_ORACLE_MANIFEST_SHA256 = "fd52536e40afb6045b773b6a4f4f3cd78b9a340e8f3f670ba4bf4de70b39b604"
+FROZEN_HARNESS_SHA256 = "836dcc3617e0550ed1be95771461dce3fbd65ef4424939563bb3db9d894747a9"
+FROZEN_RESULTS_SHA256 = "e8ed68593133fef192307e3a252007b72a6b0c437c6ecb8a43fbcef7ff90da6c"
 
 
 @pytest.fixture(scope="module")
@@ -149,6 +149,15 @@ def test_cap007_lock4_scale_tiers_and_environment_metadata(cap007_data):
     assert "os_platform" in env
     assert "cpu_count" in env
     assert "ram_total_gb" in env
+
+    # Assert physical scale tier instantiation in corpus (R0-B4)
+    cases = cap007_data["cases"]
+    s1_cases = [c for c in cases if c.get("tier") == "S1" and "S1 production scale" in c.get("name", "")]
+    s2_cases = [c for c in cases if c.get("tier") == "S2" and "S2 production scale" in c.get("name", "")]
+    assert len(s1_cases) >= 6
+    assert all(len(c["graph"]["nodes"]) >= 10000 for c in s1_cases)
+    assert len(s2_cases) >= 2
+    assert all(len(c["graph"]["nodes"]) >= 50000 for c in s2_cases)
 
 
 def test_cap007_lock6_fail_closed_tripwires(cap007_data):

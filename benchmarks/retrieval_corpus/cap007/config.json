@@ -7,6 +7,13 @@
   "slices_count": 8,
   "cases_per_slice": 8,
   "scale_tiers": {
+    "S0_micro": {
+      "name": "Micro Structural Topology",
+      "min_nodes": 20,
+      "max_nodes": 500,
+      "p95_target_ms": 1.0,
+      "description": "Micro structural fixtures for intricate topology validation"
+    },
     "S1": {
       "name": "Standard Modular",
       "min_nodes": 10000,
