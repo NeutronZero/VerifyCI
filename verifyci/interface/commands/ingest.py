@@ -185,7 +185,9 @@ def _carry_forward(store, carried_sources, carried_texts, revision_id, now, repo
 
 
 def run_ingest(path: str, incremental: bool = False,
-               commit_id: str | None = None) -> dict:
+               commit_id: str | None = None,
+               branch: str | None = None,
+               parent_commit_id: str | None = None) -> dict:
     # Resolved identity: `ingest .` produced `Path('.').name == ''` as the
     # repository_id — an empty string that made every repo-scoped lookup
     # (latest_ingest_id, resolve_repository, close_disappeared) bind
@@ -200,7 +202,10 @@ def run_ingest(path: str, incremental: bool = False,
     meta = MetadataStore(db_path, conn=store.conn)
     try:
       with store.batch():
-        return _run_ingest_inner(repo, db_path, store, meta, incremental, commit_id)
+        return _run_ingest_inner(
+            repo, db_path, store, meta, incremental,
+            commit_id=commit_id, branch=branch, parent_commit_id=parent_commit_id,
+        )
     finally:
         store.close()
 
@@ -217,7 +222,9 @@ def _ingest_revision_id(store, ingest_id: str) -> str:
 
 
 def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False,
-                      commit_id: str | None = None) -> dict:
+                      commit_id: str | None = None,
+                      branch: str | None = None,
+                      parent_commit_id: str | None = None) -> dict:
         sources, texts, manifest = _collect(repo)
         collected = len(sources) + len(texts)
 
@@ -241,8 +248,21 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
         # hash); they ride along only as the revision row's first-
         # observation metadata. Lineage and commit are authoritative on
         # the append-only ingest record below.
-        prev_ingest_id = store.latest_ingest_id(repo.name)
-        prev_revision_id = _ingest_revision_id(store, prev_ingest_id)
+        if parent_commit_id:
+            parent_ingest = store.get_ingest_by_commit_id(repo.name, parent_commit_id)
+            if parent_ingest:
+                prev_ingest_id = parent_ingest.ingest_id
+                prev_revision_id = parent_ingest.revision_id
+            else:
+                prev_ingest_id = ""
+                prev_revision_id = store.get_revision_by_commit_id(repo.name, parent_commit_id) or ""
+        elif branch:
+            prev_ingest_id = store.latest_ingest_on_branch(repo.name, branch)
+            prev_revision_id = _ingest_revision_id(store, prev_ingest_id)
+        else:
+            prev_ingest_id = store.latest_ingest_id(repo.name)
+            prev_revision_id = _ingest_revision_id(store, prev_ingest_id)
+
         revision = create_revision(repository_id=repo.name,
                                    commit_id=commit_id,
                                    parent_revision_id=prev_revision_id or None,
@@ -256,6 +276,7 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
             parent_ingest_id=prev_ingest_id or None,
             commit_id=commit_id,
             timestamp=revision.timestamp,
+            branch=branch,
         )
         store.insert_ingest(ingest)
         # Same-state re-ingest has no distinct predecessor: skip the

@@ -81,14 +81,35 @@ def sync_directory_files(target_dir: Path, files: dict[str, str]):
                     pass
 
 
-def extract_live_canonical_graph(store: GraphStore) -> tuple[dict[str, Any], list[Any], str]:
+def extract_live_canonical_graph(store: GraphStore, revision_id: str | None = None) -> tuple[dict[str, Any], list[Any], str]:
     """Extract live entities and edges from a GraphStore and compute canonical digest."""
-    # Live entities: valid_until IS NULL
-    entity_rows = store.conn.execute(
-        "SELECT revision_entity_id, logical_entity_id, type, name, file_path, line_start, line_end, source_hash"
-        " FROM entities WHERE valid_until IS NULL"
-        " ORDER BY name, file_path, type"
-    ).fetchall()
+    if revision_id:
+        entity_rows = store.conn.execute(
+            "SELECT revision_entity_id, logical_entity_id, type, name, file_path, line_start, line_end, source_hash"
+            " FROM entities WHERE revision_id = ?"
+            " GROUP BY logical_entity_id"
+            " ORDER BY name, file_path, type",
+            (revision_id,),
+        ).fetchall()
+        edge_rows = store.conn.execute(
+            "SELECT src_entity_id, dst_entity_id, type, metadata_json"
+            " FROM edges WHERE revision_id = ?"
+            " GROUP BY type, src_entity_id, dst_entity_id"
+            " ORDER BY type, src_entity_id, dst_entity_id",
+            (revision_id,),
+        ).fetchall()
+    else:
+        # Live entities: valid_until IS NULL
+        entity_rows = store.conn.execute(
+            "SELECT revision_entity_id, logical_entity_id, type, name, file_path, line_start, line_end, source_hash"
+            " FROM entities WHERE valid_until IS NULL"
+            " ORDER BY name, file_path, type"
+        ).fetchall()
+        edge_rows = store.conn.execute(
+            "SELECT src_entity_id, dst_entity_id, type, metadata_json"
+            " FROM edges WHERE valid_until IS NULL"
+            " ORDER BY type, src_entity_id, dst_entity_id"
+        ).fetchall()
 
     ent_map = {r[0]: (r[3], r[4]) for r in entity_rows}
 
@@ -102,12 +123,6 @@ def extract_live_canonical_graph(store: GraphStore) -> tuple[dict[str, Any], lis
         for r in entity_rows
     ]
 
-    edge_rows = store.conn.execute(
-        "SELECT src_entity_id, dst_entity_id, type, metadata_json"
-        " FROM edges WHERE valid_until IS NULL"
-        " ORDER BY type, src_entity_id, dst_entity_id"
-    ).fetchall()
-
     canonical_edges = [
         {
             "src": ent_map.get(r[0], (r[0], ""))[0],
@@ -119,6 +134,9 @@ def extract_live_canonical_graph(store: GraphStore) -> tuple[dict[str, Any], lis
         }
         for r in edge_rows
     ]
+
+    canonical_entities.sort(key=lambda x: (x["name"], x["file_path"], x["type"]))
+    canonical_edges.sort(key=lambda x: (x["type"], x["src"], x["src_path"], x["dst"], x["dst_path"]))
 
     payload = json.dumps({"entities": canonical_entities, "edges": canonical_edges}, sort_keys=True)
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -177,7 +195,16 @@ def evaluate_single_case(case: dict[str, Any], label: dict[str, Any]) -> dict[st
             # Execute ingest
             is_incremental = (step.get("mode") != "snapshot" and step_idx > 0)
             try:
-                run_ingest(str(replay_dir), incremental=is_incremental, commit_id=cid)
+                parent_cid = step_commit.get("parent_id") or (
+                    step_commit.get("parent_ids")[0] if step_commit.get("parent_ids") else None
+                )
+                run_ingest(
+                    str(replay_dir),
+                    incremental=is_incremental,
+                    commit_id=cid,
+                    branch=step.get("branch") or step_commit.get("branch"),
+                    parent_commit_id=parent_cid,
+                )
             except Exception as e:
                 result["errors"].append(f"Ingest exception at step {cid}: {e}")
 
@@ -207,15 +234,23 @@ def evaluate_single_case(case: dict[str, Any], label: dict[str, Any]) -> dict[st
             return result
 
         replay_store = GraphStore(str(db_path))
-        rep_ents, rep_edges, rep_digest = extract_live_canonical_graph(replay_store)
+        rep_rev_id = replay_store.get_revision_by_commit_id(repo_name, target_commit_id)
+        rep_ents, rep_edges, rep_digest = extract_live_canonical_graph(replay_store, revision_id=rep_rev_id)
 
         # Step 3: Run clean snapshot ingest for target commit
         target_commit = commits.get(target_commit_id)
         if target_commit:
             sync_directory_files(clean_dir, target_commit["files"])
-            run_ingest(str(clean_dir), incremental=False, commit_id=target_commit_id)
+            run_ingest(
+                str(clean_dir),
+                incremental=False,
+                commit_id=target_commit_id,
+                branch=target_commit.get("branch"),
+                parent_commit_id=None,
+            )
             clean_store = GraphStore(str(clean_dir / ".verifyci" / "verifyci.db"))
-            clean_ents, clean_edges, clean_digest = extract_live_canonical_graph(clean_store)
+            clean_rev_id = clean_store.get_revision_by_commit_id(repo_name, target_commit_id)
+            clean_ents, clean_edges, clean_digest = extract_live_canonical_graph(clean_store, revision_id=clean_rev_id)
             clean_store.close()
         else:
             clean_ents, clean_edges, clean_digest = {"entities": [], "count": 0}, [], ""

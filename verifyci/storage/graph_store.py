@@ -99,9 +99,11 @@ CREATE TABLE IF NOT EXISTS ingests (
     repository_id TEXT NOT NULL,
     parent_ingest_id TEXT,
     commit_id TEXT,
-    timestamp REAL NOT NULL
+    timestamp REAL NOT NULL,
+    branch TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_ingests_repo ON ingests(repository_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_ingests_branch ON ingests(repository_id, branch, timestamp);
 """
 
 
@@ -119,7 +121,7 @@ def _edge_match_key(src_logic: str, dst_logic: str, etype: str,
     return (src_logic, dst_logic, etype)
 
 
-def latest_revision_id(conn, repository_id: str | None = None) -> str:
+def latest_revision_id(conn, repository_id: str | None = None, branch: str | None = None) -> str:
     """Latest ingested revision id for raw connections, scoped when
     possible.
 
@@ -145,6 +147,14 @@ def latest_revision_id(conn, repository_id: str | None = None) -> str:
         "SELECT 1 FROM ingests LIMIT 1").fetchone() is not None
     if ingests_live:
         if repository_id:
+            if branch:
+                row = conn.execute(
+                    "SELECT revision_id FROM ingests WHERE repository_id = ? AND branch = ?"
+                    " ORDER BY timestamp DESC, rowid DESC LIMIT 1",
+                    (repository_id, branch),
+                ).fetchone()
+                if row:
+                    return row[0]
             row = conn.execute(
                 "SELECT revision_id FROM ingests WHERE repository_id = ?"
                 " ORDER BY timestamp DESC, rowid DESC LIMIT 1",
@@ -290,6 +300,14 @@ class GraphStore:
                     _migrate_v0_to_v1(self.conn)
                 if v < 2:
                     _migrate_v1_to_v2(self.conn)
+                if _has_table(self.conn, "ingests"):
+                    cols = [r[1] for r in self.conn.execute("PRAGMA table_info(ingests)").fetchall()]
+                    if "branch" not in cols:
+                        self.conn.execute("ALTER TABLE ingests ADD COLUMN branch TEXT;")
+                        self.conn.execute(
+                            "CREATE INDEX IF NOT EXISTS idx_ingests_branch ON ingests(repository_id, branch, timestamp);"
+                        )
+                        self.conn.commit()
         except BaseException:
             # Same half-open guarantee as the read-only path above.
             self.conn.close()
@@ -340,14 +358,16 @@ class GraphStore:
 
     def insert_ingest(self, ingest) -> None:
         """Append one ingest event (lineage chain, never rewritten)."""
+        branch = getattr(ingest, "branch", None)
         self.conn.execute(
-            "INSERT INTO ingests VALUES (?,?,?,?,?,?)",
+            "INSERT INTO ingests (ingest_id, revision_id, repository_id, parent_ingest_id, commit_id, timestamp, branch)"
+            " VALUES (?,?,?,?,?,?,?)",
             (ingest.ingest_id, ingest.revision_id, ingest.repository_id,
-             ingest.parent_ingest_id, ingest.commit_id, ingest.timestamp),
+             ingest.parent_ingest_id, ingest.commit_id, ingest.timestamp, branch),
         )
         self._maybe_commit()
 
-    def latest_revision_id(self, repository_id: str | None = None) -> str:
+    def latest_revision_id(self, repository_id: str | None = None, branch: str | None = None) -> str:
         """Latest revision id, scoped to a repository when known.
 
         A global MAX(timestamp) across repository ids lets one repo's
@@ -355,15 +375,66 @@ class GraphStore:
         Callers pass the convention-derived repo (`resolve_repository`)
         and fall back to global only when no convention applies.
         """
-        return latest_revision_id(self.conn, repository_id)
+        return latest_revision_id(self.conn, repository_id, branch=branch)
 
-    def latest_ingest_id(self, repository_id: str) -> str:
+    def latest_ingest_id(self, repository_id: str, branch: Optional[str] = None) -> str:
+        if branch:
+            row = self.conn.execute(
+                "SELECT ingest_id FROM ingests WHERE repository_id = ? AND branch = ?"
+                " ORDER BY timestamp DESC, rowid DESC LIMIT 1",
+                (repository_id, branch),
+            ).fetchone()
+            if row:
+                return row[0]
         row = self.conn.execute(
             "SELECT ingest_id FROM ingests WHERE repository_id = ?"
             " ORDER BY timestamp DESC, rowid DESC LIMIT 1",
             (repository_id,),
         ).fetchone()
         return row[0] if row else ""
+
+    def latest_ingest_on_branch(self, repository_id: str, branch: str) -> str:
+        row = self.conn.execute(
+            "SELECT ingest_id FROM ingests WHERE repository_id = ? AND branch = ?"
+            " ORDER BY timestamp DESC, rowid DESC LIMIT 1",
+            (repository_id, branch),
+        ).fetchone()
+        return row[0] if row else ""
+
+    def get_ingest_by_commit_id(self, repository_id: str, commit_id: str):
+        from verifyci.contracts.revision import Ingest
+        row = self.conn.execute(
+            "SELECT ingest_id, revision_id, repository_id, parent_ingest_id, commit_id, timestamp, branch"
+            " FROM ingests WHERE repository_id = ? AND commit_id = ?"
+            " ORDER BY timestamp DESC, rowid DESC LIMIT 1",
+            (repository_id, commit_id),
+        ).fetchone()
+        if not row:
+            return None
+        return Ingest(
+            ingest_id=row[0],
+            revision_id=row[1],
+            repository_id=row[2],
+            parent_ingest_id=row[3],
+            commit_id=row[4],
+            timestamp=row[5],
+            branch=row[6] if len(row) > 6 else None,
+        )
+
+    def get_revision_by_commit_id(self, repository_id: str, commit_id: str) -> Optional[str]:
+        row = self.conn.execute(
+            "SELECT revision_id FROM ingests WHERE repository_id = ? AND commit_id = ?"
+            " ORDER BY timestamp DESC, rowid DESC LIMIT 1",
+            (repository_id, commit_id),
+        ).fetchone()
+        if row and row[0]:
+            return row[0]
+        row = self.conn.execute(
+            "SELECT revision_id FROM revisions WHERE repository_id = ? AND commit_id = ?"
+            " ORDER BY timestamp DESC LIMIT 1",
+            (repository_id, commit_id),
+        ).fetchone()
+        return row[0] if row else None
 
     def get_latest_revision(self, repository_id: str):
         from verifyci.contracts.revision import Revision
@@ -418,22 +489,24 @@ class GraphStore:
         it, `get_entity_by_name` and graph loads return ghosts of
         deleted code indefinitely. Returns (entities, edges) closed.
 
-        Scoped to one repository: multi-repo DBs must not expire each
-        other's rows. Skips when there is no parent (fresh or
-        same-state ingest — nothing could have disappeared). Carried
+        Scoped to parent revision and repository: multi-repo and multi-branch
+        DBs must not expire each other's rows. Skips when there is no parent
+        (fresh or same-state ingest — nothing could have disappeared). Carried
         unresolved references are present in the new revision (re-
         inserted by carry-forward), so they read as continuing, not
-        disappeared — no special-casing. Also self-healing: live ghost
-        rows predating this logic close on the next ingest.
+        disappeared — no special-casing.
         """
         if not parent_revision_id:
             return 0, 0
         cur = self.conn.execute(
             "UPDATE entities SET valid_until = ?, t_expired = ?"
             " WHERE revision_id != ? AND repository_id = ?"
-            " AND valid_until IS NULL AND logical_entity_id NOT IN ("
+            " AND valid_until IS NULL"
+            " AND logical_entity_id IN ("
+            " SELECT logical_entity_id FROM entities WHERE revision_id = ?)"
+            " AND logical_entity_id NOT IN ("
             " SELECT logical_entity_id FROM entities WHERE revision_id = ?)",
-            (now, now, current_revision_id, repository_id, current_revision_id),
+            (now, now, current_revision_id, repository_id, parent_revision_id, current_revision_id),
         )
         n_entities = cur.rowcount
         entmap = {
@@ -452,10 +525,8 @@ class GraphStore:
                                          entmap.get(r[1], r[1]), r[2], meta))
         old = self.conn.execute(
             "SELECT id, src_entity_id, dst_entity_id, type, metadata_json FROM edges"
-            " WHERE revision_id != ? AND valid_until IS NULL"
-            " AND revision_id IN (SELECT revision_id FROM revisions"
-            " WHERE repository_id = ?)",
-            (current_revision_id, repository_id)).fetchall()
+            " WHERE revision_id = ? AND valid_until IS NULL",
+            (parent_revision_id,)).fetchall()
         gone = []
         for r in old:
             meta = json.loads(r[4]) if r[4] else {}

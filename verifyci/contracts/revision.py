@@ -38,3 +38,4 @@ class Ingest:
     parent_ingest_id: Optional[str]
     commit_id: Optional[str]
     timestamp: float
+    branch: Optional[str] = None
