@@ -23,7 +23,13 @@ def slice_source(
     if not source or line_start <= 0 or line_end < line_start:
         return []
 
-    lines_raw = source.splitlines(keepends=True)
+    # P1-B: split on b"\n" only. bytes.splitlines() also splits on \x0b,
+    # \x0c, \u2028 et al, while tree-sitter and git count \n alone — a
+    # form-feed in a file desynchronized every span after it.
+    parts = source.split(b"\n")
+    lines_raw = [part + b"\n" for part in parts[:-1]]
+    if parts[-1]:
+        lines_raw.append(parts[-1])
     if not lines_raw:
         return []
 

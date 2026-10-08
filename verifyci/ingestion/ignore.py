@@ -94,6 +94,14 @@ def iter_repo_files(repo: Path) -> Iterator[Path]:
             if d in DEFAULT_SKIP_DIRS or _name_matches(d, patterns):
                 continue
             child = root_path / d
+            # P1-B: never follow or yield symlinks. A symlinked dir is not
+            # descended into (os.walk already avoids that with
+            # followlinks=False); pruning it here also keeps it out of
+            # skip-reporting ambiguity. A symlink pointing outside the repo
+            # must never route /etc/passwd (or a sensitive tree) into the
+            # graph, and a dangling link must not crash collection.
+            if child.is_symlink():
+                continue
             if (child / _VENV_MARKER).is_file():
                 continue  # virtualenv: never ingest its site-packages
             rel = child.relative_to(repo).as_posix()
@@ -103,6 +111,11 @@ def iter_repo_files(repo: Path) -> Iterator[Path]:
         dirs[:] = kept
         for name in sorted(files):
             fpath = root_path / name
+            # P1-B: symlinks (repo escape), and FIFOs/sockets/devices
+            # (opening one blocks forever or raises) are never ingested.
+            # Only regular files reach the graph.
+            if fpath.is_symlink() or not fpath.is_file():
+                continue
             rel = fpath.relative_to(repo).as_posix()
             if _name_matches(name, patterns) or _rel_matches(rel, patterns):
                 continue

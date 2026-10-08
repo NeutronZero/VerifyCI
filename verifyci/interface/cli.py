@@ -2,6 +2,8 @@ import functools
 
 import typer
 
+from verifyci.interface.limits import MAX_DIFF_CHARS
+
 # No hard-coded name: the prog shown in --help follows the invoked
 # console script (`verifyci` or the `aci` alias), not a fixed string.
 app = typer.Typer(help="VerifyCI — Verification-first code intelligence")
@@ -166,20 +168,36 @@ def _decode_diff_bytes(data: bytes) -> str:
 
 def _read_diff(diff: str, diff_file: str) -> str:
     """Diff text from argv, a file, or stdin (`-`). Argv hits shell
-    limits on real diffs; file/stdin is the CI path."""
+    limits on real diffs; file/stdin is the CI path.
+
+    P1-B: stdin and files are read with a hard byte cap
+    (MAX_DIFF_CHARS+1 probe). An unbounded pipe must not OOM the CLI;
+    oversize input fails closed (exit 3) instead of entering the gate.
+    """
     if diff_file:
         if diff_file == "-":
             import sys
             # Raw bytes decoded explicitly: sys.stdin.read() decodes
             # with the locale encoding, which mangles or crashes on
             # non-UTF-8 diffs under a non-UTF-8 locale.
-            data = sys.stdin.buffer.read()
+            data = sys.stdin.buffer.read(MAX_DIFF_CHARS + 1)
             if isinstance(data, bytes):
+                if len(data) > MAX_DIFF_CHARS:
+                    raise _DiffTooLarge()
                 return _decode_diff_bytes(data)
             return data
         with open(diff_file, "rb") as fh:
-            return _decode_diff_bytes(fh.read())
+            data = fh.read(MAX_DIFF_CHARS + 1)
+        if len(data) > MAX_DIFF_CHARS:
+            raise _DiffTooLarge()
+        return _decode_diff_bytes(data)
+    if len(diff) > MAX_DIFF_CHARS:
+        raise _DiffTooLarge()
     return diff
+
+
+class _DiffTooLarge(Exception):
+    """Oversize diff input: fail closed before any verification runs."""
 
 
 def _exit_for_status(status: str) -> None:
@@ -211,7 +229,14 @@ def verify_diff(diff: str = typer.Argument("", help="Unified diff (or use --diff
         raise typer.Exit(code=3)
 
     need_artifacts = fmt in ("json", "sarif")
-    result = run_verify(_read_diff(diff, diff_file), revision_id, db_path=db or None,
+    try:
+        diff_text = _read_diff(diff, diff_file)
+    except _DiffTooLarge:
+        typer.echo(
+            f"Error: diff exceeds {MAX_DIFF_CHARS} characters; refusing to gate an unbounded input.",
+            err=True)
+        raise typer.Exit(code=3)
+    result = run_verify(diff_text, revision_id, db_path=db or None,
                         return_artifacts=need_artifacts)
 
     if fmt == "text":
@@ -254,7 +279,12 @@ def run(task: str, diff: str = typer.Option("", "--diff", "-d",
           help="Append (task, revision, ledger head) to a JSONL anchor log (L2 tamper evidence)")):
     from verifyci.interface.commands.run import run_task
     import json
-    result = run_task(task, diff=_read_diff(diff, diff_file), db_path=db or None,
+    try:
+        diff_text = _read_diff(diff, diff_file)
+    except _DiffTooLarge:
+        typer.echo("Error: diff exceeds the interface size cap; refusing to run on an unbounded input.", err=True)
+        raise typer.Exit(code=3)
+    result = run_task(task, diff=diff_text, db_path=db or None,
                       anchor_file=anchor_file or None)
     typer.echo(json.dumps(result, indent=2))
     _exit_for_status(result["status"])

@@ -11,6 +11,13 @@ from verifyci.contracts.edge import Edge, EdgeType, CPGEdgeSubtype
 from verifyci.contracts.revision import Revision
 
 
+#: Chunk size for batched `IN (...)` UPDATEs. SQLite guarantees at least 999
+#: bound variables (SQLITE_MAX_VARIABLE_NUMBER); some statements bind two
+#: IN-lists per chunk, so 400 keeps every statement under the floor on all
+#: builds instead of relying on the 32766 of modern SQLite.
+_SQLITE_PARAM_CHUNK = 400
+
+
 def _format_ro_uri(db_path: str) -> str:
     return "file:" + pathname2url(os.path.abspath(db_path)) + "?mode=ro"
 
@@ -642,7 +649,7 @@ class GraphStore:
         if not ids:
             return 0
         total_closed = 0
-        for i in range(0, len(ids), 500):
+        for i in range(0, len(ids), _SQLITE_PARAM_CHUNK):
             chunk = ids[i:i + 500]
             placeholders = ",".join("?" for _ in chunk)
             sql = (
@@ -674,7 +681,7 @@ class GraphStore:
         ent: dict[str, str] = {}
         endpoints = sorted({x for e in new_edges
                             for x in (e.src_entity_id, e.dst_entity_id) if x})
-        for i in range(0, len(endpoints), 500):
+        for i in range(0, len(endpoints), _SQLITE_PARAM_CHUNK):
             chunk = endpoints[i:i + 500]
             placeholders = ",".join("?" for _ in chunk)
             sql = ("SELECT revision_entity_id, logical_entity_id FROM entities"
@@ -697,7 +704,7 @@ class GraphStore:
                                         getattr(e, "metadata", None)))
         touched = sorted({_logic(x) for x in endpoints})
         cand_ids: set[str] = set()
-        for i in range(0, len(touched), 500):
+        for i in range(0, len(touched), _SQLITE_PARAM_CHUNK):
             chunk = touched[i:i + 500]
             placeholders = ",".join("?" for _ in chunk)
             sql = ("SELECT revision_entity_id, logical_entity_id FROM entities"
@@ -714,7 +721,7 @@ class GraphStore:
         cand_ids.update(x for x in endpoints if x not in ent)
         edge_rows: list = []
         cand = sorted(cand_ids)
-        for i in range(0, len(cand), 500):
+        for i in range(0, len(cand), _SQLITE_PARAM_CHUNK):
             chunk = cand[i:i + 500]
             placeholders = ",".join("?" for _ in chunk)
             sql = ("SELECT id, src_entity_id, dst_entity_id, type, metadata_json"
@@ -734,7 +741,7 @@ class GraphStore:
                                r[3], meta) in targets:
                 ids.append(r[0])
         if ids:
-            for i in range(0, len(ids), 500):
+            for i in range(0, len(ids), _SQLITE_PARAM_CHUNK):
                 chunk = ids[i:i + 500]
                 self.conn.executemany(
                     "UPDATE edges SET valid_until = ?, t_expired = ? WHERE id = ?",
