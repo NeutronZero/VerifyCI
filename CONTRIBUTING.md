@@ -48,14 +48,18 @@ ruff check .
 ```
 
 ### Test Suite
-Run the fast unit and integration tests:
+Run the fast unit and integration tests (always via `python -m pytest`,
+never bare `pytest`: the module form pins the repository root at the front
+of `sys.path`, while the console script can resolve an installed copy of
+`verifyci` instead of the working tree):
 ```bash
-pytest -q
+uv sync --frozen --extra dev
+uv run --no-sync python -m pytest -q
 ```
 
 To run a specific test module:
 ```bash
-pytest tests/export/test_sarif_export.py -v
+uv run --no-sync python -m pytest tests/export/test_sarif_export.py -v
 ```
 
 ### Packaging Validation
