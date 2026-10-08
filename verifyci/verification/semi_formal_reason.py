@@ -212,6 +212,8 @@ class SemiFormalReasoner:
         config_files: list[str],
         entities: list | None,
         waivers_list: list,
+        graph: Any = None,
+        node_map: dict | None = None,
     ) -> Certificate:
         from verifyci.verification.witness import extract_execution_witnesses
 
@@ -314,6 +316,19 @@ class SemiFormalReasoner:
                 test_files=test_files,
                 entities=entities,
             )
+            # Test files are code too for deletion soundness. A test-only diff
+            # must not bypass deletion verification merely because no CODE_CORE
+            # file was changed.
+            from verifyci.verification.deletion import evaluate_deletions
+            del_ok, del_status, del_reason, _ = evaluate_deletions(
+                diff=diff_str,
+                code_files=test_files,
+                entities=entities,
+                graph=graph,
+                node_map=node_map,
+                witnesses=witnesses,
+                waivers=waivers_list,
+            )
             if cfg_status == "inconclusive":
                 det_checks = [
                     DeterministicCheck(checker_id="diff_parsed", passed=True, detail=f"files={len(files)}"),
@@ -337,15 +352,43 @@ class SemiFormalReasoner:
                     waivers=tuple(waivers_list),
                 )
             config_ok = (cfg_status == "pass")
+            if del_status == "INCONCLUSIVE":
+                det_checks = [
+                    DeterministicCheck(checker_id="diff_parsed", passed=True, detail=f"files={len(files)}"),
+                    DeterministicCheck(checker_id="seeds_grounded", passed=True, detail="no_code_core_files"),
+                    DeterministicCheck(checker_id="deletion_verification", passed=False, detail=del_reason),
+                    DeterministicCheck(checker_id="test_suite_policy", passed=config_ok, detail=config_err or f"test_files={len(test_files)}"),
+                ]
+                return Certificate(
+                    certificate_id=str(uuid.uuid4()),
+                    premises=premises,
+                    evidence=[],
+                    execution_traces=[],
+                    conclusion=Conclusion(result="inconclusive", reasoning=f"insufficient_evidence:deletion_verification ({del_reason})"),
+                    confidence=0.5,
+                    generated_by=self.model_name,
+                    checked_by=[c.checker_id for c in det_checks],
+                    verification_method="test_suite_policy",
+                    certificate_verified=False,
+                    timestamp=time.time(),
+                    witnesses=tuple(witnesses),
+                    waivers=tuple(waivers_list),
+                )
+            deletion_ok = del_ok and del_status == "PASS"
             det_checks = [
                 DeterministicCheck(checker_id="diff_parsed", passed=True, detail=f"files={len(files)}"),
                 DeterministicCheck(checker_id="seeds_grounded", passed=True, detail="no_code_core_files"),
+                DeterministicCheck(checker_id="deletion_verification", passed=deletion_ok, detail=del_reason),
                 DeterministicCheck(checker_id="test_suite_policy", passed=config_ok, detail=config_err or f"test_files={len(test_files)}"),
             ]
             conclusion = (
                 Conclusion(result="pass", reasoning="test_suite_only_change")
-                if config_ok
-                else Conclusion(result="fail", reasoning=f"configuration_schema_invalid: {config_err}")
+                if config_ok and deletion_ok
+                else Conclusion(result="fail", reasoning=(
+                    f"configuration_schema_invalid: {config_err}"
+                    if not config_ok
+                    else f"deletion_verification_failed: {del_reason}"
+                ))
             )
             return Certificate(
                 certificate_id=str(uuid.uuid4()),
@@ -434,7 +477,15 @@ class SemiFormalReasoner:
 
         if not code_files:
             return self._verify_non_code_files(
-                diff_str, files, test_files, doc_files, config_files, entities, waivers_list
+                diff_str,
+                files,
+                test_files,
+                doc_files,
+                config_files,
+                entities,
+                waivers_list,
+                graph=graph,
+                node_map=node_map,
             )
 
         code_deletion_hunks = _find_code_deletion_hunks(diff_str, set(code_files))

@@ -48,13 +48,29 @@ def validate_entity(entity: Entity) -> list[str]:
     """Validate an Entity instance, returning a list of contract violation messages."""
     errors: list[str] = []
 
+    if entity.metadata is not None and not isinstance(entity.metadata, dict):
+        errors.append(
+            f"entity.metadata must be a dict, got '{type(entity.metadata).__name__}'"
+        )
+        return errors
+
     if not entity.repository_id:
         errors.append("entity.repository_id must be non-empty")
 
     if not _is_hex64(entity.logical_entity_id):
         errors.append(f"entity.logical_entity_id must be 64-char lowercase hex, got '{entity.logical_entity_id}'")
 
-    if not _is_hex64(entity.revision_entity_id):
+    external = bool((entity.metadata or {}).get("external"))
+    if external:
+        if entity.type != EntityType.IMPORT:
+            errors.append("external entity.type must be IMPORT")
+        if not entity.revision_entity_id:
+            errors.append("external entity.revision_entity_id must be non-empty")
+        if entity.file_path != "":
+            errors.append("external entity.file_path must be empty")
+        if entity.line_start != 0 or entity.line_end != 0:
+            errors.append("external entity span must be 0..0")
+    if not external and not _is_hex64(entity.revision_entity_id):
         errors.append(f"entity.revision_entity_id must be 64-char lowercase hex, got '{entity.revision_entity_id}'")
 
     if not isinstance(entity.type, EntityType):
@@ -67,7 +83,7 @@ def validate_entity(entity: Entity) -> list[str]:
         errors.append(f"entity.file_path must be POSIX normalized (no backslashes), got '{entity.file_path}'")
 
     if entity.line_start is not None and entity.line_end is not None:
-        if entity.line_start < 1:
+        if not external and entity.line_start < 1:
             errors.append(f"entity.line_start must be >= 1, got {entity.line_start}")
         if entity.line_end < entity.line_start:
             errors.append(f"entity.line_end ({entity.line_end}) cannot be less than line_start ({entity.line_start})")

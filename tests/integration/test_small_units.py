@@ -100,19 +100,19 @@ def test_run_stats_reports_resolution_coverage(tmp_path):
 
         def _ent(eid, name, type_=EntityType.FUNCTION):
             return Entity(
-                repository_id="r", logical_entity_id="l" + eid,
-                revision_entity_id=eid, type=type_, name=name,
+                repository_id="r", logical_entity_id="a" * 63 + eid,
+                revision_entity_id="b" * 63 + eid, type=type_, name=name,
                 file_path="a.py", line_start=1, line_end=2, language="python",
                 source_hash="h", revision_id=rev)
 
-        for eid, name in [("e1", "user"), ("e2", "helper")]:
+        for eid, name in [("1", "user"), ("2", "helper")]:
             store.insert_entity(_ent(eid, name))
         store.insert_edge(Edge(
-            id="u1", revision_id=rev, src_entity_id="e1", dst_entity_id="",
+            id="u1", revision_id=rev, src_entity_id="b" * 63 + "1", dst_entity_id="",
             type=EdgeType.CALLS_UNRESOLVED,
             metadata={"callee": "helper", "caller_scope": ""}))
         store.insert_edge(Edge(
-            id="u2", revision_id=rev, src_entity_id="e1", dst_entity_id="",
+            id="u2", revision_id=rev, src_entity_id="b" * 63 + "1", dst_entity_id="",
             type=EdgeType.CALLS_UNRESOLVED,
             metadata={"callee": "nobody", "caller_scope": ""}))
     finally:
@@ -190,5 +190,11 @@ def test_provenance_and_graph_schema_imports():
     assert hasattr(prov, 'validate_provenance_chain')
     assert hasattr(gs, 'GRAPH_TYPES')
     assert hasattr(gs, 'NODE_PROPERTIES')
-    assert prov.validate_provenance_chain([{ 'file_path': 'a', 'source_hash': 'h', 'revision_id': 'r'}]) is True
+    # P0 soundness: canonical 7-field provenance records validate;
+    # legacy 3-field dicts and raw strings are rejected.
+    assert prov.validate_provenance_chain([{
+        'entry_id': 'prov_e1', 'entity_id': 'e1', 'file_path': 'a',
+        'line_start': 1, 'line_end': 2, 'source_hash': 'h', 'revision_id': 'r',
+    }]) is True
+    assert prov.validate_provenance_chain([{ 'file_path': 'a', 'source_hash': 'h', 'revision_id': 'r'}]) is False
     assert prov.validate_provenance_chain([{ 'file_path': 'a'}]) is False

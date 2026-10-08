@@ -405,8 +405,8 @@ def test_tests_cannot_override_deterministic_blocker(tmp_path):
         store.insert_revision(revision)
         store.insert_entity(Entity(
             repository_id="r",
-            logical_entity_id="l",
-            revision_entity_id="e1",
+            logical_entity_id="a" * 64,
+            revision_entity_id="b" * 64,
             type=EntityType.FUNCTION,
             name="f",
             file_path="src/app.py",

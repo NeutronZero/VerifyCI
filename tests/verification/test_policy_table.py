@@ -114,4 +114,4 @@ def test_table_nonblocking_only():
 def test_table_unestablished_pass_deflects():
     d = _decide([_check(passed=True),
                  dataclasses.replace(_check(passed=True), established=False)])
-    assert (d.status, d.rationale) == ("INCONCLUSIVE", "unestablished_blocking_checks")
+    assert (d.status, d.rationale) == ("INCONCLUSIVE", "unestablished_or_unverified_checks")

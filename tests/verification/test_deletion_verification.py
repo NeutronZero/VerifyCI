@@ -345,7 +345,10 @@ def test_signature_incompatibility_declines():
 # ---------------------------------------------------------------------------
 
 
-def test_valid_class_2_refactoring_with_execution_witness_passes():
+def test_class_2_refactoring_with_diff_text_witness_declines():
+    # P0 soundness: a diff-text witness is an association hint, not execution
+    # proof. Without an external execution receipt Class-2 refactoring must
+    # decline (INCONCLUSIVE), never PASS.
     snippet = "def transform(data):\n    old_step()\n    return data\n"
     ent = _mock_func_entity(
         name="transform",
@@ -385,8 +388,8 @@ def test_valid_class_2_refactoring_with_execution_witness_passes():
         entities=[ent],
     )
 
-    assert cert.conclusion.result == "pass"
-    assert cert.certificate_verified is True
+    assert cert.conclusion.result == "inconclusive"
+    assert cert.certificate_verified is False
     assert len(cert.witnesses) >= 1
 
 
