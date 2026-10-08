@@ -548,8 +548,25 @@ def verify_deletion_hunks(
 
             if not minus_lines:
                 continue
-            is_net_deletion = (len(minus_lines) > len(plus_lines)) or (hunk.old_count > hunk.new_count)
-            guard_lines = [ml for ml in minus_lines if _is_guard_line(ml)]
+            # P2 precision: minus lines re-added verbatim in the same hunk
+            # are content-preserving context churn, not deletions (multiset
+            # difference, so duplicated lines are accounted exactly). Only
+            # EFFECTIVE removals can sustain a deletion claim. This does
+            # not reopen the equal-line swap gate: `-x = 1` / `+x = 2`
+            # differ, so they still route to Class-2. Re-indentation also
+            # still counts (whitespace is significant to scope).
+            from collections import Counter as _Counter
+            _plus_counts = _Counter(plus_lines)
+            effective_minus = []
+            for _ml in minus_lines:
+                if _plus_counts.get(_ml, 0) > 0:
+                    _plus_counts[_ml] -= 1
+                else:
+                    effective_minus.append(_ml)
+            if not effective_minus:
+                continue
+            is_net_deletion = (len(effective_minus) > len(plus_lines)) or (hunk.old_count > hunk.new_count)
+            guard_lines = [ml for ml in effective_minus if _is_guard_line(ml)]
 
             hunk_fabricated, hunk_unverified = _check_hunk_provenance(f.path, hunk, covering)
             if hunk_fabricated:

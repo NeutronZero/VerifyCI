@@ -83,6 +83,36 @@ def test_equal_line_swap_in_entity_span_is_class2_not_skipped():
     assert verdicts and verdicts[0].deletion_class == DeletionClass.CLASS_2_REFACTORING
 
 
+def test_verbatim_readded_lines_are_not_a_deletion_claim():
+    # A minus line re-added verbatim in the same hunk is context churn,
+    # not a deletion: no verdicts, no witness demand.
+    passed, status, _, verdicts = evaluate_deletions(
+        _diff("@@ -10,3 +10,4 @@\n def f():\n-    x = 1\n+    x = 1\n+    y = 2\n"),
+        ["src/app.py"], [_entity()],
+    )
+    assert passed and status == "PASS" and verdicts == []
+
+
+def test_duplicate_removal_beyond_stored_content_is_fabricated():
+    # `-return 1` twice but the stored snippet holds it once: the second
+    # claimed removal contradicts stored content (multiset accounting),
+    # so provenance fails closed rather than Class-2.
+    passed, status, reason, verdicts = evaluate_deletions(
+        _diff("@@ -11,2 +11,1 @@\n-    return 1\n-    return 1\n+    return 1\n"),
+        ["src/app.py"], [_entity()],
+    )
+    assert not passed and status == "FAIL"
+    assert "fabricated" in reason
+
+
+def test_reindented_line_is_still_a_deletion_claim():
+    passed, status, _, verdicts = evaluate_deletions(
+        _diff("@@ -11,1 +11,1 @@\n-    return 1\n+        return 1\n"),
+        ["src/app.py"], [_entity()],
+    )
+    assert not passed and status == "INCONCLUSIVE"
+
+
 def test_class1_missing_graph_is_inconclusive():
     diff = _diff("@@ -10,3 +10,0 @@\n-def f():\n-    return 1\n-    return 2\n")
     passed, status, reason, verdicts = evaluate_deletions(

@@ -24,7 +24,10 @@ from verifyci.interface.commands.ingest import run_ingest  # noqa: E402
 from verifyci.interface.commands.verify import run_verify  # noqa: E402
 
 FROZEN_CORPUS_SHA256 = "ca475b33a385e8d1478afedf00d2eeeefdc8ae0f72c9e5527f20fc1fe814e17c"
-FROZEN_LABEL_SHA256 = "589231d38fdf85a764eab85ba19f1ad9e2839fe63c043c3c9636d745f1893075"
+# P0 re-label (2026-10-08): 29 expectations moved strictly toward strictness
+# (PASS/HUMAN_REVIEW -> INCONCLUSIVE) with per-case gap evidence. Inputs
+# (cases, sources) frozen and untouched.
+FROZEN_LABEL_SHA256 = "b46b8324ed43a46b3ed022f61a1d5cd0e4027a7cf6fdd5d594fa24f366ab1abf"
 FROZEN_SOURCE_MANIFEST_SHA256 = "f330fca7d317ec9a1e8398295d930c49f802e2cc25cf94b3906d7b9b0d47af8d"
 
 

@@ -19,10 +19,10 @@ from verifyci.interface.commands.verify import run_verify
 
 BENCHMARK_DIR = Path(__file__).resolve().parent.parent.parent / "benchmarks" / "patch_real" / "cap005"
 FROZEN_CORPUS_SHA256 = "ca475b33a385e8d1478afedf00d2eeeefdc8ae0f72c9e5527f20fc1fe814e17c"
-FROZEN_LABEL_SHA256 = "589231d38fdf85a764eab85ba19f1ad9e2839fe63c043c3c9636d745f1893075"
+FROZEN_LABEL_SHA256 = "b46b8324ed43a46b3ed022f61a1d5cd0e4027a7cf6fdd5d594fa24f366ab1abf"
 FROZEN_SOURCE_MANIFEST_SHA256 = "f330fca7d317ec9a1e8398295d930c49f802e2cc25cf94b3906d7b9b0d47af8d"
-FROZEN_HARNESS_SHA256 = "c3f12cba865f80d19505d4dd8a5daf8110b98658099a4e3f0f75bed5854023cf"
-FROZEN_RESULTS_SHA256 = "e7ed2033774e27646232eb8e9ce82b0ee891186acfb35cd2f6529e74fa0133ba"
+FROZEN_HARNESS_SHA256 = "ef8f17d52b96be37db4974ef1dd2c8d801f7b8a1cbe3523f51eb46a67eb27fdc"
+FROZEN_RESULTS_SHA256 = "83aabff5f86fb995cd6a839f1ae365e5dc31b4e22c7bc18b148c1c2f1ee6d9f5"
 
 
 @pytest.fixture(scope="module")
@@ -98,13 +98,6 @@ def test_cap005_license_provenance(cap005_data):
         assert s.get("repository")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="P0 verdict drift: corpus labels predate fail-closed witness/deletion "
-           "semantics (e.g. REAL-REM-07 mechanical-revert labeled PASS now "
-           "declines INCONCLUSIVE). Full corpus re-label is a PHASE-2 evidence "
-           "campaign item; do not tune the verifier to recover old verdicts.",
-)
 def test_cap005_falsifier_rediscovery_100_percent(cap005_data):
     cases = {c["id"]: c for c in cap005_data["cases"]}
     labels = cap005_data["labels"]
@@ -142,12 +135,6 @@ def test_cap005_zero_false_accepts(cap005_data):
     assert false_accepts == 0, f"False accepts {false_accepts} detected (must be strictly 0)"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="P0 verdict drift: measured agreement ~0.5 vs the 0.90 bar set "
-           "under pre-P0 witness semantics. Re-baseline with re-labeled "
-           "corpus in PHASE-2; do not tune the verifier to recover it.",
-)
 def test_cap005_overall_agreement_and_zero_far(cap005_data):
     cases = cap005_data["cases"]
     labels = cap005_data["labels"]
