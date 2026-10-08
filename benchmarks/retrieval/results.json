@@ -5,7 +5,7 @@
     "vector_store.py": "f0d31cbc9594be0233950d4924cc3aac48f075757f7059921be6d85ea74483e9",
     "dense.py": "3db2257d1cb39a92249e5b8831229d44ab9d7dc0e6fefa7a5112db798c33331a",
     "sparse.py": "db0f8cdddf914e944006149c90c24ee1596b4687634e12300d1b96e0939ff1eb",
-    "fusion.py": "d44f672b3cf23ac3395ae85630079fc619dba95e0c65afa479a098cd3d41397b"
+    "fusion.py": "a212a8d220d6a5e283a0fad10973897214cf3a9653f66bb30344b56d18819084"
   },
   "environment": {
     "python": "3.14.7",

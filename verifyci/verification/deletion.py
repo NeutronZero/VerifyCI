@@ -341,7 +341,6 @@ def _has_associated_witness(
     - General regression witnesses (w.is_general_regression is True) cannot corroborate
       Class 2 refactorings (Contract 5).
     """
-    norm_file = normalize_path(file_path)
     eid = getattr(entity, "revision_entity_id", None)
     for w in witnesses:
         if w.is_general_regression:
@@ -551,7 +550,6 @@ def verify_deletion_hunks(
                 continue
             is_net_deletion = (len(minus_lines) > len(plus_lines)) or (hunk.old_count > hunk.new_count)
             guard_lines = [ml for ml in minus_lines if _is_guard_line(ml)]
-            old_defs = [ml for ml in minus_lines if _looks_like_def(ml)]
 
             hunk_fabricated, hunk_unverified = _check_hunk_provenance(f.path, hunk, covering)
             if hunk_fabricated:

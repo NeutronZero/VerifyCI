@@ -21,11 +21,15 @@ DIFF_PASS = (
     "diff --git a/calc.py b/calc.py\n"
     "--- a/calc.py\n"
     "+++ b/calc.py\n"
-    "@@ -1,2 +1,2 @@\n"
+    "@@ -1,2 +1,3 @@\n"
     " def add(a, b):\n"
-    "-    return a + b\n"
-    "+    return (a + b)\n"
+    "     return a + b\n"
+    "+    # documented fast path\n"
 )
+# NOTE (P0): the previous fixture was an equal-line value swap
+# (`-return a+b` / `+return (a+b)`), which fail-closed Class-2 now routes
+# to INCONCLUSIVE without an execution witness. Exporter PASS-shape tests
+# use a pure addition instead, which carries no deletion claim.
 
 DIFF_GUARD_FAIL = (
     "diff --git a/app.py b/app.py\n"
