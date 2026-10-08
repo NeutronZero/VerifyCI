@@ -147,3 +147,81 @@ def test_probe_no_asof_gap_on_reingest(tmp_path):
         assert old[0][2] >= new[0][1], (old, new)
     finally:
         store.close()
+
+
+def test_probe_superseded_edges_chunk_bound_under_sqlite_limit(tmp_path):
+    """Regression for the chunk-bound mismatch cited in the audit.
+
+    close_superseded_edges must never pass more than 999 bound
+    parameters to any single SQLite statement (the documented
+    _SQLITE_PARAM_CHUNK guard floor). Before the fix the candidate
+    scan built [rev, *chunk, *chunk] with 500-element chunks, which
+    could reach 1001 params; the corrected path slices by
+    _SQLITE_PARAM_CHUNK and now asserts the bound explicitly.
+    """
+    from verifyci.storage.graph_store import GraphStore, _SQLITE_PARAM_CHUNK
+    db = str(tmp_path / "t.db")
+    store = GraphStore(db)
+    try:
+        # Build a candidate set at the chunk boundary: 400 + 100 == 500
+        # distinct logical ids, so one chunk will be full-size and the
+        # params list will be [rev, *chunk, *chunk] == 1 + 500 + 500.
+        n = _SQLITE_PARAM_CHUNK + 100
+        ents = []
+        for i in range(n):
+            ents.append(f"e{i:04d}")
+
+        def _rev(store):
+            from verifyci.storage.revision import create_revision
+            rev = create_revision(repository_id="r", files=[])
+            store.insert_revision(rev)
+            return rev
+
+        def _ent(store, logical):
+            from verifyci.contracts.entity import Entity, EntityType
+            from verifyci.contracts.identity import compute_revision_entity_id
+            rev = _rev(store)
+            e = Entity(
+                repository_id="r", logical_entity_id=logical,
+                revision_entity_id=compute_revision_entity_id(logical, rev.revision_id),
+                type=EntityType.FUNCTION, name=logical, file_path="a.py",
+                line_start=1, line_end=2, language="python", source_hash="h",
+                revision_id=rev.revision_id, valid_from=time.time(),
+                t_created=time.time(),
+            )
+            store.insert_entity(e)
+            return e
+
+        def _edge(store, eid, src, dst):
+            from verifyci.contracts.edge import Edge, EdgeType
+            now = time.time()
+            e = Edge(
+                id=eid, revision_id=_rev(store).revision_id,
+                src_entity_id=src, dst_entity_id=dst,
+                type=EdgeType.CALLS, metadata={},
+                valid_from=now, observed_at=now, t_created=now,
+            )
+            store.insert_edge(e)
+            return e
+
+        r1 = _rev(store)
+        srcs = {i: _ent(store, f"s{i:04d}") for i in range(n)}
+        dsts = {i: _ent(store, f"d{i:04d}") for i in range(n)}
+        edges = [_edge(store, f"e{i:04d}", srcs[i].revision_entity_id, dsts[i].revision_entity_id)
+                 for i in range(n)]
+
+        r2 = _rev(store)
+        new = _edge(store, "new", srcs[0].revision_entity_id, dsts[0].revision_entity_id)
+
+        try:
+            store.close_superseded_edges([new], r2.revision_id, time.time())
+        except RuntimeError as exc:
+            msg = str(exc)
+            assert "sql param bound overflow" in msg, msg
+            raise AssertionError(
+                "close_superseded_edges exceeded the 999 bound on a deliberately "
+                "boundary-sized candidate set; the chunk constant guard is not "
+                "enforced on the candidate-load query path."
+            ) from exc
+    finally:
+        store.close()

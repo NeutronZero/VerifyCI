@@ -596,6 +596,11 @@ class GraphStore:
         unresolved references are present in the new revision (re-
         inserted by carry-forward), so they read as continuing, not
         disappeared — no special-casing.
+
+        Metadata parsing is fail-closed on purpose: a corrupt edge
+        metadata_json aborts the whole pass as LineageIntegrityError
+        rather than treating the edge as vanished, continuing, or silently
+        skipped.
         """
         if not parent_revision_id:
             return 0, 0
@@ -660,15 +665,16 @@ class GraphStore:
     def close_superseded_entities(self, logical_ids: list[str], current_revision_id: str,
                                    now: float, repository_id: Optional[str] = None) -> int:
         """Close prior live versions (valid_until/t_expired) superseded by the
-        current revision. Chunked UPDATEs to avoid SQLITE_MAX_VARIABLE_NUMBER. Returns rows closed.
-        Scoped by repository_id when provided so multi-repo DBs never close
-        each other's live rows."""
+        current revision. Chunked UPDATEs keep every statement under the
+        SQLite bound that the chunk constant guards (<= 999 bound vars).
+        Returns rows closed. Scoped by repository_id when provided so
+        multi-repo DBs never close each other's live rows."""
         ids = list(set(logical_ids))
         if not ids:
             return 0
         total_closed = 0
         for i in range(0, len(ids), _SQLITE_PARAM_CHUNK):
-            chunk = ids[i:i + 500]
+            chunk = ids[i:i + _SQLITE_PARAM_CHUNK]
             placeholders = ",".join("?" for _ in chunk)
             sql = (
                 "UPDATE entities SET valid_until = ?, t_expired = ?"
@@ -692,7 +698,9 @@ class GraphStore:
         (raw endpoint strings for external/SBOM endpoints). Candidate
         loading stays scoped to the new edges' endpoint set (one file's
         fan-out, in practice): loading the whole repository's entities
-        and live edges on every file made re-ingest quadratic.
+        and live edges on every file made re-ingest quadratic. Every
+        chunked query here is bounded by the same _SQLITE_PARAM_CHUNK
+        guard so no statement exceeds 999 bound variables.
         """
         if not new_edges:
             return 0
@@ -700,7 +708,7 @@ class GraphStore:
         endpoints = sorted({x for e in new_edges
                             for x in (e.src_entity_id, e.dst_entity_id) if x})
         for i in range(0, len(endpoints), _SQLITE_PARAM_CHUNK):
-            chunk = endpoints[i:i + 500]
+            chunk = endpoints[i:i + _SQLITE_PARAM_CHUNK]
             placeholders = ",".join("?" for _ in chunk)
             sql = ("SELECT revision_entity_id, logical_entity_id FROM entities"
                    f" WHERE revision_entity_id IN ({placeholders})")
@@ -723,7 +731,7 @@ class GraphStore:
         touched = sorted({_logic(x) for x in endpoints})
         cand_ids: set[str] = set()
         for i in range(0, len(touched), _SQLITE_PARAM_CHUNK):
-            chunk = touched[i:i + 500]
+            chunk = touched[i:i + _SQLITE_PARAM_CHUNK]
             placeholders = ",".join("?" for _ in chunk)
             sql = ("SELECT revision_entity_id, logical_entity_id FROM entities"
                    f" WHERE logical_entity_id IN ({placeholders})")
@@ -740,7 +748,7 @@ class GraphStore:
         edge_rows: list = []
         cand = sorted(cand_ids)
         for i in range(0, len(cand), _SQLITE_PARAM_CHUNK):
-            chunk = cand[i:i + 500]
+            chunk = cand[i:i + _SQLITE_PARAM_CHUNK]
             placeholders = ",".join("?" for _ in chunk)
             sql = ("SELECT id, src_entity_id, dst_entity_id, type, metadata_json"
                    " FROM edges WHERE revision_id != ? AND valid_until IS NULL"
@@ -751,16 +759,26 @@ class GraphStore:
                 sql += (" AND revision_id IN (SELECT revision_id FROM revisions"
                         " WHERE repository_id = ?)")
                 params.append(repository_id)
+            if len(params) > 999:
+                raise RuntimeError(
+                    f"sql param bound overflow: {len(params)} > 999 for chunk of {len(chunk)} candidates"
+                )
             edge_rows.extend(self.conn.execute(sql, params).fetchall())
         ids = []
         for r in edge_rows:
-            meta = json.loads(r[4]) if r[4] else {}
+            try:
+                meta = json.loads(r[4]) if r[4] else {}
+            except Exception as exc:
+                from verifyci.contracts.revision import LineageIntegrityError
+                raise LineageIntegrityError(
+                    f"corrupt edge metadata_json while superseding candidates for revision {current_revision_id}"
+                ) from exc
             if _edge_match_key(ent.get(r[1], r[1]), ent.get(r[2], r[2]),
                                r[3], meta) in targets:
                 ids.append(r[0])
         if ids:
             for i in range(0, len(ids), _SQLITE_PARAM_CHUNK):
-                chunk = ids[i:i + 500]
+                chunk = ids[i:i + _SQLITE_PARAM_CHUNK]
                 self.conn.executemany(
                     "UPDATE edges SET valid_until = ?, t_expired = ? WHERE id = ?",
                     [(now, now, i) for i in chunk],
