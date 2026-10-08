@@ -40,6 +40,8 @@ def main() -> None:
     sha = hashlib.sha256(LABELS.read_bytes()).hexdigest()
     assert sha == FROZEN_SHA, f"frozen corpus changed: {sha}"
     metrics = score_labeled(load_v2_cases())
+    assert metrics.detection_recall is not None and metrics.detection_precision is not None, (
+        "unmeasured recall/precision cannot gate")
     measured = {
         "recall": metrics.detection_recall,
         "precision": metrics.detection_precision,

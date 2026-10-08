@@ -95,7 +95,8 @@ def extract_added_refs_status(diff: str | None) -> tuple[dict[str, dict[str, set
         if parsed.tree is None:
             had_error = True
             continue
-        root = parsed.tree.root_node
+        tree = parsed.tree
+        root = tree.root_node
         if getattr(root, "has_error", False):
             had_error = True
         calls: set[str] = set()

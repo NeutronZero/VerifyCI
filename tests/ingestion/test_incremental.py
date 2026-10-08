@@ -36,7 +36,7 @@ class FakeTreeSitterParser:
 def _wired(language="python"):
     inc = IncrementalParser(language)
     raw = FakeRawParser()
-    inc._parser = FakeTreeSitterParser(raw)
+    inc._parser = FakeTreeSitterParser(raw)  # ty: ignore[invalid-assignment] — duck-typed parser double by design (no tree-sitter dependency in this test)
     return inc, raw
 
 

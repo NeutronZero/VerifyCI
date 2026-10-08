@@ -10,6 +10,7 @@ Unknown or empty queries fail closed (return False): an invariant that
 cannot be evaluated never silently passes. Semantic intent beyond these
 kinds (e.g. "this deletion is wrong") is out of V1 scope by design.
 """
+import dataclasses
 import re
 import uuid
 from typing import Any
@@ -649,6 +650,18 @@ def _coverage_note(examined: int, edge_type: str, name: str) -> str:
     return f"examined {examined} {edge_type} edges for {name!r}"
 
 
+@dataclasses.dataclass
+class _SecretScanState:
+    """Per-file multiline secret-scan continuation state.
+
+    Replaces the old heterogeneous 5-element list (whose 5th slot was
+    dead): typed fields keep the scan's fail-closed buffer accounting
+    checkable instead of `Unknown`-typed.
+    """
+    quote: str | None = None
+    paren_depth: int = 0
+    backslash: bool = False
+    buf: list[str] = dataclasses.field(default_factory=list)
 
 
 def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
@@ -660,7 +673,7 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
         return True, 'empty diff, nothing to scan', True, []
     tdq = chr(34) * 3
     tsq = chr(39) * 3
-    states = {}
+    states: dict[str | None, _SecretScanState] = {}
     hits = []
 
     def _lineno(fname, lineno):
@@ -670,26 +683,26 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
         fname = file if file is not None else 'unscoped'
         st = states.get(file)
         if st is None:
-            st = [None, 0, False, [], 0]
+            st = _SecretScanState()
             states[file] = st
         # single line hits, including high signal shapes in continuation lines
         if _has_secret(content, fname=fname):
             pat = _secret_pat_name(content)
             hits.append(f'{_lineno(fname, lineno)}:{pat}')
-        if st[0] is not None or st[1] > 0 or st[2]:
-            if len(st[3]) >= 200 or (sum(len(x) for x in st[3]) + len(content) > 32_768):
+        if st.quote is not None or st.paren_depth > 0 or st.backslash:
+            if len(st.buf) >= 200 or (sum(len(x) for x in st.buf) + len(content) > 32_768):
                 # Multiline buffer cap (mirrors secrets/engine.py limits):
                 # fail closed as unestablished rather than grow unbounded.
                 return False, 'secret scan resource limit exceeded: multiline buffer', False, []
-            st[3].append(content)
-            joined = ' '.join(st[3])
+            st.buf.append(content)
+            joined = ' '.join(st.buf)
             found = False
             why = 'multiline-continuation'
-            opener = st[3][0] if st[3] else None
+            opener = st.buf[0] if st.buf else None
             if _is_secret_carve_out(content, opener=opener, fname=fname):
                 pass
-            elif st[0] is not None:
-                bare = content.replace(st[0], '')
+            elif st.quote is not None:
+                bare = content.replace(st.quote, '')
                 if len(bare.strip()) >= 3:
                     found = True
                     why = 'multiline-triple'
@@ -708,25 +721,25 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
             else:
                 if _quoted_hit(content, 3):
                     found = True
-                    why = 'multiline-paren' if st[1] > 0 else 'multiline-backslash'
+                    why = 'multiline-paren' if st.paren_depth > 0 else 'multiline-backslash'
                 elif _has_secret(content, fname=fname) or _has_secret(joined, fname=fname):
                     found = True
-                    why = 'multiline-paren' if st[1] > 0 else 'multiline-backslash'
+                    why = 'multiline-paren' if st.paren_depth > 0 else 'multiline-backslash'
             if found:
                 if not _has_secret(content, fname=fname):
                     hits.append(f'{_lineno(fname, lineno)}:{why}')
-            if st[0] is not None:
-                if st[0] in content:
-                    st[0] = None
-                    st[3] = []
-            elif st[1] > 0:
-                st[1] += content.count(chr(40)) - content.count(chr(41))
-                if st[1] <= 0:
-                    st[1] = 0
-                    st[3] = []
+            if st.quote is not None:
+                if st.quote in content:
+                    st.quote = None
+                    st.buf = []
+            elif st.paren_depth > 0:
+                st.paren_depth += content.count(chr(40)) - content.count(chr(41))
+                if st.paren_depth <= 0:
+                    st.paren_depth = 0
+                    st.buf = []
             else:
-                st[2] = False
-                st[3] = []
+                st.backslash = False
+                st.buf = []
             continue
         if _KEYWORD_RE.search(content) is None and CONN_STR_RE.search(content) is None:
             # Keywordless split connection strings (postgres://user: ... on
@@ -739,21 +752,21 @@ def _scan_secrets(diff: str) -> tuple[bool, str, bool, list]:
                 if content.count(chr(40)) <= content.count(chr(41)):
                     continue
         if content.count(tdq) % 2 == 1:
-            st[0] = tdq
-            st[3] = [content]
+            st.quote = tdq
+            st.buf = [content]
             continue
         if content.count(tsq) % 2 == 1:
-            st[0] = tsq
-            st[3] = [content]
+            st.quote = tsq
+            st.buf = [content]
             continue
         if content.rstrip().endswith(chr(92)):
-            st[2] = True
-            st[3] = [content]
+            st.backslash = True
+            st.buf = [content]
             continue
         stripped = content.rstrip()
         if stripped.endswith(chr(40)) and stripped.count(chr(40)) > stripped.count(chr(41)):
-            st[1] = stripped.count(chr(40)) - stripped.count(chr(41))
-            st[3] = [content]
+            st.paren_depth = stripped.count(chr(40)) - stripped.count(chr(41))
+            st.buf = [content]
             continue
     if hits:
         return False, f'secret-shaped string in {hits[0]}', True, hits

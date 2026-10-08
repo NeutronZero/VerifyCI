@@ -54,6 +54,7 @@ def test_h1_rr_measurement_reproduces():
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "rerank_measure", Path(HERE, "..", "..", "benchmarks", "beir", "rerank_measure.py"))
+    assert spec is not None and spec.loader is not None
     measure = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(measure)
     before = _results()

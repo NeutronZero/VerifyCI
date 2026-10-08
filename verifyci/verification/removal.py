@@ -170,11 +170,6 @@ def _snippet_record(entity) -> EntitySnippetRecord | None:
     )
 
 
-def _snippet_lines(entity) -> list[str] | None:
-    rec = _snippet_record(entity)
-    return rec.lines if rec else None
-
-
 def _path_matches(diff_path: str, entity_path: str) -> bool:
     want = normalize_path(diff_path or "")
     epath = normalize_path(entity_path or "")

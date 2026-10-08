@@ -70,12 +70,23 @@ def run_vuln(db_path: str | None = None, cache_path: str = "./storage/vuln_cache
         # The 5001st row is a tripwire, not data: a silently
         # truncated scan gates green on packages it never examined.
         truncated = len(rows) > 5000
+        from verifyci.contracts.edge import Edge as _ContractEdge
+        from verifyci.contracts.edge import EdgeType as _ContractEdgeType
         for (meta_json,) in rows[:5000]:
             try:
                 meta = json.loads(meta_json) if meta_json else {}
             except ValueError:
                 continue
-            edge = type("Edge", (), {"metadata": meta})()
+            if not isinstance(meta, dict):
+                # Corrupt non-object metadata: previously crashed the scan
+                # here (`.get` on a list/str); skip the row instead. The
+                # scan still reports what it could examine.
+                continue
+            edge = _ContractEdge(
+                id=f"vulnscan:{revision_id}:{meta.get('package', '')}",
+                revision_id=revision_id,
+                src_entity_id="", dst_entity_id="",
+                type=_ContractEdgeType.DEPENDS_ON, metadata=meta)
             for vuln in cache.lookup(edge):
                 findings.append({"package": meta.get("package"), **vuln})
     finally:

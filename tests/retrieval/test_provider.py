@@ -89,9 +89,11 @@ def test_selection_ollama_parses_model(monkeypatch, tmp_path):
     monkeypatch.setenv("ACI_OLLAMA_URL", "http://example:11434")
     provider = default_dense_provider(str(tmp_path))
     assert isinstance(provider, CachedEmbeddingProvider)
-    assert isinstance(provider.base, OllamaEmbeddingProvider)
-    assert provider.base.model == "mxbai-embed-large"
-    assert provider.base.base_url == "http://example:11434"
+    base = provider.base
+    assert isinstance(base, OllamaEmbeddingProvider)
+    assert base.model == "mxbai-embed-large"
+    assert base.base_url == "http://example:11434"
+    assert provider.cache_path is not None
     assert provider.cache_path.endswith("embedding_cache_mxbai_embed_large.json")
 
 
@@ -100,7 +102,9 @@ def test_selection_ollama_defaults(monkeypatch):
     monkeypatch.delenv("ACI_OLLAMA_URL", raising=False)
     provider = default_dense_provider()
     assert isinstance(provider, CachedEmbeddingProvider)
-    assert provider.base.model == "nomic-embed-text"
+    _base = provider.base
+    assert isinstance(_base, OllamaEmbeddingProvider)
+    assert _base.model == "nomic-embed-text"
     assert provider.cache_path is None
 
 

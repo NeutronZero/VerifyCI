@@ -164,7 +164,7 @@ def test_d_timeout_handling():
             return None
 
         real = exmod.Executor.execute_node
-        exmod.Executor.execute_node = slow_execute
+        exmod.Executor.execute_node = slow_execute  # ty: ignore[invalid-assignment] — hang double never returns normally by design
         try:
             sched = AsyncDAGScheduler()
             dag = ExecutableDAG(

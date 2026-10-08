@@ -14,17 +14,18 @@ __all__ = [
     "GenAiUsageOutputTokens",
 ]
 try:
-    from opentelemetry.semconv.gen_ai import (
-        GenAiAgentId,
-        GenAiAgentName,
-        GenAiAgentVersion,
-        GenAiAgentDescription,
-        GenAiConversationId,
-        GenAiOperationName,
-        GenAiUsageInputTokens,
-        GenAiUsageOutputTokens,
-    )
-except ImportError:
+    import importlib as _importlib
+
+    _gen_ai = _importlib.import_module("opentelemetry.semconv.gen_ai")
+    GenAiAgentId = _gen_ai.GenAiAgentId
+    GenAiAgentName = _gen_ai.GenAiAgentName
+    GenAiAgentVersion = _gen_ai.GenAiAgentVersion
+    GenAiAgentDescription = _gen_ai.GenAiAgentDescription
+    GenAiConversationId = _gen_ai.GenAiConversationId
+    GenAiOperationName = _gen_ai.GenAiOperationName
+    GenAiUsageInputTokens = _gen_ai.GenAiUsageInputTokens
+    GenAiUsageOutputTokens = _gen_ai.GenAiUsageOutputTokens
+except (ImportError, AttributeError):
     from typing import Any as _Any
 
     class _Attr:

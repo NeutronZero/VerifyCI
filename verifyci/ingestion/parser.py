@@ -1,5 +1,9 @@
 import hashlib
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tree_sitter import Tree
 
 
 @dataclass
@@ -8,7 +12,7 @@ class ParsedFile:
     source: bytes
     source_hash: str
     language: str
-    tree: object = None
+    tree: "Tree | None" = None
 
 
 def compute_source_hash(source: bytes) -> str:

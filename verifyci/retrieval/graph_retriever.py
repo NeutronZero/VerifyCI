@@ -48,7 +48,7 @@ class GraphRetriever:
     deterministically by entity ID.
     """
 
-    def __init__(self, graph, node_map: dict = None):
+    def __init__(self, graph, node_map: dict | None = None):
         self.graph = graph
         self.node_map = node_map or {}
         self._cached_adj = None

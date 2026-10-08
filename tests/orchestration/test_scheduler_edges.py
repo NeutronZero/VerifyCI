@@ -170,7 +170,7 @@ def test_cancelled_mid_levels_persists_and_returns():
                 sched._tasks[task_id]["status"] = TaskStatus.CANCELLED
             return []
 
-        sched._run_level = fake_run_level
+        sched._run_level = fake_run_level  # ty: ignore[invalid-assignment] — instance-attr double called with explicit executor (no self)
         tid = await sched.submit(
             {
                 "task_id": "t",
@@ -212,7 +212,7 @@ def test_execute_cancelled_error_path_sets_cancelled():
         async def boom(*a, **k):
             raise asyncio.CancelledError()
 
-        sched._run_level = boom
+        sched._run_level = boom  # ty: ignore[invalid-assignment] — raising double with intentionally loose signature
         tid = await sched.submit(
             {
                 "task_id": "t",
@@ -251,7 +251,7 @@ def test_run_level_cancelled_sibling_marked():
             await asyncio.sleep(30)
             return ("ok", None)
 
-        sched._run_node = fake_run_node
+        sched._run_node = fake_run_node  # ty: ignore[invalid-assignment] — instance-attr double called with explicit executor (no self)
         level = [
             {"step_id": "fast", "type": "x", "config": {}},
             {"step_id": "slow", "type": "x", "config": {}},
@@ -275,11 +275,13 @@ def test_run_level_self_cancelled_node_marked():
         async def fake_run_node(executor, node, task_id, conversation_id, shared):
             if node["step_id"] == "fast":
                 return ("ok", None)
-            asyncio.current_task().cancel()
+            _self = asyncio.current_task()
+            assert _self is not None
+            _self.cancel()
             await asyncio.sleep(30)
             return ("ok", None)  # unreachable
 
-        sched._run_node = fake_run_node
+        sched._run_node = fake_run_node  # ty: ignore[invalid-assignment] — instance-attr double called with explicit executor (no self)
         level = [
             {"step_id": "fast", "type": "x", "config": {}},
             {"step_id": "selfcancel", "type": "x", "config": {}},
@@ -298,7 +300,7 @@ def test_run_level_node_exception_attributed():
         async def raiser(executor, node, task_id, conversation_id, shared):
             raise ValueError("kablam")
 
-        sched._run_node = raiser
+        sched._run_node = raiser  # ty: ignore[invalid-assignment] — raising double with intentionally loose signature
         level = [{"step_id": "s1", "type": "x", "config": {}}]
         results = await sched._run_level(None, level, "t", "c", {})
         assert results == [("error", ("s1", "ValueError: kablam"))]

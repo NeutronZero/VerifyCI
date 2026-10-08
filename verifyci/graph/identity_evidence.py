@@ -15,6 +15,7 @@ disambiguated in stored metadata and needs no migration.
 Read-only over the entity list. Deterministic: groups sorted by
 (name, file, line); member rows sorted by file and span.
 """
+from typing import Any
 
 CALLABLE_TYPES = frozenset({"FUNCTION", "METHOD", "CLASS"})
 
@@ -79,7 +80,7 @@ def collision_report(entities: list) -> dict:
             continue
         by_name.setdefault(name, []).append(e)
 
-    groups = []
+    groups: list[dict[str, Any]] = []
     for name in sorted(by_name):
         members = sorted(
             by_name[name],

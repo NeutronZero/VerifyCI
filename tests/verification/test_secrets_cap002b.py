@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Mapping
+from typing import Any
+
 import pytest
 
 from verifyci.secrets.contracts import (
@@ -186,6 +189,7 @@ def test_adversarial_overlapping_detector_findings():
     # Verify that competing lower-specificity finding was not silently discarded
     superseded = [s for s in suppressed if s.suppression and s.suppression.reason == "superseded_by_specific_rule"]
     assert len(superseded) >= 1
+    assert superseded[0].suppression is not None
     assert superseded[0].suppression.superseded_by_rule_id == "provider_openai_key"
 
 
@@ -263,7 +267,7 @@ def test_adversarial_malformed_rule_configuration():
 
 # 16. Unknown rule configuration key fails loudly
 def test_adversarial_unknown_rule_configuration_key():
-    dict_list = [{
+    dict_list: list[Mapping[str, Any]] = [{
         "rule_id": "r1",
         "description": "desc",
         "detector_family": "test",

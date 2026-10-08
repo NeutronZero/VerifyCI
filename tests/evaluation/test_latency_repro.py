@@ -98,8 +98,9 @@ def test_frozen_sources_match_working_tree():
         parts = re.split(r"\n    (?=def )", text)
         out = {}
         for p in parts[1:]:
-            name = re.match(r"def (\w+)", p).group(1)
-            out[name] = p
+            m = re.match(r"def (\w+)", p)
+            assert m is not None
+            out[m.group(1)] = p
         return out
 
     lm, fm = _methods(live_gs), _methods(fx_gs)

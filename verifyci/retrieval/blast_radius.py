@@ -51,7 +51,7 @@ def compute_blast_radius(
     test_entities: set[str],
     dependency_graph=None,
     vuln_cache=None,
-    node_map: dict = None,
+    node_map: dict | None = None,
     max_hops: int = 2,
 ) -> BlastRadiusResult:
     if max_hops > MAX_DEPTH_LIMIT:

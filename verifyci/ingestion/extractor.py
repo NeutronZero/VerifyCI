@@ -585,10 +585,11 @@ def extract_entities(parsed: ParsedFile, repository_id: str, revision_id: str) -
         EntityType.MODULE, parsed.language, parsed.source_hash, 1, num_lines, now,
     )
     entities = [module]
-    if parsed.tree is None:
+    tree = parsed.tree
+    if tree is None:
         return entities
 
-    root = parsed.tree.root_node
+    root = tree.root_node
     parents = {}
     for node in _walk(root):
         for child in node.children:
@@ -777,7 +778,8 @@ def _include_header(node, source: bytes) -> Optional[str]:
 def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) -> list[Edge]:
     now = time.time()
     edges: list[Edge] = []
-    if parsed.tree is None:
+    tree = parsed.tree
+    if tree is None:
         return edges
 
     by_name: dict[str, list[Entity]] = {}
@@ -874,7 +876,7 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
                 revision_id, caller.revision_entity_id, callee.revision_entity_id,
                 EdgeType.REFERENCES, CPGEdgeSubtype.REFERENCES, now, site))
 
-    root = parsed.tree.root_node
+    root = tree.root_node
     parents = {}
     for _n in _walk(root):
         for _c in _n.children:

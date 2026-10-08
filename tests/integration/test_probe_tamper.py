@@ -243,7 +243,7 @@ def test_probe_cancel_event_persisted_and_pinned():
         return NodeResult(step_id="s1", status="COMPLETED", output=None)
 
     real = exmod.Executor.execute_node
-    exmod.Executor.execute_node = slow
+    exmod.Executor.execute_node = slow  # ty: ignore[invalid-assignment] — timing double with intentionally loose signature
     try:
         async def _go():
             db = os.path.join(tempfile.mkdtemp(prefix="vci_probecancel_"), "v.db")

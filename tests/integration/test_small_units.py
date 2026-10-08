@@ -55,6 +55,7 @@ def test_get_dict_and_namespace():
 def test_emit_event_appends():
     ledger = EventLedger()
     event = emit_event(ledger, "T", {"k": "v"}, {"s": "test"})
+    assert event is not None
     assert event.type == "T"
     assert ledger.get_events() == [event]
 

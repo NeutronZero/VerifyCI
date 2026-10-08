@@ -194,22 +194,22 @@ diff --git a/mystery/unknown.xyz b/mystery/unknown.xyz
 
         # Modifying attribute on frozen dataclass raises FrozenInstanceError
         with pytest.raises(FrozenInstanceError):
-            pdiff.raw_diff = "something else"
+            pdiff.raw_diff = "something else"  # ty: ignore[invalid-assignment]
 
         # Collections returned are immutable mappings or tuples
         files = pdiff.files_for_partition(FilePartition.CODE_CORE)
         assert isinstance(files, tuple)
         with pytest.raises(AttributeError):
-            files.append("hack.py")  # tuples have no append
+            files.append("hack.py")  # tuples have no append  # ty: ignore[unresolved-attribute]
 
         hunks = pdiff.hunks_for_partition(FilePartition.CODE_CORE)
         assert isinstance(hunks, tuple)
         with pytest.raises(AttributeError):
-            hunks.append(None)
+            hunks.append(None)  # ty: ignore[unresolved-attribute]
 
         # Mapping proxies reject assignment
         with pytest.raises(TypeError):
-            pdiff.partitions[FilePartition.CODE_CORE] = ()
+            pdiff.partitions[FilePartition.CODE_CORE] = ()  # ty: ignore[invalid-assignment]
 
     def test_empty_diff(self):
         pdiff = partition_diff("")

@@ -84,6 +84,7 @@ def _items():
 def test_v2_meets_recorded_baseline():
     metrics = score_labeled(load_v2_cases())
     assert metrics.check_coverage == 1.0
+    assert metrics.detection_recall is not None and metrics.detection_precision is not None
     assert metrics.detection_recall >= BASELINE_RECALL - EPSILON
     assert metrics.detection_precision >= BASELINE_PRECISION - EPSILON
 

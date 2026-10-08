@@ -18,6 +18,7 @@ Verifies:
 from __future__ import annotations
 
 import hashlib
+from typing import Any
 
 import pytest
 
@@ -212,6 +213,7 @@ def test_actual_corrupt_payload_encountered():
     defense-in-depth for payloads constructed outside the builder.
     """
     corrupt_id = _hid("orders.create_order")
+    corrupt_metadata: Any = "corrupted_non_dict_metadata"  # deliberate contract violation
     entity = Entity(
         repository_id="test_repo",
         logical_entity_id=_hid("test_repo", "orders", "create_order"),
@@ -224,7 +226,7 @@ def test_actual_corrupt_payload_encountered():
         language="python",
         source_hash="h123",
         revision_id="rev_1",
-        metadata="corrupted_non_dict_metadata",  # invalid metadata type
+        metadata=corrupt_metadata,
     )
 
     builder = GraphBuilder()

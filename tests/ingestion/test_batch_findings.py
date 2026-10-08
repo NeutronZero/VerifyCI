@@ -133,7 +133,7 @@ void process(struct Point p, ns::Type q) {
     parsed = parser.parse("proc.cpp", code, "cpp")
     ents = extract_entities(parsed, "repo", "rev")
     fn = next(e for e in ents if e.name == "process")
-    sig = fn.metadata.get("signature")
+    sig = fn.metadata.get("signature") or ""
     assert "struct Point" in sig
     assert "ns::Type" in sig
 

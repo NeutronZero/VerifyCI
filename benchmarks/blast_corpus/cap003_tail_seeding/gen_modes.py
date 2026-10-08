@@ -37,7 +37,7 @@ def function_spans(source: str) -> list[tuple[str, int, int]]:
     return out
 
 
-def main() -> None:
+def main() -> tuple[list[dict], list[dict]]:
     cases = [json.loads(line) for line in V1.read_text(encoding="utf-8").splitlines() if line.strip()]
     revised = []
     modes = []

@@ -124,6 +124,7 @@ def test_legacy_midline_truncation_detected_via_2000_char_boundary():
         # is_complete and truncated_at_line intentionally omitted (legacy format)
     )
     rec = _snippet_record(ent)
+    assert rec is not None
     assert rec.is_complete is False
 
     # Line 46 removed line does not match the truncated 'return som...'

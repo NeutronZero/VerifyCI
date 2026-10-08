@@ -343,7 +343,7 @@ class VulnerabilityCache:
         self.close()
 
     def lookup(self, edge: Edge) -> list[dict]:
-        pkg = edge.metadata.get("package", "")
+        pkg = (edge.metadata or {}).get("package", "")
         if pkg in self._cache:
             return self._cache[pkg]
         try:

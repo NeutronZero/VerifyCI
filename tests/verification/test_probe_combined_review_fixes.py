@@ -244,11 +244,21 @@ def test_retriever_fallback_normalizes_payload_neighbors():
 
 
 def test_provider_keeps_ollama_model_case(monkeypatch):
-    from verifyci.retrieval.provider import default_dense_provider
+    from verifyci.retrieval.provider import (
+        CachedEmbeddingProvider,
+        OllamaEmbeddingProvider,
+        default_dense_provider,
+    )
     monkeypatch.setenv("VERIFYCI_EMBEDDINGS", "ollama:MyModel")
-    assert default_dense_provider().base.model == "MyModel"
+    _p = default_dense_provider()
+    assert isinstance(_p, CachedEmbeddingProvider)
+    assert isinstance(_p.base, OllamaEmbeddingProvider)
+    assert _p.base.model == "MyModel"
     monkeypatch.setenv("VERIFYCI_EMBEDDINGS", "OLLAMA")
-    assert default_dense_provider().base.model == "nomic-embed-text"
+    _p2 = default_dense_provider()
+    assert isinstance(_p2, CachedEmbeddingProvider)
+    assert isinstance(_p2.base, OllamaEmbeddingProvider)
+    assert _p2.base.model == "nomic-embed-text"
 
 
 # --- shared anchor helper sanity --------------------------------------------

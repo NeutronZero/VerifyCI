@@ -53,6 +53,10 @@ class GraphBuilder:
 
         self._graph = rx.PyDiGraph()
         self._node_map = {}
+        # Local alias: ty does not narrow attribute types across calls,
+        # so the build body works through a narrowed local.
+        graph = self._graph
+        assert graph is not None
         self.resolution_stats = {"resolved": 0, "ambiguous": 0, "missing": 0}
         self.resolution_events = []
 
@@ -63,7 +67,7 @@ class GraphBuilder:
                 raise ValueError(
                     f"invalid_graph_entity:{entity.revision_entity_id}:{entity_errors}"
                 )
-            idx = self._graph.add_node(entity)
+            idx = graph.add_node(entity)
             self._node_map[entity.revision_entity_id] = idx
 
         for edge in edges:
@@ -84,7 +88,7 @@ class GraphBuilder:
             if dst_idx is None and self._allow_external:
                 dst_idx = self._add_external(edge.dst_entity_id, edge)
             if src_idx is not None and dst_idx is not None:
-                self._graph.add_edge(src_idx, dst_idx, edge)
+                graph.add_edge(src_idx, dst_idx, edge)
 
         self._resolve_deferred(pending, now)
         return self._graph
@@ -102,6 +106,8 @@ class GraphBuilder:
         depends only on the loaded entity set, so every load of the
         same revision resolves identically.
         """
+        graph = self._graph
+        assert graph is not None  # only called post-build
         by_lang: dict[str, str] = {}
         by_name: dict[str, list[str]] = {}
         # Qualified-name index built once per build: matching every
@@ -114,7 +120,7 @@ class GraphBuilder:
         call_qual_index: dict[str, list[str]] = {}
         call_top_index: dict[str, list[str]] = {}
         for eid, idx in self._node_map.items():
-            payload = self._graph[idx]
+            payload = graph[idx]
             if not hasattr(payload, "type") or not hasattr(payload, "name"):
                 continue  # external placeholder nodes never resolve targets
             if payload.type in (EntityType.IMPORT, EntityType.MODULE,
@@ -153,7 +159,7 @@ class GraphBuilder:
                 continue
             if edge.type == EdgeType.CALLS_UNRESOLVED:
                 name = (edge.metadata or {}).get("callee", "")
-                caller_lang = getattr(self._graph[src_idx], "language", "") or ""
+                caller_lang = getattr(graph[src_idx], "language", "") or ""
                 qualified_ref = (edge.metadata or {}).get("callee_qualified", "")
                 if qualified_ref and "::" in qualified_ref:
                     # A spelled `ns::helper` resolves ONLY canonically: a
@@ -166,7 +172,7 @@ class GraphBuilder:
                     candidates = [
                         e for e in self._match_qualified(
                             qualified_ref, call_qual_index, call_top_index)
-                        if self._graph[self._node_map[e]].type in _CALL_TARGET_TYPES
+                        if graph[self._node_map[e]].type in _CALL_TARGET_TYPES
                         and (not caller_lang or _same_lang_family(
                             by_lang.get(e, caller_lang), caller_lang))]
                     if len(candidates) != 1:
@@ -185,7 +191,7 @@ class GraphBuilder:
                 receiver = (edge.metadata or {}).get("receiver", "")
                 candidates = [
                     e for e in by_name.get(name, [])
-                    if self._graph[self._node_map[e]].type in _CALL_TARGET_TYPES
+                    if graph[self._node_map[e]].type in _CALL_TARGET_TYPES
                     # Same language family only: a Python `obj.add(x)`
                     # must not link a C `add` across the repo (unique-name
                     # policy is necessary but not sufficient). C and C++
@@ -201,8 +207,8 @@ class GraphBuilder:
                     # Only match if candidate is in a class/scope matching the receiver.
                     candidates = [
                         e for e in candidates
-                        if (getattr(self._graph[self._node_map[e]], "metadata", {}).get("scope") == receiver
-                            or getattr(self._graph[self._node_map[e]], "metadata", {}).get("identity_scope") == receiver)
+                        if (getattr(graph[self._node_map[e]], "metadata", {}).get("scope") == receiver
+                            or getattr(graph[self._node_map[e]], "metadata", {}).get("identity_scope") == receiver)
                     ]
                 if len(candidates) != 1:
                     self.resolution_stats["ambiguous" if candidates else "missing"] += 1
@@ -222,7 +228,7 @@ class GraphBuilder:
                     candidates = self._match_qualified(name, qual_index, top_index)
                 else:
                     candidates = [e for e in by_name.get(name, [])
-                                  if self._graph[self._node_map[e]].type in _BASE_TARGET_TYPES]
+                                  if graph[self._node_map[e]].type in _BASE_TARGET_TYPES]
                 if len(candidates) != 1:
                     self.resolution_stats["ambiguous" if candidates else "missing"] += 1
                     self._record(edge, "inherits", name,
@@ -252,9 +258,11 @@ class GraphBuilder:
         """
         if not self._collect_events:
             return
+        graph = self._graph
+        assert graph is not None  # only called post-build
         meta = edge.metadata or {}
         scope = meta.get("caller_scope", meta.get("scope", "")) or ""
-        src = self._graph[self._node_map[edge.src_entity_id]] \
+        src = graph[self._node_map[edge.src_entity_id]] \
             if edge.src_entity_id in self._node_map else None
         self.resolution_events.append({
             "edge_id": edge.id,
@@ -278,6 +286,8 @@ class GraphBuilder:
         namespaced one. Unqualified refs never reach this path — flat
         `by_name` lookup handles them, unchanged.
         """
+        graph = self._graph
+        assert graph is not None  # only called post-build
         anchored = name.startswith("::")
         bare = name.lstrip(":") if anchored else name
         if not bare:
@@ -289,7 +299,7 @@ class GraphBuilder:
             return list(qual_index.get(name, ()))
         matches = []
         for eid, idx in self._node_map.items():
-            payload = self._graph[idx]
+            payload = graph[idx]
             if not hasattr(payload, "type") or not hasattr(payload, "name"):
                 continue
             if payload.type not in _BASE_TARGET_TYPES:
@@ -315,8 +325,10 @@ class GraphBuilder:
         consumes it yet, and weighting it into risk scores is a
         separately-measured change.
         """
+        assert self._graph is not None  # only called post-build
+        graph = self._graph
         dst_idx = self._node_map[dst_eid]
-        self._graph.add_edge(src_idx, dst_idx, Edge(
+        graph.add_edge(src_idx, dst_idx, Edge(
             id=f"{unresolved.id}__{dst_eid}",
             revision_id=unresolved.revision_id,
             src_entity_id=unresolved.src_entity_id,
@@ -334,6 +346,8 @@ class GraphBuilder:
     def _add_external(self, endpoint: str, edge: Edge) -> int:
         """Materialize string endpoints (e.g. SBOM `pypi:requests`) as nodes
         so DEPENDS_ON edges reach the graph instead of being dropped."""
+        assert self._graph is not None  # only called post-build
+        graph = self._graph
         existing = self._node_map.get(endpoint)
         if existing is not None:
             return existing
@@ -358,7 +372,7 @@ class GraphBuilder:
             raise ValueError(
                 f"invalid_external_graph_entity:{endpoint}:{entity_errors}"
             )
-        idx = self._graph.add_node(entity)
+        idx = graph.add_node(entity)
         self._node_map[endpoint] = idx
         return idx
 

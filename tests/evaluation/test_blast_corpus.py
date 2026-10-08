@@ -113,6 +113,7 @@ def test_measurement_reproduces_recorded_report():
     tracking, not expectation retuning: expected sets match v1 exactly."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("blast_measure", CORPUS / "measure.py")
+    assert spec is not None and spec.loader is not None
     measure = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(measure)
     rows = measure.collect()  # rerun detection on a fresh ingest

@@ -469,7 +469,16 @@ def _strip_prefix(path: str) -> str:
     return path
 
 
-def normalize_path(path: str) -> str:
+def normalize_path(path: str | None) -> str:
+    """Normalize a diff/file path to posix form.
+
+    P1/ty: accepts None (FileDiff.path is Optional) and maps it to "".
+    Previously `str(None)` produced the literal string "None", which then
+    participated in path comparisons; "" matches nothing and routes to the
+    existing skip paths (fail closed) at every call site.
+    """
+    if not path:
+        return ""
     p = str(path).replace("\\", "/")
     while p.startswith("./"):
         p = p[2:]
@@ -556,7 +565,7 @@ def uninspectable_files(diff: str | None) -> list[str]:
     Hunk-less renames/copies are the same class: the diff carries no
     content for the move, so a same-named entity in the base graph must
     not ground a PASS for it."""
-    out: list[str] = []
+    out: list[str | None] = []
     for f in parse_unified_diff(diff):
         if f.binary:
             out.append(f.path)

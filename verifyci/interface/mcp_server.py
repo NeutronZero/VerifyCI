@@ -94,6 +94,8 @@ class MCPServerHandlers:
             self._repo_invariants_err = "invalid_invariants_config"
 
     def _index_fingerprint(self):
+        if self.graph is None:
+            return None
         try:
             return (id(self.graph), int(self.graph.num_nodes()), int(self.graph.num_edges()))
         except Exception:  # noqa: BLE001 - adapter without counts

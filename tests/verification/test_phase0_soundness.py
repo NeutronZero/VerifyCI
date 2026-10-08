@@ -2,6 +2,8 @@
 
 import pytest
 
+from typing import Any
+
 from verifyci.contracts.edge import Edge, EdgeType
 from verifyci.contracts.entity import Entity, EntityType
 from verifyci.contracts.verification_ir import (
@@ -207,7 +209,8 @@ def test_provenance_uses_canonical_record_shape():
     records = ent.provenance_chain()
     assert records and isinstance(records[0], dict)
     assert validate_provenance_chain(records) is True
-    assert validate_provenance_chain(["raw-provenance"]) is False
+    bad: list[Any] = ["raw-provenance"]
+    assert validate_provenance_chain(bad) is False
 
 
 def test_external_entities_validate_and_builder_preserves_them():

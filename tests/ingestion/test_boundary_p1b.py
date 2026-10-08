@@ -49,9 +49,12 @@ def test_fifo_not_ingested_and_does_not_block(tmp_path):
     repo.mkdir()
     (repo / "app.py").write_text("x = 1\n", encoding="utf-8")
     fifo = repo / "stream.py"
+    _mkfifo = getattr(os, "mkfifo", None)
+    if _mkfifo is None:
+        pytest.skip("FIFOs unavailable")
     try:
-        os.mkfifo(fifo)
-    except (OSError, NotImplementedError, AttributeError):
+        _mkfifo(fifo)
+    except (OSError, NotImplementedError):
         pytest.skip("FIFOs unavailable")
     yielded = [p.name for p in iter_repo_files(repo)]
     assert "stream.py" not in yielded

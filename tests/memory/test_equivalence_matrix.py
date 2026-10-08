@@ -80,7 +80,9 @@ def test_snapshot_round_trip(threshold):
         if snap is not None:
             last = snap
     assert last is not None
-    assert store.get_anchor(last.revision_id).state == last.state
+    anchor = store.get_anchor(last.revision_id)
+    assert anchor is not None
+    assert anchor.state == last.state
 
 
 def test_ledger_store_round_trip(tmp_path):

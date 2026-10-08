@@ -16,7 +16,7 @@ def test_probe_incremental_requirement_removal_drops_stale_edge(tmp_path):
     try:
         deps = [e for e in store.get_edges_by_revision(out2["revision_id"])
                 if e.type.value == "DEPENDS_ON"]
-        pkgs = sorted(e.metadata.get("package") for e in deps)
+        pkgs = sorted((e.metadata.get("package") for e in deps), key=lambda p: str(p))
         assert "requests" in pkgs
         assert "flask" not in pkgs, "stale edge resurrected: %s" % (pkgs,)
     finally:
