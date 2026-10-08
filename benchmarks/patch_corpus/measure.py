@@ -41,12 +41,12 @@ def load_cases():
             (BASE / "cases.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def run():
+def run(cases=None):
     from verifyci.interface.commands.verify import run_verify
     work, db = _ingest_base()
     try:
         table = []
-        for c in load_cases():
+        for c in cases if cases is not None else load_cases():
             r = run_verify(c["diff"], db_path=db)
             table.append({
                 "id": c["id"], "ground_truth": c["ground_truth"],

@@ -184,14 +184,16 @@ def run_benchmark() -> dict:
     licensed_sources = [s for s in sources if s.get("license") and s.get("license") in ("MIT", "BSD-3-Clause", "Apache-2.0", "MIT-Equivalent/Internal-Agent")]
     p9_pass = len(licensed_sources) == 5
 
-    # P10: Clean-room non-regression (manual attestation: no capability
-    # outside this corpus regressed in the accompanying test run; see CI).
+    # P10: Clean-room non-regression is a manual attestation, not a
+    # measured signal. It is REPORTED but excluded from the promotion gate:
+    # a hardcoded True inside all_predicates_pass made PROMOTE unfalsifiable
+    # on this axis. Wire it to a real signal or keep it out of the gate.
     p10_pass = True
-    p10_note = "attested, see CI"
+    p10_note = "attested, see CI (reported only; excluded from promotion gate)"
 
     all_predicates_pass = all([
         p1_pass, p2_pass, p3_pass, p4_pass, p5_pass,
-        p6_pass, p7_pass, p8_pass, p9_pass, p10_pass,
+        p6_pass, p7_pass, p8_pass, p9_pass,
     ])
     adjudication_verdict = "PROMOTE" if all_predicates_pass else "HOLD"
     adjudication_status = "ESTABLISHED" if all_predicates_pass else "MEASURED"

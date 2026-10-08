@@ -21,15 +21,23 @@ from verifyci.retrieval.provider import (  # noqa: E402
     CachedEmbeddingProvider, OllamaEmbeddingProvider,
 )
 
-BASELINE = {
-    "dense_recall": 0.6465053763440861,
-    "dense_ndcg": 0.6219642456212527,
-    "hybrid_recall": 0.6706989247311829,
-    "hybrid_ndcg": 0.6603443467936309,
-    "delta_ndcg": 0.03838010117237811,
-}
 SCRATCH_CACHE = HERE / "embedding_cache_h1_nomic_embed_text.json"
 VARIANTS = ("control", "b", "c", "d")
+
+
+def _load_baseline(recorded: dict) -> dict:
+    """Baseline deltas come from the frozen results.json run, never from
+    hardcoded constants: a stale literal silently re-bases every delta.
+    """
+    metrics = recorded["metrics"]
+    dense, hybrid = metrics["dense"], metrics["hybrid"]
+    return {
+        "dense_recall": dense["recall"],
+        "dense_ndcg": dense["ndcg"],
+        "hybrid_recall": hybrid["recall"],
+        "hybrid_ndcg": hybrid["ndcg"],
+        "delta_ndcg": metrics["delta_ndcg"],
+    }
 
 
 def _harness():
@@ -48,6 +56,7 @@ def main() -> None:
     frozen_corpus, queries = h.load()
     recorded = json.loads((HERE / "results.json").read_text(encoding="utf-8"))
     frozen = recorded["frozen"]
+    baseline = _load_baseline(recorded)
     assert _sha(HERE / "corpus.jsonl") == frozen["corpus_sha256"]
     assert _sha(HERE / "qrels.jsonl") == frozen["qrels_sha256"]
     assert _sha(HERE / "config.json") == frozen["config_sha256"]
@@ -88,11 +97,11 @@ def main() -> None:
         report["variants"][variant] = {
             "dense": d, "hybrid": hy, "delta_ndcg": delta,
             "vs_baseline": {
-                "hybrid_recall": hy["recall"] - BASELINE["hybrid_recall"],
-                "hybrid_ndcg": hy["ndcg"] - BASELINE["hybrid_ndcg"],
-                "delta_ndcg": delta - BASELINE["delta_ndcg"],
-                "dense_recall": d["recall"] - BASELINE["dense_recall"],
-                "dense_ndcg": d["ndcg"] - BASELINE["dense_ndcg"],
+                "hybrid_recall": hy["recall"] - baseline["hybrid_recall"],
+                "hybrid_ndcg": hy["ndcg"] - baseline["hybrid_ndcg"],
+                "delta_ndcg": delta - baseline["delta_ndcg"],
+                "dense_recall": d["recall"] - baseline["dense_recall"],
+                "dense_ndcg": d["ndcg"] - baseline["dense_ndcg"],
             },
         }
         print(f"H1-{variant}: dense R@5={d['recall']:.4f} nDCG={d['ndcg']:.4f} | "
