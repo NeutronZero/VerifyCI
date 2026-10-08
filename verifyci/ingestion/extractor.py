@@ -989,27 +989,64 @@ def extract_edges(parsed: ParsedFile, entities: list[Entity], revision_id: str) 
                     revision_id, module.revision_entity_id, entity.revision_entity_id,
                     EdgeType.CONTAINS, CPGEdgeSubtype.HAS_NAME, now))
 
-    for parent in entities:
-        for child in entities:
-            if parent.revision_entity_id == child.revision_entity_id:
-                continue
-            if child.type == EntityType.MODULE:
-                continue
-            if parent.file_path == child.file_path:
-                if (parent.type in (EntityType.FUNCTION, EntityType.METHOD)
-                        and child.type == EntityType.PARAMETER):
-                    parent_scope = f"{scope_of(parent)}.{parent.name}" if scope_of(parent) else parent.name
-                    if scope_of(child) == parent_scope:
-                        edges.append(_make_edge(
-                            revision_id, parent.revision_entity_id, child.revision_entity_id,
-                            EdgeType.CONTAINS, CPGEdgeSubtype.CONTAINS, now))
-                elif parent.line_start <= child.line_start and parent.line_end >= child.line_end:
-                    if parent.type == EntityType.MODULE or (
-                        parent.line_start != child.line_start or parent.line_end != child.line_end
-                    ):
-                        edges.append(_make_edge(
-                            revision_id, parent.revision_entity_id, child.revision_entity_id,
-                            EdgeType.CONTAINS, CPGEdgeSubtype.CONTAINS, now))
+    # P5: file-grouped span sweep. The old all-pairs loop evaluated the
+    # containment conditions O(n^2) times over the whole entity list
+    # (10k entities = 100M evals for one file). Grouping by file and
+    # resolving candidates by span keeps the exact same edge set; emitting
+    # in original (parent, child) index order keeps byte-identical output
+    # (edge ids are content-derived, but downstream resolution iterates
+    # insertion order, so order stability is load-bearing).
+    pairs: set[tuple[int, int]] = set()
+    by_file: dict[str, list[int]] = {}
+    for _i, _e in enumerate(entities):
+        by_file.setdefault(_e.file_path, []).append(_i)
+
+    def _is_self(_pi: int, _ci: int) -> bool:
+        return entities[_pi].revision_entity_id == entities[_ci].revision_entity_id
+
+    for _idxs in by_file.values():
+        by_start = sorted(_idxs, key=lambda _i: (
+            entities[_i].line_start, -entities[_i].line_end, _i))
+        params = [i for i in _idxs
+                  if entities[i].type == EntityType.PARAMETER]
+        for _pi in _idxs:
+            parent = entities[_pi]
+            is_fn = parent.type in (EntityType.FUNCTION, EntityType.METHOD)
+            if is_fn:
+                parent_scope = f"{scope_of(parent)}.{parent.name}" if scope_of(parent) else parent.name
+                for _ci in params:
+                    if _is_self(_pi, _ci):
+                        continue
+                    if scope_of(entities[_ci]) == parent_scope:
+                        pairs.add((_pi, _ci))
+            lo, hi = parent.line_start, parent.line_end
+            # by_start is ascending on line_start: children past hi or
+            # before lo cannot nest; the rest face the exact original
+            # conditions. FUNCTION/METHOD parents skip PARAMETER children
+            # here (the scope rule above already decided them).
+            for _ci in by_start:
+                child = entities[_ci]
+                if child.line_start > hi:
+                    break
+                if child.line_start < lo or child.line_end > hi:
+                    continue
+                if _is_self(_pi, _ci):
+                    continue
+                if child.type == EntityType.MODULE:
+                    continue
+                if is_fn and child.type == EntityType.PARAMETER:
+                    continue
+                if parent.type == EntityType.MODULE or (
+                    parent.line_start != child.line_start
+                    or parent.line_end != child.line_end
+                ):
+                    pairs.add((_pi, _ci))
+
+    for _pi, _ci in sorted(pairs):
+        parent, child = entities[_pi], entities[_ci]
+        edges.append(_make_edge(
+            revision_id, parent.revision_entity_id, child.revision_entity_id,
+            EdgeType.CONTAINS, CPGEdgeSubtype.CONTAINS, now))
     return edges
 
 
