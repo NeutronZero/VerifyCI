@@ -433,8 +433,9 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
                 from verifyci.ingestion.parser import ParsedFile
                 parsed = ParsedFile(file_path=rel, source=source, source_hash=digest,
                                     language=language, tree=None)
-            has_error = (parsed.tree is not None
-                         and getattr(parsed.tree.root_node, "has_error", False))
+            tree = parsed.tree
+            has_error = (tree is not None
+                         and getattr(tree.root_node, "has_error", False))
             if has_error:
                 # Raw signal, kept as data: tree-sitter produced ERROR or
                 # MISSING nodes somewhere in this file. On C this fires on

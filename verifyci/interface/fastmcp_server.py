@@ -15,7 +15,7 @@ from starlette.responses import JSONResponse
 from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_TASK_DIFF_CHARS
 
 
-def create_fastmcp_server(db_path: str, name: str = "verifyci"):
+def create_fastmcp_server(db_path: str | None, name: str = "verifyci"):
     from fastmcp import FastMCP
 
     from verifyci.interface.commands import resolve_db
@@ -133,13 +133,13 @@ class FastMCPAuthMiddleware(BaseHTTPMiddleware):
         return JSONResponse({"detail": "unauthorized"}, status_code=401)
 
 
-def create_fastmcp_http_app(db_path: str = ""):
+def create_fastmcp_http_app(db_path: str | None = ""):
     """Create a Starlette HTTP app with FastMCPAuthMiddleware attached."""
     mcp = create_fastmcp_server(db_path or None)
     return mcp.http_app(middleware=[Middleware(FastMCPAuthMiddleware)])
 
 
-def serve(db_path: str = "", transport: str = "stdio", host: str = "127.0.0.1",
+def serve(db_path: str | None = "", transport: str = "stdio", host: str = "127.0.0.1",
           port: int = 8000) -> None:
     from verifyci.env import get_env
     if transport == "http" and not _is_loopback(host):

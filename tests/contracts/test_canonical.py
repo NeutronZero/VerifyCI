@@ -52,7 +52,7 @@ def test_canonical_excludes_attestation():
         payload={"goal": "test"},
         provenance={"source": "test"},
         prev_event_hash=None,
-        attestation={"key_id": "should_not_appear"},
+        attestation={"key_id": "should_not_appear"},  # ty: ignore[invalid-argument-type] — deliberate malformed attestation: canonical bytes must exclude it
     )
     result = canonical_event_bytes(event)
     assert b"should_not_appear" not in result

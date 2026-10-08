@@ -53,6 +53,7 @@ def main() -> None:
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("beir_harness", HERE / "eval_harness.py")
+    assert spec is not None and spec.loader is not None
     h = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(h)
 

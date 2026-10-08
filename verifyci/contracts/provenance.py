@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from verifyci.contracts.evidence import ProvenanceEntry
@@ -15,7 +15,7 @@ _REQUIRED_FIELDS = {
 }
 
 
-def validate_provenance_chain(entries: list[ProvenanceEntry | Mapping[str, Any]]) -> bool:
+def validate_provenance_chain(entries: Sequence[ProvenanceEntry | Mapping[str, Any]]) -> bool:
     """Validate the canonical provenance-record shape.
 
     Dataclass instances are the in-process representation; mappings are the

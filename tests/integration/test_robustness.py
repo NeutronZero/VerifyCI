@@ -58,7 +58,7 @@ async def test_review_decision_not_clobbered():
         from verifyci.contracts.task_ir import NodeResult
         return NodeResult(step_id='s2', status='COMPLETED', output=None, decision=ok_dec)
     real = exmod.Executor.execute_node
-    exmod.Executor.execute_node = fake_execute
+    exmod.Executor.execute_node = fake_execute  # ty: ignore[invalid-assignment] — timing double with intentionally loose signature
     try:
         sched = AsyncDAGScheduler()
         dag = ExecutableDAG(dag_id='d', nodes=[
@@ -154,7 +154,7 @@ async def test_node_timeout_marks_error():
         from verifyci.contracts.task_ir import NodeResult
         return NodeResult(step_id='s1', status='COMPLETED', output=None)
     real = exmod.Executor.execute_node
-    exmod.Executor.execute_node = slow
+    exmod.Executor.execute_node = slow  # ty: ignore[invalid-assignment] — timing double with intentionally loose signature
     try:
         sched = AsyncDAGScheduler()
         dag = ExecutableDAG(dag_id='d', nodes=[{'step_id': 's1', 'type': 'x', 'config': {'timeout': 0.05}, 'depends_on': []}])
@@ -177,7 +177,7 @@ def test_event_attestation_roundtrip(tmp_path):
     store = GraphStore(db)
     try:
         att_dict = {'key_id': 'k1', 'signature_algorithm': 'ed', 'public_key_id': 'p1', 'signed_at': 1.0, 'signature': 's', 'signed_hash': 'h'}
-        ev = Event(id='e1', type='T', timestamp=1.0, task_id='t', conversation_id='c', payload={}, provenance={}, prev_event_hash=None, attestation=att_dict)
+        ev = Event(id='e1', type='T', timestamp=1.0, task_id='t', conversation_id='c', payload={}, provenance={}, prev_event_hash=None, attestation=att_dict)  # ty: ignore[invalid-argument-type] — deliberate dict input: store must coerce it
         store.insert_event(ev)
         got = store.get_events()[0]
         assert isinstance(got.attestation, AttestationMetadata)

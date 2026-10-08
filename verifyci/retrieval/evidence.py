@@ -12,7 +12,7 @@ def build_evidence_pack(
     scores: dict[str, float],
     retrieval_methods: list[str],
     graph_revision: str,
-    blast_radius: BlastRadiusResult = None,
+    blast_radius: BlastRadiusResult | None = None,
 ) -> EvidencePack:
     provenance = []
     for chunk in source_chunks:

@@ -43,6 +43,7 @@ def _bash_is_wsl():
     """True when BASH is the Windows WSL launcher (needs path translation)."""
     if os.name != "nt" or not BASH:
         return False
+    assert BASH is not None
     try:
         proc = subprocess.run(
             [BASH, "-c", "printf %s \"$WSL_DISTRO_NAME$WSL_INTEROP\""],
@@ -144,6 +145,7 @@ def test_action_enforces_strict_shell_options():
 
 @needs_bash
 def test_action_run_body_passes_bash_syntax_check(tmp_path):
+    assert BASH is not None  # guaranteed by the needs_bash marker
     script = tmp_path / "step.sh"
     script.write_text(
         _run_body().replace("\r\n", "\n"), encoding="utf-8", newline="\n")
@@ -209,6 +211,7 @@ def _harness(tmp_path, monkeypatch, *, env_extra, stub_exit="0",
 
     Returns (returncode, files_created, github_output_text, argv_log).
     """
+    assert BASH is not None  # guaranteed by the needs_bash marker
     body = _run_body()
     # Normalize line endings: the composite step executes under bash, which
     # requires LF. (GitHub checks out action.yml with LF on Linux runners;

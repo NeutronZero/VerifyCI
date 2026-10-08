@@ -36,6 +36,7 @@ SCRATCH_CACHE = HERE / "embedding_cache_h1_nomic_embed_text.json"
 
 def _harness():
     spec = importlib.util.spec_from_file_location("beir_harness", HERE / "eval_harness.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

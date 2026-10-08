@@ -114,6 +114,7 @@ def test_labeled_ground_truth_meets_baseline():
     assert any(s.startswith("flask-history:") for s in sources)
     metrics = score_labeled(cases)
     assert metrics.check_coverage == 1.0
+    assert metrics.detection_recall is not None and metrics.detection_precision is not None
     assert metrics.detection_recall >= BASELINE_RECALL - EPSILON
     assert metrics.detection_precision >= BASELINE_PRECISION - EPSILON
 

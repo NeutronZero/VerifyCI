@@ -240,7 +240,7 @@ def test_d_entity_snippet_record_immutable():
     assert rec.lines == ("line 1", "line 2")
     assert rec.text == "line 1\nline 2"
     with pytest.raises(TypeError):
-        rec.lines[0] = "mutated"  # type: ignore[index]
+        rec.lines[0] = "mutated"  # type: ignore[index]  # ty: ignore[invalid-assignment]
 
 
 # ---------------------------------------------------------------------------

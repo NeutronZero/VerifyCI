@@ -93,6 +93,7 @@ def test_changed_content_creates_new_version(tmp_path):
     # as-of history: T1 sees v1, now sees v2.
     v1 = store.get_entity_as_of(lid, old[1] + 0.001)
     v2 = store.get_entity_as_of(lid, new[1] + 0.001)
+    assert v1 is not None and v2 is not None
     assert v1.source_hash == old[4] and v2.source_hash == new[4]
     store.close()
 

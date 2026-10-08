@@ -463,7 +463,7 @@ class SecretDetector:
             return []
 
         # Group by (file_path, line_start)
-        by_line: dict[tuple[str, int], list[SecretFinding]] = {}
+        by_line: dict[tuple[str, int | None], list[SecretFinding]] = {}
         for c in candidates:
             by_line.setdefault((c.file_path, c.line_start), []).append(c)
 

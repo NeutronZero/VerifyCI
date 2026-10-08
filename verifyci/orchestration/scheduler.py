@@ -55,12 +55,16 @@ def _as_dag_dict(dag: Any) -> dict[str, Any]:
     return {"task_id": "", "nodes": [], "conversation_id": "", "budget_nano_usd": None}
 
 
-def _topo_order(nodes: list[dict]) -> list[dict]:
-    by_id = {n.get("step_id"): n for n in nodes}
-    visited: dict[str, str] = {}
-    order: list[dict] = []
+def _topo_order(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # Nodes arrive as unvalidated JSON-ish mappings (real validation lives
+    # in compiler/validation.py); keys stay Any-typed so ty does not invent
+    # constraints the runtime does not enforce. Missing/duplicate step ids
+    # keep their historical dict semantics (None-keyed, last-wins).
+    by_id: dict[Any, dict[str, Any]] = {n.get("step_id"): n for n in nodes}
+    visited: dict[Any, str] = {}
+    order: list[dict[str, Any]] = []
 
-    def visit(n: dict) -> None:
+    def visit(n: dict[str, Any]) -> None:
         sid = n.get("step_id")
         state = visited.get(sid, "")
         if state == "done":
@@ -80,16 +84,16 @@ def _topo_order(nodes: list[dict]) -> list[dict]:
     return order
 
 
-def _levels(nodes: list[dict]) -> list[list[dict]]:
+def _levels(nodes: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     """Topological levels: nodes in one level are independent and may run
     concurrently. Raises ValueError on cycles."""
     ordered = _topo_order(nodes)
-    depth: dict[str, int] = {}
+    depth: dict[Any, int] = {}
     by_id = {n.get("step_id"): n for n in ordered}
     for n in ordered:
         deps = [d for d in (n.get("depends_on", []) or []) if d in by_id]
         depth[n.get("step_id")] = (max((depth[d] for d in deps), default=-1) + 1)
-    buckets: dict[int, list[dict]] = {}
+    buckets: dict[int, list[dict[str, Any]]] = {}
     for n in ordered:
         buckets.setdefault(depth[n.get("step_id")], []).append(n)
     return [buckets[k] for k in sorted(buckets)]
@@ -349,7 +353,7 @@ class AsyncDAGScheduler(Scheduler):
         tasks = [asyncio.create_task(
             self._run_node(executor, node, task_id, conversation_id, shared))
             for node in level]
-        results = [None] * len(tasks)
+        results: list = [None] * len(tasks)
         pending = set(tasks)
         task_to_idx = {t: i for i, t in enumerate(tasks)}
 

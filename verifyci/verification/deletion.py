@@ -534,6 +534,10 @@ def verify_deletion_hunks(
         norm_path = normalize_path(f.path)
         if norm_path not in norm_code and f.path not in code_files:
             continue
+        # Proven above: a None path normalizes to "" (never in norm_code)
+        # and is never a member of code_files, so this point is unreachable
+        # with f.path None. The assert documents it for the type checker.
+        assert f.path is not None
 
         covering = [
             e for e in code_entities

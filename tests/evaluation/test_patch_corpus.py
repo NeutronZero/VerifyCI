@@ -143,6 +143,7 @@ def test_measurement_reproduces_recorded_report():
     measurement is pinned to POSTFIX (evidence tracking, not retuning)."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("patch_measure", CORPUS / "measure.py")
+    assert spec is not None and spec.loader is not None
     measure = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(measure)
     fresh = measure.compute_metrics(measure.run())
@@ -168,6 +169,7 @@ def test_c6_readme_doc_routes_to_human_review():
     but empty evidence fails non-blocking provenance check -> HUMAN_REVIEW."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("patch_measure", CORPUS / "measure.py")
+    assert spec is not None and spec.loader is not None
     measure = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(measure)
     work, db = measure._ingest_base()

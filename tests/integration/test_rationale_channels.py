@@ -102,11 +102,7 @@ async def test_mcp_result_carries_rationale():
 
 def test_http_response_carries_rationale(monkeypatch):
     from verifyci.interface import http as http_module
-
-    class _Req:
-        diff = DIFF
-        revision_id = ""
-        task_id = "http_verify"
+    from verifyci.interface.http import VerifyRequest
 
     monkeypatch.setattr(
         http_module, "run_verify",
@@ -114,7 +110,8 @@ def test_http_response_carries_rationale(monkeypatch):
                          "report_id": "r", "revision_id": "",
                          "files": [], "changed_entities": []},
     )
-    response = http_module.verify(_Req())
+    response = http_module.verify(
+        VerifyRequest(diff=DIFF, revision_id="", task_id="http_verify"))
     assert response["rationale"] == QUALIFIER
 
 
@@ -144,4 +141,5 @@ async def test_ledger_event_carries_rationale():
     assert await scheduler.status(task_id) == TaskStatus.COMPLETED
     completed = [e for e in ledger.get_events() if e.type == "TASK_COMPLETED"]
     assert completed, "TASK_COMPLETED must be emitted to the ledger"
+    assert completed[-1].payload is not None
     assert completed[-1].payload.get("rationale") == QUALIFIER

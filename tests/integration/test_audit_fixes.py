@@ -225,7 +225,7 @@ def test_validate_task_ir_rejects_cycles_dangling_and_missing_budget():
         intent_package_id="intent-1",
         steps=[Step(step_id="step_a", type="t", config={}, pre_commit_hook_id="h", depends_on=[])],
         constraints=[],
-        budget=None,
+        budget=None,  # ty: ignore[invalid-argument-type] — deliberate None budget: validator must reject
         policy_id="default",
     )
     assert validate_task_ir(task_no_budget) is False

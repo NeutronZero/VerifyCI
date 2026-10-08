@@ -23,7 +23,7 @@ async def test_probe_block_beats_cancelled_noise():
         raise RuntimeError("cancelled")
 
     real = exmod.Executor.execute_node
-    exmod.Executor.execute_node = fake_execute
+    exmod.Executor.execute_node = fake_execute  # ty: ignore[invalid-assignment] — timing double with intentionally loose signature
     try:
         sched = AsyncDAGScheduler()
         dag = ExecutableDAG(dag_id="d", nodes=[

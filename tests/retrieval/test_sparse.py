@@ -70,7 +70,7 @@ def test_search_builds_no_per_document_counters():
         n["c"] += 1
         return real(*a, **k)
 
-    sparse_mod.Counter = counting
+    sparse_mod.Counter = counting  # ty: ignore[invalid-assignment] — deliberate constructor spy for call counting
     try:
         hits = r.search("alpha", k=100)
     finally:

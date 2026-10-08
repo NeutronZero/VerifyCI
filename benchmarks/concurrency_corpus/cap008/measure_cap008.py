@@ -319,7 +319,7 @@ def evaluate_single_case(case: dict[str, Any], label: dict[str, Any], temp_dir: 
     # 2. Spawn worker processes
     ctx = mp.get_context("spawn")
     result_queue = ctx.Queue()
-    processes: list[mp.Process] = []
+    processes: list[mp.process.BaseProcess] = []
 
     case_start = time.perf_counter()
 

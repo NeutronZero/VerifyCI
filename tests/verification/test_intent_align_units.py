@@ -327,13 +327,11 @@ def test_diff_files_helpers():
     assert _diff_files("") == set()
     assert _diff_files(_diff("src/a.py", "y = 1")) == {"src/a.py"}
     import verifyci.verification.diffmap as dm
+    from unittest import mock
 
-    real = dm.parse_diff_files
-    dm.parse_diff_files = lambda d: (_ for _ in ()).throw(RuntimeError("x"))
-    try:
+    with mock.patch.object(dm, "parse_diff_files", side_effect=RuntimeError("x")):
         assert _diff_files("anything") == set()
-    finally:
-        dm.parse_diff_files = real
+    assert _file_in_set("a/src/x.py", {"src/x.py"})
     assert _file_in_set("a/src/x.py", {"src/x.py"})
     assert _file_in_set("src/x.py", {"a/src/x.py"})
     assert not _file_in_set("src/y.py", {"src/x.py"})

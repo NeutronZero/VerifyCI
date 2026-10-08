@@ -232,9 +232,18 @@ def test_mixed_binary_passes_only_after_text_and_binary_are_both_considered():
     check = build_semi_check(cert, files, ents, diff=d)
     assert check.established is False
     assert "opaque change" in check.explanation
+    from verifyci.contracts.verification_ir import (
+        BlastRadiusResult, VerificationReport,
+    )
+    report = VerificationReport(
+        report_id="r", task_id="t", policy_id="p", checks=[check],
+        blast_radius=BlastRadiusResult(
+            affected_callers=[], affected_callees=[], test_coverage_gap=[],
+            risk_score=0.0, dependency_impact=[], vulnerability_impact=[]),
+        timestamp=0.0,
+    )
     decision = PolicyEvaluator().evaluate(
-        type("R", (), {"report_id": "r", "checks": [check],
-                       "blast_radius": None})(),
+        report,
         VerificationPolicy(policy_id="p", on_failure="block",
                            on_inconclusive="human_review",
                            on_human_review="block",

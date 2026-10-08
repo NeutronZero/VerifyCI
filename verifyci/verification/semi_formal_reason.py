@@ -84,6 +84,9 @@ def _validate_configuration_diff(diff_str: str, config_files: list[str]) -> tupl
     for f in parsed:
         if normalize_path(f.path) not in norm_config and f.path not in config_files:
             continue
+        # Same reachability argument as deletion.verify_deletion_hunks:
+        # a None path cannot survive the guard above.
+        assert f.path is not None
         new_lines: list[str] = []
         for h in f.hunks:
             for line in h.lines:

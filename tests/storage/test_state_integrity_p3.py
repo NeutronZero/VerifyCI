@@ -42,6 +42,7 @@ def test_snapshot_deepcopy_isolation():
     state = {"nested": {"x": [1]}}
     snap = store.maybe_snapshot("r1", state)
     state["nested"]["x"].append(999)
+    assert snap is not None
     assert snap.state == {"nested": {"x": [1]}}
 
 
@@ -118,6 +119,7 @@ def test_get_entity_by_name_deterministic_order(tmp_path):
                 line_start=line, line_end=line + 1, language="python",
                 source_hash="h", revision_id=rev.revision_id))
         got = store.get_entity_by_name("dup", revision_id=rev.revision_id)
+        assert got is not None
         assert (got.file_path, got.line_start) == ("a.py", 5)
     finally:
         store.close()
