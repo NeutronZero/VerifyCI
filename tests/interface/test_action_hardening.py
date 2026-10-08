@@ -278,6 +278,27 @@ fi
 exit 0
 """)
 
+    # The name `git` misresolves on some Windows shells (observed on CI:
+    # an executable stubs/git lost PATH lookup to /mingw64/bin/git for
+    # unknown reasons). Belt and braces: ALSO shadow it with a shell
+    # function via BASH_ENV, which wins deterministically over any PATH
+    # behavior on every bash. The function replicates the file stub
+    # exactly (argv log, canned diff); `return` replaces `exit` because
+    # a function shares the action shell's process.
+    git_fn = tmp_path / "git_shadow.sh"
+    git_fn.write_text(
+        "git() {\n"
+        f"  echo \"git $@\" >> \"{sh(argv_log)}\"\n"
+        "  if [ \"$1\" = \"diff\" ]; then\n"
+        "    printf 'diff --git a/app.py b/app.py\\n+ok\\n'\n"
+        "    return 0\n"
+        "  fi\n"
+        "  return 0\n"
+        "}\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
     # Extensionless stubs created by Python lack the executable bit that
     # native Windows shells (Git-bash) require for PATH lookup: without
     # this, bash silently skips the stubs and the REAL verifyci/git/python
@@ -331,6 +352,7 @@ exit 0
         if key not in env_extra:
             env[key] = value
     env.setdefault("ACTION_PATH", sh(REPO_ROOT))
+    env["BASH_ENV"] = sh(git_fn)
     if wsl:
         # Never leak Windows interpreter/temp configuration into the guest:
         # TMPDIR with backslashes would break mktemp, PYTHON* could hijack
@@ -379,9 +401,11 @@ exit 0
         env=_probe_env,
     )
     _resolved = _preflight.stdout.replace("\\", "/")
-    for _tool in ("verifyci", "git", "python"):
+    for _tool in ("verifyci", "python"):
         assert f"/stubs/{_tool}" in _resolved, (
             f"stub preflight failed for {_tool} (real tool would run instead):\n{_preflight.stdout}\n{_preflight.stderr}")
+    assert "/stubs/git" in _resolved or "is a function" in _resolved, (
+        f"stub preflight failed for git (real tool would run instead):\n{_preflight.stdout}\n{_preflight.stderr}")
 
     proc = None
     if wsl:
@@ -403,7 +427,7 @@ exit 0
         )
     created = sorted(
         p.name for p in tmp_path.iterdir()
-        if p.name not in ("step.sh", "test_env.sh", "GITHUB_OUTPUT", "argv.log", "stubs", "STUB_REPORT_PATH")
+        if p.name not in ("step.sh", "test_env.sh", "git_shadow.sh", "GITHUB_OUTPUT", "argv.log", "stubs", "STUB_REPORT_PATH")
         and CANARY not in p.name
     )
     canary_hits = list(tmp_path.rglob(f"*{CANARY}*"))
