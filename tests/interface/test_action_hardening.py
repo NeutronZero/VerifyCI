@@ -345,21 +345,45 @@ exit 0
             if _key not in env:
                 env[_key] = os.environ[_key]
 
-    proc = None
-    if wsl:
-        # WSL only propagates variables listed in WSLENV, so large or
-        # hostile values cannot ride the process environment. Bridge them
-        # through a file instead: single-quote escaping keeps arbitrary
-        # bytes (quotes, $(), backticks, newlines) inert data.
-        def _sq(value):
-            return "'" + value.replace("'", "'\\''") + "'"
+    def _sq(value):
+        return "'" + value.replace("'", "'\\''") + "'"
 
+    if wsl:
         env_file = tmp_path / "test_env.sh"
         env_file.write_text(
             "".join(f"export {key}={_sq(value)}\n" for key, value in env.items()),
             encoding="utf-8",
             newline="\n",
         )
+        _probe_cmd = ". " + sh(env_file) + " && command -v verifyci; command -v git; command -v python"
+        _probe_env = {"SystemRoot": os.environ.get("SystemRoot", r"C:\Windows")}
+    else:
+        _probe_cmd = "command -v verifyci; command -v git; command -v python"
+        _probe_env = dict(env)
+
+    # Preflight: prove the stubs (not the real tools) resolve in PATH.
+    # A previous CI failure mode ran the REAL git here with zero signal
+    # in the test output about which binary won. Fail loudly instead.
+    # NOTE: this must run through the same environment mechanism as the
+    # main flow (env-file bridge on WSL, process env natively) — an early
+    # version probed with a bare environment and proved nothing.
+    _preflight = subprocess.run(
+        [BASH, "-c", _probe_cmd + "; ls -la " + _shq(sh(bin_dir))],
+        capture_output=True, text=True, timeout=60,
+        cwd=tmp_path,
+        env=_probe_env,
+    )
+    _resolved = _preflight.stdout.replace("\\", "/")
+    for _tool in ("verifyci", "git", "python"):
+        assert f"/stubs/{_tool}" in _resolved, (
+            f"stub preflight failed for {_tool} (real tool would run instead):\n{_preflight.stdout}\n{_preflight.stderr}")
+
+    proc = None
+    if wsl:
+        # WSL only propagates variables listed in WSLENV, so large or
+        # hostile values cannot ride the process environment. Bridge them
+        # through a file instead: single-quote escaping keeps arbitrary
+        # bytes (quotes, $(), backticks, newlines) inert data.
         bridge = ". " + sh(env_file) + " && exec bash " + sh(script)
         proc = subprocess.run(
             [BASH, "-c", bridge],
