@@ -51,7 +51,7 @@ def test_b1_witness_does_not_match_unrelated_file_even_if_non_general():
 
 
 def test_b1_witness_matches_when_target_file_or_entity_matches():
-    """Witness matches when target_file or target_entity_id matches."""
+    """Only an executed, entity-scoped witness can corroborate a deletion."""
     ent = SimpleNamespace(revision_entity_id="ent_a", name="compute", file_path="src/a.py")
     w_file = ExecutionWitness(
         witness_id="w1",
@@ -59,15 +59,18 @@ def test_b1_witness_matches_when_target_file_or_entity_matches():
         target_file="src/a.py",
         target_entity_id=None,
         is_general_regression=False,
+        execution_receipt_id="run-1",
+        execution_verified=True,
     )
-    assert _has_associated_witness("src/a.py", ent, [w_file])
-
+    assert not _has_associated_witness("src/a.py", ent, [w_file])
     w_ent = ExecutionWitness(
         witness_id="w2",
         test_file="tests/test_a.py",
         target_file=None,
         target_entity_id="ent_a",
         is_general_regression=False,
+        execution_receipt_id="run-2",
+        execution_verified=True,
     )
     assert _has_associated_witness("src/a.py", ent, [w_ent])
 
@@ -88,6 +91,8 @@ def test_b1_witness_entity_scoping_disambiguates_multi_entity_file():
         target_file="src/calc.py",
         target_entity_id="ent_add",
         is_general_regression=False,
+        execution_receipt_id="run-add",
+        execution_verified=True,
     )
     # Must match add
     assert _has_associated_witness("src/calc.py", ent_add, [w_add]) is True
@@ -102,9 +107,11 @@ def test_b1_witness_entity_scoping_disambiguates_multi_entity_file():
         target_file="src/calc.py",
         target_entity_id=None,
         is_general_regression=False,
+        execution_receipt_id="run-file",
+        execution_verified=True,
     )
-    assert _has_associated_witness("src/calc.py", ent_add, [w_file]) is True
-    assert _has_associated_witness("src/calc.py", ent_mult, [w_file]) is True
+    assert _has_associated_witness("src/calc.py", ent_add, [w_file]) is False
+    assert _has_associated_witness("src/calc.py", ent_mult, [w_file]) is False
 
 
 # ---------------------------------------------------------------------------

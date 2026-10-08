@@ -203,5 +203,7 @@ def iter_edge_payloads(graph: Any) -> list[Any]:
         return []
     try:
         return [payload for _, (_, _, payload) in fn().items()]
-    except Exception:  # noqa: BLE001, S110
-        return []
+    except Exception as e:  # noqa: BLE001
+        raise TraversalInconclusiveError(
+            f"edge payload enumeration failed: {type(e).__name__}: {e}"
+        ) from e

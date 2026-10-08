@@ -29,6 +29,8 @@ class ExecutionWitness:
     target_file: Optional[str] = None
     is_general_regression: bool = False
     association_method: str = "general_regression"
+    execution_receipt_id: Optional[str] = None
+    execution_verified: bool = False
 
 
 @dataclass(frozen=True)

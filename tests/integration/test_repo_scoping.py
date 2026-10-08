@@ -36,21 +36,21 @@ def test_multi_repo_db_loads_own_latest(tmp_path):
     try:
         rA = _rev(store, "repoA", [("a.py", "h1")])
         store.insert_entity(Entity(
-            repository_id="repoA", logical_entity_id="lA", revision_entity_id="eA",
+            repository_id="repoA", logical_entity_id="a" * 64, revision_entity_id="b" * 64,
             type=EntityType.FUNCTION, name="funcA", file_path="a.py",
             line_start=1, line_end=2, language="python", source_hash="h",
             revision_id=rA.revision_id))
         time.sleep(0.02)
         rB = _rev(store, "repoB", [("b.py", "h9")])
         store.insert_entity(Entity(
-            repository_id="repoB", logical_entity_id="lB", revision_entity_id="eB",
+            repository_id="repoB", logical_entity_id="c" * 64, revision_entity_id="d" * 64,
             type=EntityType.FUNCTION, name="funcB", file_path="b.py",
             line_start=1, line_end=2, language="python", source_hash="h",
             revision_id=rB.revision_id))
     finally:
         store.close()
     _, _, entities = load_graph(db)
-    assert [e.revision_entity_id for e in entities] == ["eA"]
+    assert [e.revision_entity_id for e in entities] == ["b" * 64]
 
 
 def test_custom_path_falls_back_to_global(tmp_path):
