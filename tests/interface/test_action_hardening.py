@@ -220,7 +220,10 @@ def _harness(tmp_path, monkeypatch, *, env_extra, stub_exit="0",
     script.write_text(body.replace("\r\n", "\n"), encoding="utf-8", newline="\n")
 
     wsl = _bash_is_wsl()
-    sh = _wsl_path if wsl else str
+    # Forward slashes everywhere inside the shell: WSL needs /mnt paths,
+    # native Git-bash will not convert quoted backslash paths on
+    # redirection, so Windows separators must never reach the script.
+    sh = _wsl_path if wsl else (lambda p: str(p).replace("\\", "/"))
 
     bin_dir = tmp_path / "stubs"
     bin_dir.mkdir()
@@ -229,13 +232,14 @@ def _harness(tmp_path, monkeypatch, *, env_extra, stub_exit="0",
 
     # The action script invokes `python` for JSON parsing. Under WSL the
     # Windows interpreter is unusable with /mnt paths, so provide a `python`
-    # stub delegating to the guest interpreter; on native bash the runner's
-    # own `python` is used.
+    # stub delegating to the guest interpreter; on native bash the stub
+    # delegates to this very interpreter (forward slashes: executable by
+    # the Windows loader when invoked from msys).
     if wsl:
-        _write_stub(bin_dir, "python", "#!/usr/bin/env bash\nexec python3 \"$@\"\n")
         python_bin = "python3"
     else:
         python_bin = sys.executable.replace("\\", "/")
+    _write_stub(bin_dir, "python", f"#!/usr/bin/env bash\nexec \"{python_bin}\" \"$@\"\n")
     _write_stub(bin_dir, "verifyci", f"""#!/usr/bin/env bash
 echo "verifyci $@" >> "{sh(argv_log)}"
 cmd="$1"; shift || true
@@ -274,12 +278,28 @@ fi
 exit 0
 """)
 
+    # Extensionless stubs created by Python lack the executable bit that
+    # native Windows shells (Git-bash) require for PATH lookup: without
+    # this, bash silently skips the stubs and the REAL verifyci/git/python
+    # run instead (observed on CI). chmod through the test shell itself so
+    # the bit is set in a way msys honors. WSL/DrvFs files are already
+    # executable; the call is harmless there.
+    def _shq(value):
+        return "'" + value.replace("'", "'\\''") + "'"
+
+    _chmod = subprocess.run(
+        [BASH, "-c", "chmod +x " + " ".join(
+            _shq(sh(bin_dir / name)) for name in ("verifyci", "git", "python"))],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert _chmod.returncode == 0, _chmod.stderr
+
     out_file = tmp_path / "GITHUB_OUTPUT"
     out_file.write_text("", encoding="utf-8")
     if wsl:
         path_env = sh(bin_dir) + ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     else:
-        path_env = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+        path_env = sh(bin_dir) + os.pathsep + os.environ.get("PATH", "")
     env = {
         "PATH": path_env,
         "GITHUB_OUTPUT": sh(out_file),
@@ -310,7 +330,7 @@ exit 0
     for key, value in _defaults.items():
         if key not in env_extra:
             env[key] = value
-    env.setdefault("ACTION_PATH", str(REPO_ROOT))
+    env.setdefault("ACTION_PATH", sh(REPO_ROOT))
     if wsl:
         # Never leak Windows interpreter/temp configuration into the guest:
         # TMPDIR with backslashes would break mktemp, PYTHON* could hijack
