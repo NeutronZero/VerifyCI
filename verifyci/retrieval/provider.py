@@ -80,14 +80,21 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
     turned every 500-doc query into 500 HTTP calls. No connection is
     made at construction, so selecting this provider stays offline-safe;
     failures surface at embed time and callers fall back honestly.
+
+    P4: bounded client timeout (default 30s per batch) — a hung server
+    previously blocked retrieval forever. Note the trust surface this
+    implies: raw code texts are POSTed to `base_url`, which the
+    environment may point at a remote host. Treat the URL as secret-adjacent
+    configuration; retrieval never scrubs code before embedding.
     """
 
     def __init__(self, model: str = "nomic-embed-text",
                  base_url: str = "http://localhost:11434",
-                 batch_size: int = 64):
+                 batch_size: int = 64, timeout_s: float = 30.0):
         self.model = model
         self.base_url = base_url
         self.batch_size = max(1, batch_size)
+        self.timeout_s = timeout_s
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         out: list[list[float]] = []
@@ -97,7 +104,8 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
 
     async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         import aiohttp
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=self.timeout_s)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(
                 f"{self.base_url}/api/embed",
                 json={"model": self.model, "input": texts},
@@ -136,6 +144,7 @@ class CachedEmbeddingProvider(EmbeddingProvider):
     @staticmethod
     def _read_file(path: str) -> dict[str, list[float]]:
         import json as _json
+        import math as _math
         try:
             with open(path, encoding="utf-8") as fh:
                 data = _json.load(fh)
@@ -143,8 +152,17 @@ class CachedEmbeddingProvider(EmbeddingProvider):
             return {}
         if not isinstance(data, dict):
             return {}
-        return {k: v for k, v in data.items()
-                if isinstance(k, str) and isinstance(v, list)}
+        clean = {}
+        for k, v in data.items():
+            # P4: corrupt cache entries (wrong shapes, NaN/Inf, non-floats)
+            # previously flowed into cosine scoring as silent garbage.
+            # Drop them; the text re-embeds on next miss.
+            if not isinstance(k, str) or not isinstance(v, list) or not v:
+                continue
+            if not all(isinstance(x, (int, float)) and _math.isfinite(x) for x in v):
+                continue
+            clean[k] = [float(x) for x in v]
+        return clean
 
     def _save(self) -> None:
         if not self.cache_path:
