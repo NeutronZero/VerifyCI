@@ -13,6 +13,14 @@ from typing import Any
 
 DEFAULT_MAX_LOG_BYTES = 10 * 1024 * 1024  # 10 MB
 
+#: Queries are operator-typed code search: they routinely contain pasted
+#: secrets and proprietary snippets. The log is an operational record, not
+#: an evidence bundle, so entries carry a truncated query plus an explicit
+#: flag — never unbounded verbatim text. (Full secret scrubbing at this
+#: boundary would couple observability to the secrets engine; truncation
+#: plus owner-only file mode bounds the exposure instead.)
+MAX_LOGGED_QUERY_CHARS = 500
+
 
 class QueryLogger:
     """Thread-safe append-only structured query logger with single-generation rotation."""
@@ -42,9 +50,11 @@ class QueryLogger:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Append a query log entry in structured JSONL format."""
+        truncated = len(query) > MAX_LOGGED_QUERY_CHARS
         entry = {
             "ts": time.time(),
-            "query": query,
+            "query": query[:MAX_LOGGED_QUERY_CHARS],
+            "query_truncated": truncated,
             "caller": caller,
             "duration_ms": round(duration_ms, 3),
             "results_count": results_count,
@@ -58,7 +68,15 @@ class QueryLogger:
 
         try:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            fresh = not self.log_path.exists()
             with open(self.log_path, "a", encoding="utf-8") as f:
                 f.write(line)
+            if fresh:
+                # Owner-only on creation: the log routinely holds code
+                # snippets. Best-effort on platforms without POSIX modes.
+                try:
+                    os.chmod(self.log_path, 0o600)
+                except OSError:
+                    pass
         except OSError:
             pass

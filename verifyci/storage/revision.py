@@ -39,12 +39,21 @@ def canonical_manifest(
     ``commit_id`` and ``parent_revision_id`` are accepted for signature
     compatibility with callers that still pass them, but are deliberately
     excluded from the hash: they are ingest metadata, not content.
+    Duplicate (path, hash) pairs are collapsed (same tree listed twice is
+    the same tree); the same path with two different hashes is a
+    contradictory manifest and fails closed.
     """
+    pairs = sorted(files or [])
+    seen: dict[str, str] = {}
+    for path, source_hash in pairs:
+        if path in seen and seen[path] != source_hash:
+            raise ValueError(f"contradictory manifest: {path!r} has two source hashes")
+        seen[path] = source_hash
     manifest = {
         "repository_id": repository_id,
         "files": [
             {"path": path, "source_hash": source_hash}
-            for path, source_hash in sorted(files or [])
+            for path, source_hash in sorted(seen.items())
         ],
         "ingestion_config_hash": INGESTION_CONFIG_HASH,
     }

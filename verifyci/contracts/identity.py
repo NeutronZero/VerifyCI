@@ -15,11 +15,21 @@ def compute_logical_entity_id(
     For Python properties, signature contains the accessor kind (:getter/:setter/:deleter).
     For non-overloaded functions (Python), signature is empty to preserve
     cross-revision parameter continuity.
+
+    P3: file_path is normalized before hashing (backslash separators become
+    posix, leading ./ stripped, duplicate slashes collapsed) so the same
+    file reached by different spellings cannot split identities across
+    platforms. Already-canonical paths hash exactly as before.
     """
+    norm_path = file_path.replace("\\", "/")
+    while norm_path.startswith("./"):
+        norm_path = norm_path[2:]
+    while "//" in norm_path:
+        norm_path = norm_path.replace("//", "/")
     if signature:
-        payload = f"{repository_id}\x1f{file_path}\x1f{scope}\x1f{name}\x1f{type.value}\x1f{signature}"
+        payload = f"{repository_id}\x1f{norm_path}\x1f{scope}\x1f{name}\x1f{type.value}\x1f{signature}"
     else:
-        payload = f"{repository_id}\x1f{file_path}\x1f{scope}\x1f{name}\x1f{type.value}"
+        payload = f"{repository_id}\x1f{norm_path}\x1f{scope}\x1f{name}\x1f{type.value}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

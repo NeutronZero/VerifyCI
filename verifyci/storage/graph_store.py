@@ -139,11 +139,12 @@ def latest_revision_id(conn, repository_id: str | None = None, branch: str | Non
     """Latest ingested revision id for raw connections, scoped when
     possible.
 
-    Reads the append-only ``ingests`` chain (insertion order), so a
-    revert (old content reappearing) correctly reports the old revision
-    as latest — ordering by the immutable ``revisions.timestamp`` would
-    freeze "latest" at first observation. Falls back to the
-    ``revisions`` table for DBs written before the ingest log existed.
+    Reads the append-only ``ingests`` chain in INSERTION order (rowid),
+    never wall-clock order: a backdated or skewed timestamp must not
+    reorder the log. A revert (old content reappearing) still correctly
+    reports the old revision as latest, because the revert's ingest row
+    is the newest row. Falls back to the ``revisions`` table for DBs
+    written before the ingest log existed.
 
     Read-only paths (stats, vuln) must not construct a store — that
     would mkdir and schema-write at client-chosen paths. Same
@@ -164,32 +165,32 @@ def latest_revision_id(conn, repository_id: str | None = None, branch: str | Non
             if branch:
                 row = conn.execute(
                     "SELECT revision_id FROM ingests WHERE repository_id = ? AND branch = ?"
-                    " ORDER BY timestamp DESC, rowid DESC LIMIT 1",
+                    " ORDER BY rowid DESC LIMIT 1",
                     (repository_id, branch),
                 ).fetchone()
                 if row:
                     return row[0]
             row = conn.execute(
                 "SELECT revision_id FROM ingests WHERE repository_id = ?"
-                " ORDER BY timestamp DESC, rowid DESC LIMIT 1",
+                " ORDER BY rowid DESC LIMIT 1",
                 (repository_id,),
             ).fetchone()
             return row[0] if row else ""
         row = conn.execute(
             "SELECT revision_id FROM ingests"
-            " ORDER BY timestamp DESC, rowid DESC LIMIT 1"
+            " ORDER BY rowid DESC LIMIT 1"
         ).fetchone()
         if row:
             return row[0]
     if repository_id:
         row = conn.execute(
             "SELECT revision_id FROM revisions WHERE repository_id = ?"
-            " ORDER BY timestamp DESC LIMIT 1",
+            " ORDER BY rowid DESC LIMIT 1",
             (repository_id,),
         ).fetchone()
         return row[0] if row else ""
     row = conn.execute(
-        "SELECT revision_id FROM revisions ORDER BY timestamp DESC LIMIT 1"
+        "SELECT revision_id FROM revisions ORDER BY rowid DESC LIMIT 1"
     ).fetchone()
     return row[0] if row else ""
 
@@ -529,7 +530,7 @@ class GraphStore:
                     ingestion_config_hash=row[6],
                 )
         row = self.conn.execute(
-            "SELECT * FROM revisions WHERE repository_id = ? ORDER BY timestamp DESC LIMIT 1",
+            "SELECT * FROM revisions WHERE repository_id = ? ORDER BY rowid DESC LIMIT 1",
             (repository_id,),
         ).fetchone()
         if row is None:
@@ -542,7 +543,9 @@ class GraphStore:
 
     def insert_anchor(self, revision_id: str, snapshot: dict) -> str:
         import time as _time
-        anchor_id = f"anchor_{revision_id[:12]}"
+        # Full revision id in the key: truncated prefixes collide across
+        # revisions and OR REPLACE then silently overwrote live anchors.
+        anchor_id = f"anchor_{revision_id}"
         self.conn.execute(
             "INSERT OR REPLACE INTO anchors VALUES (?,?,?,?)",
             (anchor_id, revision_id, json.dumps(snapshot, sort_keys=True),
@@ -552,7 +555,7 @@ class GraphStore:
         return anchor_id
 
     def insert_delta(self, from_revision_id: str, to_revision_id: str, delta: dict) -> str:
-        delta_id = f"delta_{from_revision_id[:8]}_{to_revision_id[:8]}"
+        delta_id = f"delta_{from_revision_id}_{to_revision_id}"
         self.conn.execute(
             "INSERT OR REPLACE INTO deltas VALUES (?,?,?,?)",
             (delta_id, from_revision_id, to_revision_id,
@@ -618,7 +621,16 @@ class GraphStore:
         for r in self.conn.execute(
                 "SELECT src_entity_id, dst_entity_id, type, metadata_json FROM edges"
                 " WHERE revision_id = ?", (current_revision_id,)).fetchall():
-            meta = json.loads(r[3]) if r[3] else {}
+            try:
+                meta = json.loads(r[3]) if r[3] else {}
+            except Exception:
+                # Corrupt metadata cannot participate in disappearance
+                # matching: fail closed on the whole pass rather than
+                # treating the edge as vanished or continuing.
+                from verifyci.contracts.revision import LineageIntegrityError
+                raise LineageIntegrityError(
+                    f"corrupt edge metadata_json in revision {current_revision_id}"
+                )
             new_keys.add(_edge_match_key(entmap.get(r[0], r[0]),
                                          entmap.get(r[1], r[1]), r[2], meta))
         old = self.conn.execute(
@@ -627,7 +639,13 @@ class GraphStore:
             (parent_revision_id,)).fetchall()
         gone = []
         for r in old:
-            meta = json.loads(r[4]) if r[4] else {}
+            try:
+                meta = json.loads(r[4]) if r[4] else {}
+            except Exception:
+                from verifyci.contracts.revision import LineageIntegrityError
+                raise LineageIntegrityError(
+                    f"corrupt edge metadata_json in revision {parent_revision_id}"
+                )
             if _edge_match_key(entmap.get(r[1], r[1]), entmap.get(r[2], r[2]),
                                r[3], meta) not in new_keys:
                 gone.append(r[0])
@@ -851,7 +869,8 @@ class GraphStore:
             if repository_id:
                 sql += " AND repository_id = ?"
                 params.append(repository_id)
-            row = self.conn.execute(sql + " LIMIT 1", params).fetchone()
+            row = self.conn.execute(
+                sql + " ORDER BY file_path, line_start LIMIT 1", params).fetchone()
         elif as_of is not None:
             sql = (
                 "SELECT * FROM entities WHERE name = ?"
@@ -1038,61 +1057,95 @@ class GraphStore:
 
     @staticmethod
     def _row_to_entity(row) -> Entity:
-        return Entity(
-            repository_id=row[2],
-            logical_entity_id=row[1],
-            revision_entity_id=row[0],
-            type=EntityType(row[4]),
-            name=row[5],
-            file_path=row[6],
-            line_start=row[7],
-            line_end=row[8],
-            language=row[9],
-            source_hash=row[10],
-            revision_id=row[3],
-            valid_from=row[11],
-            valid_until=row[12],
-            t_created=row[13],
-            t_expired=row[14],
-            metadata=json.loads(row[15]) if row[15] else {},
-            properties_json=row[16],
-        )
+        from verifyci.contracts.revision import LineageIntegrityError
+        try:
+            metadata = json.loads(row[15]) if row[15] else {}
+            if not isinstance(metadata, dict):
+                raise ValueError(f"entity metadata is {type(metadata).__name__}, not a dict")
+            return Entity(
+                repository_id=row[2],
+                logical_entity_id=row[1],
+                revision_entity_id=row[0],
+                type=EntityType(row[4]),
+                name=row[5],
+                file_path=row[6],
+                line_start=row[7],
+                line_end=row[8],
+                language=row[9],
+                source_hash=row[10],
+                revision_id=row[3],
+                valid_from=row[11],
+                valid_until=row[12],
+                t_created=row[13],
+                t_expired=row[14],
+                metadata=metadata,
+                properties_json=row[16],
+            )
+        except LineageIntegrityError:
+            raise
+        except Exception as exc:
+            # A corrupt row must surface as a lineage integrity failure
+            # (fail-closed upstream), never as a raw ValueError/JSON error
+            # that reads as a caller bug, and never as a skipped row that
+            # silently ungrounds live code.
+            raise LineageIntegrityError(
+                f"corrupt entity row for revision_entity_id={row[0] if row else None!r}: {exc}"
+            ) from exc
 
     @staticmethod
     def _row_to_edge(row) -> Edge:
-        return Edge(
-            id=row[0],
-            revision_id=row[1],
-            src_entity_id=row[2],
-            dst_entity_id=row[3],
-            type=EdgeType(row[4]),
-            subtype=CPGEdgeSubtype(row[5]) if row[5] else None,
-            valid_from=row[6],
-            valid_until=row[7],
-            observed_at=row[8],
-            source_commit=row[9],
-            t_created=row[10],
-            t_expired=row[11],
-            metadata=json.loads(row[12]) if row[12] else {},
-            properties_json=row[13],
-        )
+        from verifyci.contracts.revision import LineageIntegrityError
+        try:
+            metadata = json.loads(row[12]) if row[12] else {}
+            if not isinstance(metadata, dict):
+                raise ValueError(f"edge metadata is {type(metadata).__name__}, not a dict")
+            return Edge(
+                id=row[0],
+                revision_id=row[1],
+                src_entity_id=row[2],
+                dst_entity_id=row[3],
+                type=EdgeType(row[4]),
+                subtype=CPGEdgeSubtype(row[5]) if row[5] else None,
+                valid_from=row[6],
+                valid_until=row[7],
+                observed_at=row[8],
+                source_commit=row[9],
+                t_created=row[10],
+                t_expired=row[11],
+                metadata=metadata,
+                properties_json=row[13],
+            )
+        except LineageIntegrityError:
+            raise
+        except Exception as exc:
+            raise LineageIntegrityError(
+                f"corrupt edge row for id={row[0] if row else None!r}: {exc}"
+            ) from exc
 
     @staticmethod
     def _row_to_event(row):
         from verifyci.contracts.event import AttestationMetadata, Event
-        attestation = None
-        if len(row) > 8 and row[8]:
-            data = json.loads(row[8])
-            if isinstance(data, dict):
-                attestation = AttestationMetadata(**data)
+        from verifyci.contracts.revision import LineageIntegrityError
+        try:
+            attestation = None
+            if len(row) > 8 and row[8]:
+                data = json.loads(row[8])
+                if isinstance(data, dict):
+                    attestation = AttestationMetadata(**data)
+            payload = json.loads(row[5]) if row[5] else {}
+            provenance = json.loads(row[6]) if row[6] else {}
+        except Exception as exc:
+            raise LineageIntegrityError(
+                f"corrupt event row for id={row[0] if row else None!r}: {exc}"
+            ) from exc
         return Event(
             id=row[0],
             type=row[1],
             timestamp=row[2],
             task_id=row[3],
             conversation_id=row[4],
-            payload=json.loads(row[5]) if row[5] else {},
-            provenance=json.loads(row[6]) if row[6] else {},
+            payload=payload,
+            provenance=provenance,
             prev_event_hash=row[7],
             attestation=attestation,
         )
