@@ -25,6 +25,25 @@ def test_replay_events_folds_payloads():
     assert state.state["outcome"] == "ok"
 
 
+def test_replay_events_equal_timestamps_keep_arrival_order():
+    # Coarse clocks (Windows ~15ms granularity) stamp fast-appended events
+    # with identical timestamps while ids are random uuids: ordering must
+    # be stable on arrival order, never scrambled by an id tiebreak.
+    import dataclasses
+    from verifyci.contracts.event import Event
+    base = [Event(id=f"id-{i}", type="E", timestamp=1.0, task_id=None,
+                  conversation_id=None, payload={"k": i}, provenance={},
+                  prev_event_hash=None, attestation=None)
+            for i in range(5)]
+    engine = ReplayEngine()
+    assert engine.replay_events(base).state == {"k": 4}
+    # Same timestamps, reversed arrival: last writer (id-0) wins, proving
+    # ties follow arrival order rather than id sort order.
+    assert engine.replay_events(list(reversed(base))).state == {"k": 0}
+    late = dataclasses.replace(base[0], timestamp=9.0)
+    assert engine.replay_events([late] + base[1:]).state == {"k": 0}
+
+
 def test_ledger_genesis_and_chain():
     ledger = EventLedger()
     e1 = ledger.append(type="E1", payload={}, provenance={})

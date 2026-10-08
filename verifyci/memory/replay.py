@@ -105,17 +105,20 @@ class ReplayEngine:
     def replay_events(self, events) -> ProjectionState:
         """Event-sourced replay: fold event payloads into projection state.
 
-        P3: folded in (timestamp, id) order so out-of-order delivery cannot
+        P3: folded in timestamp order so out-of-order delivery cannot
         silently produce a non-equivalent state; nested payload values are
         deep-copied so the projection never aliases ledger-owned objects.
-        Last-write-wins per key remains the documented merge rule.
+        The sort is STABLE with no id tiebreak: on coarse clocks (Windows
+        ~15ms granularity) many events share one timestamp, and ids are
+        random uuids — tiebreaking by id would scramble insertion order.
+        Equal timestamps therefore keep arrival order. Last-write-wins
+        per key remains the documented merge rule.
         """
         import copy
         import time
 
         def _order_key(event):
-            return (getattr(event, "timestamp", 0.0) or 0.0,
-                    getattr(event, "id", "") or "")
+            return getattr(event, "timestamp", 0.0) or 0.0
 
         state: dict = {}
         revision_id = ""
