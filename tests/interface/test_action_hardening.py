@@ -358,7 +358,12 @@ exit 0
         _probe_cmd = ". " + sh(env_file) + " && command -v verifyci; command -v git; command -v python"
         _probe_env = {"SystemRoot": os.environ.get("SystemRoot", r"C:\Windows")}
     else:
-        _probe_cmd = "command -v verifyci; command -v git; command -v python"
+        _probe_cmd = (
+            "echo \"PATH-IS:$PATH\"; type -a git; "
+            "test -x " + _shq(sh(bin_dir / "git")) + " && echo GIT-STUB-EXEC-YES || echo GIT-STUB-EXEC-NO; "
+            "head -c 40 " + _shq(sh(bin_dir / "git")) + " | od -An -c | head -2; "
+            "command -v verifyci; command -v git; command -v python"
+        )
         _probe_env = dict(env)
 
     # Preflight: prove the stubs (not the real tools) resolve in PATH.
