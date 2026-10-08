@@ -265,7 +265,7 @@ class MCPServerHandlers:
                     "status": "FAIL",
                     "report_id": "",
                     "rationale": "invalid_invariants_config",
-                    "files": parse_diff_files(diff),
+                    "files": [],
                     "changed_entities": [],
                 }
             if len(diff) > MAX_DIFF_CHARS:
@@ -275,7 +275,7 @@ class MCPServerHandlers:
                     "error": "diff_too_large",
                     "report_id": "",
                     "rationale": "diff_too_large",
-                    "files": parse_diff_files(diff),
+                    "files": [],
                     "changed_entities": [],
                 }
             reasoner = SemiFormalReasoner()
@@ -289,7 +289,7 @@ class MCPServerHandlers:
                     "status": "FAIL",
                     "report_id": "",
                     "rationale": "invalid_invariants_config",
-                    "files": parse_diff_files(diff),
+                    "files": [],
                     "changed_entities": [],
                 }
             cert = reasoner.verify(diff=diff, graph=self.graph, node_map=self.node_map,
