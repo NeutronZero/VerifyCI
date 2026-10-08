@@ -27,7 +27,7 @@ FROZEN_CORPUS_SHA256 = "ca475b33a385e8d1478afedf00d2eeeefdc8ae0f72c9e5527f20fc1f
 # P0 re-label (2026-10-08): 29 expectations moved strictly toward strictness
 # (PASS/HUMAN_REVIEW -> INCONCLUSIVE) with per-case gap evidence. Inputs
 # (cases, sources) frozen and untouched.
-FROZEN_LABEL_SHA256 = "b46b8324ed43a46b3ed022f61a1d5cd0e4027a7cf6fdd5d594fa24f366ab1abf"
+FROZEN_LABEL_SHA256 = "01eb093946dc53c29fc8c40bfb2c12419a5fb43bf513474f2b8c30da236c02cf"
 FROZEN_SOURCE_MANIFEST_SHA256 = "f330fca7d317ec9a1e8398295d930c49f802e2cc25cf94b3906d7b9b0d47af8d"
 
 

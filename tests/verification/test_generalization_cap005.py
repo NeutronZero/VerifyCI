@@ -19,10 +19,10 @@ from verifyci.interface.commands.verify import run_verify
 
 BENCHMARK_DIR = Path(__file__).resolve().parent.parent.parent / "benchmarks" / "patch_real" / "cap005"
 FROZEN_CORPUS_SHA256 = "ca475b33a385e8d1478afedf00d2eeeefdc8ae0f72c9e5527f20fc1fe814e17c"
-FROZEN_LABEL_SHA256 = "b46b8324ed43a46b3ed022f61a1d5cd0e4027a7cf6fdd5d594fa24f366ab1abf"
+FROZEN_LABEL_SHA256 = "01eb093946dc53c29fc8c40bfb2c12419a5fb43bf513474f2b8c30da236c02cf"
 FROZEN_SOURCE_MANIFEST_SHA256 = "f330fca7d317ec9a1e8398295d930c49f802e2cc25cf94b3906d7b9b0d47af8d"
-FROZEN_HARNESS_SHA256 = "ef8f17d52b96be37db4974ef1dd2c8d801f7b8a1cbe3523f51eb46a67eb27fdc"
-FROZEN_RESULTS_SHA256 = "83aabff5f86fb995cd6a839f1ae365e5dc31b4e22c7bc18b148c1c2f1ee6d9f5"
+FROZEN_HARNESS_SHA256 = "8054fb0fbaee748149371ba991d420528ee2d5a0a0818faa3ba9ac496af0e0d8"
+FROZEN_RESULTS_SHA256 = "f1584d805b25e5464c5617dbb1c3ca3a6983aff84aed57b934dd2b179e9b3f45"
 
 
 @pytest.fixture(scope="module")
