@@ -169,7 +169,7 @@ def test_nameless_entity_skipped_in_deletion_scan():
         diff,
         ["src/app.py"],
         [named, nameless],
-        witnesses=[_wit(target_file="src/app.py")],
+        witnesses=[_wit(eid="e1")],
     )
     assert len(verdicts) == 1
     assert verdicts[0].reasoning == "class_2_refactoring_verified:f"
@@ -223,7 +223,7 @@ def test_refactoring_needs_witness_then_passes_with_one():
         [ent],
         graph=None,
         node_map={},
-        witnesses=[_wit(target_file="src/app.py")],
+        witnesses=[_wit(eid="e1")],
     )
     assert passed and status == "PASS", reason
     assert "class_2_refactoring_verified" in verdicts[0].reasoning
@@ -316,6 +316,8 @@ def _wit(eid=None, target_file=None, general=False):
         target_file=target_file,
         is_general_regression=general,
         association_method="direct_ast",
+        execution_receipt_id="test-receipt",
+        execution_verified=True,
     )
 
 
@@ -328,7 +330,7 @@ def test_witness_scoping():
     assert not _has_associated_witness(
         "src/app.py", ent, [_wit(target_file="src/app.py", general=True)]
     )
-    assert _has_associated_witness("src/app.py", ent, [_wit(target_file="src/app.py")])
+    assert not _has_associated_witness("src/app.py", ent, [_wit(target_file="src/app.py")])
     assert not _has_associated_witness("src/app.py", ent, [])
 
 

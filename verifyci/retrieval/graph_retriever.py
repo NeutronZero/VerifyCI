@@ -52,7 +52,12 @@ class GraphRetriever:
         self.graph = graph
         self.node_map = node_map or {}
         self._cached_adj = None
-        self._cached_adj_size: int | None = None
+        self._cached_adj_fp: str | None = None
+
+    def invalidate(self) -> None:
+        """Drop cached adjacency (call after mutating the graph in place)."""
+        self._cached_adj = None
+        self._cached_adj_fp = None
 
     def retrieve(self, seed_entity_ids: list[str], max_hops: int = 2) -> list[SearchResult]:
         if self.graph is None or max_hops <= 0 or not seed_entity_ids:
@@ -192,23 +197,34 @@ class GraphRetriever:
     def _adjacency_from_edges(self):
         """(outgoing, incoming) adjacency indices built from traversable edge payloads.
         Cached on the graph instance for zero-overhead index reuse across queries.
-        Cache key is the edge-index size: a mutated graph (new edges) must
-        not reuse a stale adjacency — size change invalidates both the
-        instance and graph-attached caches.
+        Cache key is a content fingerprint (edge count plus the sorted
+        (src, dst, type) triples): a same-count edge replacement or relabel
+        must not reuse a stale adjacency. A size-only key did exactly that.
         """
+        import hashlib as _hashlib
+        import json as _json
+
+        def _type_name(payload) -> str:
+            etype = getattr(payload, "type", None)
+            return getattr(etype, "value", etype) if etype is not None else "?"
+
         index = getattr(self.graph, "edge_index_map", None)
         if not callable(index):
             return None
         try:
             raw_index = index()
-            live_size = len(raw_index)
+            fingerprint = _hashlib.sha256(_json.dumps(sorted(
+                (src, dst, str(_type_name(payload)))
+                for _, (src, dst, payload) in raw_index.items()
+            ), sort_keys=True).encode("utf-8")).hexdigest()
         except Exception:  # noqa: BLE001 - unfamiliar adapter shape
             return None
         cached = getattr(self.graph, "_verifyci_adj_cache", None)
-        cached_size = getattr(self.graph, "_verifyci_adj_cache_size", None)
-        if cached is not None and cached_size == live_size:
+        cached_fp = getattr(self.graph, "_verifyci_adj_cache_fp", None)
+        if cached is not None and cached_fp == fingerprint:
             return cached
-        if self._cached_adj is not None and self._cached_adj_size == live_size:
+        if self._cached_adj is not None and getattr(
+                self, "_cached_adj_fp", None) == fingerprint:
             return self._cached_adj
 
         outgoing: dict[int, set[int]] = {}
@@ -224,10 +240,10 @@ class GraphRetriever:
             return None
         result = (outgoing, incoming)
         self._cached_adj = result
-        self._cached_adj_size = live_size
+        self._cached_adj_fp = fingerprint
         try:
             self.graph._verifyci_adj_cache = result
-            self.graph._verifyci_adj_cache_size = live_size
+            self.graph._verifyci_adj_cache_fp = fingerprint
         except Exception:
             pass
         return result

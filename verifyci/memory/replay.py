@@ -1,4 +1,6 @@
 
+import copy
+
 from verifyci.contracts.memory_types import ProjectionState
 
 
@@ -12,25 +14,31 @@ class ReplayEngine:
         self._anchors[revision_id] = ProjectionState(
             projection_id=f"anchor_{revision_id}",
             revision_id=revision_id,
-            state=state,
+            state=copy.deepcopy(state),
             timestamp=time.time(),
         )
 
     def add_delta(self, from_revision: str, to_revision: str, delta: dict):
-        self._deltas.append((from_revision, to_revision, delta))
+        self._deltas.append((from_revision, to_revision, copy.deepcopy(delta)))
 
     def replay(self, from_revision: str, to_revision: str) -> ProjectionState:
         import time
 
         anchor = self._anchors.get(from_revision)
+        substituted = False
         if anchor is None:
-            nearest = self.get_latest_anchor(from_revision)
-            anchor = nearest
+            # Documented fallback (see get_latest_anchor): replay from the
+            # latest stored anchor when the requested one is absent. The
+            # result is LABELED with the anchor actually used, never with
+            # the requested revision — state derived from the wrong base
+            # must not masquerade as a correct replay.
+            anchor = self.get_latest_anchor(from_revision)
+            substituted = anchor is not None and anchor.revision_id != from_revision
         if anchor is None:
             raise RuntimeError(
                 f"no anchor for replay {from_revision!r} -> {to_revision!r}")
 
-        state = dict(anchor.state)
+        state = copy.deepcopy(anchor.state)
         current = anchor.revision_id  # resume from the anchor actually used
 
         from collections import deque
@@ -49,7 +57,7 @@ class ReplayEngine:
 
         if path_deltas is not None:
             for delta in path_deltas:
-                state.update(delta)
+                state.update(copy.deepcopy(delta))
             current = to_revision
         else:
             visited = set()
@@ -63,7 +71,7 @@ class ReplayEngine:
                 if next_delta is None:
                     break
                 current, delta = next_delta
-                state.update(delta)
+                state.update(copy.deepcopy(delta))
 
         if current != to_revision:
             # Fail closed: a partial state labeled with an unreached
@@ -72,8 +80,12 @@ class ReplayEngine:
                 f"no delta path for replay {from_revision!r} ->"
                 f" {to_revision!r} (reached {current!r})")
 
+        base = anchor.revision_id
+        projection_id = f"replay_{base}_{to_revision}"
+        if substituted:
+            projection_id += f"~substituted_for_{from_revision}"
         return ProjectionState(
-            projection_id=f"replay_{from_revision}_{to_revision}",
+            projection_id=projection_id,
             revision_id=to_revision,
             state=state,
             timestamp=time.time(),
@@ -91,15 +103,27 @@ class ReplayEngine:
         return anchors[-1] if anchors else None
 
     def replay_events(self, events) -> ProjectionState:
-        """Event-sourced replay: fold event payloads into projection state."""
+        """Event-sourced replay: fold event payloads into projection state.
+
+        P3: folded in (timestamp, id) order so out-of-order delivery cannot
+        silently produce a non-equivalent state; nested payload values are
+        deep-copied so the projection never aliases ledger-owned objects.
+        Last-write-wins per key remains the documented merge rule.
+        """
+        import copy
         import time
+
+        def _order_key(event):
+            return (getattr(event, "timestamp", 0.0) or 0.0,
+                    getattr(event, "id", "") or "")
 
         state: dict = {}
         revision_id = ""
-        for event in events:
+        for event in sorted(events, key=_order_key):
             payload = getattr(event, "payload", {}) or {}
             if isinstance(payload, dict):
-                state.update({k: v for k, v in payload.items() if k != "task_id"})
+                state.update({k: copy.deepcopy(v) for k, v in payload.items()
+                              if k != "task_id"})
             revision_id = getattr(event, "id", revision_id) or revision_id
         return ProjectionState(
             projection_id=f"replay_events_{len(events)}",

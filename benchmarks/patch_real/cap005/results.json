@@ -1,32 +1,32 @@
 {
   "experiment_id": "CAP-005",
   "corpus_sha256": "ca475b33a385e8d1478afedf00d2eeeefdc8ae0f72c9e5527f20fc1fe814e17c",
-  "label_sha256": "589231d38fdf85a764eab85ba19f1ad9e2839fe63c043c3c9636d745f1893075",
+  "label_sha256": "01eb093946dc53c29fc8c40bfb2c12419a5fb43bf513474f2b8c30da236c02cf",
   "source_manifest_sha256": "f330fca7d317ec9a1e8398295d930c49f802e2cc25cf94b3906d7b9b0d47af8d",
   "total_cases": 64,
   "predicates": {
     "P1_overall_agreement": {
-      "metric": 0.9688,
+      "metric": 1.0,
       "target": ">= 0.9000",
-      "counts": "62/64",
+      "counts": "64/64",
       "status": "PASS"
     },
     "P2_false_acceptance_rate": {
       "metric": 0.0,
       "target": "== 0.0000",
-      "counts": "0/24",
+      "counts": "0/14",
       "status": "PASS"
     },
     "P3_false_confidence_rate": {
       "metric": 0.0,
       "target": "== 0.0000",
-      "counts": "0/2",
+      "counts": "0/31",
       "status": "PASS"
     },
     "P4_violation_detection_recall": {
       "metric": 1.0,
       "target": "== 1.0000",
-      "counts": "24/24",
+      "counts": "14/14",
       "status": "PASS"
     },
     "P5_falsifier_rediscovery": {
@@ -36,17 +36,17 @@
       "status": "PASS"
     },
     "P6_compliant_verification_recall": {
-      "metric": 0.9474,
+      "metric": 1.0,
       "target": ">= 0.9000",
-      "counts": "36/38",
+      "counts": "19/19",
       "status": "PASS"
     },
     "P7_latency_p95_ms": {
-      "p50_ms": 18.25,
-      "p90_ms": 21.44,
-      "p95_ms": 23.52,
-      "p99_ms": 72.6,
-      "max_ms": 135.32,
+      "p50_ms": 21.18,
+      "p90_ms": 28.41,
+      "p95_ms": 29.15,
+      "p99_ms": 77.36,
+      "max_ms": 143.25,
       "target": "<= 500.0ms",
       "status": "PASS"
     },
@@ -66,10 +66,10 @@
   },
   "confusion_matrix": {
     "PASS": {
-      "PASS": 36,
+      "PASS": 19,
       "FAIL": 0,
       "HUMAN_REVIEW": 0,
-      "INCONCLUSIVE": 2,
+      "INCONCLUSIVE": 0,
       "INFRA_ERROR": 0
     },
     "FAIL": {
@@ -82,7 +82,7 @@
     "HUMAN_REVIEW": {
       "PASS": 0,
       "FAIL": 0,
-      "HUMAN_REVIEW": 15,
+      "HUMAN_REVIEW": 5,
       "INCONCLUSIVE": 0,
       "INFRA_ERROR": 0
     },
@@ -90,7 +90,7 @@
       "PASS": 0,
       "FAIL": 0,
       "HUMAN_REVIEW": 0,
-      "INCONCLUSIVE": 2,
+      "INCONCLUSIVE": 31,
       "INFRA_ERROR": 0
     }
   },
@@ -102,8 +102,8 @@
     },
     "production_code_removals": {
       "total": 8,
-      "correct": 6,
-      "accuracy": 0.75
+      "correct": 8,
+      "accuracy": 1.0
     },
     "call_site_and_signature_evolution": {
       "total": 8,
@@ -180,34 +180,34 @@
     {
       "id": "REAL-REM-07",
       "falsifier_class": "removal_provenance",
-      "gold": "PASS",
-      "pred": "PASS",
+      "gold": "INCONCLUSIVE",
+      "pred": "INCONCLUSIVE",
       "matched": true,
-      "rationale": "all_checks_passed_behavior_not_verified"
+      "rationale": "checks_ran_but_nothing_established"
     },
     {
       "id": "REAL-CALL-02",
       "falsifier_class": "argument_value_blindness",
-      "gold": "HUMAN_REVIEW",
-      "pred": "HUMAN_REVIEW",
+      "gold": "INCONCLUSIVE",
+      "pred": "INCONCLUSIVE",
       "matched": true,
-      "rationale": "non_blocking_failures"
+      "rationale": "checks_ran_but_nothing_established"
     },
     {
       "id": "REAL-CALL-04",
       "falsifier_class": "argument_value_blindness",
-      "gold": "HUMAN_REVIEW",
-      "pred": "HUMAN_REVIEW",
+      "gold": "INCONCLUSIVE",
+      "pred": "INCONCLUSIVE",
       "matched": true,
-      "rationale": "non_blocking_failures"
+      "rationale": "checks_ran_but_nothing_established"
     },
     {
       "id": "REAL-CALL-06",
       "falsifier_class": "argument_value_blindness",
-      "gold": "HUMAN_REVIEW",
-      "pred": "HUMAN_REVIEW",
+      "gold": "INCONCLUSIVE",
+      "pred": "INCONCLUSIVE",
       "matched": true,
-      "rationale": "non_blocking_failures"
+      "rationale": "checks_ran_but_nothing_established"
     }
   ],
   "adjudication_verdict": "PROMOTE",

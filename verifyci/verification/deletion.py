@@ -341,19 +341,21 @@ def _has_associated_witness(
     - General regression witnesses (w.is_general_regression is True) cannot corroborate
       Class 2 refactorings (Contract 5).
     """
-    norm_file = normalize_path(file_path)
     eid = getattr(entity, "revision_entity_id", None)
     for w in witnesses:
         if w.is_general_regression:
             continue
-        if w.target_entity_id:
-            if eid and w.target_entity_id == eid:
-                return True
+        # A witness extracted from diff text is only an association hint.
+        # It becomes execution evidence only when an external CI receipt
+        # explicitly attests that the test actually ran.
+        if not getattr(w, "execution_verified", False):
             continue
-        if w.target_file:
-            norm_target = normalize_path(w.target_file)
-            if norm_target == norm_file or norm_file.endswith("/" + norm_target) or norm_target.endswith("/" + norm_file):
-                return True
+        if not getattr(w, "execution_receipt_id", None):
+            continue
+        # Class-2 evidence is entity-scoped. A file-level association is not
+        # enough for a multi-entity file and must never certify refactoring.
+        if eid and w.target_entity_id == eid:
+            return True
     return False
 
 
@@ -422,6 +424,19 @@ def _verify_class_1_dead_code_hunk(
     code_entities: list,
     diff_files: set[str],
 ) -> DeletionHunkVerdict:
+    # Class-1 is a graph claim: without a readable base graph and node map,
+    # "no surviving callers" cannot be established. Never convert missing
+    # graph state into a dead-code PASS.
+    if graph is None or not node_map:
+        return DeletionHunkVerdict(
+            file_path=file_path,
+            old_start=hunk.old_start,
+            deletion_class=DeletionClass.CLASS_1_DEAD_CODE,
+            passed=False,
+            status="INCONCLUSIVE",
+            reasoning=f"class_1_graph_unavailable:{file_path}:{hunk.old_start}",
+        )
+
     surviving = _find_surviving_callers(deleted_entity, graph, node_map, code_entities, diff_files)
     if surviving:
         return DeletionHunkVerdict(
@@ -533,12 +548,25 @@ def verify_deletion_hunks(
 
             if not minus_lines:
                 continue
-            is_net_deletion = (len(minus_lines) > len(plus_lines)) or (hunk.old_count > hunk.new_count)
-            guard_lines = [ml for ml in minus_lines if _is_guard_line(ml)]
-            old_defs = [ml for ml in minus_lines if _looks_like_def(ml)]
-
-            if not is_net_deletion and not guard_lines and not old_defs:
+            # P2 precision: minus lines re-added verbatim in the same hunk
+            # are content-preserving context churn, not deletions (multiset
+            # difference, so duplicated lines are accounted exactly). Only
+            # EFFECTIVE removals can sustain a deletion claim. This does
+            # not reopen the equal-line swap gate: `-x = 1` / `+x = 2`
+            # differ, so they still route to Class-2. Re-indentation also
+            # still counts (whitespace is significant to scope).
+            from collections import Counter as _Counter
+            _plus_counts = _Counter(plus_lines)
+            effective_minus = []
+            for _ml in minus_lines:
+                if _plus_counts.get(_ml, 0) > 0:
+                    _plus_counts[_ml] -= 1
+                else:
+                    effective_minus.append(_ml)
+            if not effective_minus:
                 continue
+            is_net_deletion = (len(effective_minus) > len(plus_lines)) or (hunk.old_count > hunk.new_count)
+            guard_lines = [ml for ml in effective_minus if _is_guard_line(ml)]
 
             hunk_fabricated, hunk_unverified = _check_hunk_provenance(f.path, hunk, covering)
             if hunk_fabricated:

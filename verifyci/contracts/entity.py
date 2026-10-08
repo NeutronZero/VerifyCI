@@ -79,10 +79,16 @@ class Entity:
     metadata: dict[str, Any] = field(default_factory=dict)
     properties_json: Optional[str] = None
 
-    def provenance_chain(self) -> list[str]:
+    def provenance_chain(self) -> list[dict[str, Any]]:
+        """Return the canonical provenance-record shape used by EvidencePack."""
         return [
-            self.source_hash,
-            self.revision_id,
-            self.file_path,
-            f"{self.line_start}-{self.line_end}",
+            {
+                "entry_id": f"prov_{self.revision_entity_id}",
+                "entity_id": self.revision_entity_id,
+                "file_path": self.file_path,
+                "line_start": self.line_start,
+                "line_end": self.line_end,
+                "source_hash": self.source_hash,
+                "revision_id": self.revision_id,
+            },
         ]

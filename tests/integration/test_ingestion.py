@@ -73,7 +73,7 @@ def test_collect_excludes_venv_and_cache_dirs(tmp_path):
     (tmp_path / "__pycache__" / "junk.py").write_text("x = 1\n")
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "real.py").write_text("x = 1\n")
-    sources, _, _ = _collect(tmp_path)
+    sources, _, _, _oversize, _truncated = _collect(tmp_path)
     rels = [rel for rel, _, _ in sources]
     assert any("real.py" in r for r in rels)
     assert not any("venv" in r for r in rels)
@@ -87,7 +87,7 @@ def test_collect_includes_markerless_venv_named_dir(tmp_path):
     from verifyci.interface.commands.ingest import _collect
     (tmp_path / "venv").mkdir()
     (tmp_path / "venv" / "junk.py").write_text("x = 1\n")
-    sources, _, _ = _collect(tmp_path)
+    sources, _, _, _oversize, _truncated = _collect(tmp_path)
     assert any("venv" in rel for rel, _, _ in sources)
 
 
@@ -104,8 +104,14 @@ def test_pathological_nesting_falls_back_to_module(tmp_path):
     (tmp_path / "deep.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (tmp_path / "ok.py").write_text("def ok():\n    return 1\n", encoding="utf-8")
     totals = run_ingest(str(tmp_path))
-    assert any("deep.py" in p for p in totals["parse_errors"])
-    assert totals["files"] == 2
+    # P1-B gate precedence: this 8MB nesting file trips the per-file byte
+    # cap before it reaches the parser, so it lands in oversize_files
+    # rather than parse_errors. Either way it is recorded and skipped and
+    # the run survives; the RecursionError→MODULE fallback below is
+    # exercised directly against the extractor.
+    recorded = list(totals["parse_errors"]) + list(totals.get("oversize_files", []))
+    assert any("deep.py" in p for p in recorded)
+    assert totals["files"] == 1
     with pytest.raises(RecursionError):
         from verifyci.ingestion.extractor import extract_entities
         from verifyci.ingestion.parser import TreeSitterParser

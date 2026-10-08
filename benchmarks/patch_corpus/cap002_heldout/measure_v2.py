@@ -27,9 +27,7 @@ def main() -> None:
         raise SystemExit("held-out corpus not frozen: run author_v2.py first")
     new_cases = [json.loads(line) for line in
                  cases_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    m.load_cases = lambda: new_cases
-    table = m.run()
-    metrics = m.compute_metrics(table)
+    table = m.run(new_cases)
     for t, c in zip(table, new_cases):
         t["expected"] = c["expected_status"]
     metrics = m.compute_metrics(table)

@@ -19,14 +19,16 @@ from verifyci.interface.commands.verify import run_verify
 
 BENCHMARK_DIR = Path(__file__).resolve().parent.parent.parent / "benchmarks" / "patch_real" / "cap005"
 FROZEN_CORPUS_SHA256 = "ca475b33a385e8d1478afedf00d2eeeefdc8ae0f72c9e5527f20fc1fe814e17c"
-FROZEN_LABEL_SHA256 = "589231d38fdf85a764eab85ba19f1ad9e2839fe63c043c3c9636d745f1893075"
+FROZEN_LABEL_SHA256 = "01eb093946dc53c29fc8c40bfb2c12419a5fb43bf513474f2b8c30da236c02cf"
 FROZEN_SOURCE_MANIFEST_SHA256 = "f330fca7d317ec9a1e8398295d930c49f802e2cc25cf94b3906d7b9b0d47af8d"
-FROZEN_HARNESS_SHA256 = "8e8874bea2c45fc941472a921b0c24329e0053fb47f95b68279fdd05a172ef4f"
-FROZEN_RESULTS_SHA256 = "e7ed2033774e27646232eb8e9ce82b0ee891186acfb35cd2f6529e74fa0133ba"
+FROZEN_HARNESS_SHA256 = "8054fb0fbaee748149371ba991d420528ee2d5a0a0818faa3ba9ac496af0e0d8"
+FROZEN_RESULTS_SHA256 = "f1584d805b25e5464c5617dbb1c3ca3a6983aff84aed57b934dd2b179e9b3f45"
 
 
 @pytest.fixture(scope="module")
-def cap005_data():
+def cap005_data(tmp_path_factory):
+    import shutil
+
     cases_file = BENCHMARK_DIR / "cases.jsonl"
     labels_file = BENCHMARK_DIR / "labels.jsonl"
     sources_file = BENCHMARK_DIR / "sources.jsonl"
@@ -35,28 +37,35 @@ def cap005_data():
     labels = {json.loads(line)["id"]: json.loads(line) for line in labels_file.read_text(encoding="utf-8").splitlines() if line.strip()}
     sources = [json.loads(line) for line in sources_file.read_text(encoding="utf-8").splitlines() if line.strip()]
 
-    base_dir = BENCHMARK_DIR / "base"
+    # P2: always ingest a pristine copy under tmp. The previous shape reused
+    # a local-only `.verifyci.db` inside the benchmark tree when present, so
+    # extractor/storage changes were silently tested against a stale graph
+    # (and extractor runs could mutate the fixture tree in place).
+    work = tmp_path_factory.mktemp("cap005_base")
+    base_dir = work / "base"
+    shutil.copytree(
+        BENCHMARK_DIR / "base", base_dir,
+        ignore=shutil.ignore_patterns(".verifyci"),
+    )
     verifyci_dir = base_dir / ".verifyci"
     verifyci_dir.mkdir(parents=True, exist_ok=True)
     invariants_file = verifyci_dir / "invariants.yaml"
-    if not invariants_file.exists():
-        invariants_file.write_text(
-            "invariants:\n"
-            "  - id: no-eval\n"
-            "    rule: forbid eval\n"
-            "    query: forbid_call:eval\n"
-            "    blocking: true\n"
-            "  - id: no-subprocess\n"
-            "    rule: forbid subprocess\n"
-            "    query: forbid_import:subprocess\n"
-            "    blocking: true\n",
-            encoding="utf-8",
-        )
+    invariants_file.write_text(
+        "invariants:\n"
+        "  - id: no-eval\n"
+        "    rule: forbid eval\n"
+        "    query: forbid_call:eval\n"
+        "    blocking: true\n"
+        "  - id: no-subprocess\n"
+        "    rule: forbid subprocess\n"
+        "    query: forbid_import:subprocess\n"
+        "    blocking: true\n",
+        encoding="utf-8",
+    )
     db_file = verifyci_dir / "verifyci.db"
-    if not db_file.exists():
-        from verifyci.interface.commands.ingest import run_ingest
+    from verifyci.interface.commands.ingest import run_ingest
 
-        run_ingest(str(base_dir))
+    run_ingest(str(base_dir))
     db_path = str(db_file)
 
     return {
@@ -106,6 +115,24 @@ def test_cap005_falsifier_rediscovery_100_percent(cap005_data):
         res = run_verify(diff=c["diff"], db_path=db_path)
         pred = res["status"]
         assert pred == gold, f"Falsifier {fid} failed: expected {gold}, got {pred} ({res.get('rationale')})"
+
+
+def test_cap005_zero_false_accepts(cap005_data):
+    # LIVE safety invariant (not subject to the re-label xfail below):
+    # whatever P0 strictness changes, nothing labeled FAIL/HUMAN_REVIEW
+    # may verify as PASS. Drift is allowed only toward INCONCLUSIVE.
+    cases = cap005_data["cases"]
+    labels = cap005_data["labels"]
+    db_path = cap005_data["db_path"]
+
+    false_accepts = 0
+    for c in cases:
+        cid = c["id"]
+        gold = labels[cid]["expected_status"]
+        res = run_verify(diff=c["diff"], db_path=db_path)
+        if gold in ("FAIL", "HUMAN_REVIEW") and res["status"] == "PASS":
+            false_accepts += 1
+    assert false_accepts == 0, f"False accepts {false_accepts} detected (must be strictly 0)"
 
 
 def test_cap005_overall_agreement_and_zero_far(cap005_data):

@@ -1,7 +1,9 @@
 """Contract 5: Execution Witness extraction and association rules.
 
-Associates test functions in TEST_SUITE diffs with changed production entities
-or files in CODE_CORE:
+Associates test functions in TEST_SUITE diffs with candidate production
+entities/files. These are association hints only; they are NOT execution
+proof until a trusted CI receipt is attached by an execution-aware caller.
+
 1. Probe metadata (explicit annotations)
 2. Direct AST reference / imports
 3. Fallback naming convention (module-level correspondence)

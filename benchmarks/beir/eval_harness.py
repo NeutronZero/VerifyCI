@@ -132,10 +132,11 @@ async def build_rankings(corpus, queries, provider):
         sparse_ranked = [r.id for r in bm25.search(q["text"], k=k)]
         dense_res = [_res(i) for i in dense_ranked]
         sparse_res = [_res(i) for i in sparse_ranked]
-        if CONFIG["rrf_k"] != 60:
-            fused_ids = _rrf(dense_res, sparse_res, CONFIG["rrf_k"])
-        else:
-            fused_ids = rrf_fusion(dense_res, sparse_res, [])
+        # Single fusion path for every k: rrf_fusion with the configured k
+        # is exactly _rrf (same formula, same docid tiebreak). The old fork
+        # (private _rrf unless k == 60) made reported metrics depend on an
+        # untested code path; _rrf is retained only for the equivalence test.
+        fused_ids = rrf_fusion(dense_res, sparse_res, [], CONFIG["rrf_k"])
         hybrid_ranked = list(fused_ids)[:k]
         out[q["qid"]] = {"dense": dense_ranked, "hybrid": hybrid_ranked}
     return out
@@ -180,6 +181,19 @@ def make_provider(name: str, cache_dir: Path):
     return CachedEmbeddingProvider(base, str(cache_dir / f"embedding_cache_{safe}.json"))
 
 
+def gate_established(dry_run: bool, provider: str, n_queries: int,
+                     delta: float) -> bool:
+    """The single predicate deciding whether a run is gate evidence.
+
+    Factored so tests execute the real rule instead of re-stating it:
+    dry runs and non-frozen providers are pipeline checks, never evidence.
+    """
+    return (
+        not dry_run and provider == CONFIG["provider"]
+        and n_queries >= CONFIG["min_queries_to_establish"]
+        and delta >= CONFIG["pass_rule"]["target_delta_ndcg_abs"])
+
+
 async def amain(args):
     corpus, queries = load()
     errs = validate(corpus, queries)
@@ -197,10 +211,8 @@ async def amain(args):
     metrics = score(rankings, queries)
     d, h = metrics["dense"], metrics["hybrid"]
     delta = h["ndcg"] - d["ndcg"]
-    established = (
-        not args.dry_run and args.provider == CONFIG["provider"]
-        and len(queries) >= CONFIG["min_queries_to_establish"]
-        and delta >= CONFIG["pass_rule"]["target_delta_ndcg_abs"])
+    established = gate_established(args.dry_run, args.provider,
+                                   len(queries), delta)
     report = {
         "frozen": {"corpus_sha256": ch, "qrels_sha256": qh,
                    "config_sha256": _sha(HERE / "config.json"),

@@ -3,6 +3,7 @@ from typing import Any
 from verifyci.contracts.entity import Entity, EntityType
 from verifyci.contracts.edge import CPGEdgeSubtype, Edge, EdgeType
 from verifyci.contracts.identity import compute_logical_entity_id
+from verifyci.contracts.validate import validate_edge, validate_entity
 
 UNRESOLVED_TYPES = frozenset({EdgeType.CALLS_UNRESOLVED, EdgeType.INHERITS_UNRESOLVED})
 
@@ -57,10 +58,18 @@ class GraphBuilder:
 
         pending: list[Edge] = []
         for entity in entities:
+            entity_errors = validate_entity(entity)
+            if entity_errors:
+                raise ValueError(
+                    f"invalid_graph_entity:{entity.revision_entity_id}:{entity_errors}"
+                )
             idx = self._graph.add_node(entity)
             self._node_map[entity.revision_entity_id] = idx
 
         for edge in edges:
+            edge_errors = validate_edge(edge)
+            if edge_errors:
+                raise ValueError(f"invalid_graph_edge:{edge.id}:{edge_errors}")
             # Unresolved references are never graph links (their dst is
             # empty — linking them would materialize a phantom external
             # node per call site). They resolve below, post-build, once
@@ -342,8 +351,13 @@ class GraphBuilder:
             source_hash="",
             revision_id=edge.revision_id,
             metadata={"external": True,
-                      "ecosystem": (edge.metadata or {}).get("ecosystem", "")},
+                      "ecosystem": ((edge.metadata if isinstance(edge.metadata, dict) else {}) or {}).get("ecosystem", "")},
         )
+        entity_errors = validate_entity(entity)
+        if entity_errors:
+            raise ValueError(
+                f"invalid_external_graph_entity:{endpoint}:{entity_errors}"
+            )
         idx = self._graph.add_node(entity)
         self._node_map[endpoint] = idx
         return idx

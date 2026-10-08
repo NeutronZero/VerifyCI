@@ -94,7 +94,7 @@ def main() -> None:
             scores[did] = scores.get(did, 0) + 1.0 / (60 + rank + 1)
         for rank, did in enumerate(sparse):
             scores[did] = scores.get(did, 0) + 1.0 / (60 + rank + 1)
-        fused = [d for d, _ in sorted(scores.items(), key=lambda t: -t[1])]
+        fused = [d for d, _ in sorted(scores.items(), key=lambda t: (-t[1], t[0]))]
         top = fused[:RERANK_DEPTH]
         s = ce.predict([(q["text"], corpus[d]) for d in top]).tolist()
         hybrid = [d for d, _ in sorted(zip(top, s), key=lambda t: (-t[1], t[0]))][:k]

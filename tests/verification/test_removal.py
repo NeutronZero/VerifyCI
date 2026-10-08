@@ -158,7 +158,7 @@ def test_run_verify_routes_fabricated_removal_to_fail(tmp_path):
         revision = create_revision(repository_id="r", files=[("src/app.py", "h")])
         store.insert_revision(revision)
         store.insert_entity(Entity(
-            repository_id="r", logical_entity_id="l", revision_entity_id="e1",
+            repository_id="r", logical_entity_id="a" * 64, revision_entity_id="b" * 64,
             type=EntityType.FUNCTION, name="f", file_path="src/app.py",
             line_start=10, line_end=12, language="python", source_hash="h",
             revision_id=revision.revision_id,
@@ -219,7 +219,7 @@ def test_run_verify_stray_before_hunk_not_pass(tmp_path):
     try:
         revision = create_revision(repository_id='r', files=[('src/app.py', 'h')])
         store.insert_revision(revision)
-        store.insert_entity(Entity(repository_id='r', logical_entity_id='l', revision_entity_id='e1', type=EntityType.FUNCTION, name='f', file_path='src/app.py', line_start=10, line_end=12, language='python', source_hash='h', revision_id=revision.revision_id, metadata={'snippet': 'def f():' + nl + '    return 1' + nl + '    return 2'}))
+        store.insert_entity(Entity(repository_id='r', logical_entity_id='a' * 64, revision_entity_id='b' * 64, type=EntityType.FUNCTION, name='f', file_path='src/app.py', line_start=10, line_end=12, language='python', source_hash='h', revision_id=revision.revision_id, metadata={'snippet': 'def f():' + nl + '    return 1' + nl + '    return 2'}))
     finally:
         store.close()
     diff = DIFF_HEAD + '-forged line' + nl + '@@ -10,3 +10,3 @@' + nl + ' def f():' + nl + '-    return 1' + nl + '-    launch_missiles()' + nl + '+    return 2' + nl

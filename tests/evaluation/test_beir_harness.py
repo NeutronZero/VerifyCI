@@ -81,12 +81,15 @@ def test_judged_set_is_diverse_not_smoke():
 
 
 def test_dry_run_or_nonfrozen_provider_never_establishes_gate():
-    # The established flag is computed from provider==frozen AND not dry_run
-    # AND size AND delta. Simulate the arithmetic the CLI performs.
+    # The real gate predicate, executed across the matrix that matters:
+    # dry runs and non-frozen providers are pipeline checks, never evidence.
     cfg = eh.CONFIG
-    established_dry = (False and cfg["provider"] == "hash"
-                       and 62 >= cfg["min_queries_to_establish"] and 0.08 >= 0.05)
-    assert established_dry is False  # dry_run short-circuits
+    target = cfg["pass_rule"]["target_delta_ndcg_abs"]
+    assert eh.gate_established(True, cfg["provider"], 62, target + 0.03) is False
+    assert eh.gate_established(False, "hash", 62, target + 0.03) is False
+    assert eh.gate_established(False, cfg["provider"], 1, target + 0.03) is False
+    assert eh.gate_established(False, cfg["provider"], 62, target - 0.001) is False
+    assert eh.gate_established(False, cfg["provider"], 62, target) is True
 
 
 def test_report_records_corpora_hash_for_both_conditions():
@@ -97,6 +100,16 @@ def test_report_records_corpora_hash_for_both_conditions():
     rankings = {"q": {"dense": list(corpus)[:10], "hybrid": list(corpus)[:10]}}
     metrics = eh.score({q["qid"]: rankings["q"] for q in queries}, queries)
     assert metrics["dense"]["ndcg"] == metrics["hybrid"]["ndcg"]
+
+
+def test_rrf_single_path_matches_legacy_private_rrf():
+    # The reported metric must not depend on a fork: production rrf_fusion
+    # with the configured k equals the retired private _rrf on fixed ranks,
+    # including score ties (docid tiebreak both sides).
+    dense = [eh._res(i) for i in ("d2", "d1", "d3")]
+    sparse = [eh._res(i) for i in ("d3", "d1", "d4")]
+    for k in (1, 10, 60, 120):
+        assert eh.rrf_fusion(dense, sparse, [], k) == eh._rrf(dense, sparse, k)
 
 
 def test_results_file_wellformed_if_present():

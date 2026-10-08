@@ -98,6 +98,12 @@ class CrossEncoderReranker(Reranker):
     A real model is used only when ``model`` names a loadable local
     sentence-transformers CrossEncoder and ``local_files_only`` resolution
     succeeds. Nothing is ever downloaded.
+
+    Deliberate divergence, recorded here so it stays deliberate: the
+    cross-encoder path ranks by pure model scores, WITHOUT the
+    OfflineReranker exact/qualified symbol bonuses. Neural and lexical
+    orderings therefore differ by design; unifying them would need a
+    measured relevance study, not a drive-by constant change.
     """
 
     def __init__(self, model: str | None = None, local_files_only: bool = True) -> None:

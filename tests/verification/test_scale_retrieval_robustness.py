@@ -17,6 +17,8 @@ Verifies:
 """
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from verifyci.contracts.edge import Edge, EdgeType
@@ -27,6 +29,16 @@ from verifyci.graph.traverse import (
     TraversalInconclusiveError,
 )
 from verifyci.retrieval.blast_radius import compute_blast_radius
+
+
+def _hid(*parts: str) -> str:
+    """Deterministic canonical fixture ID.
+
+    P0 soundness requires 64-hex entity IDs at build time. Fixtures keep
+    readable names in `name`/`module`; identity is the sha256 of the
+    readable dotted path, so graphs stay deterministic and human-mappable.
+    """
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
 def _make_entity(eid: str, module: str = "app_pkg", name: str | None = None) -> Entity:
@@ -50,12 +62,12 @@ def test_actual_visit_budget_exceeded_benign_names():
     """Actual visit budget exceeded (>20,000 nodes) triggers TraversalInconclusiveError on benign names."""
     # Build a hub connected to 22,000 worker nodes
     num_workers = 22000
-    hub_id = "services.telemetry_hub"
+    hub_id = _hid("services.telemetry_hub")
     entities = [_make_entity(hub_id, module="telemetry", name="telemetry_hub")]
     edges = []
 
     for i in range(num_workers):
-        w_id = f"workers.worker_{i}"
+        w_id = _hid(f"workers.worker_{i}")
         entities.append(_make_entity(w_id, module=f"workers_{i//1000}", name=f"worker_{i}"))
         edges.append(Edge(
             id=f"e_{i}",
@@ -81,7 +93,7 @@ def test_actual_edge_expansion_budget_exceeded_benign_names():
     """Actual edge expansion budget exceeded (>40,000 edges) triggers TraversalInconclusiveError."""
     # Build a dense bipartite / multi-link cluster with 45,000 edges
     # 200 sources each calling 230 targets = 46,000 edge expansions
-    seed_id = "cluster.entrypoint"
+    seed_id = _hid("cluster.entrypoint")
     entities = [_make_entity(seed_id, module="cluster", name="entrypoint")]
     edges = []
 
@@ -89,21 +101,21 @@ def test_actual_edge_expansion_budget_exceeded_benign_names():
     num_sinks = 230
 
     for i in range(num_intermediates):
-        m_id = f"mid.fn_{i}"
+        m_id = _hid(f"mid.fn_{i}")
         entities.append(_make_entity(m_id, module="cluster_mid", name=f"fn_{i}"))
         # seed calls all intermediates
         edges.append(Edge(id=f"e_seed_{i}", revision_id="rev_1", src_entity_id=seed_id, dst_entity_id=m_id, type=EdgeType.CALLS))
 
     for j in range(num_sinks):
-        s_id = f"sink.fn_{j}"
+        s_id = _hid(f"sink.fn_{j}")
         entities.append(_make_entity(s_id, module="cluster_sink", name=f"fn_{j}"))
 
     # Each intermediate calls all sinks (200 * 230 = 46,000 edges)
     edge_idx = 0
     for i in range(num_intermediates):
-        m_id = f"mid.fn_{i}"
+        m_id = _hid(f"mid.fn_{i}")
         for j in range(num_sinks):
-            s_id = f"sink.fn_{j}"
+            s_id = _hid(f"sink.fn_{j}")
             edges.append(Edge(id=f"e_dense_{edge_idx}", revision_id="rev_1", src_entity_id=m_id, dst_entity_id=s_id, type=EdgeType.CALLS))
             edge_idx += 1
 
@@ -119,7 +131,7 @@ def test_actual_edge_expansion_budget_exceeded_benign_names():
 
 def test_actual_max_hop_contract_exceeded_benign_names():
     """Actual depth limit contract exceeded (>50 hops) triggers TraversalInconclusiveError."""
-    seed_id = "pipelines.data_step_01"
+    seed_id = _hid("pipelines.data_step_01")
     entities = [_make_entity(seed_id, module="pipeline", name="data_step_01")]
     builder = GraphBuilder()
     graph = builder.build(entities, [])
@@ -135,8 +147,8 @@ def test_actual_max_hop_contract_exceeded_benign_names():
 def test_actual_dangling_node_encountered_benign_names():
     """Actual dangling unmodeled target on code call triggers TraversalInconclusiveError."""
     # A genuine call edge pointing to an entity not present in declared entities
-    caller_id = "billing.process_invoice"
-    dangling_callee_id = "external_ledger.record_transaction"
+    caller_id = _hid("billing.process_invoice")
+    dangling_callee_id = _hid("external_ledger.record_transaction")
 
     entities = [_make_entity(caller_id, module="billing", name="process_invoice")]
     # Note: dangling_callee_id is intentionally omitted from entities
@@ -162,8 +174,8 @@ def test_actual_dangling_node_encountered_benign_names():
 
 def test_actual_forbidden_boundary_crossed_varied_metadata():
     """Actual forbidden boundary crossed with varied metadata wording (denied / restricted)."""
-    src_id = "frontend.checkout_button"
-    dst_id = "auth.admin_key_store"
+    src_id = _hid("frontend.checkout_button")
+    dst_id = _hid("auth.admin_key_store")
 
     entities = [
         _make_entity(src_id, module="frontend", name="checkout_button"),
@@ -192,11 +204,17 @@ def test_actual_forbidden_boundary_crossed_varied_metadata():
 
 
 def test_actual_corrupt_payload_encountered():
-    """Malformed or corrupt entity metadata triggers TraversalInconclusiveError."""
-    corrupt_id = "orders.create_order"
+    """Malformed entity metadata fails closed at the contract boundary.
+
+    P0 soundness validates graph contracts at build time: a non-dict
+    metadata payload is rejected by the builder before it can enter
+    traversal. Traversal-time corrupt-payload interception remains as
+    defense-in-depth for payloads constructed outside the builder.
+    """
+    corrupt_id = _hid("orders.create_order")
     entity = Entity(
         repository_id="test_repo",
-        logical_entity_id=corrupt_id,
+        logical_entity_id=_hid("test_repo", "orders", "create_order"),
         revision_entity_id=corrupt_id,
         type=EntityType.FUNCTION,
         name="create_order",
@@ -210,21 +228,21 @@ def test_actual_corrupt_payload_encountered():
     )
 
     builder = GraphBuilder()
-    graph = builder.build([entity], [])
-    node_map = builder.get_node_map()
-
-    with pytest.raises(TraversalInconclusiveError) as exc_info:
-        compute_blast_radius(graph, [corrupt_id], set(), node_map=node_map, max_hops=1)
-
-    assert "corrupted metadata" in str(exc_info.value).lower()
+    with pytest.raises(ValueError, match="invalid_graph_entity"):
+        builder.build([entity], [])
 
 
 def test_actual_ungrounded_entity_missing_module_container():
-    """Ungrounded entity lacking file definition / module container triggers TraversalInconclusiveError."""
-    ungrounded_id = "utility.orphan_helper"
+    """Ungrounded entity lacking file definition / module container fails closed.
+
+    P0 soundness moved this gate to build time: a span-less, sourceless
+    non-external entity cannot enter the graph, so the failure surfaces as
+    a build-time contract rejection rather than a traversal-time abort.
+    """
+    ungrounded_id = _hid("utility.orphan_helper")
     entity = Entity(
         repository_id="test_repo",
-        logical_entity_id=ungrounded_id,
+        logical_entity_id=_hid("test_repo", "utility", "orphan_helper"),
         revision_entity_id=ungrounded_id,
         type=EntityType.FUNCTION,
         name="orphan_helper",
@@ -237,13 +255,8 @@ def test_actual_ungrounded_entity_missing_module_container():
     )
 
     builder = GraphBuilder()
-    graph = builder.build([entity], [])
-    node_map = builder.get_node_map()
-
-    with pytest.raises(TraversalInconclusiveError) as exc_info:
-        compute_blast_radius(graph, [ungrounded_id], set(), node_map=node_map, max_hops=1)
-
-    assert "lacks source file definition" in str(exc_info.value).lower() or "incomplete retrieval state" in str(exc_info.value).lower()
+    with pytest.raises(ValueError, match="invalid_graph_entity"):
+        builder.build([entity], [])
 
 
 def test_token_renaming_invariance_diagnostic():
@@ -252,11 +265,12 @@ def test_token_renaming_invariance_diagnostic():
     fail closed — proving the guard keys on grounding state, not on tokens."""
 
     for seed_name in ("benign_seed_17", "seed_42", "seed_99"):
+        seed_id = _hid(seed_name)
         for file_path, should_raise in (("pkg/service.py", False), ("", True)):
             entity = Entity(
                 repository_id="scale_repo",
-                logical_entity_id=seed_name,
-                revision_entity_id=seed_name,
+                logical_entity_id=_hid("scale_repo", "pkg", seed_name),
+                revision_entity_id=seed_id,
                 type=EntityType.FUNCTION,
                 name=seed_name,
                 file_path=file_path,
@@ -272,9 +286,9 @@ def test_token_renaming_invariance_diagnostic():
 
             if should_raise:
                 with pytest.raises(TraversalInconclusiveError):
-                    compute_blast_radius(graph, [seed_name], set(), node_map=node_map, max_hops=2)
+                    compute_blast_radius(graph, [seed_id], set(), node_map=node_map, max_hops=2)
             else:
-                res = compute_blast_radius(graph, [seed_name], set(), node_map=node_map, max_hops=2)
+                res = compute_blast_radius(graph, [seed_id], set(), node_map=node_map, max_hops=2)
                 assert res is not None
 
 
@@ -283,13 +297,13 @@ def test_positive_control_high_scale_within_budget_passes():
 
     and valid boundaries completes with status=None and exact callers/callees.
     """
-    hub_id = "logger.standard_logger"
+    hub_id = _hid("logger.standard_logger")
     entities = [_make_entity(hub_id, module="logger", name="standard_logger")]
     edges = []
 
     # 10,000 clients calling the logger
     for i in range(1, 10000):
-        c_id = f"client.fn_{i}"
+        c_id = _hid(f"client.fn_{i}")
         entities.append(_make_entity(c_id, module=f"client_pkg_{i//500}", name=f"fn_{i}"))
         edges.append(Edge(
             id=f"e_{i}",
@@ -304,7 +318,7 @@ def test_positive_control_high_scale_within_budget_passes():
     node_map = builder.get_node_map()
 
     # Outgoing traversal from a client reaches standard_logger (1 callee)
-    res = compute_blast_radius(graph, ["client.fn_1"], set(), node_map=node_map, max_hops=1)
+    res = compute_blast_radius(graph, [_hid("client.fn_1")], set(), node_map=node_map, max_hops=1)
     assert res.status in (None, "PASS")
     assert res.affected_callees == [hub_id]
     assert res.affected_callers == []

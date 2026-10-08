@@ -1,3 +1,4 @@
+import copy
 import time
 from typing import Optional
 
@@ -16,7 +17,9 @@ class SnapshotStore:
             snapshot = ProjectionState(
                 projection_id=f"snapshot_{revision_id}",
                 revision_id=revision_id,
-                state=dict(state),
+                # P3: deep copy — a shallow dict() aliases nested objects,
+                # so later mutation rewrote "saved" snapshots.
+                state=copy.deepcopy(state),
                 timestamp=time.time(),
             )
             self._snapshots[revision_id] = snapshot

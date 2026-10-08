@@ -32,15 +32,33 @@ def _read_manifest_text(file: Path) -> str:
     return file.read_text(encoding="utf-8-sig", errors="replace")
 
 
-def _collect(repo: Path) -> tuple[list[tuple[str, str, bytes]], list[tuple[str, str]], list[tuple[str, str]]]:
+#: P1-B ingestion bounds. One hostile or generated file (minified bundles,
+#: data dumps) must not OOM the ingest, and the batch as a whole must not
+#: buffer unbounded bytes. Oversize files are skipped and RECORDED — never
+#: silently dropped. A skipped file is unindexed, hence ungrounded
+#: downstream: verification declines it instead of passing over it.
+MAX_INGEST_FILE_BYTES = 2_000_000
+MAX_INGEST_TOTAL_BYTES = 256_000_000
+
+
+def _collect(repo: Path) -> tuple[list[tuple[str, str, bytes]], list[tuple[str, str]], list[tuple[str, str]], list[str], bool]:
     """Pass 1 (no parsing): gather source files + dependency manifests.
 
-    Returns ((rel_path, language, bytes) list, manifest (rel_path, sha256) list).
+    Returns (sources, texts, manifest, oversize, truncated):
+    - sources: (rel_path, language, bytes) for files within the byte budget.
+    - texts: (rel_path, text) manifests.
+    - manifest: (rel_path, sha256) over collected content only.
+    - oversize: rel paths skipped for exceeding MAX_INGEST_FILE_BYTES.
+    - truncated: True when the aggregate budget stopped collection early;
+      the revision then covers a prefix of the tree, recorded explicitly.
     Skipped paths come only from `verifyci.ingestion.ignore` so every
     discovery path agrees on what is excluded.
     """
     sources: list[tuple[str, str, bytes]] = []
     texts: list[tuple[str, str]] = []
+    oversize: list[str] = []
+    total_bytes = 0
+    truncated = False
     for file in iter_repo_files(repo):
         rel = file.relative_to(repo).as_posix()
         if file.name in MANIFESTS:
@@ -48,13 +66,34 @@ def _collect(repo: Path) -> tuple[list[tuple[str, str, bytes]], list[tuple[str, 
             # ingestible suffix, which used to swallow it silently and
             # drop Python dependencies from the graph.
             texts.append((rel, _read_manifest_text(file)))
-        elif file.suffix.lower() in INGESTIBLE_EXTENSIONS:
-            language = detect_language(str(file))
-            # Docs have no AST: parsed with tree=None yields a MODULE entity.
-            sources.append((rel, language, file.read_bytes()))
+            continue
+        if file.suffix.lower() not in INGESTIBLE_EXTENSIONS:
+            continue
+        try:
+            size = file.stat().st_size
+        except OSError:
+            continue  # raced deletion / unreadable: skip, never abort
+        if size > MAX_INGEST_FILE_BYTES:
+            oversize.append(rel)
+            continue
+        if total_bytes + size > MAX_INGEST_TOTAL_BYTES:
+            truncated = True
+            break
+        try:
+            content = file.read_bytes()
+        except OSError:
+            continue
+        if len(content) > MAX_INGEST_FILE_BYTES:
+            # TOCTOU growth between stat and read: same skip path.
+            oversize.append(rel)
+            continue
+        total_bytes += len(content)
+        language = detect_language(str(file))
+        # Docs have no AST: parsed with tree=None yields a MODULE entity.
+        sources.append((rel, language, content))
     manifest = [(rel, compute_source_hash(src)) for rel, _, src in sources]
     manifest += [(rel, compute_source_hash(text.encode("utf-8"))) for rel, text in texts]
-    return sources, texts, manifest
+    return sources, texts, manifest, oversize, truncated
 
 
 #: Languages where tree-sitter routinely produces ERROR nodes on valid,
@@ -240,7 +279,7 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
                       expected_source_hashes: dict[str, str] | None = None,
                       revert_of: str | None = None,
                       unresolved_conflict: bool = False) -> dict:
-        sources, texts, manifest = _collect(repo)
+        sources, texts, manifest, oversize_files, collection_truncated = _collect(repo)
         collected = len(sources) + len(texts)
 
         # Lineage & DAG validation checks (CAP-006 Capability 2: Fail-Closed Tripwires)
@@ -372,6 +411,8 @@ def _run_ingest_inner(repo, db_path: str, store, meta, incremental: bool = False
         totals = {"entities": 0, "edges": 0, "files": 0,
                   "skipped": collected - len(sources) - len(texts),
                   "skipped_dirs": skipped_dir_names(repo),
+                  "oversize_files": oversize_files,
+                  "collection_truncated": collection_truncated,
                   "closed_entities": 0, "closed_edges": 0,
                   "parse_errors": [], "manifest_errors": [],
                   "partial_parses": [], "zero_entity_files": 0,

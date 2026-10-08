@@ -56,22 +56,121 @@ runs:
     - name: Run VerifyCI Verification Gate
       id: run-verifyci
       shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_DB: ${{ inputs.db }}
+        INPUT_BASE_REF: ${{ inputs.base-ref }}
+        INPUT_HEAD_REF: ${{ inputs.head-ref }}
+        INPUT_FORMAT: ${{ inputs.format }}
+        INPUT_OUTPUT_FILE: ${{ inputs.output-file }}
+        INPUT_FAIL_ON_INC: ${{ inputs.fail-on-inconclusive }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        set +e
+        # PHASE 1-A boundary rule: this script body contains ZERO template
+        # interpolations of the workflow expression language. Every
+        # caller-controlled value arrives via the `env:` block above, so
+        # quotes, command substitutions, backticks, newlines, and glob
+        # characters in inputs are inert data, never shell syntax.
+        # All parameter expansions below are double-quoted.
+        set -uo pipefail
 
-        REPO_PATH="${{ inputs.path }}"
-        DB_ARG="${{ inputs.db }}"
-        BASE_REF="${{ inputs.base-ref }}"
-        HEAD_REF="${{ inputs.head-ref }}"
-        FORMAT="${{ inputs.format }}"
-        OUT_FILE="${{ inputs.output-file }}"
-        FAIL_ON_INC="${{ inputs.fail-on-inconclusive }}"
+        # `${VAR-default}` (no colon) is deliberate: GitHub always sets these
+        # from action defaults when the caller omits them, so an explicitly
+        # empty value must reach validation and fail closed, not silently
+        # inherit a default.
+        REPO_PATH="${INPUT_PATH-.}"
+        DB_ARG="${INPUT_DB-}"
+        BASE_REF="${INPUT_BASE_REF-}"
+        HEAD_REF="${INPUT_HEAD_REF-HEAD}"
+        FORMAT="${INPUT_FORMAT-sarif}"
+        OUT_FILE="${INPUT_OUTPUT_FILE-verifyci-results.sarif}"
+        FAIL_ON_INC="${INPUT_FAIL_ON_INC-true}"
 
-        # Ensure VerifyCI CLI is available
-        if ! command -v verifyci &> /dev/null; then
-          echo "::group::Installing VerifyCI"
+        # Fail closed on invalid input (exit 3 = infrastructure/misuse, the
+        # same ladder the CLI uses). Never run the tool on unvalidated input.
+        fail_infra() {
+          echo "::error::VerifyCI action input rejected: $1"
+          exit 3
+        }
+
+        # --- format: strict allowlist (blocks `json;cmd`, newlines, `XML`) ---
+        case "$FORMAT" in
+          sarif|json|text) ;;
+          *) fail_infra "format must be one of: sarif, json, text." ;;
+        esac
+
+        # --- fail-on-inconclusive flag: strict allowlist ---
+        case "$FAIL_ON_INC" in
+          true|false) ;;
+          *) fail_infra "fail-on-inconclusive must be 'true' or 'false'." ;;
+        esac
+
+        # --- output-file: relative workspace path only ---
+        # Blocks absolute paths (`/etc/...`), parent traversal (`../`),
+        # newline injection, and shell metacharacters. Names are matched
+        # against an explicit charset; anything else is rejected.
+        case "$OUT_FILE" in
+          ""|/*) fail_infra "output-file must be a non-empty relative path." ;;
+        esac
+        case "$OUT_FILE" in
+          -*|*$'\n'*) fail_infra "output-file must not start with '-' or contain newlines." ;;
+        esac
+        if [[ "$OUT_FILE" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+          :
+        else
+          fail_infra "output-file contains characters outside [A-Za-z0-9._/-]."
+        fi
+        if [[ "/$OUT_FILE/" == *"/../"* ]]; then
+          fail_infra "output-file must not contain '..' path segments."
+        fi
+
+        # --- repo path: non-empty, no newline, never option-like ---
+        # (Quoted argv is safe from splitting, but a leading `-` could be
+        # parsed as a CLI flag by the tool itself.)
+        case "$REPO_PATH" in
+          ""|-*|*$'\n'*) fail_infra "path must be a non-empty relative path not starting with '-'." ;;
+        esac
+        # Shell metacharacters are never legitimate in a repository path and
+        # always indicate an injection attempt. Spaces, parens, and unicode
+        # stay allowed (e.g. "my repo").
+        case "$REPO_PATH" in
+          *';'*|*'&'*|*'|'*|*'<'*|*'>'*|*'$'*|*'`'*|*'"'*|*"'"*|*'*'*|*'?'*|*'['*) fail_infra "path contains shell metacharacters." ;;
+        esac
+
+        # --- git refs: conservative charset, never option-like ---
+        # Allows SHAs, HEAD, HEAD~1, HEAD^, branches, tags, slashes.
+        # Rejects option injection (`--output=...`), command separators,
+        # newlines, and exotic `@{...}` syntax (fail closed: pass an
+        # explicit SHA instead). `--` is still used below as belt-and-braces.
+        valid_ref() {
+          case "$1" in
+            ""|-*) return 1 ;;
+          esac
+          if [[ "$1" =~ ^[A-Za-z0-9._/+~^:-]+$ ]]; then
+            return 0
+          fi
+          return 1
+        }
+        if [ -n "$BASE_REF" ]; then
+          valid_ref "$BASE_REF" || fail_infra "base-ref is not a safe git ref."
+        fi
+        valid_ref "$HEAD_REF" || fail_infra "head-ref is not a safe git ref."
+
+        # --- db path: same rules as repo path when explicitly provided ---
+        if [ -n "$DB_ARG" ]; then
+          case "$DB_ARG" in
+            -*|*$'\n'*) fail_infra "db must not start with '-' or contain newlines." ;;
+          esac
+          case "$DB_ARG" in
+            *';'*|*'&'*|*'|'*|*'<'*|*'>'*|*'$'*|*'`'*|*'"'*|*"'"*|*'*'*|*'?'*|*'['*) fail_infra "db contains shell metacharacters." ;;
+          esac
+        fi
+
+        # Ensure VerifyCI CLI is available (pinned transitive dependencies).
+        if ! command -v verifyci >/dev/null 2>&1; then
+          echo "::group::Installing VerifyCI (pinned dependencies)"
           python -m pip install --upgrade pip
-          python -m pip install "${{ github.action_path }}"
+          python -m pip install -c "$ACTION_PATH/constraints-ci.txt" "$ACTION_PATH"
           echo "::endgroup::"
         fi
 
@@ -92,22 +191,27 @@ runs:
 
         # Determine git base reference for PR diff
         if [ -z "$BASE_REF" ]; then
-          if [ -n "$GITHUB_BASE_REF" ]; then
-            git fetch origin "$GITHUB_BASE_REF" --depth=1 || true
-            BASE_REF="origin/$GITHUB_BASE_REF"
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            if valid_ref "$GITHUB_BASE_REF"; then
+              git fetch origin --depth=1 "$GITHUB_BASE_REF" || true
+              BASE_REF="origin/$GITHUB_BASE_REF"
+            else
+              echo "::warning::Ignoring unsafe GITHUB_BASE_REF value; falling back to HEAD~1."
+              BASE_REF="HEAD~1"
+            fi
           else
             BASE_REF="HEAD~1"
           fi
         fi
 
-        DIFF_FILE=$(mktemp)
+        DIFF_FILE="$(mktemp)"
         trap 'rm -f "$DIFF_FILE"' EXIT
 
-        if ! git diff "$BASE_REF" "$HEAD_REF" > "$DIFF_FILE"; then
-          echo "::error::Failed to compute git diff between '$BASE_REF' and '$HEAD_REF'. Ensure references are fetched and valid."
+        if ! git diff "$BASE_REF" "$HEAD_REF" -- > "$DIFF_FILE"; then
+          echo "::error::Failed to compute git diff. Ensure references are fetched and valid."
           exit 3
         fi
-        echo "Computed diff against $BASE_REF ($(wc -l < "$DIFF_FILE") lines)"
+        echo "Computed diff ($(wc -l < "$DIFF_FILE") lines)"
 
         # Execute VerifyCI verify-diff
         echo "::group::Executing VerifyCI Verification"
@@ -137,12 +241,31 @@ runs:
           esac
         fi
 
-        # Write output variables to GITHUB_OUTPUT safely
-        echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-        echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
-        echo "rationale<<EOF_VERIFYCI" >> "$GITHUB_OUTPUT"
-        echo "$RATIONALE" >> "$GITHUB_OUTPUT"
-        echo "EOF_VERIFYCI" >> "$GITHUB_OUTPUT"
+        # Sanitize STATUS to a single allowlisted token: the verdict field
+        # comes from report content, which can carry attacker-influenced
+        # diff text. Without this, a crafted verdict could inject extra
+        # `key=value` lines into GITHUB_OUTPUT.
+        STATUS="$(printf '%s' "$STATUS" | tr -cd 'A-Za-z_' | cut -c1-32)"
+        if [ -z "$STATUS" ]; then
+          STATUS="UNKNOWN"
+        fi
+
+        # EXIT_CODE must be numeric (it comes from our own tool, but enforce).
+        case "$EXIT_CODE" in
+          ''|*[!0-9]*) EXIT_CODE=3 ;;
+        esac
+
+        # Write output variables with a per-run random heredoc delimiter:
+        # a fixed delimiter (e.g. EOF_VERIFYCI) can be matched by a crafted
+        # rationale line, truncating or injecting step outputs.
+        DELIM="verifyci_delim_${GITHUB_RUN_ID:-local}_${RANDOM}_${RANDOM}_${BASHPID:-$$}"
+        {
+          echo "status=$STATUS"
+          echo "exit_code=$EXIT_CODE"
+          echo "rationale<<$DELIM"
+          printf '%s\n' "$RATIONALE"
+          echo "$DELIM"
+        } >> "$GITHUB_OUTPUT"
 
         echo "VerifyCI Verdict: $STATUS (exit code: $EXIT_CODE)"
         if [ -n "$RATIONALE" ]; then

@@ -126,11 +126,23 @@ def test_frozen_sources_match_working_tree():
     #   Full-repo audit fix added an optional repository_id scope to
     #      get_entity_by_name (default None preserves the exact prior
     #      queries; measure.py has no get_entity_by_name call site).
+    #   P3 determinism: insert_anchor keys anchors by full revision id
+    #      instead of a 12-char prefix (ingest/write path; the temporal
+    #      gate times get_entity_as_of only).
+    #   P1-B/P3 storage hardening, all OFF the timed get_entity_as_of
+    #      primitive (verified: no call site in benchmarks/latency/
+    #      measure.py): close_superseded_edges chunk constant (ingest
+    #      close path), _row_to_entity/_row_to_edge/_row_to_event
+    #      corrupt-row guards (exception-free fast path adds one
+    #      isinstance check per row; the raise path never fires on
+    #      healthy rows).
     accepted_drift = {"__init__", "insert_entity", "insert_edge", "insert_event", "close",
                       "get_entities_by_revision", "get_edges_by_revision",
                       "insert_ingest", "latest_revision_id", "latest_ingest_id", "close_disappeared",
                       "get_anchor", "get_latest_revision", "close_superseded_entities",
-                      "get_entity_by_name"}
+                      "close_superseded_edges",
+                      "get_entity_by_name", "insert_anchor", "insert_delta",
+                      "_row_to_entity", "_row_to_edge", "_row_to_event"}
     assert set(lm) >= set(fm) - accepted_drift
     for name, fx_body in fm.items():
         if name in accepted_drift:

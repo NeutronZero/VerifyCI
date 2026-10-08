@@ -17,6 +17,22 @@ class PolicyEvaluator:
             raise ValueError(f"unknown on_failure: {policy.on_failure!r}")
         if getattr(policy, "on_inconclusive", None) not in ("human_review", "warn"):
             raise ValueError(f"unknown on_inconclusive: {policy.on_inconclusive!r}")
+
+        # A report with no checks is not evidence of safety.  It is an
+        # unevaluated request and must never inherit all([]) == True.
+        if not report.checks:
+            return VerificationDecision(
+                decision_id=str(uuid.uuid4()),
+                report_id=report.report_id,
+                status="INCONCLUSIVE",
+                policy_id=policy.policy_id,
+                rationale=(
+                    "no_deterministic_checker_executed"
+                    if policy.require_deterministic_checker else "no_checks_executed"
+                ),
+                timestamp=time.time(),
+            )
+
         if policy.require_deterministic_checker and not _executed_deterministic(report):
             return VerificationDecision(
                 decision_id=str(uuid.uuid4()),
@@ -27,18 +43,17 @@ class PolicyEvaluator:
                 timestamp=time.time(),
             )
 
+        # A PASS is only meaningful when every passed check is established
+        # and, when it carries a certificate, that certificate is verified.
+        # Missing/incomplete/unverified evidence can never launder into PASS.
         if all(check.passed for check in report.checks):
-            # A pass-on-zero-edges is not a pass-on-500-edges: a blocking
-            # check that established nothing deflects to INCONCLUSIVE even
-            # when nothing failed. Decided explicitly, not inherited.
-            if any(check.blocking and not getattr(check, "established", True)
-                   for check in report.checks):
+            if any(not _check_pass_is_established(check) for check in report.checks):
                 return VerificationDecision(
                     decision_id=str(uuid.uuid4()),
                     report_id=report.report_id,
                     status="INCONCLUSIVE",
                     policy_id=policy.policy_id,
-                    rationale="unestablished_blocking_checks",
+                    rationale="unestablished_or_unverified_checks",
                     timestamp=time.time(),
                 )
             return VerificationDecision(
@@ -135,3 +150,13 @@ def _executed_deterministic(report: VerificationReport) -> bool:
         if getattr(check, "deterministic", True):
             return True
     return False
+
+
+def _check_pass_is_established(check) -> bool:
+    """Return True only when a passed check has grounded, verified evidence."""
+    if not getattr(check, "established", True):
+        return False
+    certificate = getattr(check, "certificate", None)
+    if certificate is not None and not getattr(certificate, "certificate_verified", False):
+        return False
+    return True

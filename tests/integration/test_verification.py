@@ -183,10 +183,13 @@ def test_unestablished_blocking_pass_deflects_to_inconclusive():
     report = make_report([established_pass, vacuous_pass])
     decision = PolicyEvaluator().evaluate(report, policy)
     assert decision.status == "INCONCLUSIVE"
-    assert decision.rationale == "unestablished_blocking_checks"
+    assert decision.rationale == "unestablished_or_unverified_checks"
 
 
-def test_unestablished_nonblocking_pass_stays_pass():
+def test_unestablished_nonblocking_pass_deflects_to_inconclusive():
+    # P0 soundness: every passed check must be established, blocking or
+    # not. An unestablished non-blocking pass can no longer launder into
+    # PASS.
     import dataclasses
     policy = VerificationPolicy(
         policy_id="pol1",
@@ -199,7 +202,8 @@ def test_unestablished_nonblocking_pass_stays_pass():
         make_check(passed=True), check_id="soft", blocking=False, established=False)
     report = make_report([make_check(passed=True), vacuous_soft])
     decision = PolicyEvaluator().evaluate(report, policy)
-    assert decision.status == "PASS"
+    assert decision.status == "INCONCLUSIVE"
+    assert decision.rationale == "unestablished_or_unverified_checks"
 
 
 def test_semi_formal_reasoner():

@@ -96,19 +96,65 @@ def _reverse_patch_text(head_text: str, hunks: list) -> str:
     return "".join(lines)
 
 
+def _target_variants(target_path: str) -> set[str]:
+    """Path variants identifying a policy file without basename-only matching."""
+    target_norm = target_path.replace("\\", "/").strip("/")
+    variants = {target_norm}
+    try:
+        rel = os.path.relpath(target_path, os.getcwd()).replace("\\", "/").strip("/")
+        if rel:
+            variants.add(rel)
+    except ValueError:
+        pass
+    # Preserve internal directory segments (not basename-only matching).
+    parts = [part for part in target_norm.split("/") if part]
+    if ".verifyci" in parts:
+        i = parts.index(".verifyci")
+        variants.add("/".join(parts[i:]))
+    return {v for v in variants if v}
+
+
+def _find_policy_diff(target_path: str, diff: str):
+    """Return the diff entry touching target_path, or None when untouched.
+
+    Distinguishes "policy file not in diff" (caller should use the live repo
+    file) from "policy file in diff but base unrecoverable" (caller must fail
+    closed and never fall back to the worktree file).
+    """
+    from verifyci.verification.diffmap import parse_unified_diff
+    variants = _target_variants(target_path)
+    target_base = target_path.replace("\\", "/").split("/")[-1]
+    for f in parse_unified_diff(diff):
+        for p in (f.old_path, f.new_path):
+            if not p:
+                continue
+            p_norm = p.replace("\\", "/").strip("/")
+            if any(
+                p_norm == variant
+                or p_norm.endswith("/" + variant)
+                or variant.endswith("/" + p_norm)
+                for variant in variants
+            ):
+                return f
+            # Same policy filename inside a `.verifyci/` directory is the
+            # canonical policy location even when the resolved target path
+            # carries no `.verifyci` segment (e.g. a bare-db layout). A bare
+            # same-basename file elsewhere (`other/invariants.yaml`) never
+            # matches: basename-only matching stays removed.
+            p_parts = [part for part in p_norm.split("/") if part]
+            if (
+                p_parts
+                and p_parts[-1] == target_base
+                and ".verifyci" in p_parts[:-1]
+            ):
+                return f
+    return None
+
+
 def extract_base_file_content(target_path: str, diff: str) -> str | None:
     """Extract or reconstruct the base (pre-PR) version of a policy file."""
-    from verifyci.verification.diffmap import parse_unified_diff
-    diff_files = parse_unified_diff(diff)
-    matching_diff = None
-    target_base = os.path.basename(target_path)
-    for f in diff_files:
-        for p in (f.old_path, f.new_path):
-            if p and (p == target_path or p.endswith("/" + target_base) or os.path.basename(p) == target_base):
-                matching_diff = f
-                break
-        if matching_diff:
-            break
+    from verifyci.verification.diffmap import parse_unified_diff  # noqa: F401 (kept for symmetry)
+    matching_diff = _find_policy_diff(target_path, diff)
     if not matching_diff or not matching_diff.hunks:
         return None
 
@@ -120,15 +166,6 @@ def extract_base_file_content(target_path: str, diff: str) -> str | None:
             res = subprocess.run(["git", "show", f"{base_ref}:{target_path}"],
                                  capture_output=True, text=True, check=True)
             return res.stdout
-        except Exception:
-            pass
-
-    # Reverse patch head content if file exists on disk
-    if os.path.exists(target_path):
-        try:
-            with open(target_path, "r", encoding="utf-8") as fh:
-                head_content = fh.read()
-            return _reverse_patch_text(head_content, matching_diff.hunks)
         except Exception:
             pass
 
@@ -185,6 +222,11 @@ def load_trusted_base_waivers(db_path: str | None = None, path: str | None = Non
     resolved = path or repo_waivers_path(db_path)
     target = resolved or (os.path.join(os.path.dirname(os.path.abspath(db_path)), WAIVERS_FILENAME) if db_path else WAIVERS_FILENAME)
     if diff:
+        if _find_policy_diff(target, diff) is None:
+            # Policy file untouched by this diff: the live repo file is the
+            # trusted base. Fail-closed only applies when the diff modifies
+            # gate configuration but the base cannot be reconstructed.
+            return load_repo_waivers(db_path, path)
         base_content = extract_base_file_content(target, diff)
         if base_content is not None:
             import yaml
@@ -193,7 +235,10 @@ def load_trusted_base_waivers(db_path: str | None = None, path: str | None = Non
                 if isinstance(data, dict):
                     return _parse_waivers_data(data, target)
             except Exception:
-                pass
+                return []
+        # The diff changed gate configuration but the trusted base could not
+        # be reconstructed. Never fall back to the current worktree file.
+        return []
     return load_repo_waivers(db_path, path)
 
 
@@ -254,6 +299,11 @@ def load_trusted_base_invariants(db_path: str | None = None, path: str | None = 
     resolved = path or repo_invariants_path(db_path)
     target = resolved or (os.path.join(os.path.dirname(os.path.abspath(db_path)), FILENAME) if db_path else FILENAME)
     if diff:
+        if _find_policy_diff(target, diff) is None:
+            # Policy file untouched by this diff: the live repo file is the
+            # trusted base. Fail-closed only applies when the diff modifies
+            # gate configuration but the base cannot be reconstructed.
+            return load_repo_invariants(db_path, path)
         base_content = extract_base_file_content(target, diff)
         if base_content is not None:
             import yaml
@@ -262,5 +312,8 @@ def load_trusted_base_invariants(db_path: str | None = None, path: str | None = 
                 if isinstance(data, dict):
                     return default_invariants() + _parse_invariants_data(data, target)
             except Exception:
-                pass
+                return default_invariants()
+        # Configuration was modified but no trustworthy base could be
+        # reconstructed. Keep only immutable built-ins; never load HEAD.
+        return default_invariants()
     return load_repo_invariants(db_path, path)

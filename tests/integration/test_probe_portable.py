@@ -6,7 +6,7 @@ def test_probe_collect_uses_posix_separators(tmp_path):
     d = tmp_path / "sub"
     d.mkdir()
     (d / "mod.py").write_text("x = 1\n")
-    sources, texts, manifest = _collect(tmp_path)
+    sources, texts, manifest, _oversize, _truncated = _collect(tmp_path)
     rels = [r for r, _, _ in sources] + [r for r, _ in texts] + [p for p, _ in manifest]
     assert rels
     assert all("\\" not in r for r in rels), rels

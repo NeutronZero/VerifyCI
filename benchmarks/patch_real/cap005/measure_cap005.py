@@ -24,7 +24,10 @@ from verifyci.interface.commands.ingest import run_ingest  # noqa: E402
 from verifyci.interface.commands.verify import run_verify  # noqa: E402
 
 FROZEN_CORPUS_SHA256 = "ca475b33a385e8d1478afedf00d2eeeefdc8ae0f72c9e5527f20fc1fe814e17c"
-FROZEN_LABEL_SHA256 = "589231d38fdf85a764eab85ba19f1ad9e2839fe63c043c3c9636d745f1893075"
+# P0 re-label (2026-10-08): 29 expectations moved strictly toward strictness
+# (PASS/HUMAN_REVIEW -> INCONCLUSIVE) with per-case gap evidence. Inputs
+# (cases, sources) frozen and untouched.
+FROZEN_LABEL_SHA256 = "01eb093946dc53c29fc8c40bfb2c12419a5fb43bf513474f2b8c30da236c02cf"
 FROZEN_SOURCE_MANIFEST_SHA256 = "f330fca7d317ec9a1e8398295d930c49f802e2cc25cf94b3906d7b9b0d47af8d"
 
 
@@ -184,14 +187,16 @@ def run_benchmark() -> dict:
     licensed_sources = [s for s in sources if s.get("license") and s.get("license") in ("MIT", "BSD-3-Clause", "Apache-2.0", "MIT-Equivalent/Internal-Agent")]
     p9_pass = len(licensed_sources) == 5
 
-    # P10: Clean-room non-regression (manual attestation: no capability
-    # outside this corpus regressed in the accompanying test run; see CI).
+    # P10: Clean-room non-regression is a manual attestation, not a
+    # measured signal. It is REPORTED but excluded from the promotion gate:
+    # a hardcoded True inside all_predicates_pass made PROMOTE unfalsifiable
+    # on this axis. Wire it to a real signal or keep it out of the gate.
     p10_pass = True
-    p10_note = "attested, see CI"
+    p10_note = "attested, see CI (reported only; excluded from promotion gate)"
 
     all_predicates_pass = all([
         p1_pass, p2_pass, p3_pass, p4_pass, p5_pass,
-        p6_pass, p7_pass, p8_pass, p9_pass, p10_pass,
+        p6_pass, p7_pass, p8_pass, p9_pass,
     ])
     adjudication_verdict = "PROMOTE" if all_predicates_pass else "HOLD"
     adjudication_status = "ESTABLISHED" if all_predicates_pass else "MEASURED"
