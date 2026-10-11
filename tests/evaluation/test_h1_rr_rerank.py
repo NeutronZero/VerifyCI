@@ -39,6 +39,10 @@ def test_h1_rr_recorded_metrics_stable():
         "38dbaffb0cf07be2f01b7a46a47817bef6827153cd73e7b86cf59019656a5ed7")
     assert rec["frozen"]["model_files"]["model.safetensors"] == (
         "821d1aa69520101d6e0737f78a042ae25b19e5cb9160701909d10434f4aeb0ae")
+    assert isinstance(rec["frozen"]["model_manifest"], list)
+    assert len(rec["frozen"]["model_manifest"]) == 6
+    assert rec["frozen"]["model_manifest"][0]["path"] == "config.json"
+    assert rec["frozen"]["model_manifest"][0]["size_bytes"] == 794
     assert rec["frozen"]["revision_config_sha256"] == _sha(REVISION / "config.json")
     assert evaluate_claim("H1_RR_reranked_hybrid", rec)["status"] == "ESTABLISHED"
 

@@ -114,6 +114,7 @@ def main() -> None:
                    "model_snapshot_commit": model_prov["snapshot_commit"],
                    "model_snapshot_sha256": model_prov["snapshot_sha256"],
                    "model_files": model_prov["files"],
+                   "model_manifest": model_prov["manifest"],
                    "rerank_depth": RERANK_DEPTH,
                    "rrf_k": 60, "k_ndcg": 10},
         "run": {"provider": "cached:nomic-embed-text+local-cross-encoder",
