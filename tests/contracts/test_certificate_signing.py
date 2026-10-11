@@ -321,8 +321,8 @@ def test_malformed_metadata_and_non_finite_fields_fail_closed():
     valid_cert = _sample_certificate().sign(private_key, key_id=pub_hex)
     assert valid_cert.verify_signature(pub_key) is True
 
-    # 1. Malformed signature_algorithm types (non-string: int, list, dict, object)
-    for bad_alg in [123, ["ed25519"], {"algo": "ed25519"}, object(), 3.14, True]:
+    # 1. Malformed signature_algorithm types (None, non-string: int, list, dict, object)
+    for bad_alg in [None, "", 123, ["ed25519"], {"algo": "ed25519"}, object(), 3.14, True]:
         bad_cert = dataclasses.replace(valid_cert, signature_algorithm=bad_alg)
         assert bad_cert.verify_signature(pub_key) is False
         assert bad_cert.verify_signature(trusted_keys=[pub_hex]) is False
@@ -352,4 +352,32 @@ def test_malformed_metadata_and_non_finite_fields_fail_closed():
         cert_bad_ts = dataclasses.replace(valid_cert, timestamp=bad_float)
         assert cert_bad_ts.verify_signature(pub_key) is False
         assert cert_bad_ts.verify_signature(trusted_keys=[pub_hex]) is False
+
+
+def test_missing_signature_algorithm_rejected():
+    """Regression test: A certificate with a valid Ed25519 signature over an envelope
+    where signature_algorithm is None (missing) is rejected fail-closed."""
+    private_key = Ed25519PrivateKey.generate()
+    pub_key = private_key.public_key()
+    pub_hex = pub_key.public_bytes_raw().hex()
+
+    cert = _sample_certificate()
+    # Construct an envelope with signature_algorithm=None (omitted)
+    envelope = dataclasses.replace(
+        cert,
+        signature=None,
+        signing_key_id=pub_hex,
+        signature_algorithm=None,
+    )
+    # Compute a valid cryptographic Ed25519 signature directly over this envelope's canonical bytes
+    sig_bytes = private_key.sign(envelope.canonical_bytes())
+    cert_missing_alg = dataclasses.replace(
+        envelope,
+        signature=sig_bytes.hex(),
+    )
+    assert cert_missing_alg.signature_algorithm is None
+    # Must fail closed: missing signature algorithm is rejected even with valid signature
+    assert cert_missing_alg.verify_signature(pub_key) is False
+    assert cert_missing_alg.verify_signature(trusted_keys=[pub_hex]) is False
+
 

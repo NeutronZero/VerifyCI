@@ -237,9 +237,11 @@ class Certificate:
         """
         if not self.signature or not isinstance(self.signature, (str, bytes, bytearray)):
             return False
-        if self.signature_algorithm is not None:
-            if not isinstance(self.signature_algorithm, str) or self.signature_algorithm.lower() != "ed25519":
-                return False
+        if (
+            not isinstance(self.signature_algorithm, str)
+            or self.signature_algorithm.lower() != "ed25519"
+        ):
+            return False
         if self.signing_key_id is not None and not isinstance(self.signing_key_id, str):
             return False
 
