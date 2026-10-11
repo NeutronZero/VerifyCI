@@ -339,3 +339,77 @@ def test_immutable_graph_view_all_exposed_read_methods():
     assert view.edge_list() == [(0, 1)]
 
 
+def test_immutable_graph_view_blocks_dict_attribute_and_uses_slots():
+    from verifyci.storage.graph_cache import ImmutableGraphView
+
+    assert ImmutableGraphView.__slots__ == ("_graph",)
+    view = ImmutableGraphView({"dummy": 123})
+
+    # Direct __dict__ access is prohibited and fails closed with AttributeError
+    with pytest.raises(AttributeError, match="Direct access to private or internal attribute '__dict__' is prohibited"):
+        _ = view.__dict__
+
+    with pytest.raises(AttributeError, match="Direct access to private or internal attribute '__dict__' is prohibited"):
+        _ = getattr(view, "__dict__")
+
+    assert hasattr(view, "__dict__") is False
+
+    with pytest.raises((TypeError, AttributeError)):
+        _ = vars(view)
+
+
+def test_graph_cache_get_or_load_returns_recursively_frozen_entities():
+    from types import MappingProxyType
+    from verifyci.contracts.entity import Entity, EntityType
+
+    cache = GraphSnapshotCache(max_cost=1000)
+    key = ("db_frozen_ents", "repo", "rev", "v2", "", "")
+
+    mutable_ent = Entity(
+        repository_id="repo1",
+        logical_entity_id="0" * 64,
+        revision_entity_id="ent_mutable",
+        type=EntityType.FUNCTION,
+        name="do_work",
+        file_path="work.py",
+        line_start=1,
+        line_end=10,
+        language="python",
+        source_hash="h1",
+        revision_id="rev1",
+        metadata={"role": "dev", "nested": {"counter": 42}},
+    )
+
+    def _loader():
+        return {"fake": "graph"}, {"e1": 0}, [mutable_ent], []
+
+    # 1. Miss path: returned entities must be recursively frozen
+    g1, map1, ents1 = cache.get_or_load(key, _loader)
+    assert len(ents1) == 1
+    ret_ent1 = ents1[0]
+    assert isinstance(ret_ent1.metadata, MappingProxyType)
+    assert isinstance(ret_ent1.metadata["nested"], MappingProxyType)
+    assert ret_ent1.metadata["role"] == "dev"
+
+    # Caller attempts to mutate returned entity's metadata fail
+    with pytest.raises(TypeError):
+        ret_ent1.metadata["role"] = "tampered"
+
+    with pytest.raises(TypeError):
+        ret_ent1.metadata["nested"]["counter"] = 999
+
+    # Even if original loader reference is mutated post-load
+    mutable_ent.metadata["role"] = "mutated_locally"
+
+    # 2. Hit path: cached entity remains pristine and frozen
+    g2, map2, ents2 = cache.get_or_load(key, _loader)
+    ret_ent2 = ents2[0]
+    assert isinstance(ret_ent2.metadata, MappingProxyType)
+    assert ret_ent2.metadata["role"] == "dev"
+    assert ret_ent2.metadata["nested"]["counter"] == 42
+
+    with pytest.raises(TypeError):
+        ret_ent2.metadata["role"] = "tampered_again"
+
+
+

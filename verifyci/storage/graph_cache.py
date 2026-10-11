@@ -91,7 +91,15 @@ class ImmutableGraphView:
     (such as `_graph`), disallows arbitrary method forwarding, and deeply freezes
     returned payloads (including nested dataclass fields) so shared cache state
     cannot be corrupted.
+
+    Threat model note:
+    This wrapper provides cooperative in-process immutability boundaries against
+    inadvertent or accidental mutation across pipeline stages sharing memory. It
+    does not defend against malicious in-process actors using ctypes or raw memory
+    manipulation.
     """
+
+    __slots__ = ("_graph",)
 
     def __init__(self, graph: Any):
         object.__setattr__(self, "_graph", graph)
@@ -103,12 +111,12 @@ class ImmutableGraphView:
         raise TypeError(f"ImmutableGraphView cannot be modified: attribute deletion '{name}' is forbidden")
 
     def __getattribute__(self, name: str) -> Any:
-        if name.startswith("_") and not (name.startswith("__") and name.endswith("__")):
+        if name == "__dict__" or (name.startswith("_") and not (name.startswith("__") and name.endswith("__"))):
             raise AttributeError(f"Direct access to private or internal attribute '{name}' is prohibited")
         return super().__getattribute__(name)
 
     def __getattr__(self, name: str) -> Any:
-        if name.startswith("_") and not (name.startswith("__") and name.endswith("__")):
+        if name == "__dict__" or (name.startswith("_") and not (name.startswith("__") and name.endswith("__"))):
             raise AttributeError(f"Direct access to private or internal attribute '{name}' is prohibited")
         if name in MUTATING_GRAPH_METHODS or name.startswith(("add_", "remove_", "clear", "extend_", "insert_", "update_")):
             raise TypeError(f"ImmutableGraphView cannot be modified: attempt to call mutating method '{name}'")
@@ -316,6 +324,7 @@ class GraphSnapshotCache:
                 # Execute load
                 graph, node_map, entities, edges = loader_fn()
                 cost = estimate_graph_cost(entities, edges)
+                frozen_entities = tuple(_freeze_payload(e) for e in entities)
 
                 with self._lock:
                     # Only cache if snapshot fits within max_cost
@@ -327,12 +336,12 @@ class GraphSnapshotCache:
                         self._cache[key] = (
                             graph,
                             MappingProxyType(dict(node_map)),
-                            tuple(entities),
+                            frozen_entities,
                             cost,
                         )
                         self._current_cost += cost
 
-                return _wrap_graph(graph), dict(node_map), list(entities)
+                return _wrap_graph(graph), dict(node_map), list(frozen_entities)
         finally:
             with self._lock:
                 if key in self._key_locks:
