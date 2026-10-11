@@ -775,7 +775,7 @@ class VerificationEnvelope:
     rationale: str
     repository_id: str
     revision_id: str
-    source_commit_id: str
+    source_commit_id: str  #: Latest associated git commit ID for this content revision, or "" if unrecorded/unknown.
     diff_hash: str
     effective_policy_bundle_hash: str
     evidence_manifest: tuple[EvidenceManifestEntry, ...]

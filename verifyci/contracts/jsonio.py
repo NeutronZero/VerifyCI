@@ -15,7 +15,8 @@ def to_json_dict(obj: Any) -> Any:
         return obj.value
     if is_dataclass(obj):
         return {k: to_json_dict(v) for k, v in asdict(obj).items()}
-    if isinstance(obj, dict):
+    from collections.abc import Mapping
+    if isinstance(obj, (Mapping, dict)):
         return {k: to_json_dict(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [to_json_dict(v) for v in obj]

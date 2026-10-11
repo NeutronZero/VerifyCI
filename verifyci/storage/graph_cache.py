@@ -7,6 +7,7 @@ cached snapshots cannot be mutated.
 """
 from __future__ import annotations
 
+import dataclasses
 from collections import OrderedDict
 from collections.abc import Mapping
 import threading
@@ -22,6 +23,7 @@ rather than a measured byte-level memory limit.
 def estimate_graph_cost(entities: list | tuple, edges: list | tuple) -> int:
     """Documented cost estimate accounting for entity nodes, edge adjacency, and metadata."""
     return len(entities) + len(edges) * 2
+
 
 MUTATING_GRAPH_METHODS = frozenset({
     "add_child",
@@ -59,24 +61,36 @@ MUTATING_GRAPH_METHODS = frozenset({
 
 
 def _freeze_payload(val: Any) -> Any:
-    """Recursively freeze dictionaries, lists, and sets to prevent caller mutation of cached payloads."""
+    """Recursively freeze dictionaries, lists, sets, and dataclasses to prevent caller mutation of cached payloads."""
     if val is None or isinstance(val, (int, float, str, bool, bytes)):
         return val
     if isinstance(val, (Mapping, dict)):
         return MappingProxyType({k: _freeze_payload(v) for k, v in val.items()})
     if isinstance(val, (list, tuple)):
         return tuple(_freeze_payload(x) for x in val)
-    if isinstance(val, set):
+    if isinstance(val, (set, frozenset)):
         return frozenset(_freeze_payload(x) for x in val)
+    if dataclasses.is_dataclass(val) and not isinstance(val, type):
+        updates = {}
+        for f in dataclasses.fields(val):
+            field_val = getattr(val, f.name)
+            frozen_val = _freeze_payload(field_val)
+            if frozen_val is not field_val:
+                updates[f.name] = frozen_val
+        if updates:
+            return dataclasses.replace(val, **updates)
+        return val
     return val
 
 
 class ImmutableGraphView:
-    """Read-only view over a code graph preventing mutating operations.
+    """Read-only view over a code graph enforcing strict immutability.
 
-    Delegates query/traversal methods to the underlying graph while raising
-    TypeError on any attempt to call mutating methods or modify payloads.
-    Direct access to private underlying graph attributes (_graph) is blocked.
+    Restricts graph access exclusively to supported query and traversal methods.
+    Blocks all mutating methods, prohibits direct access to private attributes
+    (such as `_graph`), disallows arbitrary method forwarding, and deeply freezes
+    returned payloads (including nested dataclass fields) so shared cache state
+    cannot be corrupted.
     """
 
     def __init__(self, graph: Any):
@@ -89,29 +103,22 @@ class ImmutableGraphView:
         raise TypeError(f"ImmutableGraphView cannot be modified: attribute deletion '{name}' is forbidden")
 
     def __getattribute__(self, name: str) -> Any:
-        if name == "_graph":
-            raise AttributeError("Direct access to private _graph attribute is prohibited")
+        if name.startswith("_") and not (name.startswith("__") and name.endswith("__")):
+            raise AttributeError(f"Direct access to private or internal attribute '{name}' is prohibited")
         return super().__getattribute__(name)
 
     def __getattr__(self, name: str) -> Any:
-        if name == "_graph":
-            raise AttributeError("Direct access to private _graph attribute is prohibited")
-        graph = object.__getattribute__(self, "_graph")
+        if name.startswith("_") and not (name.startswith("__") and name.endswith("__")):
+            raise AttributeError(f"Direct access to private or internal attribute '{name}' is prohibited")
         if name in MUTATING_GRAPH_METHODS or name.startswith(("add_", "remove_", "clear", "extend_", "insert_", "update_")):
-            raise TypeError(f"ImmutableGraphView cannot be modified: attempt to call '{name}'")
-        attr = getattr(graph, name)
-        if callable(attr):
-            return attr
-        return _freeze_payload(attr)
-
-    def _get_inner(self) -> Any:
-        return object.__getattribute__(self, "_graph")
+            raise TypeError(f"ImmutableGraphView cannot be modified: attempt to call mutating method '{name}'")
+        raise AttributeError(f"'ImmutableGraphView' object has no attribute '{name}'")
 
     def __len__(self) -> int:
-        return len(self._get_inner())
+        return len(object.__getattribute__(self, "_graph"))
 
     def __getitem__(self, idx: Any) -> Any:
-        return _freeze_payload(self._get_inner()[idx])
+        return _freeze_payload(object.__getattribute__(self, "_graph")[idx])
 
     def __setitem__(self, idx: Any, value: Any) -> None:
         raise TypeError("ImmutableGraphView cannot be modified: item assignment is forbidden")
@@ -119,45 +126,132 @@ class ImmutableGraphView:
     def __delitem__(self, idx: Any) -> None:
         raise TypeError("ImmutableGraphView cannot be modified: item deletion is forbidden")
 
+    def __contains__(self, idx: Any) -> bool:
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "has_node", None)
+        if callable(fn):
+            return bool(fn(idx))
+        fn_indices = getattr(graph, "node_indices", None)
+        if callable(fn_indices):
+            return idx in fn_indices()
+        return False
+
+    def has_node(self, idx: Any) -> bool:
+        return idx in self
+
     def __iter__(self):
-        return iter(self._get_inner())
+        return iter(self.nodes())
 
     def nodes(self):
-        return [_freeze_payload(n) for n in self._get_inner().nodes()]
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "nodes", None)
+        if callable(fn):
+            return [_freeze_payload(n) for n in fn()]
+        if hasattr(graph, "__iter__"):
+            return [_freeze_payload(n) for n in graph]
+        return []
 
     def node_indices(self):
-        return self._get_inner().node_indices()
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "node_indices", None)
+        if callable(fn):
+            return list(fn())
+        return list(range(len(graph)))
 
-    def successors(self, idx):
-        return [_freeze_payload(n) for n in self._get_inner().successors(idx)]
+    def num_nodes(self) -> int:
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "num_nodes", None)
+        if callable(fn):
+            return int(fn())
+        return len(graph)
 
-    def predecessors(self, idx):
-        return [_freeze_payload(n) for n in self._get_inner().predecessors(idx)]
+    def num_edges(self) -> int:
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "num_edges", None)
+        if callable(fn):
+            return int(fn())
+        fn_edges = getattr(graph, "edge_list", None)
+        if callable(fn_edges):
+            return len(fn_edges())
+        return 0
 
-    def in_edges(self, idx):
-        return [(src, dst, _freeze_payload(data)) for src, dst, data in self._get_inner().in_edges(idx)]
+    def successors(self, idx: Any):
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "successors", None)
+        if callable(fn):
+            return [_freeze_payload(n) for n in fn(idx)]
+        return []
 
-    def out_edges(self, idx):
-        return [(src, dst, _freeze_payload(data)) for src, dst, data in self._get_inner().out_edges(idx)]
+    def predecessors(self, idx: Any):
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "predecessors", None)
+        if callable(fn):
+            return [_freeze_payload(n) for n in fn(idx)]
+        return []
 
-    def get_edge_data(self, u, v):
-        return _freeze_payload(self._get_inner().get_edge_data(u, v))
+    def neighbors(self, idx: Any):
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "neighbors", None)
+        if callable(fn):
+            return [_freeze_payload(n) for n in fn(idx)]
+        raise AttributeError("Underlying graph does not implement neighbors")
 
-    def get_all_edge_data(self, u, v):
-        fn = getattr(self._get_inner(), "get_all_edge_data", None)
+    def in_edges(self, idx: Any):
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "in_edges", None)
+        if callable(fn):
+            return [(src, dst, _freeze_payload(data)) for src, dst, data in fn(idx)]
+        return []
+
+    def out_edges(self, idx: Any):
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "out_edges", None)
+        if callable(fn):
+            return [(src, dst, _freeze_payload(data)) for src, dst, data in fn(idx)]
+        return []
+
+    def get_edge_data(self, u: Any, v: Any):
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "get_edge_data", None)
+        if callable(fn):
+            return _freeze_payload(fn(u, v))
+        return None
+
+    def get_all_edge_data(self, u: Any, v: Any):
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "get_all_edge_data", None)
         if callable(fn):
             return [_freeze_payload(d) for d in fn(u, v)]
         raise AttributeError("Underlying graph does not implement get_all_edge_data")
 
+    def has_edge(self, u: Any, v: Any) -> bool:
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "has_edge", None)
+        if callable(fn):
+            return bool(fn(u, v))
+        raise AttributeError("Underlying graph does not implement has_edge")
+
     def edge_index_map(self):
-        raw = self._get_inner().edge_index_map()
-        return {k: (src, dst, _freeze_payload(payload)) for k, (src, dst, payload) in raw.items()}
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "edge_index_map", None)
+        if callable(fn):
+            raw = fn()
+            return {k: (src, dst, _freeze_payload(payload)) for k, (src, dst, payload) in raw.items()}
+        raise AttributeError("Underlying graph does not implement edge_index_map")
 
-    def num_nodes(self) -> int:
-        return self._get_inner().num_nodes()
+    def edge_indices(self):
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "edge_indices", None)
+        if callable(fn):
+            return list(fn())
+        raise AttributeError("Underlying graph does not implement edge_indices")
 
-    def num_edges(self) -> int:
-        return self._get_inner().num_edges()
+    def edge_list(self):
+        graph = object.__getattribute__(self, "_graph")
+        fn = getattr(graph, "edge_list", None)
+        if callable(fn):
+            return [(src, dst) for src, dst in fn()]
+        raise AttributeError("Underlying graph does not implement edge_list")
 
 
 def _wrap_graph(graph: Any) -> Any:

@@ -32,7 +32,8 @@ def _check_structural_invariants(graph: Any, changed_entities: list[str], node_m
             node = graph[idx] if hasattr(graph, "__getitem__") else None
             if node is not None:
                 # Corrupted payload check
-                if getattr(node, "metadata", None) is not None and not isinstance(node.metadata, dict):
+                from collections.abc import Mapping
+                if getattr(node, "metadata", None) is not None and not isinstance(node.metadata, (dict, Mapping)):
                     raise TraversalInconclusiveError(
                         f"Corrupted metadata payload on entity: {entity_id}"
                     )

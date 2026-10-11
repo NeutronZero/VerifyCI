@@ -196,11 +196,14 @@ def latest_revision_id(conn, repository_id: str | None = None, branch: str | Non
 
 
 def resolve_commit_for_revision(conn, revision_id: str) -> str:
-    """Resolve the git commit_id associated with a revision_id.
+    """Resolve the latest associated git commit_id for a content revision_id.
 
-    Queries the append-only ingests table in insertion order (rowid DESC),
-    falling back to the revisions table. Returns "" if unknown or unrecorded,
-    never substituting content revision_id.
+    Queries the append-only ingests table in insertion order (rowid DESC) to locate
+    the newest ingest record associated with the content revision, falling back to
+    the revisions table. Because identical content revisions can be reused across
+    multiple ingest operations, this represents the latest associated commit for
+    that content revision. Returns "" if unknown or unrecorded, never substituting
+    the content revision_id.
     """
     if not conn or not revision_id:
         return ""

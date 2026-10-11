@@ -104,7 +104,8 @@ def edge_allowed(graph: Any, src_idx: int, dst_idx: int, allowed: set[str] | fro
     if payloads is not None:
         for e in payloads:
             meta = getattr(e, "metadata", None)
-            if isinstance(meta, dict):
+            from collections.abc import Mapping
+            if isinstance(meta, (dict, Mapping)):
                 cross = meta.get("cross_boundary")
                 sec = meta.get("security_boundary")
                 if cross in ("forbidden", "denied", True) or sec in ("isolated", "restricted", "blocked", True):
