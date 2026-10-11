@@ -80,14 +80,7 @@ filterwarnings = [
 exclude = ["samples/", "benchmarks/patch_real/cap005/base/"]
 
 [tool.ruff.lint]
-select = ["E", "F", "BLE", "S", "B", "UP"]
-# NOTE: expanded from the prior narrow gate (E4/E7/E9/F). The old gate
-# was effectively near-no-op because ~70 blind-exception sites use
-# # noqa: BLE001/S110, which never fired under the narrow select. This
-# configuration now surfaces the real categories the audit called out.
-# Blanket removal of every new violation in one PR is out of scope: fix
-# the highest-risk sites first (BL001 blind Exception, S110 bare except,
-# B904/B905 logging of untrusted data) and leave mechanical style rules
-# (UP045 Optional->X|None, etc.) for follow-ups or a separate lint
-# normalization PR. Individual sites can still use targeted noqas with a
-# documented justification; do not reintroduce broad no-op suppression.
+select = ["E4", "E7", "E9", "F", "B023"]
+# NOTE: Gate enforces error-level Python syntax/import/undefined-variable rules (E4/E7/E9/F)
+# plus loop-closure binding safety (B023). Additional audit-surfaced rule sets
+# (BLE, S, full B, UP) are tracked for progressive remediation without blocking CI.

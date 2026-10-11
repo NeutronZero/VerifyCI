@@ -1,4 +1,4 @@
-﻿"""PROBES item 8: storage-side scale/scoping fixes."""
+"""PROBES item 8: storage-side scale/scoping fixes."""
 import time
 
 from verifyci.storage.graph_store import GraphStore
@@ -204,11 +204,11 @@ def test_probe_superseded_edges_chunk_bound_under_sqlite_limit(tmp_path):
             store.insert_edge(e)
             return e
 
-        r1 = _rev(store)
+        _r1 = _rev(store)
         srcs = {i: _ent(store, f"s{i:04d}") for i in range(n)}
         dsts = {i: _ent(store, f"d{i:04d}") for i in range(n)}
-        edges = [_edge(store, f"e{i:04d}", srcs[i].revision_entity_id, dsts[i].revision_entity_id)
-                 for i in range(n)]
+        _edges = [_edge(store, f"e{i:04d}", srcs[i].revision_entity_id, dsts[i].revision_entity_id)
+                  for i in range(n)]
 
         r2 = _rev(store)
         new = _edge(store, "new", srcs[0].revision_entity_id, dsts[0].revision_entity_id)

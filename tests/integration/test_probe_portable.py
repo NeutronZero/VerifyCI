@@ -1,4 +1,4 @@
-﻿"""PROBES item 4: portability (posix ids, LF-normalised hashing, utf-8 stdin)."""
+"""PROBES item 4: portability (posix ids, LF-normalised hashing, utf-8 stdin)."""
 
 
 def test_probe_collect_uses_posix_separators(tmp_path):

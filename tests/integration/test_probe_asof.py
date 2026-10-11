@@ -1,4 +1,4 @@
-﻿"""PROBE item 3: graph_query(name, asOf=...) must time-filter named lookups."""
+"""PROBE item 3: graph_query(name, asOf=...) must time-filter named lookups."""
 import asyncio
 import time
 

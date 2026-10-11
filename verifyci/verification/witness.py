@@ -150,14 +150,14 @@ def extract_execution_witnesses(
             tf_stem = _module_stem(norm_tf)
             tf_stem_no_ext = re.sub(r"\.[a-zA-Z0-9]+$", "", tf_stem)
 
-            def _stem_matches(cs: str) -> bool:
-                if cs == tf_stem or cs.endswith("/" + tf_stem) or tf_stem.endswith("/" + cs):
+            def _stem_matches(cs: str, s: str = tf_stem, s_no_ext: str = tf_stem_no_ext) -> bool:
+                if cs == s or cs.endswith("/" + s) or s.endswith("/" + cs):
                     return True
                 cs_no_ext = re.sub(r"\.[a-zA-Z0-9]+$", "", cs)
                 return (
-                    cs_no_ext == tf_stem_no_ext
-                    or cs_no_ext.endswith("/" + tf_stem_no_ext)
-                    or tf_stem_no_ext.endswith("/" + cs_no_ext)
+                    cs_no_ext == s_no_ext
+                    or cs_no_ext.endswith("/" + s_no_ext)
+                    or s_no_ext.endswith("/" + cs_no_ext)
                 )
 
             matches = [cf for cf, cs in code_stems.items() if _stem_matches(cs)]

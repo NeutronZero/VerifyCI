@@ -1,4 +1,4 @@
-﻿"""PROBE item 1: _carry_forward must not resurrect removed DEPENDS_ON edges."""
+"""PROBE item 1: _carry_forward must not resurrect removed DEPENDS_ON edges."""
 from verifyci.interface.commands.ingest import run_ingest
 from verifyci.storage.graph_store import GraphStore
 

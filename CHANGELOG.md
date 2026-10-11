@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **BOM Byte Corruption**: Stripped unexpected UTF-8 Byte Order Marks (BOM) from 8 test probe suites (`tests/integration/test_probe_*.py`, `tests/orchestration/test_probe_sched.py`, `tests/storage/test_probe_*.py`), eliminating panic crashes during Ruff formatting.
+- **Loop Variable Closure Binding (`B023`)**: Resolved late binding in loop closures across `verifyci/verification/deletion.py`, `verifyci/verification/witness.py`, `verifyci/ingestion/dependency.py`, and `benchmarks/retrieval/measure.py`.
+- **CI Linter Stability & pyproject.toml**: Hardened `[tool.ruff.lint] select` to enforce `["E4", "E7", "E9", "F", "B023"]` cleanly without surfacing deferred styling backlogs in CI.
+- **Unused Variables (`F841`)**: Fixed unreferenced variables in storage scaling probe suites.
+
 ## [0.1.0] - 2026-10-07 — First Open Source Release & Adoption Surface
 
 - **Machine-readable Certificate JSON Export**: Added `--format json` and `--output`

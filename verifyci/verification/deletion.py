@@ -179,7 +179,7 @@ def _matches_waiver(
 ) -> SignedIntentWaiver | None:
     norm_file = normalize_path(file_path)
     for w in waivers:
-        if not w.valid or not getattr(w, "verify_signature", lambda: bool(w.signature))():
+        if not w.valid or not getattr(w, "verify_signature", lambda w=w: bool(w.signature))():
             continue
         t = w.target.strip()
         if not t:

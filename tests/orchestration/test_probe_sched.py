@@ -1,4 +1,4 @@
-﻿"""PROBES item 6: block/review precedence over cancelled noise; thread limit note."""
+"""PROBES item 6: block/review precedence over cancelled noise; thread limit note."""
 import asyncio
 
 import pytest

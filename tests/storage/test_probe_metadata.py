@@ -1,4 +1,4 @@
-﻿"""PROBE item 7: MetadataStore.upsert_file commits when it owns the connection."""
+"""PROBE item 7: MetadataStore.upsert_file commits when it owns the connection."""
 
 
 def test_probe_upsert_standalone_persists(tmp_path):

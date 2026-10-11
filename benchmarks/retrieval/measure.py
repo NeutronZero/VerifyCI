@@ -105,8 +105,8 @@ def main() -> None:
         queries_dense = [[rng.gauss(0, 1) for _ in range(dim)] for _ in range(grid["queries"])]
         queries_text = [" ".join(f"term{rng.randrange(500)}" for _ in range(5)) for _ in range(grid["queries"])]
         k = grid["k"]
-        dense = measure_search(lambda q, kk: store.search(q, kk), queries_dense, k)
-        sparse = measure_search(lambda q, kk: bm25.search(q, kk), queries_text, k)
+        dense = measure_search(lambda q, kk, s=store: s.search(q, kk), queries_dense, k)
+        sparse = measure_search(lambda q, kk, b=bm25: b.search(q, kk), queries_text, k)
         dense_lists = [[SearchResult(id=r, score=s, metadata={}) for r, s in store.search(q, k)] for q in queries_dense[:10]]
         sparse_lists = [bm25.search(q, k) for q in queries_text[:10]]
         t = time.perf_counter_ns()

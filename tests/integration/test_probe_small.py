@@ -1,4 +1,4 @@
-﻿"""PROBES item 9: small CLI/MCP surface fixes."""
+"""PROBES item 9: small CLI/MCP surface fixes."""
 
 
 def _repo_with_func(tmp_path, name="proj"):

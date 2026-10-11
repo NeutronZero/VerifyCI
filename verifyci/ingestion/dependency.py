@@ -261,8 +261,8 @@ def _parse_maven(source: str, file_path: str, revision_id: str,
         for block in re.finditer(r"<dependency\b[^>]*>(.*?)</dependency>", clean, re.DOTALL):
             body = block.group(1)
 
-            def _tag(tag: str) -> str:
-                found = re.search(rf"<{tag}>(.*?)</{tag}>", body, re.DOTALL)
+            def _tag(tag: str, b: str = body) -> str:
+                found = re.search(rf"<{tag}>(.*?)</{tag}>", b, re.DOTALL)
                 return found.group(1).strip() if found else ""
 
             group, artifact, version = _tag("groupId"), _tag("artifactId"), _tag("version")

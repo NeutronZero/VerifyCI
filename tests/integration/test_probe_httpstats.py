@@ -1,4 +1,4 @@
-﻿"""PROBES item 5: HTTP auth, readonly URI, stats error, fail-closed DBs."""
+"""PROBES item 5: HTTP auth, readonly URI, stats error, fail-closed DBs."""
 import os
 
 
