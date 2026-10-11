@@ -108,6 +108,7 @@ The foundation of VerifyCI consists of immutable, frozen dataclass schemas that 
     3. Mandatory protocol validation: rejects missing, empty, non-string, or non-`"ed25519"` algorithm metadata.
     4. Serialization protection: catches non-finite numeric floats (`NaN`, `Infinity` rejected by `allow_nan=False`) and returns `False` fail-closed without exception leakage.
 - **`SignedIntentWaiver` (`verification_ir.py`)**: Cryptographic waivers (`hmac-sha256` and `ed25519`) over canonical `"{waiver_id}:{target}:{signer}:{reason}"` payloads, allowing explicit, signed human-in-the-loop exemptions for intentional policy violations (denying unauthenticated waivers by default).
+- **`VerificationEnvelope` (`verification_ir.py`)**: End-to-end cryptographic envelope binding the full verification report (`report_hash`), authoritative verdict, rationale, source repository, content revision (`revision_id`), authoritative git commit identity (`source_commit_id`, distinct from `revision_id`), diff hash (`diff_hash`), effective policy bundle hash (`effective_policy_bundle_hash`), evidence manifest, check summaries, and verifier build ID. Supports Ed25519 signing (`envelope.sign`) and external trust store signature verification (`envelope.verify_signature(trusted_keys=...)`) with fail-closed anti-self-certification.
 - **`VerificationReport` & `CheckResult` (`verification_ir.py`)**: Individual deterministic check outcomes, score, blocking flags, and grounding establishment.
 - **`VerificationDecision` & `VerificationPolicy` (`verification_ir.py`)**: Fail-closed policy evaluation decisions.
 - **`jsonio` (`jsonio.py`)**: Canonical JSON serialization converting dataclasses and `Enum.value` without schema drift.
@@ -120,10 +121,11 @@ The foundation of VerifyCI consists of immutable, frozen dataclass schemas that 
 
 ### 4. Graph Storage & Concurrency Isolation (`verifyci/storage/graph_store.py`)
 - Persistent SQLite database running in **Write-Ahead Logging (WAL)** mode for concurrent readers and atomic writers (`PRAGMA journal_mode=WAL`).
-- **Dual-Store Boundary**:
-  - Observation tools use read-only store instances (`ro_store` via `_format_ro_uri` SQLite `mode=ro` cache) preventing write locks, schema modifications, or journal flips.
+- **Dedicated Read-Only Connection Ownership**:
+  - Observation and verification readers use independent per-instance SQLite handles (`_format_ro_uri` SQLite `mode=ro`) preventing write locks, schema modifications, or journal flips, ensuring that cache eviction never closes active connections of live `GraphStore` instances.
   - Task executions use read-write store instances (`rw_store`) for ledger updates.
   - Dual-store instances are orchestrated at the agent/interface layer (`fastmcp_server.py`, `mcp_server.py`).
+- **Immutable Graph Snapshot Cache & Safe Views (`graph_cache.py`)**: `GLOBAL_GRAPH_CACHE` provides cost-weighted LRU caching (`DEFAULT_MAX_CACHE_COST = 200_000`) with single-flight build deduplication. Returned graphs are wrapped in `ImmutableGraphView`, which blocks mutating graph methods, forbids direct access to the private `_graph` instance, and deeply freezes node and edge payloads (via `MappingProxyType`, `tuple`, and `frozenset`) to prevent caller mutations from corrupting cached graphs.
 - **Bitemporal Semantics**:
   - *Valid time* (`valid_from` / `valid_until`): when the code was valid in the repository revision. Point-in-time entity resolution queries `valid_from <= ? AND (valid_until IS NULL OR valid_until > ?)`.
   - *Transaction time* (`t_created` / `t_expired`): when the record was ingested into the database. Live records query `t_expired IS NULL`.
@@ -140,7 +142,10 @@ The foundation of VerifyCI consists of immutable, frozen dataclass schemas that 
   - *Import Resolution (`import_resolution.py`)*: Validates import accessibility and module bindings.
   - *Removal Provenance (`removal.py`)*: Cross-references deleted `-` lines against stored base-revision snippets to catch stale or fabricated deletions.
   - *Secret Detection (`verifyci/secrets/entropy.py`, `engine.py`, `intent_align.py`)*: Scans additions with multi-rule entropy, multiline tracking, and regex rules.
-- **Exact Graph Traversal & Blast Radius (`blast_radius.py`, `witness.py`)**: Traverses call-graph paths to evaluate impacted callers, callees, and test coverage gaps.
+- **Exact Graph Traversal, Static Test Reachability & Blast Radius (`blast_radius.py`, `witness.py`)**:
+  - Traverses call-graph paths to evaluate impacted callers, callees, and coverage gaps.
+  - Computes transitive call-graph test coverage (`test_coverage_status` as `STATIC_REACHABILITY_EVALUATED`, `EVALUATED_EMPTY`, or `UNKNOWN`).
+  - When tests are configured and populated, `test_coverage_gap` and `static_reachability_gap` reflect uncovered transitive dependents (`dependents - covered`). When no test suite is discovered or configured, structural risk remains uninflated while reporting untested dependents.
 - **Policy Evaluator (`policy.py`)**: Evaluates `VerificationReport` under strict fail-closed rules:
   - Rejection on any blocking check yields `FAIL`.
   - Checks that did not establish grounding or ran without established status route to `INCONCLUSIVE` (never a false `PASS`).
@@ -175,7 +180,7 @@ The foundation of VerifyCI consists of immutable, frozen dataclass schemas that 
 - **CLI (`verifyci.interface.cli`)**: Terminal command interface with standardized exit codes:
   - `0`: `PASS` (Established grounding, zero blocking check failures).
   - `1`: `FAIL` (Blocking check or invariant tripped).
-  - `2`: `HUMAN_REVIEW` / `INCONCLUSIVE` (Ungrounded diff, policy edit, escalated).
+  - `2`: `HUMAN_REVIEW` / `INCONCLUSIVE` / `ADVISORY_WARN` (Ungrounded diff, policy edit, non-blocking advisory finding, escalated).
   - `3`: `INFRA_ERROR` / `TIMEOUT` / `REFUSAL` (DB missing/corrupt, task deadline exceeded, or oversized diff input exceeding `MAX_DIFF_CHARS` rejected at ingress).
 - **Exporters (`verifyci.export/`)**:
   - `export_certificate_json` (`json.py`): Stable machine-readable Certificate, Report, Decision, and Policy serialization under schema `https://verifyci.org/schemas/v1/certificate-report.json`.

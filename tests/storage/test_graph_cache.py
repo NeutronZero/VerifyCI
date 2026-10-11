@@ -119,23 +119,50 @@ def test_graph_cache_immutable_view_rejects_mutation():
 
     def _loader():
         g = rx.PyDiGraph()
-        n1 = g.add_node("node1")
-        n2 = g.add_node("node2")
-        g.add_edge(n1, n2, "edge")
+        n1 = g.add_node({"name": "node1", "tags": ["tag1"]})
+        n2 = g.add_node({"name": "node2", "tags": ["tag2"]})
+        g.add_edge(n1, n2, {"type": "CALLS", "meta": {"weight": 1}})
         return g, {"node1": n1, "node2": n2}, ["node1", "node2"], [("node1", "node2")]
 
     g_view, _, _ = cache.get_or_load(key, _loader)
     # Read operations succeed
     assert len(g_view) == 2
-    assert g_view.successors(0) == ["node2"]
+    assert g_view.successors(0)[0]["name"] == "node2"
+    assert g_view[0]["name"] == "node1"
+    assert g_view.num_nodes() == 2
+    assert g_view.num_edges() == 1
 
     # Mutating operations fail closed with TypeError
     with pytest.raises(TypeError, match="ImmutableGraphView cannot be modified"):
-        g_view.add_node("node3")
+        g_view.add_node({"name": "node3"})
 
     with pytest.raises(TypeError, match="ImmutableGraphView cannot be modified"):
-        g_view.add_edge(0, 1, "tampered")
+        g_view.add_edge(0, 1, {"type": "NEW"})
 
     with pytest.raises(TypeError, match="ImmutableGraphView cannot be modified"):
         g_view.remove_node(0)
+
+    with pytest.raises(TypeError, match="ImmutableGraphView cannot be modified"):
+        g_view.update_edge(0, 1, {"type": "TAMPERED"})
+
+    with pytest.raises(TypeError, match="item assignment is forbidden"):
+        g_view[0] = {"tampered": True}
+
+    with pytest.raises(TypeError, match="attribute assignment"):
+        g_view.custom_attr = 123
+
+    # Direct access to _graph attribute is blocked
+    with pytest.raises(AttributeError, match="Direct access to private _graph attribute is prohibited"):
+        _ = g_view._graph
+
+    # Payload immutability: attempting to mutate returned dictionaries or lists raises TypeError or AttributeError (immutable tuple)
+    with pytest.raises(TypeError):
+        g_view[0]["name"] = "mutated_node1"
+
+    with pytest.raises((TypeError, AttributeError)):
+        g_view.successors(0)[0]["tags"].append("mutated_tag")
+
+    with pytest.raises(TypeError):
+        g_view.in_edges(1)[0][2]["meta"]["weight"] = 999
+
 

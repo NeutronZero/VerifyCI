@@ -32,7 +32,8 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
                db_path: str | None = None, return_artifacts: bool = False,
                signing_key: Any | None = None, signing_key_id: str | None = None,
                policy: VerificationPolicy | None = None,
-               budget: ExecutionBudget | None = None) -> dict:
+               budget: ExecutionBudget | None = None,
+               trusted_keys: Any | None = None) -> dict:
     from verifyci.interface.ingress import IngressValidationError, validate_diff_ingress
     try:
         diff = validate_diff_ingress(diff)
@@ -274,6 +275,18 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
                 "require_deterministic_checker": effective_policy.require_deterministic_checker,
             },
         )
+        resolved_commit_id = ""
+        if db and resolved_revision:
+            try:
+                from verifyci.storage.graph_store import resolve_commit_for_revision
+                probe = open_for_read(db)
+                try:
+                    resolved_commit_id = resolve_commit_for_revision(probe, resolved_revision)
+                finally:
+                    probe.close()
+            except Exception:
+                resolved_commit_id = ""
+
         envelope = VerificationEnvelope(
             envelope_version="1.0",
             report_id=report.report_id,
@@ -282,7 +295,7 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
             rationale=rationale,
             repository_id=repo_id,
             revision_id=resolved_revision,
-            source_commit_id=resolved_revision,
+            source_commit_id=resolved_commit_id,
             diff_hash=diff_hash,
             effective_policy_bundle_hash=eff_policy_hash,
             evidence_manifest=tuple(manifest_entries),
@@ -298,11 +311,22 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
                 rationale = f"envelope_signing_failed:{sign_err}"
                 envelope = None
 
-        if effective_policy.require_signed_envelope and (envelope is None or not envelope.signature):
-            authoritative_status = "INFRA_ERROR"
-            envelope = None
-            if not rationale.startswith("envelope_signing_failed"):
-                rationale = "envelope_signing_failed: unsigned envelope rejected under policy requirement"
+        if effective_policy.require_signed_envelope:
+            if envelope is None or not envelope.signature:
+                authoritative_status = "INFRA_ERROR"
+                envelope = None
+                if not rationale.startswith("envelope_signing_failed"):
+                    rationale = "envelope_signing_failed: unsigned envelope rejected under policy requirement"
+            else:
+                try:
+                    if not envelope.verify_signature(trusted_keys=trusted_keys):
+                        authoritative_status = "INFRA_ERROR"
+                        envelope = None
+                        rationale = "envelope_trust_verification_failed: signer is not authorized by trust store"
+                except Exception as trust_err:
+                    authoritative_status = "INFRA_ERROR"
+                    envelope = None
+                    rationale = f"envelope_trust_verification_failed:{trust_err}"
 
         res = {
             "report_id": report.report_id,
@@ -319,8 +343,11 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
                 res["contract"] = contract_flag
             else:
                 res["error"] = infra_error
-        elif authoritative_status == "INFRA_ERROR" and "envelope_signing_failed" in rationale:
-            res["error"] = "signing_failed"
+        elif authoritative_status == "INFRA_ERROR":
+            if "envelope_signing_failed" in rationale:
+                res["error"] = "signing_failed"
+            elif "envelope_trust_verification_failed" in rationale:
+                res["error"] = "trust_verification_failed"
 
         if return_artifacts:
             res["certificate"] = cert

@@ -181,6 +181,136 @@ def test_require_signed_envelope_policy_rejects_unsigned_result(tmp_path):
     assert res["envelope"] is None
 
 
+def test_envelope_sign_exception_fails_closed_infra_error(tmp_path, monkeypatch):
+    """Specifically test that an exception raised inside envelope.sign() fails closed as INFRA_ERROR."""
+    from verifyci.contracts.verification_ir import VerificationEnvelope
+    from verifyci.storage.graph_store import GraphStore
+
+    db = str(tmp_path / "valid.db")
+    GraphStore(db).close()
+
+    priv = Ed25519PrivateKey.generate()
+    diff = (
+        "diff --git a/docs/README.md b/docs/README.md\n"
+        "--- a/docs/README.md\n"
+        "+++ b/docs/README.md\n"
+        "@@ -1,1 +1,1 @@\n"
+        "-old doc\n"
+        "+new doc\n"
+    )
+
+    def _failing_sign(self, *args, **kwargs):
+        raise RuntimeError("hsm_offline_error")
+
+    monkeypatch.setattr(VerificationEnvelope, "sign", _failing_sign)
+    res = run_verify(diff, db_path=db, signing_key=priv)
+    assert res["status"] == "INFRA_ERROR"
+    assert res["error"] == "signing_failed"
+    assert "envelope_signing_failed:hsm_offline_error" in res["rationale"]
+    assert res["envelope"] is None
+
+
+def test_require_signed_envelope_trust_verification_lifecycle(tmp_path):
+    """Test require_signed_envelope rejects untrusted signers and accepts authorized trust store signers."""
+    from verifyci.storage.graph_store import GraphStore
+
+    db = str(tmp_path / "valid.db")
+    GraphStore(db).close()
+
+    priv = Ed25519PrivateKey.generate()
+    pub_hex = priv.public_key().public_bytes_raw().hex()
+    other_pub_hex = Ed25519PrivateKey.generate().public_key().public_bytes_raw().hex()
+
+    diff = (
+        "diff --git a/docs/README.md b/docs/README.md\n"
+        "--- a/docs/README.md\n"
+        "+++ b/docs/README.md\n"
+        "@@ -1,1 +1,1 @@\n"
+        "-old doc\n"
+        "+new doc\n"
+    )
+    policy = VerificationPolicy.strict_gate(
+        policy_id="strict_signed",
+        require_signed_envelope=True,
+    )
+
+    # 1. Signer not in trust store -> fail closed as INFRA_ERROR with trust_verification_failed
+    res_untrusted = run_verify(
+        diff, db_path=db, signing_key=priv, policy=policy, trusted_keys=[other_pub_hex]
+    )
+    assert res_untrusted["status"] == "INFRA_ERROR"
+    assert res_untrusted["error"] == "trust_verification_failed"
+    assert "envelope_trust_verification_failed" in res_untrusted["rationale"]
+    assert res_untrusted["envelope"] is None
+
+    # 2. Signer authorized in trust store -> passes verification
+    res_trusted = run_verify(
+        diff, db_path=db, signing_key=priv, policy=policy, trusted_keys=[pub_hex]
+    )
+    assert res_trusted["status"] == "HUMAN_REVIEW"
+    assert res_trusted["envelope"] is not None
+    assert res_trusted["envelope"].signature is not None
+    assert res_trusted["envelope"].verify_signature(trusted_keys=[pub_hex]) is True
+
+
+def test_source_commit_id_distinction_from_revision_id(tmp_path):
+    """Test that source_commit_id is resolved from authoritative ingest records and never substituted with revision_id."""
+    import time
+    from verifyci.contracts.revision import Revision
+    from verifyci.storage.graph_store import GraphStore
+
+    db = str(tmp_path / "lineage.db")
+    store = GraphStore(db)
+
+    # 1. Case: commit_id is known and recorded
+    rev = Revision(
+        revision_id="content_hash_rev_123",
+        repository_id="repo_verifyci",
+        commit_id="git_commit_sha_abc",
+        parent_revision_id=None,
+        source_hash="src_hash_1",
+        timestamp=time.time(),
+        ingestion_config_hash="cfg_hash_1",
+    )
+    store.insert_revision(rev)
+    store.close()
+
+    diff = (
+        "diff --git a/docs/README.md b/docs/README.md\n"
+        "--- a/docs/README.md\n"
+        "+++ b/docs/README.md\n"
+        "@@ -1,1 +1,1 @@\n"
+        "-old doc\n"
+        "+new doc\n"
+    )
+    res = run_verify(diff, db_path=db, revision_id="content_hash_rev_123")
+    assert res["envelope"] is not None
+    assert res["envelope"].revision_id == "content_hash_rev_123"
+    assert res["envelope"].source_commit_id == "git_commit_sha_abc"
+    assert res["envelope"].source_commit_id != res["envelope"].revision_id
+
+    # 2. Case: commit_id is unknown/unrecorded -> represented as "", NEVER substituted with revision_id
+    db2 = str(tmp_path / "no_commit.db")
+    store2 = GraphStore(db2)
+    rev2 = Revision(
+        revision_id="content_hash_rev_456",
+        repository_id="repo_verifyci",
+        commit_id=None,
+        parent_revision_id=None,
+        source_hash="src_hash_2",
+        timestamp=time.time(),
+        ingestion_config_hash="cfg_hash_2",
+    )
+    store2.insert_revision(rev2)
+    store2.close()
+
+    res2 = run_verify(diff, db_path=db2, revision_id="content_hash_rev_456")
+    assert res2["envelope"] is not None
+    assert res2["envelope"].revision_id == "content_hash_rev_456"
+    assert res2["envelope"].source_commit_id == ""
+    assert res2["envelope"].source_commit_id != res2["envelope"].revision_id
+
+
 def test_sarif_export_handles_advisory_warn():
     from verifyci.export.sarif import export_sarif
     res = {

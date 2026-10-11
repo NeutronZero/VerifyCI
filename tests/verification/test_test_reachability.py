@@ -135,9 +135,23 @@ def test_risk_score_calculation_unchanged_across_test_metadata_modes():
     # Identical changed entity: payment_handler (has 1 callee: charge_card, 0 callers)
     # Base structural risk: 0 callers * 0.1 + 1 callee * 0.05 = 0.05
     res_none = compute_blast_radius(g, ["payment_handler"], None, node_map=node_map)
-    res_empty = compute_blast_radius(g, ["payment_handler"], set(), node_map=node_map)
-
     assert res_none.risk_score == pytest.approx(0.05)
+    assert res_none.test_coverage_gap == []
+
+    res_empty = compute_blast_radius(g, ["payment_handler"], set(), node_map=node_map)
     assert res_empty.risk_score == pytest.approx(0.05)
-    assert res_none.risk_score == res_empty.risk_score
+    assert res_empty.test_coverage_gap == []
+
+    # When test metadata is populated and covers the dependent, gap is 0 -> risk score remains base 0.05
+    # When test metadata is populated but does not cover the dependent, gap is 1 -> risk score is 0.05 + 1 * 0.2 = 0.25
+    res_covered = compute_blast_radius(g, ["verify_token"], {"test_auth"}, node_map=node_map)
+    # verify_token has 2 callers (auth_helper, test_auth). test_auth covers auth_helper, so gap = () -> 2 * 0.1 + 0 * 0.2 = 0.2
+    assert res_covered.risk_score == pytest.approx(0.20)
+    assert res_covered.test_coverage_gap == []
+
+    res_uncovered = compute_blast_radius(g, ["payment_handler"], {"test_auth"}, node_map=node_map)
+    # payment_handler has 1 callee (charge_card) not reached by test_auth -> gap = ['charge_card']
+    # risk = 0.05 + 1 * 0.2 = 0.25
+    assert res_uncovered.risk_score == pytest.approx(0.25)
+    assert res_uncovered.test_coverage_gap == ["charge_card"]
 

@@ -22,7 +22,8 @@ def payload_id(payload: Any) -> str | None:
         value = getattr(payload, attr, None)
         if value:
             return str(value)
-    if isinstance(payload, dict):
+    from collections.abc import Mapping
+    if isinstance(payload, (Mapping, dict)):
         for key in ("revision_entity_id", "logical_entity_id", "name"):
             if payload.get(key):
                 return str(payload[key])
@@ -90,7 +91,8 @@ def _edge_payloads_between(graph: Any, src_idx: int, dst_idx: int) -> list[Any] 
 
 def _edge_type_name(edge: Any) -> str | None:
     etype = getattr(edge, "type", None)
-    if etype is None and isinstance(edge, dict):
+    from collections.abc import Mapping
+    if etype is None and isinstance(edge, (Mapping, dict)):
         etype = edge.get("type")
     if etype is None:
         return None

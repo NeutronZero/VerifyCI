@@ -195,6 +195,34 @@ def latest_revision_id(conn, repository_id: str | None = None, branch: str | Non
     return row[0] if row else ""
 
 
+def resolve_commit_for_revision(conn, revision_id: str) -> str:
+    """Resolve the git commit_id associated with a revision_id.
+
+    Queries the append-only ingests table in insertion order (rowid DESC),
+    falling back to the revisions table. Returns "" if unknown or unrecorded,
+    never substituting content revision_id.
+    """
+    if not conn or not revision_id:
+        return ""
+    if _has_table(conn, "ingests"):
+        row = conn.execute(
+            "SELECT commit_id FROM ingests WHERE revision_id = ? AND commit_id IS NOT NULL AND commit_id != ''"
+            " ORDER BY rowid DESC LIMIT 1",
+            (revision_id,),
+        ).fetchone()
+        if row and row[0]:
+            return str(row[0])
+    if _has_table(conn, "revisions"):
+        row = conn.execute(
+            "SELECT commit_id FROM revisions WHERE revision_id = ? AND commit_id IS NOT NULL AND commit_id != ''"
+            " LIMIT 1",
+            (revision_id,),
+        ).fetchone()
+        if row and row[0]:
+            return str(row[0])
+    return ""
+
+
 def _has_table(conn, name: str) -> bool:
     return conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
@@ -287,18 +315,10 @@ class GraphStore:
             # (WAL + mode=ro works when the -shm/-wal sidecars exist or
             # the directory is writable; on a sealed read-only mount
             # the DB must have been checkpointed/closed cleanly.)
-            #
-            # Performance optimization: reuse persistent process-local
-            # read-only connection to eliminate repeated NTFS file handle
-            # acquisition, URI parsing, and schema inspection overhead
-            # under concurrent worker contention.
+            # Dedicated per-instance read-only connection ownership:
+            # each reader instance owns its SQLite handle independently
+            # so cache eviction never closes live connections of active stores.
             norm_key = os.path.abspath(db_path)
-            try:
-                stat = os.stat(norm_key)
-                current_sig = (stat.st_mtime_ns, stat.st_size)
-            except OSError:
-                current_sig = (0, 0)
-
             uri = _format_ro_uri(db_path)
             self.conn = sqlite3.connect(
                 uri, uri=True, timeout=5.0, factory=_CachedReadOnlyConnection
@@ -311,15 +331,7 @@ class GraphStore:
                 self.conn.close()
                 raise
 
-            while len(_PROCESS_RO_CACHE) >= MAX_RO_CACHE_ENTRIES:
-                _, (old_conn, _) = _PROCESS_RO_CACHE.popitem(last=False)
-                try:
-                    old_conn.close()
-                except Exception:
-                    pass
-
-            _PROCESS_RO_CACHE[norm_key] = (self.conn, current_sig)
-            self._is_cached_ro = True
+            self._is_cached_ro = False
             self._batch_depth = 0
             return
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -430,6 +442,10 @@ class GraphStore:
         and fall back to global only when no convention applies.
         """
         return latest_revision_id(self.conn, repository_id, branch=branch)
+
+    def resolve_commit_id(self, revision_id: str) -> str:
+        """Resolve the git commit_id associated with a revision_id."""
+        return resolve_commit_for_revision(self.conn, revision_id)
 
     def latest_ingest_id(self, repository_id: str, branch: Optional[str] = None) -> str:
         if branch:
