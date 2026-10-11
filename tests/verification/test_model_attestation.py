@@ -5,13 +5,12 @@ hashing, snapshot commit checking, and reranker fallback.
 """
 from __future__ import annotations
 
-import hashlib
 import sys
 import types
 from pathlib import Path
 
 from verifyci.retrieval.dense import SearchResult
-from verifyci.retrieval.model_attestation import verify_runtime_model
+from verifyci.retrieval.model_attestation import compute_snapshot_manifest, verify_runtime_model
 from verifyci.retrieval.reranker import CrossEncoderReranker
 
 
@@ -25,16 +24,11 @@ def _create_mock_model_dir(base_path: Path, commit_name: str = "mock-commit-789"
         "tokenizer.json": b'{"version": "1.0", "truncation": null}',
     }
 
-    per_file_hashes: dict[str, str] = {}
-    h = hashlib.sha256()
-
-    for name in sorted(files_content.keys()):
+    for name in files_content:
         p = model_dir / name
         p.write_bytes(files_content[name])
-        per_file_hashes[name] = hashlib.sha256(files_content[name]).hexdigest()
-        h.update(name.encode("utf-8") + b"\x00" + files_content[name])
 
-    composite_sha256 = h.hexdigest()
+    composite_sha256, per_file_hashes, _ = compute_snapshot_manifest(model_dir)
     return model_dir, composite_sha256, per_file_hashes
 
 
@@ -448,3 +442,50 @@ def test_tampering_nested_subdirectory_file_invalidates_attestation(tmp_path: Pa
     assert ok_tampered is False
     assert details_tampered["verified"] is False
     assert "Snapshot SHA-256 mismatch" in details_tampered["error"]
+
+
+def test_manifest_collision_resistance_unambiguous_structure(tmp_path: Path):
+    """Regression test: Different directory structures cannot produce the same composite digest.
+
+    Under naive concatenation h.update(path + NUL + data):
+      Manifest 1: file 'a' contains b'x', file 'b' contains b'y' -> a\\0xb\\0y
+      Manifest 2: file 'a' contains b'xb\\0y', file 'b' is absent -> a\\0xb\\0y
+    Both produce the exact same byte sequence to SHA-256.
+
+    Under the canonical manifest hashing algorithm, the two structures are
+    unambiguously distinguished and produce distinct composite digests fail-closed.
+    """
+    dir1 = tmp_path / "model_manifest_1"
+    dir1.mkdir(parents=True)
+    (dir1 / "a").write_bytes(b"x")
+    (dir1 / "b").write_bytes(b"y")
+
+    dir2 = tmp_path / "model_manifest_2"
+    dir2.mkdir(parents=True)
+    (dir2 / "a").write_bytes(b"xb\x00y")
+
+    ok1, details1 = verify_runtime_model(str(dir1))
+    ok2, details2 = verify_runtime_model(str(dir2))
+
+    assert ok1 is True
+    assert ok2 is True
+    assert details1["verified"] is True
+    assert details2["verified"] is True
+
+    # Digests MUST be different under the canonical manifest algorithm!
+    assert details1["snapshot_sha256"] != details2["snapshot_sha256"]
+
+    # Manifests themselves reflect the different structures
+    assert len(details1["manifest"]) == 2
+    assert len(details2["manifest"]) == 1
+
+    # Attestation of dir2 against dir1's digest strictly fails closed
+    ok_cross, details_cross = verify_runtime_model(
+        str(dir2),
+        expected_snapshot_sha256=details1["snapshot_sha256"],
+        require_pin=True,
+    )
+    assert ok_cross is False
+    assert details_cross["verified"] is False
+    assert "Snapshot SHA-256 mismatch" in details_cross["error"]
+

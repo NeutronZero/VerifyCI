@@ -6,8 +6,54 @@ and composite file hashes) fail-closed without network access.
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
+
+
+def compute_snapshot_manifest(
+    snap_path: Path,
+) -> tuple[str, dict[str, str], list[dict[str, Any]]]:
+    """Compute canonical snapshot manifest and composite SHA-256 digest.
+
+    Enumerates all files recursively, sorted by normalized relative POSIX path.
+    Builds a canonical manifest of per-file records:
+      - path: relative POSIX path
+      - sha256: file SHA-256 hex digest
+      - size_bytes: file size in bytes
+    Serializes the manifest deterministically (canonical JSON) and computes
+    the composite SHA-256 over that serialization.
+
+    Returns:
+        (composite_sha256, files_dict, manifest_list)
+    """
+    raw_files = [x for x in snap_path.rglob("*") if x.is_file()]
+    file_paths = sorted(raw_files, key=lambda x: x.relative_to(snap_path).as_posix())
+    if not file_paths:
+        raise ValueError(f"Snapshot directory {snap_path} contains no files.")
+
+    files: dict[str, str] = {}
+    manifest: list[dict[str, Any]] = []
+    for p in file_paths:
+        rel_name = p.relative_to(snap_path).as_posix()
+        data = p.read_bytes()
+        file_sha = hashlib.sha256(data).hexdigest()
+        files[rel_name] = file_sha
+        manifest.append({
+            "path": rel_name,
+            "sha256": file_sha,
+            "size_bytes": len(data),
+        })
+
+    canonical_manifest_bytes = json.dumps(
+        manifest,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    composite_sha256 = hashlib.sha256(canonical_manifest_bytes).hexdigest()
+    return composite_sha256, files, manifest
 
 
 def verify_runtime_model(
@@ -79,10 +125,8 @@ def verify_runtime_model(
         }
 
     try:
-        # Recursively enumerate all files affecting model loading, sorted by normalized relative posix path
         raw_files = [x for x in snap_path.rglob("*") if x.is_file()]
-        file_paths = sorted(raw_files, key=lambda x: x.relative_to(snap_path).as_posix())
-        if not file_paths:
+        if not raw_files:
             return False, {
                 "model": model_str,
                 "snapshot_path": str(snap_path),
@@ -90,14 +134,7 @@ def verify_runtime_model(
                 "error": f"Model snapshot directory {snap_path} contains no files.",
             }
 
-        h = hashlib.sha256()
-        files: dict[str, str] = {}
-        for p in file_paths:
-            rel_name = p.relative_to(snap_path).as_posix()
-            data = p.read_bytes()
-            files[rel_name] = hashlib.sha256(data).hexdigest()
-            h.update(rel_name.encode("utf-8") + b"\x00" + data)
-        snapshot_sha256 = h.hexdigest()
+        snapshot_sha256, files, manifest = compute_snapshot_manifest(snap_path)
         snapshot_commit = snap_path.name
     except Exception as exc:
         return False, {
@@ -113,6 +150,7 @@ def verify_runtime_model(
         "snapshot_commit": snapshot_commit,
         "snapshot_sha256": snapshot_sha256,
         "files": files,
+        "manifest": manifest,
         "verified": True,
     }
 
