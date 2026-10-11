@@ -13,10 +13,13 @@ large diff cannot exhaust the worker.
 """
 import hmac
 import ipaddress
+import threading
+from contextlib import contextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from verifyci.contracts.jsonio import to_json_dict
 from verifyci.env import get_env
 from verifyci.interface.commands.query import run_query
 from verifyci.interface.commands.stats import run_stats
@@ -28,10 +31,49 @@ from verifyci.interface.ingress import (
     validate_safe_db_path,
     validate_task_ingress,
 )
-from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_K
+from verifyci.interface.limits import (
+    MAX_DIFF_CHARS,
+    MAX_HTTP_QUEUE_SIZE,
+    MAX_HTTP_WORKERS,
+    MAX_K,
+    TIMEOUT_PROFILE_HTTP,
+    ExecutionBudget,
+)
 from verifyci.interface.limits import MAX_TASK_DIFF_CHARS as MAX_TASK_CHARS
 
 app = FastAPI(title="VerifyCI")
+
+
+class HTTPBackpressure:
+    """Bounded worker queue and backpressure gate for HTTP verification jobs."""
+
+    def __init__(self, max_workers: int = MAX_HTTP_WORKERS, max_queue: int = MAX_HTTP_QUEUE_SIZE):
+        self.max_workers = max_workers
+        self.max_queue = max_queue
+        self.active_and_queued = 0
+        self._lock = threading.Lock()
+        self._sem = threading.Semaphore(max_workers)
+
+    @contextmanager
+    def guard(self):
+        with self._lock:
+            if self.active_and_queued >= (self.max_workers + self.max_queue):
+                raise HTTPException(
+                    status_code=429,
+                    detail="Server overloaded: max worker queue depth exceeded",
+                )
+            self.active_and_queued += 1
+
+        self._sem.acquire()
+        try:
+            yield
+        finally:
+            self._sem.release()
+            with self._lock:
+                self.active_and_queued = max(0, self.active_and_queued - 1)
+
+
+GLOBAL_HTTP_BACKPRESSURE = HTTPBackpressure()
 
 
 def _api_token() -> str:
@@ -116,7 +158,19 @@ def verify(req: VerifyRequest, _auth: None = Depends(require_auth)):
         diff = validate_diff_ingress(req.diff)
     except IngressValidationError as exc:
         raise HTTPException(status_code=400, detail=exc.code)
-    return run_verify(diff, req.revision_id, req.task_id, db_path=_sanitize_db(getattr(req, "db", "")))
+
+    with GLOBAL_HTTP_BACKPRESSURE.guard():
+        budget = ExecutionBudget.create(timeout_seconds=TIMEOUT_PROFILE_HTTP)
+        res = run_verify(
+            diff,
+            req.revision_id,
+            req.task_id,
+            db_path=_sanitize_db(getattr(req, "db", "")),
+            budget=budget,
+        )
+        if "envelope" in res and res["envelope"] is not None:
+            res["envelope"] = to_json_dict(res["envelope"])
+        return res
 
 
 @app.post("/task/run")
@@ -126,5 +180,7 @@ def task_run(req: TaskRequest, _auth: None = Depends(require_auth)):
         task, diff = validate_task_ingress(req.task, diff=req.diff)
     except IngressValidationError as exc:
         raise HTTPException(status_code=400, detail=exc.code)
-    return run_task(task, diff=diff, db_path=_sanitize_db(req.db))
+
+    with GLOBAL_HTTP_BACKPRESSURE.guard():
+        return run_task(task, diff=diff, db_path=_sanitize_db(req.db))
 

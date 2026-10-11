@@ -37,6 +37,11 @@ class TraversalInconclusiveError(RuntimeError):
     """Raised when graph traversal encounters bounded resource limits or boundary anomalies."""
 
 
+class TraversalBudgetExceededError(TraversalInconclusiveError):
+    """Raised when shared ExecutionBudget limits (nodes, edges, or monotonic deadline) are exceeded."""
+
+
+
 def derive_node_map(graph: Any) -> dict[str, int]:
     node_map: dict[str, int] = {}
     if graph is None or not hasattr(graph, "node_indices"):
@@ -120,12 +125,19 @@ def traverse(
     allowed_types: set[str] | frozenset | None = None,
     max_visit_budget: int = DEFAULT_MAX_VISIT_BUDGET,
     max_expansion_budget: int = DEFAULT_MAX_EXPANSION_BUDGET,
+    budget: Any | None = None,
 ) -> set[int]:
     """BFS from seed following predecessors (incoming) or successors.
 
     Returns visited indices excluding the seed.
     Raises TraversalInconclusiveError on bounded contract violations or resource exhaustion.
     """
+    if budget is not None:
+        try:
+            budget.check_deadline()
+        except Exception as e:
+            raise TraversalBudgetExceededError(str(e)) from e
+
     if max_hops > MAX_DEPTH_LIMIT:
         raise TraversalInconclusiveError(
             f"Traversal depth limit exceeded (max_hops={max_hops} > {MAX_DEPTH_LIMIT})"
@@ -136,6 +148,12 @@ def traverse(
     total_expansions = 0
 
     for _ in range(max_hops):
+        if budget is not None:
+            try:
+                budget.check_deadline()
+            except Exception as e:
+                raise TraversalBudgetExceededError(str(e)) from e
+
         next_level = set()
         for idx in current_level:
             if direction == "incoming":
@@ -146,6 +164,12 @@ def traverse(
                 pairs = [("out", n) for n in neighbors]
 
             total_expansions += len(pairs)
+            if budget is not None:
+                try:
+                    budget.record_edge(len(pairs))
+                except Exception as e:
+                    raise TraversalBudgetExceededError(str(e)) from e
+
             if total_expansions > max_expansion_budget:
                 raise TraversalInconclusiveError(
                     f"Traversal edge expansion budget exceeded: {total_expansions} > {max_expansion_budget}"
@@ -184,6 +208,12 @@ def traverse(
                     next_level.add(nidx)
 
         visited.update(next_level)
+        if budget is not None:
+            try:
+                budget.record_node(len(next_level))
+            except Exception as e:
+                raise TraversalBudgetExceededError(str(e)) from e
+
         if len(visited) > max_visit_budget:
             raise TraversalInconclusiveError(
                 f"Traversal visit budget exceeded: visited {len(visited)} nodes > {max_visit_budget}"

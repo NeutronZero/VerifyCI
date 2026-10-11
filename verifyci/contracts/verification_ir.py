@@ -449,6 +449,9 @@ class BlastRadiusResult:
     vulnerability_impact: list[str]
     status: str = "PASS"
     inconclusive_reason: Optional[str] = None
+    test_coverage_status: str = "UNKNOWN"
+    static_reachability_gap: tuple[str, ...] = ()
+
 
 
 @dataclass(frozen=True)
@@ -485,6 +488,46 @@ class VerificationPolicy:
     on_inconclusive: str
     on_human_review: str
     require_deterministic_checker: bool
+    profile: str = "strict_gate"
+
+    @classmethod
+    def strict_gate(cls, policy_id: str = "default") -> "VerificationPolicy":
+        return cls(
+            policy_id=policy_id,
+            on_failure="block",
+            on_inconclusive="human_review",
+            on_human_review="block",
+            require_deterministic_checker=True,
+            profile="strict_gate",
+        )
+
+    @classmethod
+    def advisory(cls, policy_id: str = "advisory") -> "VerificationPolicy":
+        return cls(
+            policy_id=policy_id,
+            on_failure="block",
+            on_inconclusive="warn",
+            on_human_review="warn",
+            require_deterministic_checker=False,
+            profile="advisory",
+        )
+
+    def canonical_bytes(self) -> bytes:
+        import json
+        d = {
+            "on_failure": self.on_failure,
+            "on_human_review": self.on_human_review,
+            "on_inconclusive": self.on_inconclusive,
+            "policy_id": self.policy_id,
+            "profile": self.profile,
+            "require_deterministic_checker": self.require_deterministic_checker,
+        }
+        return json.dumps(d, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    def content_hash(self) -> str:
+        import hashlib
+        return hashlib.sha256(self.canonical_bytes()).hexdigest()
+
 
 
 @dataclass(frozen=True)
@@ -524,3 +567,280 @@ class IntentPackage:
     invariants: list[Invariant]
     nfrs: list[dict[str, Any]]
     verification_plan_id: str
+
+
+@dataclass(frozen=True)
+class CheckSummary:
+    check_id: str
+    passed: bool
+    blocking: bool
+    established: bool
+    score: float
+    evidence_count: int
+
+
+@dataclass(frozen=True)
+class EvidenceManifestEntry:
+    role: str
+    identity: str
+    content_hash: str
+
+
+def _verify_ed25519_signed_envelope(
+    signature: Any,
+    signature_algorithm: Any,
+    signing_key_id: Any,
+    canonical_bytes: bytes,
+    public_key: Any | None = None,
+    trusted_keys: Any | None = None,
+) -> bool:
+    """Verifies an Ed25519 signature over canonical_bytes against an authorized signer."""
+    if not signature or not isinstance(signature, (str, bytes, bytearray)):
+        return False
+    if (
+        not isinstance(signature_algorithm, str)
+        or signature_algorithm.lower() != "ed25519"
+    ):
+        return False
+    if signing_key_id is not None and not isinstance(signing_key_id, str):
+        return False
+
+    try:
+        if isinstance(signature, str):
+            sig_bytes = bytes.fromhex(signature)
+        else:
+            sig_bytes = bytes(signature)
+    except (ValueError, TypeError):
+        return False
+
+    if len(sig_bytes) != 64:
+        return False
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey,
+        Ed25519PublicKey,
+    )
+
+    def _coerce(k: Any) -> Ed25519PublicKey | None:
+        if isinstance(k, Ed25519PublicKey):
+            return k
+        if isinstance(k, Ed25519PrivateKey):
+            return k.public_key()
+        if isinstance(k, (bytes, bytearray)):
+            if len(k) == 32:
+                try:
+                    return Ed25519PublicKey.from_public_bytes(bytes(k))
+                except Exception:
+                    return None
+            return None
+        if isinstance(k, str):
+            s = k.strip()
+            if len(s) == 64:
+                try:
+                    return Ed25519PublicKey.from_public_bytes(bytes.fromhex(s))
+                except Exception:
+                    return None
+            return None
+        return None
+
+    def _key_hex(k: Ed25519PublicKey) -> str:
+        if hasattr(k, "public_bytes_raw"):
+            return k.public_bytes_raw().hex().lower()
+        from cryptography.hazmat.primitives import serialization
+        return k.public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        ).hex().lower()
+
+    # 1. Explicit public key passed by caller
+    if public_key is not None:
+        pub = _coerce(public_key)
+        if pub is None:
+            return False
+        # If signing_key_id is a 64-char hex string, it must match this public key
+        if signing_key_id and len(signing_key_id.strip()) == 64:
+            if signing_key_id.strip().lower() != _key_hex(pub):
+                return False
+        try:
+            pub.verify(sig_bytes, canonical_bytes)
+            return True
+        except Exception:
+            return False
+
+    # 2. External trust store resolution (caller-supplied trusted_keys or environment)
+    from verifyci.env import get_env as _get_env
+    import json
+
+    store_val = trusted_keys if trusted_keys is not None else _get_env("CERTIFICATE_PUBLIC_KEYS")
+    if not store_val:
+        # FAIL-CLOSED: No external trust store configured -> cannot verify signer trust
+        return False
+
+    authorized_keys: dict[str, Ed25519PublicKey] = {}
+    unkeyed_authorized: list[Ed25519PublicKey] = []
+
+    if isinstance(store_val, dict):
+        for kid, kval in store_val.items():
+            pub = _coerce(kval)
+            if pub is not None:
+                authorized_keys[str(kid)] = pub
+    elif isinstance(store_val, (list, tuple, set)):
+        for kval in store_val:
+            pub = _coerce(kval)
+            if pub is not None:
+                unkeyed_authorized.append(pub)
+    elif isinstance(store_val, str):
+        stripped = store_val.strip()
+        if stripped.startswith(("{", "[")):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, dict):
+                    for kid, kval in parsed.items():
+                        pub = _coerce(kval)
+                        if pub is not None:
+                            authorized_keys[str(kid)] = pub
+                elif isinstance(parsed, list):
+                    for kval in parsed:
+                        pub = _coerce(kval)
+                        if pub is not None:
+                            unkeyed_authorized.append(pub)
+            except Exception:
+                pass
+        else:
+            for part in stripped.replace(";", ",").replace("\n", ",").split(","):
+                part = part.strip()
+                pub = _coerce(part)
+                if pub is not None:
+                    unkeyed_authorized.append(pub)
+    else:
+        pub = _coerce(store_val)
+        if pub is not None:
+            unkeyed_authorized.append(pub)
+
+    if not authorized_keys and not unkeyed_authorized:
+        return False
+
+    # If envelope has a signing_key_id, look up in authorized_keys first
+    if signing_key_id:
+        kid = str(signing_key_id).strip()
+        if kid in authorized_keys:
+            pub = authorized_keys[kid]
+            try:
+                pub.verify(sig_bytes, canonical_bytes)
+                return True
+            except Exception:
+                return False
+
+        # If signing_key_id is a 64-char hex key, check if it matches any authorized key's hex
+        if len(kid) == 64:
+            kid_lower = kid.lower()
+            all_trusted = list(authorized_keys.values()) + unkeyed_authorized
+            matching = [k for k in all_trusted if _key_hex(k) == kid_lower]
+            if not matching:
+                # An unknown key ID is REJECTED even if it's a valid hex key
+                return False
+            for pub in matching:
+                try:
+                    pub.verify(sig_bytes, canonical_bytes)
+                    return True
+                except Exception:
+                    continue
+            return False
+
+        # If signing_key_id is an unknown non-hex label, and authorized_keys was configured,
+        # reject unknown key label fail-closed
+        if authorized_keys and kid not in authorized_keys:
+            return False
+
+    # If no signing_key_id or unkeyed store, try all unkeyed authorized keys
+    for pub in unkeyed_authorized:
+        try:
+            pub.verify(sig_bytes, canonical_bytes)
+            return True
+        except Exception:
+            continue
+
+    return False
+
+
+@dataclass(frozen=True)
+class VerificationEnvelope:
+    envelope_version: str
+    report_id: str
+    report_hash: str
+    verdict: str
+    rationale: str
+    repository_id: str
+    revision_id: str
+    source_commit_id: str
+    diff_hash: str
+    effective_policy_bundle_hash: str
+    evidence_manifest: tuple[EvidenceManifestEntry, ...]
+    check_summaries: tuple[CheckSummary, ...]
+    created_at: float
+    verifier_build_id: str = "verifyci-0.1.0"
+    signing_key_id: Optional[str] = None
+    signature_algorithm: Optional[str] = None
+    signature: Optional[str] = None
+
+    def canonical_bytes(self) -> bytes:
+        from verifyci.contracts.canonical import canonical_envelope_bytes
+        return canonical_envelope_bytes(self)
+
+    def content_hash(self) -> str:
+        from verifyci.contracts.canonical import envelope_hash
+        return envelope_hash(self)
+
+    def sign(self, private_key: Any, key_id: str | None = None) -> "VerificationEnvelope":
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        if isinstance(private_key, Ed25519PrivateKey):
+            priv = private_key
+        elif isinstance(private_key, (bytes, bytearray)):
+            priv = Ed25519PrivateKey.from_private_bytes(bytes(private_key))
+        elif isinstance(private_key, str):
+            priv = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(private_key.strip()))
+        else:
+            raise TypeError(f"Unsupported private key type: {type(private_key).__name__}")
+
+        if key_id is not None:
+            resolved_key_id = key_id
+        else:
+            pub = priv.public_key()
+            if hasattr(pub, "public_bytes_raw"):
+                resolved_key_id = pub.public_bytes_raw().hex()
+            else:
+                from cryptography.hazmat.primitives import serialization
+                resolved_key_id = pub.public_bytes(
+                    serialization.Encoding.Raw, serialization.PublicFormat.Raw
+                ).hex()
+
+        import dataclasses
+        envelope = dataclasses.replace(
+            self,
+            signature=None,
+            signing_key_id=resolved_key_id,
+            signature_algorithm="ed25519",
+        )
+        sig_bytes = priv.sign(envelope.canonical_bytes())
+        return dataclasses.replace(
+            envelope,
+            signature=sig_bytes.hex(),
+        )
+
+    def verify_signature(
+        self,
+        public_key: Any | None = None,
+        trusted_keys: Any | None = None,
+    ) -> bool:
+        try:
+            canonical = self.canonical_bytes()
+        except Exception:
+            return False
+        return _verify_ed25519_signed_envelope(
+            self.signature,
+            self.signature_algorithm,
+            self.signing_key_id,
+            canonical,
+            public_key=public_key,
+            trusted_keys=trusted_keys,
+        )
+

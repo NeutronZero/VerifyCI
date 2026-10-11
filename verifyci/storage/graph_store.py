@@ -299,25 +299,6 @@ class GraphStore:
             except OSError:
                 current_sig = (0, 0)
 
-            cached_item = _PROCESS_RO_CACHE.get(norm_key)
-            if cached_item is not None:
-                cached_conn, cached_sig = cached_item
-                if cached_sig == current_sig:
-                    try:
-                        cached_conn.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
-                        _PROCESS_RO_CACHE.move_to_end(norm_key)
-                        self.conn = cached_conn
-                        self._is_cached_ro = True
-                        self._batch_depth = 0
-                        return
-                    except Exception:
-                        pass
-                try:
-                    cached_conn.close()
-                except Exception:
-                    pass
-                _PROCESS_RO_CACHE.pop(norm_key, None)
-
             uri = _format_ro_uri(db_path)
             self.conn = sqlite3.connect(
                 uri, uri=True, timeout=5.0, factory=_CachedReadOnlyConnection

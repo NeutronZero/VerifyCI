@@ -48,11 +48,12 @@ def _check_structural_invariants(graph: Any, changed_entities: list[str], node_m
 def compute_blast_radius(
     graph,
     changed_entities: list[str],
-    test_entities: set[str],
+    test_entities: set[str] | None = None,
     dependency_graph=None,
     vuln_cache=None,
     node_map: dict | None = None,
     max_hops: int = 2,
+    budget: Any | None = None,
 ) -> BlastRadiusResult:
     if max_hops > MAX_DEPTH_LIMIT:
         raise TraversalInconclusiveError(
@@ -72,28 +73,41 @@ def compute_blast_radius(
             node_idx = node_map.get(entity_id)
             if node_idx is None:
                 continue
-            callers = traverse(graph, node_idx, "incoming", max_hops, node_map, CALL_FLOW_TYPES)
-            callees = traverse(graph, node_idx, "outgoing", max_hops, node_map, CALL_FLOW_TYPES)
+            callers = traverse(graph, node_idx, "incoming", max_hops, node_map, CALL_FLOW_TYPES, budget=budget)
+            callees = traverse(graph, node_idx, "outgoing", max_hops, node_map, CALL_FLOW_TYPES, budget=budget)
             affected_callers.update(reverse_map.get(c, str(c)) for c in callers)
             affected_callees.update(reverse_map.get(c, str(c)) for c in callees)
 
     impacted = (affected_callers | affected_callees) | set(changed_entities)
-    # No same-file wipeout: traverse() already excludes each seed itself,
-    # so a changed entity appears here only as a caller/callee of another
-    # changed entity — genuine impact. The old difference_update deleted
-    # every relative living in a changed file, and since this graph has no
-    # cross-file CALLS edges that was every relative: risk 0.00 always.
-    #
-    # Coverage gap counts impacted *dependents* without tests — not the changed
-    # entities themselves, which are the subject under review by definition.
-    # When no test mapping is provided (every V1 caller passes set()), the
-    # gap is unknown, not "everything untested": counting unknowns as gaps
-    # tripled all scores on missing metadata. Risk then measures structural
-    # impact only until a test-entity source is wired.
-    if test_entities:
-        test_coverage_gap = list((affected_callers | affected_callees) - set(test_entities))
-    else:
+    dependents = (affected_callers | affected_callees) - (set(test_entities) if test_entities is not None else set())
+
+    # Tri-state test coverage knowledge:
+    # 1. test_entities is None: unindexed / missing test suite metadata
+    # 2. test_entities is empty set: indexed test suite contains 0 tests
+    # 3. test_entities is populated: evaluate static reachability
+    if test_entities is None:
+        test_coverage_status = "UNKNOWN"
+        static_reachability_gap = []
         test_coverage_gap = []
+    elif len(test_entities) == 0:
+        test_coverage_status = "EVALUATED_EMPTY"
+        static_reachability_gap = sorted(dependents)
+        test_coverage_gap = []
+    else:
+        test_coverage_status = "STATIC_REACHABILITY_EVALUATED"
+        covered = set()
+        if graph is not None and node_map:
+            reverse_map = {v: k for k, v in node_map.items()}
+            for test_id in test_entities:
+                test_idx = node_map.get(test_id)
+                if test_idx is None:
+                    continue
+                test_callees = traverse(graph, test_idx, "outgoing", max_hops, node_map, CALL_FLOW_TYPES, budget=budget)
+                covered.update(reverse_map.get(c, str(c)) for c in test_callees)
+        static_reachability_gap = sorted(dependents - covered)
+        test_coverage_gap = list(static_reachability_gap)
+
+    # Calibrated risk formula remains frozen: callers, callees, and coverage gaps
     risk_score = min(1.0, len(affected_callers) * 0.1 + len(affected_callees) * 0.05 + len(test_coverage_gap) * 0.2)
 
     dependency_impact = _dependency_impact(dependency_graph, impacted, graph)
@@ -106,7 +120,10 @@ def compute_blast_radius(
         risk_score=risk_score,
         dependency_impact=dependency_impact,
         vulnerability_impact=vulnerability_impact,
+        test_coverage_status=test_coverage_status,
+        static_reachability_gap=tuple(static_reachability_gap),
     )
+
 
 
 def _dependency_impact(dependency_graph, impacted: set[str], graph=None) -> list[str]:

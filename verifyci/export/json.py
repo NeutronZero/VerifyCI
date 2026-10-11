@@ -70,6 +70,7 @@ def export_certificate_json(verify_result: dict[str, Any]) -> str:
         "policy": to_json_dict(policy) if policy is not None else None,
         "certificate": to_json_dict(cert) if cert is not None else None,
         "report": to_json_dict(report) if report is not None else None,
+        "envelope": to_json_dict(verify_result.get("envelope")) if verify_result.get("envelope") is not None else None,
         "infra_error": verify_result.get("infra_error") or verify_result.get("error"),
     }
 
