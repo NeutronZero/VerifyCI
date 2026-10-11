@@ -48,6 +48,8 @@ def validate_task_ingress(task: str, diff: str = "") -> tuple[str, str]:
     """Validate task description and optional accompanying diff before orchestration."""
     if not isinstance(task, str):
         raise IngressValidationError("invalid_type", "task must be a string")
+    if not isinstance(diff, str):
+        raise IngressValidationError("invalid_type", "diff must be a string")
     if len(task) > MAX_TASK_DIFF_CHARS:
         raise IngressValidationError("task_too_large", f"task exceeds maximum size of {MAX_TASK_DIFF_CHARS} characters")
     if diff:
@@ -61,9 +63,10 @@ def validate_query_ingress(query: str, k: int = 10) -> tuple[str, int]:
         raise IngressValidationError("invalid_type", "query must be a string")
     if len(query) > MAX_QUERY_CHARS:
         raise IngressValidationError("query_too_large", f"query exceeds maximum size of {MAX_QUERY_CHARS} characters")
-    if not isinstance(k, int) or k < 1 or k > MAX_K:
+    if isinstance(k, bool) or not isinstance(k, int) or k < 1 or k > MAX_K:
         raise IngressValidationError("invalid_k", f"k must be an integer between 1 and {MAX_K}")
     return query, k
+
 
 
 def validate_safe_path(
@@ -104,7 +107,7 @@ def validate_safe_db_path(db: str | None, repo_root: Path | None = None) -> str 
     Raises IngressValidationError with code 'invalid_db_path' if the path is unsafe.
     Returns resolved absolute path as string, or None if db is empty.
     """
-    if not db:
+    if db is None or db == "":
         return None
     if not isinstance(db, str):
         raise IngressValidationError("invalid_db_path", "db path must be a string")

@@ -57,6 +57,16 @@ def test_validate_task_ingress_oversized_diff():
     assert exc.value.code == "diff_too_large"
 
 
+def test_validate_task_ingress_wrong_diff_type():
+    with pytest.raises(IngressValidationError) as exc:
+        validate_task_ingress("valid task", diff=None)  # type: ignore
+    assert exc.value.code == "invalid_type"
+
+    with pytest.raises(IngressValidationError) as exc:
+        validate_task_ingress("valid task", diff=123)  # type: ignore
+    assert exc.value.code == "invalid_type"
+
+
 def test_validate_query_ingress_valid():
     q, k = validate_query_ingress("search symbol", k=5)
     assert q == "search symbol"
@@ -77,6 +87,14 @@ def test_validate_query_ingress_bounds():
         validate_query_ingress("q", k=MAX_K + 1)
     assert exc.value.code == "invalid_k"
 
+    with pytest.raises(IngressValidationError) as exc:
+        validate_query_ingress("q", k=True)  # type: ignore
+    assert exc.value.code == "invalid_k"
+
+    with pytest.raises(IngressValidationError) as exc:
+        validate_query_ingress("q", k=False)  # type: ignore
+    assert exc.value.code == "invalid_k"
+
 
 def test_validate_safe_db_path(tmp_path):
     from verifyci.interface.ingress import validate_safe_db_path
@@ -84,6 +102,15 @@ def test_validate_safe_db_path(tmp_path):
     # None or empty returns None
     assert validate_safe_db_path("") is None
     assert validate_safe_db_path(None) is None
+
+    # Falsy non-string inputs rejected
+    with pytest.raises(IngressValidationError) as exc:
+        validate_safe_db_path(0)  # type: ignore
+    assert exc.value.code == "invalid_db_path"
+
+    with pytest.raises(IngressValidationError) as exc:
+        validate_safe_db_path(False)  # type: ignore
+    assert exc.value.code == "invalid_db_path"
 
     repo_root = tmp_path
     verifyci_dir = repo_root / ".verifyci"

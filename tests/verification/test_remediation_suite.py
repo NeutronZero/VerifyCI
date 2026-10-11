@@ -449,6 +449,124 @@ def test_h_allow_dirty_worktree_override():
     # With allow_dirty=True, dirty_worktree does not downgrade established claims
     assert evaluation["claims"]["H1_RR_reranked_hybrid"]["status"] == "ESTABLISHED"
     assert evaluation["claims"]["blast_radius_bounds"]["status"] == "ESTABLISHED"
+    assert evaluation["dirty_override_recorded"] is True
+    assert evaluation["claims"]["H1_RR_reranked_hybrid"]["dirty_override_recorded"] is True
+
+
+def test_h_unknown_worktree_fails_establishment():
+    from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import evaluate_claims
+
+    evaluation = evaluate_claims(build_evidence_bundle.ROOT, clean_worktree=None)
+    assert evaluation["provenance_verified"] is False
+    assert evaluation["overall_status"] == "UNESTABLISHED"
+    assert evaluation["worktree_status"] == "unknown"
+
+
+def test_h_missing_frozen_metadata_fails(tmp_path):
+    import json
+    import shutil
+    from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import evaluate_claims, verify_claim_provenance
+
+    # 1. verify_claim_provenance fails closed when frozen section is missing
+    ok, err = verify_claim_provenance(build_evidence_bundle.ROOT, "H1_RR_reranked_hybrid", {})
+    assert ok is False
+    assert err == "missing_provenance:H1_RR_reranked_hybrid:no_frozen_metadata"
+
+    # 2. evaluate_claims downgrades established claim to PROVENANCE_MISMATCH
+    shutil.copytree(build_evidence_bundle.ROOT / "benchmarks", tmp_path / "benchmarks")
+    shutil.copytree(build_evidence_bundle.ROOT / "verifyci", tmp_path / "verifyci")
+    res_path = tmp_path / "benchmarks" / "beir" / "rerank_revision" / "results.json"
+    data = json.loads(res_path.read_text(encoding="utf-8"))
+    del data["frozen"]
+    res_path.write_text(json.dumps(data), encoding="utf-8")
+
+    evaluation = evaluate_claims(tmp_path, clean_worktree=True, bind_result_artifacts=False)
+    assert evaluation["provenance_verified"] is False
+    assert evaluation["overall_status"] == "UNESTABLISHED"
+    assert evaluation["claims"]["H1_RR_reranked_hybrid"]["status"] == "PROVENANCE_MISMATCH"
+    assert "no_frozen_metadata" in evaluation["claims"]["H1_RR_reranked_hybrid"]["provenance_error"]
+
+
+def test_h_missing_required_frozen_field_fails(tmp_path):
+    import json
+    import shutil
+    from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import evaluate_claims, verify_claim_provenance
+
+    # Removing mandatory model_snapshot_sha256 from H1_RR frozen section
+    shutil.copytree(build_evidence_bundle.ROOT / "benchmarks", tmp_path / "benchmarks")
+    shutil.copytree(build_evidence_bundle.ROOT / "verifyci", tmp_path / "verifyci")
+    res_path = tmp_path / "benchmarks" / "beir" / "rerank_revision" / "results.json"
+    data = json.loads(res_path.read_text(encoding="utf-8"))
+    del data["frozen"]["model_snapshot_sha256"]
+    res_path.write_text(json.dumps(data), encoding="utf-8")
+
+    ok, err = verify_claim_provenance(tmp_path, "H1_RR_reranked_hybrid", data, bind_result_artifact=False)
+    assert ok is False
+    assert err == "missing_provenance:H1_RR_reranked_hybrid:missing_model_snapshot_sha256"
+
+    evaluation = evaluate_claims(tmp_path, clean_worktree=True, bind_result_artifacts=False)
+    assert evaluation["claims"]["H1_RR_reranked_hybrid"]["status"] == "PROVENANCE_MISMATCH"
+    assert "missing_model_snapshot_sha256" in evaluation["claims"]["H1_RR_reranked_hybrid"]["provenance_error"]
+
+
+def test_h_missing_benchmark_or_source_file_fails(tmp_path):
+    import shutil
+    from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import evaluate_claims
+
+    shutil.copytree(build_evidence_bundle.ROOT / "benchmarks", tmp_path / "benchmarks")
+    shutil.copytree(build_evidence_bundle.ROOT / "verifyci", tmp_path / "verifyci")
+    # Delete blast_corpus cases.jsonl
+    cases_file = tmp_path / "benchmarks" / "blast_corpus" / "cases.jsonl"
+    cases_file.unlink()
+
+    evaluation = evaluate_claims(tmp_path, clean_worktree=True, bind_result_artifacts=False)
+    assert evaluation["provenance_verified"] is False
+    assert evaluation["claims"]["blast_radius_bounds"]["status"] == "PROVENANCE_MISMATCH"
+    assert evaluation["claims"]["blast_radius_bounds"]["provenance_error"] == "missing_file:cases.jsonl"
+
+
+def test_h_per_case_ground_truth_recomputation_prevents_aggregate_tampering():
+    import json
+    from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import evaluate_claim
+
+    patch_path = build_evidence_bundle.ROOT / "benchmarks" / "patch_corpus" / "results.json"
+    patch_data = json.loads(patch_path.read_text(encoding="utf-8"))
+
+    # Tamper with recorded aggregate metric in results (falsely claiming FAR=0.0 to forge ESTABLISHED)
+    tampered = dict(patch_data)
+    tampered["metrics"] = dict(patch_data["metrics"])
+    tampered["metrics"]["overall_agreement"] = 0.99
+    tampered["metrics"]["deterministic_catch_rate"] = 0.99
+    tampered["metrics"]["semantic_false_accept_rate"] = 0.0
+
+    # Recomputation from per-case verdicts preserves ground truth (true semantic FAR is 1.0, not 0.0)
+    result = evaluate_claim("patch_corpus_verifier", tampered)
+    assert result["recomputed_from_cases"] is True
+    assert result["semantic_false_accept_rate"] == 1.0
+    assert result["status"] == "MEASURED"  # FAR > 0.0, does not falsely establish
+
+
+def test_h_result_artifact_tampering_fails_binding(tmp_path):
+    import shutil
+    from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import evaluate_claims
+
+    shutil.copytree(build_evidence_bundle.ROOT / "benchmarks", tmp_path / "benchmarks")
+    shutil.copytree(build_evidence_bundle.ROOT / "verifyci", tmp_path / "verifyci")
+
+    # Mutate blast_corpus results.json bytes (e.g. append newline and space)
+    res_file = tmp_path / "benchmarks" / "blast_corpus" / "results.json"
+    res_file.write_bytes(res_file.read_bytes() + b"\n ")
+
+    evaluation = evaluate_claims(tmp_path, clean_worktree=True, bind_result_artifacts=True)
+    assert evaluation["provenance_verified"] is False
+    assert evaluation["claims"]["blast_radius_bounds"]["status"] == "PROVENANCE_MISMATCH"
+    assert "result_artifact_hash_mismatch:results.json" in evaluation["claims"]["blast_radius_bounds"]["provenance_error"]
 
 
 def test_sec_001_selector_allowlist_and_ci_transport():

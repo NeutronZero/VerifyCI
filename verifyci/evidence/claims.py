@@ -179,16 +179,62 @@ def _evaluate_h1_rr(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _evaluate_patch(data: dict[str, Any]) -> dict[str, Any]:
-    metrics = _require_mapping(data, "metrics")
-    if metrics is None:
-        return _missing_claim("missing_required_sections")
+REQUIRED_FROZEN_FIELDS: dict[str, tuple[str, ...]] = {
+    "H1_retrieval_fusion": ("corpus_sha256", "qrels_sha256", "config_sha256"),
+    "H1_RR_reranked_hybrid": (
+        "corpus_sha256",
+        "qrels_sha256",
+        "config_sha256",
+        "revision_config_sha256",
+        "model_snapshot_sha256",
+    ),
+    "patch_corpus_verifier": ("cases_sha256",),
+    "blast_radius_bounds": ("cases_sha256",),
+}
 
-    agreement = _require_number(metrics, "overall_agreement")
-    catch_rate = _require_number(metrics, "deterministic_catch_rate")
-    false_accept_rate = _require_number(metrics, "semantic_false_accept_rate")
-    if agreement is None or catch_rate is None or false_accept_rate is None:
-        return _missing_claim("missing_required_metrics")
+TRUSTED_RESULT_HASHES: dict[str, str] = {
+    "H1_retrieval_fusion": "9a14540ce93d74704095f43a36daf64cfcfa22dee9c78be49c94494071dd7553",
+    "H1_RR_reranked_hybrid": "66254e70677dfe22fe7e9d3204b688f3665b3ab1ea17fa1a265ef91c7a6ec4aa",
+    "patch_corpus_verifier": "f622583ce00404a3ac6c371bdbf1578324d66c7a171218fface91f2fa4a22107",
+    "blast_radius_bounds": "00ab5c6997107205fb0e5e2119452ae15066fa8df3a4aaec76d16f409961887d",
+}
+
+
+def _evaluate_patch(data: dict[str, Any]) -> dict[str, Any]:
+    verdicts = data.get("verdicts")
+    if isinstance(verdicts, list) and verdicts:
+        # Recompute aggregate metrics from per-case ground-truth records
+        correct = [t for t in verdicts if isinstance(t, dict) and t.get("ground_truth") == "correct"]
+        wrong = [t for t in verdicts if isinstance(t, dict) and t.get("ground_truth") == "wrong"]
+        det = [
+            t
+            for t in wrong
+            if t.get("category") in ("forbid_call", "forbid_import", "secret", "fabricated_removal")
+        ]
+        sem = [t for t in wrong if t.get("category") == "semantic"]
+
+        agreement = (
+            sum(1 for t in verdicts if isinstance(t, dict) and t.get("status") == t.get("expected")) / len(verdicts)
+        )
+        catch_rate = (sum(1 for t in det if t.get("status") == "FAIL") / len(det)) if det else 0.0
+        false_accept_rate = (sum(1 for t in sem if t.get("status") == "PASS") / len(sem)) if sem else 0.0
+        n_correct = len(correct)
+        n_wrong = len(wrong)
+        agreement = round(agreement, 4)
+        catch_rate = round(catch_rate, 4)
+        false_accept_rate = round(false_accept_rate, 4)
+    else:
+        metrics = _require_mapping(data, "metrics")
+        if metrics is None:
+            return _missing_claim("missing_required_sections")
+
+        agreement = _require_number(metrics, "overall_agreement")
+        catch_rate = _require_number(metrics, "deterministic_catch_rate")
+        false_accept_rate = _require_number(metrics, "semantic_false_accept_rate")
+        if agreement is None or catch_rate is None or false_accept_rate is None:
+            return _missing_claim("missing_required_metrics")
+        n_correct = metrics.get("n_correct")
+        n_wrong = metrics.get("n_wrong")
 
     established = (
         agreement >= PATCH_MIN_AGREEMENT
@@ -200,27 +246,40 @@ def _evaluate_patch(data: dict[str, Any]) -> dict[str, Any]:
         "overall_agreement": agreement,
         "deterministic_catch_rate": catch_rate,
         "semantic_false_accept_rate": false_accept_rate,
-        "n_correct": metrics.get("n_correct"),
-        "n_wrong": metrics.get("n_wrong"),
+        "n_correct": n_correct,
+        "n_wrong": n_wrong,
+        "recomputed_from_cases": bool(verdicts and isinstance(verdicts, list)),
     }
 
 
 def _evaluate_blast(data: dict[str, Any]) -> dict[str, Any]:
-    metrics = _require_mapping(data, "metrics")
-    if metrics is None:
-        return _missing_claim("missing_required_sections")
+    cases = data.get("cases")
+    if isinstance(cases, list) and cases:
+        # Recompute coverage metrics directly from per-case outputs and expectations
+        exp_rows = [r for r in cases if isinstance(r, dict) and r.get("expected")]
+        cov_all = (sum(r.get("recall", 0.0) for r in exp_rows) / len(exp_rows)) if exp_rows else 0.0
+        seeded = [r.get("recall", 0.0) for r in exp_rows if r.get("mode") == "seeded"]
+        cov_seeded = (sum(seeded) / len(seeded)) if seeded else 0.0
+        cov_all = round(cov_all, 4)
+        cov_seeded = round(cov_seeded, 4)
+    else:
+        metrics = _require_mapping(data, "metrics")
+        if metrics is None:
+            return _missing_claim("missing_required_sections")
 
-    cov_seeded = _require_number(metrics, "coverage_seeded_only")
-    cov_all = _require_number(metrics, "coverage_all")
-    if cov_seeded is None or cov_all is None:
-        return _missing_claim("missing_required_metrics")
+        cov_seeded = _require_number(metrics, "coverage_seeded_only")
+        cov_all = _require_number(metrics, "coverage_all")
+        if cov_seeded is None or cov_all is None:
+            return _missing_claim("missing_required_metrics")
 
     established = cov_seeded >= BLAST_MIN_SEEDED_COVERAGE and cov_all >= BLAST_MIN_ALL_COVERAGE
     return {
         "status": "ESTABLISHED" if established else "MEASURED",
         "coverage_seeded_only": cov_seeded,
         "coverage_all": cov_all,
+        "recomputed_from_cases": bool(cases and isinstance(cases, list)),
     }
+
 
 
 def evaluate_claim(claim_name: str, evidence: EvidenceLoad | dict[str, Any] | None) -> dict[str, Any]:
@@ -266,11 +325,31 @@ def _file_matches_hash(path: Path, expected: str) -> bool:
     return h1 == expected or h2 == expected
 
 
-def verify_claim_provenance(root: Path, claim_name: str, data: dict[str, Any]) -> tuple[bool, str | None]:
-    """Verify protocol, corpus, and measured-source hashes for an evaluated claim."""
+def verify_claim_provenance(
+    root: Path,
+    claim_name: str,
+    data: dict[str, Any],
+    artifact_path: Path | None = None,
+    bind_result_artifact: bool = True,
+) -> tuple[bool, str | None]:
+    """Verify protocol, corpus, measured-source, and result artifact hashes for a claim.
+
+    Fail-closed:
+    - Missing frozen metadata section -> fails.
+    - Missing any required frozen field for the claim type -> fails.
+    - Missing benchmark data file or implementation source file -> fails.
+    - Hash mismatch -> fails.
+    - Pinned result artifact tampering -> fails.
+    """
     frozen = _require_mapping(data, "frozen")
     if frozen is None:
-        return True, None
+        return False, f"missing_provenance:{claim_name}:no_frozen_metadata"
+
+    required_fields = REQUIRED_FROZEN_FIELDS.get(claim_name, ())
+    for field in required_fields:
+        val = frozen.get(field)
+        if not isinstance(val, str) or not val:
+            return False, f"missing_provenance:{claim_name}:missing_{field}"
 
     # Protocol & corpus checks
     if claim_name in ("H1_retrieval_fusion", "H1_RR_reranked_hybrid"):
@@ -278,45 +357,63 @@ def verify_claim_provenance(root: Path, claim_name: str, data: dict[str, Any]) -
         qrels_path = root / "benchmarks" / "beir" / "qrels.jsonl"
         config_path = root / "benchmarks" / "beir" / "config.json"
 
-        if "corpus_sha256" in frozen and not _file_matches_hash(corpus_path, frozen["corpus_sha256"]):
+        if not corpus_path.is_file():
+            return False, "missing_file:corpus.jsonl"
+        if not qrels_path.is_file():
+            return False, "missing_file:qrels.jsonl"
+        if not config_path.is_file():
+            return False, "missing_file:config.json"
+
+        if not _file_matches_hash(corpus_path, frozen["corpus_sha256"]):
             return False, "corpus_hash_mismatch:corpus.jsonl"
-        if "qrels_sha256" in frozen and not _file_matches_hash(qrels_path, frozen["qrels_sha256"]):
+        if not _file_matches_hash(qrels_path, frozen["qrels_sha256"]):
             return False, "corpus_hash_mismatch:qrels.jsonl"
-        if "config_sha256" in frozen and not _file_matches_hash(config_path, frozen["config_sha256"]):
+        if not _file_matches_hash(config_path, frozen["config_sha256"]):
             return False, "protocol_hash_mismatch:config.json"
 
         if claim_name == "H1_RR_reranked_hybrid":
             rev_cfg = root / "benchmarks" / "beir" / "rerank_revision" / "config.json"
-            if "revision_config_sha256" in frozen and not _file_matches_hash(rev_cfg, frozen["revision_config_sha256"]):
+            if not rev_cfg.is_file():
+                return False, "missing_file:revision_config.json"
+            if not _file_matches_hash(rev_cfg, frozen["revision_config_sha256"]):
                 return False, "protocol_hash_mismatch:revision_config.json"
 
         # Measured-source identity check for retrieval implementations
         retrieval_results = root / "benchmarks" / "retrieval" / "results.json"
-        if retrieval_results.is_file():
-            try:
-                ret_data = json.loads(retrieval_results.read_text(encoding="utf-8"))
-                frozen_sources = ret_data.get("frozen_sources", {})
-                source_paths = {
-                    "vector_store.py": "verifyci/contracts/vector_store.py",
-                    "dense.py": "verifyci/retrieval/dense.py",
-                    "sparse.py": "verifyci/retrieval/sparse.py",
-                    "fusion.py": "verifyci/retrieval/fusion.py",
-                }
-                for name, exp_h in frozen_sources.items():
-                    rel_src = source_paths.get(name)
-                    if rel_src and not _file_matches_hash(root / rel_src, exp_h):
+        if not retrieval_results.is_file():
+            return False, "missing_file:retrieval_results.json"
+        try:
+            ret_data = json.loads(retrieval_results.read_text(encoding="utf-8"))
+            frozen_sources = ret_data.get("frozen_sources", {})
+            source_paths = {
+                "vector_store.py": "verifyci/contracts/vector_store.py",
+                "dense.py": "verifyci/retrieval/dense.py",
+                "sparse.py": "verifyci/retrieval/sparse.py",
+                "fusion.py": "verifyci/retrieval/fusion.py",
+            }
+            for name, exp_h in frozen_sources.items():
+                rel_src = source_paths.get(name)
+                if rel_src:
+                    src_file = root / rel_src
+                    if not src_file.is_file():
+                        return False, f"missing_source_file:{name}"
+                    if not _file_matches_hash(src_file, exp_h):
                         return False, f"source_hash_mismatch:{name}"
-            except Exception:
-                return False, "measured_source_read_error"
+        except Exception:
+            return False, "measured_source_read_error"
 
     elif claim_name == "patch_corpus_verifier":
         cases_path = root / "benchmarks" / "patch_corpus" / "cases.jsonl"
-        if "cases_sha256" in frozen and not _file_matches_hash(cases_path, frozen["cases_sha256"]):
+        if not cases_path.is_file():
+            return False, "missing_file:cases.jsonl"
+        if not _file_matches_hash(cases_path, frozen["cases_sha256"]):
             return False, "corpus_hash_mismatch:cases.jsonl"
 
     elif claim_name == "blast_radius_bounds":
         cases_path = root / "benchmarks" / "blast_corpus" / "cases.jsonl"
-        if "cases_sha256" in frozen and not _file_matches_hash(cases_path, frozen["cases_sha256"]):
+        if not cases_path.is_file():
+            return False, "missing_file:cases.jsonl"
+        if not _file_matches_hash(cases_path, frozen["cases_sha256"]):
             return False, "corpus_hash_mismatch:cases.jsonl"
 
     # Explicit frozen_sources in the claim artifact itself
@@ -325,8 +422,16 @@ def verify_claim_provenance(root: Path, claim_name: str, data: dict[str, Any]) -
             candidate = root / src_name
             if not candidate.is_file():
                 candidate = root / "verifyci" / src_name
+            if not candidate.is_file():
+                return False, f"missing_source_file:{src_name}"
             if not _file_matches_hash(candidate, exp_h):
                 return False, f"source_hash_mismatch:{src_name}"
+
+    # Cryptographic binding of result artifact to trusted hash
+    if bind_result_artifact and artifact_path is not None and artifact_path.is_file():
+        trusted_hash = TRUSTED_RESULT_HASHES.get(claim_name)
+        if trusted_hash and not _file_matches_hash(artifact_path, trusted_hash):
+            return False, f"result_artifact_hash_mismatch:{artifact_path.name}"
 
     return True, None
 
@@ -336,29 +441,58 @@ def evaluate_claims(
     clean_worktree: bool | None = None,
     allow_dirty: bool = False,
     verify_provenance: bool = True,
+    bind_result_artifacts: bool = True,
 ) -> dict[str, Any]:
     """Evaluate every canonical benchmark claim under ``root``.
 
-    Provenance gate:
-    1. Source state must be clean or explicitly approved (``allow_dirty=True``).
-       If ``clean_worktree is False`` and not ``allow_dirty``, uncommitted source drift
-       forces ``overall_status`` to ``UNESTABLISHED`` and downgrades established
-       claims to ``PROVENANCE_MISMATCH``.
-    2. Protocol and corpus hashes must match the recorded frozen hashes.
-    3. Measured-source identity must match the frozen implementation hashes.
+    Provenance gate (strict fail-closed):
+    1. Working-tree state:
+       - If ``clean_worktree is None`` (unknown): state is unverified -> overall_status
+         is UNESTABLISHED and claims cannot establish (provenance_error="unknown_worktree").
+       - If ``clean_worktree is False`` (dirty):
+         - without ``allow_dirty=True``: uncommitted drift downgrades established claims
+           to PROVENANCE_MISMATCH (provenance_error="dirty_worktree").
+         - with ``allow_dirty=True``: allowed only with explicit override recorded.
+       - If ``clean_worktree is True`` (clean): verified clean source state.
+    2. Mandatory frozen metadata: every claim requires full set of frozen hashes.
+    3. Mandatory benchmark/source files: missing files fail provenance.
+    4. Hash integrity: source/corpus/protocol differences trigger PROVENANCE_MISMATCH.
+    5. Artifact binding: result artifacts must match trusted provenance record.
     """
     claims: dict[str, dict[str, Any]] = {}
     missing_benchmarks: list[str] = []
     provenance_failures: list[dict[str, str]] = []
 
-    tree_is_clean_or_approved = (clean_worktree is not False) or allow_dirty
+    if clean_worktree is None:
+        tree_status = "unknown"
+        tree_ok = False
+        dirty_override = False
+    elif clean_worktree is False:
+        tree_status = "dirty"
+        if allow_dirty:
+            tree_ok = True
+            dirty_override = True
+        else:
+            tree_ok = False
+            dirty_override = False
+    else:
+        tree_status = "clean"
+        tree_ok = True
+        dirty_override = False
 
     for claim_name, relative_path in CLAIM_RESULT_PATHS.items():
-        loaded = load_evidence(root / relative_path)
+        artifact_file = root / relative_path
+        loaded = load_evidence(artifact_file)
         result = evaluate_claim(claim_name, loaded)
 
         if loaded.ok and loaded.data is not None and verify_provenance:
-            prov_ok, prov_err = verify_claim_provenance(root, claim_name, loaded.data)
+            prov_ok, prov_err = verify_claim_provenance(
+                root,
+                claim_name,
+                loaded.data,
+                artifact_path=artifact_file,
+                bind_result_artifact=bind_result_artifacts,
+            )
             if not prov_ok:
                 provenance_failures.append({"claim": claim_name, "error": prov_err or "provenance_mismatch"})
                 if result.get("status") == "ESTABLISHED":
@@ -366,8 +500,15 @@ def evaluate_claims(
                 else:
                     result = {**result, "provenance_error": prov_err}
 
-        if not tree_is_clean_or_approved and result.get("status") == "ESTABLISHED":
-            result = {**result, "status": "PROVENANCE_MISMATCH", "provenance_error": "dirty_worktree"}
+        if tree_status == "dirty" and not allow_dirty and result.get("status") == "ESTABLISHED":
+            result = {
+                **result,
+                "status": "PROVENANCE_MISMATCH",
+                "provenance_error": "dirty_worktree",
+            }
+
+        if dirty_override and result.get("status") == "ESTABLISHED":
+            result = {**result, "dirty_override_recorded": True}
 
         claims[claim_name] = result
         if result.get("status") == "MISSING":
@@ -375,7 +516,7 @@ def evaluate_claims(
 
     statuses = [claim["status"] for claim in claims.values()]
     all_established = bool(statuses) and all(s == "ESTABLISHED" for s in statuses)
-    provenance_verified = tree_is_clean_or_approved and not provenance_failures
+    provenance_verified = tree_ok and not provenance_failures
 
     overall = "ESTABLISHED" if (all_established and provenance_verified) else "UNESTABLISHED"
 
@@ -385,5 +526,8 @@ def evaluate_claims(
         "missing_benchmarks": missing_benchmarks,
         "provenance_verified": provenance_verified,
         "provenance_failures": provenance_failures,
+        "worktree_status": tree_status,
+        "dirty_override_recorded": dirty_override,
     }
+
 

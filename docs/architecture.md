@@ -136,7 +136,12 @@ The foundation of VerifyCI consists of immutable, frozen dataclass schemas that 
 
 ### 7. Evidence Provenance & Bundle Generation (`scripts/build_evidence_bundle.py`, `claims.py`)
 - **Forensic Execution Metadata**: Records commit SHA, dirty worktree status (`clean_worktree`), Python version, lockfile SHA-256 (`uv.lock`), and resolved package versions.
-- **Fail-Closed Evidence Predicates & Provenance Enforcement**: Evaluates raw benchmark outputs independently. Uncommitted working tree drift (`clean_worktree is False`), protocol hash mismatches (`config_sha256`), corpus hash mismatches (`corpus_sha256`, `qrels_sha256`, `cases_sha256`), or measured-source identity drift (`frozen_sources`) automatically invalidate claim establishment, downgrading claims to `PROVENANCE_MISMATCH` and forcing `overall_status` to `UNESTABLISHED` (unless an explicit override like `allow_dirty=True` is provided).
+- **Fail-Closed Evidence Predicates & Provenance Gate**: Evaluates raw benchmark outputs independently under strict fail-closed rules:
+  - *Mandatory Provenance Metadata*: Every evaluated claim requires the complete set of frozen protocol and corpus hashes (`REQUIRED_FROZEN_FIELDS`); omitted or malformed metadata immediately fails provenance.
+  - *Strict File & Hash Integrity*: Missing benchmark data files or measured-source implementations fail provenance; differences in corpus, protocol, or source hashes downgrade claims to `PROVENANCE_MISMATCH`.
+  - *Per-Case Measurement Recomputation*: Where per-case verdict records and ground truth are available (`patch_corpus` verdicts, `blast_corpus` cases), aggregate rates (agreement, deterministic catch rate, semantic false-accept rate, coverage) are recomputed dynamically from case records, preventing tampering with stored aggregate numbers.
+  - *Cryptographic Result Binding*: Benchmark result artifacts are cryptographically bound to canonical SHA-256 hashes (`TRUSTED_RESULT_HASHES`), ensuring result data cannot be modified in place.
+  - *Fail-Closed Worktree State*: An unknown working-tree state (`clean_worktree is None`) never silently passes; it sets `provenance_verified = False` and forces `overall_status` to `UNESTABLISHED`. Uncommitted tree drift (`clean_worktree is False`) downgrades established claims to `PROVENANCE_MISMATCH` unless an explicit override is recorded (`dirty_override_recorded: True`).
 
 
 ### 8. Network & Multi-Platform Integration Surface
