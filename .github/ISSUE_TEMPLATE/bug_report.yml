@@ -1,0 +1,53 @@
+name: Bug Report
+description: Report a defect, unexpected verification verdict, or crash with reproducible diff
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue in VerifyCI.
+        VerifyCI operates on deterministic, fail-closed semantics: uncertainty never silently passes.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Concise description of the unexpected behavior.
+      placeholder: E.g., verify-diff returns INCONCLUSIVE on valid deletion with anchor...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction_diff
+    attributes:
+      label: Minimal Reproducible Diff
+      description: Unified git diff that reproduces the behavior.
+      render: diff
+    validations:
+      required: true
+  - type: textarea
+    id: command_output
+    attributes:
+      label: Command & Exit Code / Output
+      description: The exact command executed and its output (`--format json` preferred).
+      render: shell
+    validations:
+      required: true
+  - type: dropdown
+    id: expected_vs_actual
+    attributes:
+      label: Observed Verdict vs Expected Verdict
+      options:
+        - "Observed FAIL, Expected PASS"
+        - "Observed PASS, Expected FAIL"
+        - "Observed INCONCLUSIVE, Expected PASS"
+        - "Observed INFRA_ERROR (Exit 3)"
+        - "Linter or Build failure"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Python version, OS, VerifyCI version / commit SHA.
+      placeholder: Python 3.12, Ubuntu 22.04, verifyci v0.1.0
+    validations:
+      required: true

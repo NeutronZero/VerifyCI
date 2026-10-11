@@ -272,6 +272,21 @@ runs:
           echo "Rationale: $RATIONALE"
         fi
 
+        # Write clean step summary when running on GitHub Actions
+        if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          {
+            echo "### 🛡️ VerifyCI Verification Gate"
+            echo ""
+            echo "| Field | Value |"
+            echo "| :--- | :--- |"
+            echo "| **Verdict** | \`$STATUS\` |"
+            echo "| **Exit Code** | \`$EXIT_CODE\` |"
+            echo "| **Rationale** | \`$RATIONALE\` |"
+            echo "| **Report File** | \`$OUT_FILE\` |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
         # Enforce Honest Exit Semantics
         if [ "$EXIT_CODE" -eq 0 ]; then
           echo "::notice::VerifyCI PASSED: $RATIONALE"

@@ -1,0 +1,32 @@
+name: Verification Checker Proposal
+description: Propose a new deterministic static checker or invariant detector
+labels: ["enhancement", "verification"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        VerifyCI checkers enforce mathematical code property graph assertions and deterministic AST rules.
+        Review [docs/extension.md](https://github.com/NeutronZero/VerifyCI/blob/main/docs/extension.md) before submitting.
+  - type: textarea
+    id: checker_purpose
+    attributes:
+      label: Checker Name & Target Risk
+      description: What specific safety violation or invariant does this checker detect?
+      placeholder: E.g., `forbid_unbounded_recursion`: flags recursive calls lacking base cases.
+    validations:
+      required: true
+  - type: textarea
+    id: failure_semantics
+    attributes:
+      label: Verdict Semantics & Failure Mode
+      description: Explain when this checker emits PASS, FAIL, or INCONCLUSIVE under fail-closed principles.
+    validations:
+      required: true
+  - type: textarea
+    id: sample_diffs
+    attributes:
+      label: Test Pair (Compliant Diff vs Violating Diff)
+      description: Provide minimal diffs illustrating the violation and compliance.
+      render: diff
+    validations:
+      required: true

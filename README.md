@@ -253,6 +253,7 @@ For complete details and hash verification, see [docs/benchmarks.md](docs/benchm
 ## Documentation Index
 
 - [Quickstart Guide (5-Minute Walkthrough)](docs/quickstart.md)
+- [CI/CD Pipeline Integrations (GitHub Actions, GitLab CI, Bitbucket)](docs/integrations/ci_pipelines.md)
 - [Adoption Walkthrough (End-to-End Example)](docs/examples/basic_walkthrough.md)
 - [Verdict System & Exit Code Reference](docs/verdicts.md)
 - [System Architecture & Pipeline Details](docs/architecture.md)
