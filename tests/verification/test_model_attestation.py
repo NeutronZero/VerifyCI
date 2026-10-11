@@ -305,3 +305,80 @@ def test_cross_encoder_reranker_default_init_is_offline():
     reranker = CrossEncoderReranker()
     assert reranker.backend == "offline"
     assert reranker.model_attestation is None
+
+
+def test_enforced_attestation_without_pin_fails_closed(monkeypatch, tmp_path: Path):
+    """Enforce attestation without expected_snapshot_sha256 pin must fail closed and remain offline."""
+    commit = "unpinned-commit"
+    model_dir, _, _ = _create_mock_model_dir(tmp_path, commit)
+
+    loaded_cross_encoder = False
+
+    class SpyCrossEncoder:
+        def __init__(self, *args, **kwargs):
+            nonlocal loaded_cross_encoder
+            loaded_cross_encoder = True
+
+    mock_st = types.ModuleType("sentence_transformers")
+    mock_st.CrossEncoder = SpyCrossEncoder
+    monkeypatch.setitem(sys.modules, "sentence_transformers", mock_st)
+
+    # 1. verify_runtime_model with require_pin=True fails without expected_snapshot_sha256
+    ok, details = verify_runtime_model(str(model_dir), require_pin=True)
+    assert ok is False
+    assert details["verified"] is False
+    assert "requires a trusted expected_snapshot_sha256 pin" in details["error"]
+
+    # 2. CrossEncoderReranker with enforce_attestation=True and no expected_snapshot_sha256 cannot select cross_encoder
+    reranker = CrossEncoderReranker(
+        model=str(model_dir),
+        enforce_attestation=True,
+        expected_snapshot_sha256=None,
+    )
+    assert loaded_cross_encoder is False
+    assert reranker.backend == "offline"
+    assert reranker.model_attestation is not None
+    assert reranker.model_attestation["verified"] is False
+    assert "Enforced attestation requires expected_snapshot_sha256 pin" in reranker.model_attestation["error"]
+
+
+def test_verified_snapshot_path_is_passed_to_loader(monkeypatch, tmp_path: Path):
+    """Confirm the verified snapshot path (not the model identifier) is explicitly passed to CrossEncoder."""
+    commit = "verified-commit-999"
+    model_dir, expected_sha, _ = _create_mock_model_dir(tmp_path, commit)
+
+    passed_model_arg = None
+    passed_local_files_only = None
+
+    class CaptureCrossEncoder:
+        def __init__(self, model_name, local_files_only=False):
+            nonlocal passed_model_arg, passed_local_files_only
+            passed_model_arg = model_name
+            passed_local_files_only = local_files_only
+
+        def predict(self, pairs):
+            return [0.88 for _ in pairs]
+
+    mock_st = types.ModuleType("sentence_transformers")
+    mock_st.CrossEncoder = CaptureCrossEncoder
+    monkeypatch.setitem(sys.modules, "sentence_transformers", mock_st)
+
+    # Mock snapshot_download to return our mock model directory
+    mock_hf = types.ModuleType("huggingface_hub")
+    mock_hf.snapshot_download = lambda model_id, local_files_only=True: str(model_dir)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", mock_hf)
+
+    model_identifier = "some-org/some-model-id"
+    reranker = CrossEncoderReranker(
+        model=model_identifier,
+        expected_snapshot_commit=commit,
+        expected_snapshot_sha256=expected_sha,
+        enforce_attestation=True,
+    )
+
+    assert reranker.backend == "cross_encoder"
+    # Crucial assertion: passed_model_arg MUST be the verified local snapshot directory, NOT the model identifier!
+    assert passed_model_arg == str(model_dir.resolve())
+    assert passed_model_arg != model_identifier
+    assert passed_local_files_only is True
+    assert reranker.loaded_snapshot_path == str(model_dir.resolve())

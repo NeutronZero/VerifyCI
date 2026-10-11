@@ -123,14 +123,26 @@ class CrossEncoderReranker(Reranker):
         self.expected_snapshot_sha256 = expected_snapshot_sha256
         self.enforce_attestation = enforce_attestation
         self.model_attestation: dict[str, Any] | None = None
+        self.loaded_snapshot_path: str | None = None
         if model:
             self._try_load(model, local_files_only)
 
     def _try_load(self, model: str, local_files_only: bool) -> None:
+        # Enforced attestation strictly requires a trusted expected_snapshot_sha256 pin
+        if self.enforce_attestation and not self.expected_snapshot_sha256:
+            self.model_attestation = {
+                "model": model,
+                "verified": False,
+                "error": "Enforced attestation requires expected_snapshot_sha256 pin to be configured.",
+            }
+            self.backend = "offline"
+            return
+
         ok, attestation = verify_runtime_model(
             model,
             expected_snapshot_commit=self.expected_snapshot_commit,
             expected_snapshot_sha256=self.expected_snapshot_sha256,
+            require_pin=self.enforce_attestation,
         )
         self.model_attestation = attestation
 
@@ -138,10 +150,14 @@ class CrossEncoderReranker(Reranker):
             self.backend = "offline"
             return
 
+        # Explicitly load from verified snapshot_path rather than re-resolving model identifier
+        load_target = attestation.get("snapshot_path") if (ok and attestation.get("snapshot_path")) else model
+
         try:
             from sentence_transformers import CrossEncoder  # type: ignore
 
-            self._cross_encoder = CrossEncoder(model, local_files_only=local_files_only)
+            self._cross_encoder = CrossEncoder(load_target, local_files_only=local_files_only)
+            self.loaded_snapshot_path = str(load_target)
             self.backend = "cross_encoder"
         except Exception:  # noqa: BLE001, S110
             self.backend = "offline"

@@ -64,17 +64,21 @@ def test_certificate_sign_and_verify():
     assert signed_cert.signing_key_id == pub_hex
     assert signed_cert.signature_algorithm == "ed25519"
 
-    # Canonical bytes invariant: signature fields excluded from canonical representation
-    assert signed_cert.canonical_bytes() == cert.canonical_bytes()
-    assert signed_cert.content_hash() == cert.content_hash()
+    # Envelope binding: signing_key_id and signature_algorithm are bound in signed envelope
+    assert signed_cert.signing_key_id == pub_hex
+    assert signed_cert.signature_algorithm == "ed25519"
 
-    # Verification: self-contained with derived public key in signing_key_id
-    assert signed_cert.verify_signature() is True
+    # Fail-closed without external trust store configured
+    assert signed_cert.verify_signature() is False
 
     # Verification: explicit public key object, raw bytes, and hex string
     assert signed_cert.verify_signature(pub_key) is True
     assert signed_cert.verify_signature(pub_key.public_bytes_raw()) is True
     assert signed_cert.verify_signature(pub_hex) is True
+
+    # Verification: trusted_keys store argument
+    assert signed_cert.verify_signature(trusted_keys=[pub_hex]) is True
+    assert signed_cert.verify_signature(trusted_keys={pub_hex: pub_key}) is True
 
 
 def test_certificate_sign_with_raw_bytes_and_hex_and_key_id():
@@ -104,8 +108,9 @@ def test_certificate_sign_with_raw_bytes_and_hex_and_key_id():
 def test_tampering_any_field_fails_verification():
     """Test that tampering with any field in Certificate causes verify_signature() to return False."""
     private_key = Ed25519PrivateKey.generate()
+    pub_key = private_key.public_key()
     cert = _sample_certificate().sign(private_key)
-    assert cert.verify_signature() is True
+    assert cert.verify_signature(pub_key) is True
 
     tampered_fields = [
         ("conclusion", Conclusion(result="fail", reasoning="tampered reasoning")),
@@ -136,11 +141,13 @@ def test_tampering_any_field_fails_verification():
             [ExecutionTrace(trace_id="t-fake", path=["e-bad"], conditions=[])],
         ),
         ("checked_by", ["tampered_check"]),
+        ("signing_key_id", "attacker-forged-key-id"),
+        ("signature_algorithm", "ed25519-fake"),
     ]
 
     for field_name, new_val in tampered_fields:
         tampered_cert = dataclasses.replace(cert, **{field_name: new_val})
-        assert tampered_cert.verify_signature() is False, f"Tampering with {field_name} did not fail verification"
+        assert tampered_cert.verify_signature(pub_key) is False, f"Tampering with {field_name} did not fail verification"
 
 
 def test_fail_closed_on_wrong_key_corrupted_signature_missing_signature():
@@ -240,7 +247,7 @@ def test_semi_formal_reasoner_with_signing_key():
     assert cert_empty.signature is not None
     assert cert_empty.signing_key_id == pub_hex
     assert cert_empty.signature_algorithm == "ed25519"
-    assert cert_empty.verify_signature() is True
+    assert cert_empty.verify_signature(private_key.public_key()) is True
 
     # 3. Non-code path (documentation) produces valid signed certificate
     doc_diff = (
@@ -256,7 +263,7 @@ def test_semi_formal_reasoner_with_signing_key():
     assert cert_doc.signature is not None
     assert cert_doc.signing_key_id == pub_hex
     assert cert_doc.conclusion.result == "pass"
-    assert cert_doc.verify_signature() is True
+    assert cert_doc.verify_signature(private_key.public_key()) is True
 
     # 4. Reasoner with hex private key and explicit signing_key_id
     priv_hex = private_key.private_bytes_raw().hex()
@@ -269,3 +276,37 @@ def test_semi_formal_reasoner_with_signing_key():
     assert cert_custom.signing_key_id == "custom-reasoner-id"
     assert cert_custom.signature_algorithm == "ed25519"
     assert cert_custom.verify_signature(private_key.public_key()) is True
+
+
+def test_unknown_key_cannot_self_certify(monkeypatch):
+    """Regression test: A certificate signed by an unknown key is rejected
+    even if its embedded identifier contains that key's public key."""
+    attacker_key = Ed25519PrivateKey.generate()
+    attacker_pub_hex = attacker_key.public_key().public_bytes_raw().hex()
+
+    trusted_key = Ed25519PrivateKey.generate()
+    trusted_pub_hex = trusted_key.public_key().public_bytes_raw().hex()
+
+    # Attacker signs certificate with attacker private key and embeds attacker pubkey in signing_key_id
+    malicious_cert = _sample_certificate().sign(attacker_key, key_id=attacker_pub_hex)
+    assert malicious_cert.signing_key_id == attacker_pub_hex
+
+    # 1. Without trust store configured, fails closed
+    monkeypatch.delenv("VERIFYCI_CERTIFICATE_PUBLIC_KEYS", raising=False)
+    monkeypatch.delenv("ACI_CERTIFICATE_PUBLIC_KEYS", raising=False)
+    assert malicious_cert.verify_signature() is False
+
+    # 2. With trust store configured with authorized key, unknown attacker key is rejected!
+    monkeypatch.setenv("VERIFYCI_CERTIFICATE_PUBLIC_KEYS", trusted_pub_hex)
+    assert malicious_cert.verify_signature() is False
+
+    # 3. With mapping trust store {"trusted_signer": trusted_pub_hex}, attacker is rejected!
+    key_map = json.dumps({"trusted_signer": trusted_pub_hex})
+    monkeypatch.setenv("VERIFYCI_CERTIFICATE_PUBLIC_KEYS", key_map)
+    assert malicious_cert.verify_signature() is False
+    assert malicious_cert.verify_signature(trusted_keys={"trusted_signer": trusted_pub_hex}) is False
+
+    # 4. Legitimately signed certificate succeeds under the same trusted store
+    valid_cert = _sample_certificate().sign(trusted_key, key_id=trusted_pub_hex)
+    assert valid_cert.verify_signature(trusted_keys=[trusted_pub_hex]) is True
+    assert valid_cert.verify_signature() is True

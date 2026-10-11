@@ -23,7 +23,7 @@ def event_hash(event: Any) -> str:
     return hashlib.sha256(canonical_event_bytes(event)).hexdigest()
 
 
-CERTIFICATE_EXCLUDED_FIELDS = {"signature", "signing_key_id", "signature_algorithm"}
+CERTIFICATE_EXCLUDED_FIELDS = {"signature"}
 
 
 def canonical_certificate_bytes(cert: Any) -> bytes:

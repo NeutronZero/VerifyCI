@@ -14,17 +14,25 @@ def verify_runtime_model(
     model_name_or_path: str,
     expected_snapshot_commit: str | None = None,
     expected_snapshot_sha256: str | None = None,
+    require_pin: bool = False,
 ) -> tuple[bool, dict[str, Any]]:
     """Resolve and verify local cached model artifacts without network access.
 
     Consistent with `_model_provenance()` in `benchmarks/beir/rerank_measure.py`.
-    Fails closed if the model directory cannot be resolved locally or if any
-    expected snapshot constraint (commit or SHA-256) is violated.
+    Fails closed if the model directory cannot be resolved locally, if expected
+    snapshot constraints are violated, or if require_pin is enabled without a pin.
 
     Returns:
         (True, details) on success, or (False, details_with_error) on failure.
     """
     model_str = str(model_name_or_path).strip() if model_name_or_path is not None else ""
+    if require_pin and not expected_snapshot_sha256:
+        return False, {
+            "model": model_str,
+            "verified": False,
+            "error": "Enforced model attestation requires a trusted expected_snapshot_sha256 pin.",
+        }
+
     if not model_str:
         return False, {
             "model": str(model_name_or_path),

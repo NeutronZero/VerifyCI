@@ -173,7 +173,10 @@ class Certificate:
         return certificate_hash(self)
 
     def sign(self, private_key: Any, key_id: str | None = None) -> "Certificate":
-        """Signs self.canonical_bytes() using Ed25519 and returns a new frozen Certificate."""
+        """Signs the certificate envelope using Ed25519 and returns a new frozen Certificate.
+
+        Binds signing_key_id and signature_algorithm into the signed envelope.
+        """
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
         if isinstance(private_key, Ed25519PrivateKey):
             priv = private_key
@@ -196,21 +199,41 @@ class Certificate:
                     serialization.Encoding.Raw, serialization.PublicFormat.Raw
                 ).hex()
 
-        sig_bytes = priv.sign(self.canonical_bytes())
         import dataclasses
-        return dataclasses.replace(
+        envelope = dataclasses.replace(
             self,
-            signature=sig_bytes.hex(),
+            signature=None,
             signing_key_id=resolved_key_id,
             signature_algorithm="ed25519",
         )
+        sig_bytes = priv.sign(envelope.canonical_bytes())
+        return dataclasses.replace(
+            envelope,
+            signature=sig_bytes.hex(),
+        )
 
-    def verify_signature(self, public_key: Any | None = None) -> bool:
-        """Verifies self.signature over self.canonical_bytes().
+    def verify_signature(
+        self,
+        public_key: Any | None = None,
+        trusted_keys: Any | None = None,
+    ) -> bool:
+        """Verifies self.signature over canonical_bytes() against an authorized signer.
 
-        If public_key is not provided, tries self.signing_key_id (if 32-byte hex
-        public key) or environment variable VERIFYCI_CERTIFICATE_PUBLIC_KEYS.
-        Fails closed (returns False) if signature is missing, invalid, or verification fails.
+        Fail-Closed Trust Contract:
+        1. When an explicit public_key is provided by the caller, verification verifies
+           against that key. If self.signing_key_id is a 64-char hex key, it must match
+           that public key's hex.
+        2. When NO explicit public_key is provided:
+           Signer MUST be resolved through an externally configured trust store:
+           either the `trusted_keys` argument or the environment variable
+           VERIFYCI_CERTIFICATE_PUBLIC_KEYS.
+           If NO trusted keys are configured, verification FAILS CLOSED (returns False).
+           An embedded self-claimed public key in self.signing_key_id CANNOT self-certify:
+           an unknown key is rejected even if signing_key_id contains that key's public key.
+        3. If self.signing_key_id is specified:
+           - If trusted store is a mapping: self.signing_key_id must match an authorized entry.
+           - If trusted store is a list/set of keys: the verifying key must be in the trusted set,
+             and if self.signing_key_id is a 64-char hex string, it must match the trusted key.
         """
         if not self.signature:
             return False
@@ -259,59 +282,121 @@ class Certificate:
                 return None
             return None
 
+        def _key_hex(k: Ed25519PublicKey) -> str:
+            if hasattr(k, "public_bytes_raw"):
+                return k.public_bytes_raw().hex().lower()
+            from cryptography.hazmat.primitives import serialization
+            return k.public_bytes(
+                serialization.Encoding.Raw, serialization.PublicFormat.Raw
+            ).hex().lower()
+
+        # 1. Explicit public key passed by caller
         if public_key is not None:
             pub = _coerce(public_key)
             if pub is None:
                 return False
+            # If signing_key_id is a 64-char hex string, it must match this public key
+            if self.signing_key_id and len(self.signing_key_id.strip()) == 64:
+                if self.signing_key_id.strip().lower() != _key_hex(pub):
+                    return False
             try:
                 pub.verify(sig_bytes, canonical)
                 return True
             except Exception:
                 return False
 
-        # If public_key is not provided, try self.signing_key_id (if 32-byte hex public key)
-        if self.signing_key_id:
-            pub = _coerce(self.signing_key_id)
-            if pub is not None:
-                try:
-                    pub.verify(sig_bytes, canonical)
-                    return True
-                except Exception:
-                    pass
-
-        # Or environment variable VERIFYCI_CERTIFICATE_PUBLIC_KEYS
+        # 2. External trust store resolution (caller-supplied trusted_keys or environment)
         from verifyci.env import get_env as _get_env
         import json
-        env_val = _get_env("CERTIFICATE_PUBLIC_KEYS")
-        if env_val:
-            candidate_keys: list[Any] = []
-            stripped = env_val.strip()
+
+        store_val = trusted_keys if trusted_keys is not None else _get_env("CERTIFICATE_PUBLIC_KEYS")
+        if not store_val:
+            # FAIL-CLOSED: No external trust store configured -> cannot verify signer trust
+            return False
+
+        authorized_keys: dict[str, Ed25519PublicKey] = {}
+        unkeyed_authorized: list[Ed25519PublicKey] = []
+
+        if isinstance(store_val, dict):
+            for kid, kval in store_val.items():
+                pub = _coerce(kval)
+                if pub is not None:
+                    authorized_keys[str(kid)] = pub
+        elif isinstance(store_val, (list, tuple, set)):
+            for kval in store_val:
+                pub = _coerce(kval)
+                if pub is not None:
+                    unkeyed_authorized.append(pub)
+        elif isinstance(store_val, str):
+            stripped = store_val.strip()
             if stripped.startswith(("{", "[")):
                 try:
                     parsed = json.loads(stripped)
                     if isinstance(parsed, dict):
-                        if self.signing_key_id and self.signing_key_id in parsed:
-                            candidate_keys.append(parsed[self.signing_key_id])
-                        for v in parsed.values():
-                            if isinstance(v, (str, bytes)):
-                                candidate_keys.append(v)
+                        for kid, kval in parsed.items():
+                            pub = _coerce(kval)
+                            if pub is not None:
+                                authorized_keys[str(kid)] = pub
                     elif isinstance(parsed, list):
-                        candidate_keys.extend(parsed)
+                        for kval in parsed:
+                            pub = _coerce(kval)
+                            if pub is not None:
+                                unkeyed_authorized.append(pub)
                 except Exception:
                     pass
-            for part in stripped.replace(";", ",").replace("\n", ",").split(","):
-                part = part.strip()
-                if part and part not in candidate_keys:
-                    candidate_keys.append(part)
+            else:
+                for part in stripped.replace(";", ",").replace("\n", ",").split(","):
+                    part = part.strip()
+                    pub = _coerce(part)
+                    if pub is not None:
+                        unkeyed_authorized.append(pub)
+        else:
+            pub = _coerce(store_val)
+            if pub is not None:
+                unkeyed_authorized.append(pub)
 
-            for cand in candidate_keys:
-                pub = _coerce(cand)
-                if pub is not None:
+        if not authorized_keys and not unkeyed_authorized:
+            return False
+
+        # If certificate has a signing_key_id, look up in authorized_keys first
+        if self.signing_key_id:
+            kid = str(self.signing_key_id).strip()
+            if kid in authorized_keys:
+                pub = authorized_keys[kid]
+                try:
+                    pub.verify(sig_bytes, canonical)
+                    return True
+                except Exception:
+                    return False
+
+            # If signing_key_id is a 64-char hex key, check if it matches any authorized key's hex
+            if len(kid) == 64:
+                kid_lower = kid.lower()
+                all_trusted = list(authorized_keys.values()) + unkeyed_authorized
+                matching = [k for k in all_trusted if _key_hex(k) == kid_lower]
+                if not matching:
+                    # An unknown key ID is REJECTED even if it's a valid hex key
+                    return False
+                for pub in matching:
                     try:
                         pub.verify(sig_bytes, canonical)
                         return True
                     except Exception:
                         continue
+                return False
+
+            # If signing_key_id is an unknown non-hex label, and authorized_keys was configured,
+            # reject unknown key label fail-closed
+            if authorized_keys and kid not in authorized_keys:
+                return False
+
+        # If no signing_key_id or unkeyed store, try all unkeyed authorized keys
+        for pub in unkeyed_authorized:
+            try:
+                pub.verify(sig_bytes, canonical)
+                return True
+            except Exception:
+                continue
 
         return False
 
