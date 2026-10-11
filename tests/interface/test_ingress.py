@@ -76,3 +76,111 @@ def test_validate_query_ingress_bounds():
     with pytest.raises(IngressValidationError) as exc:
         validate_query_ingress("q", k=MAX_K + 1)
     assert exc.value.code == "invalid_k"
+
+
+def test_validate_safe_db_path(tmp_path):
+    from verifyci.interface.ingress import validate_safe_db_path
+
+    # None or empty returns None
+    assert validate_safe_db_path("") is None
+    assert validate_safe_db_path(None) is None
+
+    repo_root = tmp_path
+    verifyci_dir = repo_root / ".verifyci"
+    verifyci_dir.mkdir()
+    valid_db = verifyci_dir / "valid.db"
+    valid_db.touch()
+
+    # Valid relative path inside repo's .verifyci
+    resolved = validate_safe_db_path(".verifyci/valid.db", repo_root=repo_root)
+    assert resolved is not None
+    assert "valid.db" in resolved
+
+    # Null byte rejected
+    with pytest.raises(IngressValidationError) as exc:
+        validate_safe_db_path(".verifyci/valid\x00.db", repo_root=repo_root)
+    assert exc.value.code == "invalid_db_path"
+
+    # Traversal .. rejected
+    with pytest.raises(IngressValidationError) as exc:
+        validate_safe_db_path(".verifyci/../secret.db", repo_root=repo_root)
+    assert exc.value.code == "invalid_db_path"
+
+    # Non-.db extension rejected
+    with pytest.raises(IngressValidationError) as exc:
+        validate_safe_db_path(".verifyci/.env", repo_root=repo_root)
+    assert exc.value.code == "invalid_db_path"
+
+    # Absolute path outside repo rejected
+    with pytest.raises(IngressValidationError) as exc:
+        validate_safe_db_path("/etc/shadow.db", repo_root=repo_root)
+    assert exc.value.code == "invalid_db_path"
+
+
+def test_validate_safe_path(tmp_path):
+    from verifyci.interface.ingress import validate_safe_path
+
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    good_file = base_dir / "test.txt"
+    good_file.touch()
+
+    # Valid
+    p = validate_safe_path("test.txt", base_dir=base_dir, allowed_extensions=(".txt",))
+    assert p == good_file.resolve()
+
+    # Disallowed extension
+    with pytest.raises(IngressValidationError) as exc:
+        validate_safe_path("test.py", base_dir=base_dir, allowed_extensions=(".txt",))
+    assert exc.value.code == "invalid_extension"
+
+    # Path traversal
+    with pytest.raises(IngressValidationError) as exc:
+        validate_safe_path("../escape.txt", base_dir=base_dir)
+    assert exc.value.code == "path_traversal"
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_ingress_uniform_rejection():
+    from verifyci.interface.mcp_server import MCPServerHandlers
+
+    handlers = MCPServerHandlers(graph=None, store=None)
+
+    # Oversized search query rejected
+    huge_q = "q" * (MAX_QUERY_CHARS + 1)
+    res = await handlers.code_search(huge_q)
+    assert res.get("error") == "query_too_large"
+
+    # Invalid k rejected
+    res_k = await handlers.code_search("valid", k=0)
+    assert res_k.get("error") == "invalid_k"
+
+    # Oversized diff rejected in verify_diff
+    huge_diff = "d" * (MAX_DIFF_CHARS + 1)
+    res_diff = await handlers.verify_diff(huge_diff)
+    assert res_diff.get("error") == "diff_too_large"
+
+    # Oversized task rejected in task_run
+    huge_task = "t" * (MAX_TASK_DIFF_CHARS + 1)
+    res_task = await handlers.task_run(huge_task)
+    assert res_task.get("error") == "task_too_large"
+
+    # Oversized diff rejected in task_run
+    res_task_diff = await handlers.task_run("valid task", diff=huge_diff)
+    assert res_task_diff.get("error") == "diff_too_large"
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_ingress_rejection(tmp_path):
+    from verifyci.interface.fastmcp_server import create_fastmcp_server
+
+    app = create_fastmcp_server(str(tmp_path / "test.db"))
+
+    # Tool search handles oversized query
+    huge_q = "q" * (MAX_QUERY_CHARS + 1)
+    call_res = await app.call_tool("code_search", {"query": huge_q})
+    assert call_res.structured_content.get("error") == "query_too_large"
+
+    # Invalid k rejected
+    call_k = await app.call_tool("code_search", {"query": "valid", "k": 0})
+    assert call_k.structured_content.get("error") == "invalid_k"

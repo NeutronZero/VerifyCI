@@ -20,6 +20,26 @@ from verifyci.verification.verification_ir import build_semi_check, build_verifi
 
 def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
                db_path: str | None = None, return_artifacts: bool = False) -> dict:
+    from verifyci.interface.ingress import IngressValidationError, validate_diff_ingress
+    try:
+        diff = validate_diff_ingress(diff)
+    except IngressValidationError as exc:
+        res = {
+            "report_id": "",
+            "status": "FAIL",
+            "rationale": exc.code,
+            "revision_id": revision_id,
+            "files": [],
+            "changed_entities": [],
+            "error": exc.code,
+        }
+        if return_artifacts:
+            res["certificate"] = None
+            res["report"] = None
+            res["decision"] = None
+            res["policy"] = None
+        return res
+
     db = resolve_db(db_path)
     # Storage availability is its own axis, checked without ever
     # suppressing a diff-intrinsic verdict: a forbidden pattern or secret

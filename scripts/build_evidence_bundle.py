@@ -49,14 +49,22 @@ def get_environment_metadata() -> dict:
     }
 
 
-def evaluate_claims(root: Path | None = None) -> dict:
+def evaluate_claims(
+    root: Path | None = None,
+    clean_worktree: bool | None = None,
+    allow_dirty: bool = False,
+) -> dict:
     """Evaluate claims using the canonical evidence predicates."""
-    return _evaluate_claims(ROOT if root is None else root)
+    return _evaluate_claims(
+        ROOT if root is None else root,
+        clean_worktree=clean_worktree,
+        allow_dirty=allow_dirty,
+    )
 
 
 def main():
     env = get_environment_metadata()
-    evaluation = evaluate_claims()
+    evaluation = evaluate_claims(clean_worktree=env.get("clean_worktree"))
 
     bundle = {
         "schema_version": "1.0",

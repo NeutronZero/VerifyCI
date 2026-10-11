@@ -21,7 +21,14 @@ from verifyci.env import get_env
 from verifyci.interface.commands.query import run_query
 from verifyci.interface.commands.stats import run_stats
 from verifyci.interface.commands.verify import run_verify
-from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_K, MAX_QUERY_CHARS
+from verifyci.interface.ingress import (
+    IngressValidationError,
+    validate_diff_ingress,
+    validate_query_ingress,
+    validate_safe_db_path,
+    validate_task_ingress,
+)
+from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_K
 from verifyci.interface.limits import MAX_TASK_DIFF_CHARS as MAX_TASK_CHARS
 
 app = FastAPI(title="VerifyCI")
@@ -87,41 +94,37 @@ def stats(db: str = "", _auth: None = Depends(require_auth)):
 @app.get("/search")
 def search(q: str, k: int = Query(default=10, ge=1, le=MAX_K), db: str = "",
            _auth: None = Depends(require_auth)):
-    if len(q) > MAX_QUERY_CHARS:
-        raise HTTPException(status_code=400, detail="query_too_large")
+    try:
+        q, k = validate_query_ingress(q, k=k)
+    except IngressValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.code)
     return run_query(q, _sanitize_db(db), k=k)
 
 
 def _sanitize_db(db: str) -> str | None:
     if not db:
         return None
-    import os
-    from pathlib import Path
-    if "\x00" in db:
-        raise HTTPException(status_code=400, detail="invalid_db_path")
-    p = Path(db)
-    if ".." in p.parts:
-        raise HTTPException(status_code=400, detail="invalid_db_path")
-    if p.suffix != ".db":
-        raise HTTPException(status_code=400, detail="invalid_db_path")
-    # Disallow arbitrary filesystem paths; must reside within repo's .verifyci directory.
-    repo_root = Path(os.environ.get("VERIFYCI_ROOT", os.getcwd())).resolve()
     try:
-        resolved = (repo_root / p).resolve() if not p.is_absolute() else p.resolve()
-        allowed_dir = (repo_root / ".verifyci").resolve()
-        if not resolved.is_relative_to(allowed_dir):
-            raise HTTPException(status_code=400, detail="invalid_db_path")
-    except (ValueError, RuntimeError):
-        raise HTTPException(status_code=400, detail="invalid_db_path")
-    return str(resolved)
+        return validate_safe_db_path(db)
+    except IngressValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.code)
 
 
 @app.post("/verify/diff")
 def verify(req: VerifyRequest, _auth: None = Depends(require_auth)):
-    return run_verify(req.diff, req.revision_id, req.task_id, db_path=_sanitize_db(getattr(req, "db", "")))
+    try:
+        diff = validate_diff_ingress(req.diff)
+    except IngressValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.code)
+    return run_verify(diff, req.revision_id, req.task_id, db_path=_sanitize_db(getattr(req, "db", "")))
 
 
 @app.post("/task/run")
 def task_run(req: TaskRequest, _auth: None = Depends(require_auth)):
     from verifyci.interface.commands.run import run_task
-    return run_task(req.task, diff=req.diff, db_path=_sanitize_db(req.db))
+    try:
+        task, diff = validate_task_ingress(req.task, diff=req.diff)
+    except IngressValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.code)
+    return run_task(task, diff=diff, db_path=_sanitize_db(req.db))
+

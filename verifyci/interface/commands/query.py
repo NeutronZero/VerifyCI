@@ -41,6 +41,21 @@ def run_query(question: str, db_path: str | None = None, k: int = 10,
         except Exception:  # noqa: BLE001
             pass
 
+    from verifyci.interface.ingress import IngressValidationError, validate_query_ingress
+    try:
+        question, k = validate_query_ingress(question, k=k)
+    except IngressValidationError as exc:
+        _r = {
+            "query": question,
+            "results": [],
+            "methods": [],
+            "evidence": {"entities": 0, "chunks": 0, "provenance": 0},
+            "error": exc.code,
+        }
+        _qstatus = exc.code
+        _emit_log(_r)
+        return _r
+
     db = resolve_db(db_path)
     import os as _query_os
     if not _query_os.path.exists(db):

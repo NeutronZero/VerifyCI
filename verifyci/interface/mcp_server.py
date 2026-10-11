@@ -3,7 +3,22 @@ import time as _time
 from typing import Any
 
 from verifyci.contracts.scheduler import TERMINAL_STATUSES
-from verifyci.interface.limits import MAX_K, MAX_QUERY_CHARS, MAX_TASK_DIFF_CHARS
+from verifyci.interface.limits import (
+    MAX_DIFF_CHARS,
+    MAX_K,
+    MAX_QUERY_CHARS,
+    MAX_TASK_DIFF_CHARS,
+)
+
+__all__ = [
+    "MAX_DIFF_CHARS",
+    "MAX_K",
+    "MAX_QUERY_CHARS",
+    "MAX_TASK_DIFF_CHARS",
+    "MCPServer",
+    "MCPServerHandlers",
+    "create_mcp_server",
+]
 
 
 class MCPServer:
@@ -162,10 +177,12 @@ class MCPServerHandlers:
                 pass
 
         with start_agent_span("code.search", conversation_id, "code.search"):
-            k = max(1, min(int(k or 10), MAX_K))
-            if len(query) > MAX_QUERY_CHARS:
-                _qstatus = "query_too_large"
-                _r = {"results": [], "query": query, "methods": [], "error": "query_too_large"}
+            from verifyci.interface.ingress import IngressValidationError, validate_query_ingress
+            try:
+                query, k = validate_query_ingress(query, k=k)
+            except IngressValidationError as exc:
+                _qstatus = exc.code
+                _r = {"results": [], "query": query, "methods": [], "error": exc.code}
                 _emit_log(_r)
                 return _r
             if self.graph is None:
@@ -347,10 +364,11 @@ class MCPServerHandlers:
         with start_agent_span("task.run", conversation_id, "task.run"):
             if self._repo_invariants_err:
                 return {"task": task, "task_id": None, "status": "FAILED", "steps": 0, "decision": None, "error": "invalid_invariants_config", "ledger_head": None}
-            if len(diff) > MAX_TASK_DIFF_CHARS:
-                return {"task": task, "task_id": None, "status": "FAILED", "steps": 0, "decision": None, "error": "diff_too_large", "ledger_head": None}
-            if len(task) > MAX_TASK_DIFF_CHARS:
-                return {"task": task, "task_id": None, "status": "FAILED", "steps": 0, "decision": None, "error": "task_too_large", "ledger_head": None}
+            from verifyci.interface.ingress import IngressValidationError, validate_task_ingress
+            try:
+                task, diff = validate_task_ingress(task, diff=diff)
+            except IngressValidationError as exc:
+                return {"task": task, "task_id": None, "status": "FAILED", "steps": 0, "decision": None, "error": exc.code, "ledger_head": None}
             planner = Planner()
             intent = build_intent_package(task)
             task_ir = planner.plan(task, intent.intent_package_id, "default")

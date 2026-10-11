@@ -47,6 +47,12 @@ def run_task(task: str, timeout: float = 30.0, diff: str = "",
     ``ledger_head`` (L1 tamper-evidence surfacing; None when no ledger
     ran). With ``anchor_file``, the (task, revision, head) tuple is
     appended to a JSONL anchor log (L2) for later ``verify-chain``."""
+    from verifyci.interface.ingress import IngressValidationError, validate_task_ingress
+    try:
+        task, diff = validate_task_ingress(task, diff=diff)
+    except IngressValidationError as exc:
+        return {"task": task, "status": "FAILED", "error": exc.code, "ledger_head": None}
+
     async def _run() -> dict:
         planner = Planner()
         intent = build_intent_package(task)

@@ -405,6 +405,52 @@ def test_h_malformed_benchmark_is_missing(tmp_path):
     assert evaluation["overall_status"] == "UNESTABLISHED"
 
 
+def test_h_dirty_worktree_downgrades_establishment(tmp_path):
+    from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import evaluate_claims
+
+    # Evaluate on real repo root with dirty_worktree=False
+    evaluation = evaluate_claims(build_evidence_bundle.ROOT, clean_worktree=False)
+    assert evaluation["provenance_verified"] is False
+    assert evaluation["overall_status"] == "UNESTABLISHED"
+    # Even if individual claim metrics passed, dirty worktree status downgrades ESTABLISHED
+    for claim_name, result in evaluation["claims"].items():
+        assert result["status"] != "ESTABLISHED"
+        if result.get("provenance_error") == "dirty_worktree":
+            assert result["status"] == "PROVENANCE_MISMATCH"
+
+
+def test_h_tampered_corpus_or_source_downgrades_establishment(tmp_path):
+    import shutil
+    from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import evaluate_claims
+
+    # Copy benchmarks and verifyci to tmp_path
+    shutil.copytree(build_evidence_bundle.ROOT / "benchmarks", tmp_path / "benchmarks")
+    shutil.copytree(build_evidence_bundle.ROOT / "verifyci", tmp_path / "verifyci")
+
+    # Tamper with corpus.jsonl in tmp_path
+    beir_corpus = tmp_path / "benchmarks" / "beir" / "corpus.jsonl"
+    beir_corpus.write_text(beir_corpus.read_text(encoding="utf-8") + "\n{\"tampered\": true}", encoding="utf-8")
+
+    evaluation = evaluate_claims(tmp_path, clean_worktree=True)
+    assert evaluation["provenance_verified"] is False
+    assert evaluation["overall_status"] == "UNESTABLISHED"
+    # H1_RR_reranked_hybrid should be downgraded to PROVENANCE_MISMATCH
+    assert evaluation["claims"]["H1_RR_reranked_hybrid"]["status"] == "PROVENANCE_MISMATCH"
+    assert "corpus_hash_mismatch" in evaluation["claims"]["H1_RR_reranked_hybrid"]["provenance_error"]
+
+
+def test_h_allow_dirty_worktree_override():
+    from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import evaluate_claims
+
+    evaluation = evaluate_claims(build_evidence_bundle.ROOT, clean_worktree=False, allow_dirty=True)
+    # With allow_dirty=True, dirty_worktree does not downgrade established claims
+    assert evaluation["claims"]["H1_RR_reranked_hybrid"]["status"] == "ESTABLISHED"
+    assert evaluation["claims"]["blast_radius_bounds"]["status"] == "ESTABLISHED"
+
+
 def test_sec_001_selector_allowlist_and_ci_transport():
     from scripts.ci_test_selector import validate_test_targets
 

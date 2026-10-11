@@ -55,6 +55,11 @@ def create_fastmcp_server(db_path: str | None, name: str = "verifyci"):
     async def code_search(query: str, k: int = 10, conversation_id: str = "",
                           rerank: bool = False) -> dict[str, Any]:
         """Hybrid code search: BM25 + dense + graph expansion, RRF fused. Rerank opt-in."""
+        from verifyci.interface.ingress import IngressValidationError, validate_query_ingress
+        try:
+            query, k = validate_query_ingress(query, k=k)
+        except IngressValidationError as exc:
+            return {"results": [], "query": query, "methods": [], "error": exc.code}
         return await inner.call_tool("code.search", query=query, k=k,
                                      conversation_id=conversation_id, rerank=rerank)
 
@@ -75,7 +80,7 @@ def create_fastmcp_server(db_path: str | None, name: str = "verifyci"):
         try:
             validate_diff_ingress(diff)
         except IngressValidationError as exc:
-            return {"revision_id": revision_id, "status": "FAILED", "error": exc.code}
+            return {"revision_id": revision_id, "status": "FAILED", "error": exc.code or "diff_too_large"}
         return await inner.call_tool("verify.diff", diff=diff, revision_id=revision_id,
                                      conversation_id=conversation_id)
 
