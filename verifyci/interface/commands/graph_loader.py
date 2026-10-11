@@ -46,13 +46,31 @@ def load_graph(db_path: str, revision_id: str = "", return_revision: bool = Fals
                 store.conn, resolve_repository(db_path))
         if not revision_id:
             return empty
-        entities = store.get_entities_by_revision(revision_id)
-        edges = store.get_edges_by_revision(revision_id)
-        builder = GraphBuilder()
-        graph = builder.build(entities, edges) if entities else None
+
+        # Formulate canonical cache key after resolving effective revision
+        repo_id = resolve_repository(db_path)
+        canonical_path = _os.path.abspath(db_path)
+        row = store.conn.execute(
+            "SELECT ingestion_config_hash, source_hash FROM revisions WHERE revision_id = ?",
+            (revision_id,),
+        ).fetchone()
+        cfg_hash = row[0] if row else ""
+        src_hash = row[1] if row else ""
+        cache_key = (canonical_path, repo_id, revision_id, "v2", cfg_hash, src_hash)
+
+        from verifyci.storage.graph_cache import GLOBAL_GRAPH_CACHE
+
+        def _do_load():
+            entities = store.get_entities_by_revision(revision_id)
+            edges = store.get_edges_by_revision(revision_id)
+            builder = GraphBuilder()
+            graph = builder.build(entities, edges) if entities else None
+            return graph, builder.get_node_map(), entities, edges
+
+        graph, node_map, entities = GLOBAL_GRAPH_CACHE.get_or_load(cache_key, _do_load)
         if return_revision:
-            return graph, builder.get_node_map(), entities, revision_id
-        return graph, builder.get_node_map(), entities
+            return graph, node_map, entities, revision_id
+        return graph, node_map, entities
     except InfraError:
         raise
     except _sqlite3.Error as e:

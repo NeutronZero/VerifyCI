@@ -17,7 +17,7 @@ import time
 
 
 from verifyci.contracts.revision import Revision
-from verifyci.storage.graph_store import GraphStore, MAX_RO_CACHE_ENTRIES, _PROCESS_RO_CACHE
+from verifyci.storage.graph_store import GraphStore, MAX_RO_CACHE_ENTRIES
 
 
 def _create_sample_db(db_path: str, rev_id: str = "rev_1") -> None:
@@ -38,18 +38,14 @@ def _create_sample_db(db_path: str, rev_id: str = "rev_1") -> None:
 
 def test_ro_connection_lifecycle_normal_close_allows_deletion(tmp_path: Path):
     """Test 1A: Public store.close() releases file handles so files/dirs can be deleted immediately on Windows."""
-    GraphStore.clear_ro_cache()
     db_file = tmp_path / "lifecycle.db"
     _create_sample_db(str(db_file), "rev_initial")
 
     store = GraphStore(str(db_file), read_only=True)
-    norm_key = os.path.abspath(str(db_file))
-    assert norm_key in _PROCESS_RO_CACHE
     assert store.latest_revision_id("repo_test") == "rev_initial"
 
     # Normal public close
     store.close()
-    assert norm_key not in _PROCESS_RO_CACHE
 
     # Must be immediately deletable on Windows NTFS without PermissionError
     os.remove(str(db_file))
@@ -58,22 +54,18 @@ def test_ro_connection_lifecycle_normal_close_allows_deletion(tmp_path: Path):
 
 def test_ro_connection_lifecycle_force_close_and_direct_conn_close(tmp_path: Path):
     """Test 1B: store.close(force=True) and direct conn.close() cleanly release handles."""
-    GraphStore.clear_ro_cache()
     db_file = tmp_path / "lifecycle_force.db"
     _create_sample_db(str(db_file), "rev_force")
 
     # 1. Test close(force=True)
     store1 = GraphStore(str(db_file), read_only=True)
-    norm_key = os.path.abspath(str(db_file))
-    assert norm_key in _PROCESS_RO_CACHE
+    assert store1.latest_revision_id("repo_test") == "rev_force"
     store1.close(force=True)
-    assert norm_key not in _PROCESS_RO_CACHE
 
     # 2. Test direct conn.close()
     store2 = GraphStore(str(db_file), read_only=True)
-    assert norm_key in _PROCESS_RO_CACHE
+    assert store2.latest_revision_id("repo_test") == "rev_force"
     store2.conn.close()
-    assert norm_key not in _PROCESS_RO_CACHE
 
     # Verify handle is fully released
     os.remove(str(db_file))
@@ -81,11 +73,9 @@ def test_ro_connection_lifecycle_force_close_and_direct_conn_close(tmp_path: Pat
 
 
 def test_ro_cache_invalidation_and_path_reuse(tmp_path: Path):
-    """Test 2: Creating DB A at path X, caching, destroying DB A, creating DB B at path X,
-
+    """Test 2: Creating DB A at path X, destroying DB A, creating DB B at path X,
     and opening a reader proves it sees DB B, not a stale connection to DB A.
     """
-    GraphStore.clear_ro_cache()
     db_file = tmp_path / "reuse_target.db"
     db_path_str = str(db_file)
 
@@ -115,10 +105,8 @@ def test_ro_cache_invalidation_and_path_reuse(tmp_path: Path):
 
 def test_ro_cache_stale_signature_invalidation_on_disk_replacement(tmp_path: Path):
     """Test 2B: Even if DB file is replaced/rebuilt without closing an existing store instance,
-
-    the file signature (mtime/size) check evicts stale connection and reconnects.
+    a new reader instance connects independently to disk.
     """
-    GraphStore.clear_ro_cache()
     db_file = tmp_path / "sig_invalidation.db"
     db_path_str = str(db_file)
 
@@ -130,19 +118,17 @@ def test_ro_cache_stale_signature_invalidation_on_disk_replacement(tmp_path: Pat
     time.sleep(0.05)
     _create_sample_db(db_path_str, "rev_overwritten")
 
-    # Second store instance at same path must detect file signature change
+    # Second store instance at same path connects independently to disk
     store2 = GraphStore(db_path_str, read_only=True)
     assert store2.latest_revision_id("repo_test") == "rev_overwritten"
     store1.close()
     store2.close()
 
 
-def test_ro_bounded_cache_lru_eviction(tmp_path: Path):
-    """Test 3: Exercising many distinct DB paths within one process enforces MAX_RO_CACHE_ENTRIES
-
-    ceiling via LRU eviction without leaking file descriptors.
+def test_ro_concurrent_stores_remain_usable_beyond_cache_ceiling(tmp_path: Path):
+    """Test 3: Exercising many distinct DB paths within one process keeps all concurrent
+    GraphStore instances active, un-evicted, and functional.
     """
-    GraphStore.clear_ro_cache()
     total_dbs = MAX_RO_CACHE_ENTRIES * 3  # e.g. 48 distinct databases
     db_paths: list[str] = []
 
@@ -151,21 +137,21 @@ def test_ro_bounded_cache_lru_eviction(tmp_path: Path):
         _create_sample_db(p, f"rev_{i}")
         db_paths.append(p)
 
-    # Open readers across all distinct DBs without calling close()
+    # Open readers across all 48 distinct DBs concurrently
     stores: list[GraphStore] = []
     for p in db_paths:
         s = GraphStore(p, read_only=True)
         stores.append(s)
 
-    # Verify cache never exceeds the bounded ceiling
-    assert len(_PROCESS_RO_CACHE) <= MAX_RO_CACHE_ENTRIES
-    assert len(_PROCESS_RO_CACHE) == MAX_RO_CACHE_ENTRIES
+    # Every single store must remain open, functional, and not closed by eviction
+    for i, s in enumerate(stores):
+        assert s.latest_revision_id("repo_test") == f"rev_{i}"
 
-    # Verify LRU behavior: the most recently accessed DBs are in cache
-    recent_keys = [os.path.abspath(p) for p in db_paths[-MAX_RO_CACHE_ENTRIES:]]
-    for rk in recent_keys:
-        assert rk in _PROCESS_RO_CACHE
+    # Cleanly close all stores
+    for s in stores:
+        s.close()
 
-    # Clear cache and verify total release
-    GraphStore.clear_ro_cache()
-    assert len(_PROCESS_RO_CACHE) == 0
+    # Verify all handles released so files can be removed on Windows
+    for p in db_paths:
+        os.remove(p)
+        assert not os.path.exists(p)

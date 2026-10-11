@@ -5,7 +5,7 @@ Enum members, which ``json.dumps`` rejects). ``entity_from_json`` and
 friends round-trip the core code-intelligence types.
 """
 import json
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from enum import Enum
 from typing import Any
 
@@ -13,9 +13,10 @@ from typing import Any
 def to_json_dict(obj: Any) -> Any:
     if isinstance(obj, Enum):
         return obj.value
-    if is_dataclass(obj):
-        return {k: to_json_dict(v) for k, v in asdict(obj).items()}
-    if isinstance(obj, dict):
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return {f.name: to_json_dict(getattr(obj, f.name)) for f in fields(obj)}
+    from collections.abc import Mapping
+    if isinstance(obj, (Mapping, dict)):
         return {k: to_json_dict(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [to_json_dict(v) for v in obj]

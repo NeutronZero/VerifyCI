@@ -859,7 +859,8 @@ def _graph_search(graph: Any, name: str, edge_type: str
                 # carries no file, so an unresolved hit is unattributed.
                 examined += 1
                 meta = getattr(edge, "metadata", None) or {}
-                if isinstance(meta, dict) and meta.get("callee") == name:
+                from collections.abc import Mapping
+                if isinstance(meta, (dict, Mapping)) and meta.get("callee") == name:
                     found = True
                     src = getattr(edge, "src_entity_id", None)
                     src_file = files.get(src, "")

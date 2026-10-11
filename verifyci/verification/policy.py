@@ -103,9 +103,9 @@ class PolicyEvaluator:
             return VerificationDecision(
                 decision_id=str(uuid.uuid4()),
                 report_id=report.report_id,
-                status="PASS",
+                status="ADVISORY_WARN",
                 policy_id=policy.policy_id,
-                rationale="non_blocking_failures_but_warn",
+                rationale="non_blocking_failures_advisory_warn",
                 timestamp=time.time(),
             )
 

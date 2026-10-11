@@ -101,6 +101,12 @@ _DEFAULT_RULES: dict[str, dict[str, Any]] = {
         "fullDescription": {"text": "The verification pipeline timed out before all scheduled checks could conclude."},
         "defaultConfiguration": {"level": "error"},
     },
+    "advisory_warning": {
+        "name": "AdvisoryWarningCheck",
+        "shortDescription": {"text": "Non-blocking advisory warning generated during verification."},
+        "fullDescription": {"text": "Reports non-blocking advisory conditions that require developer attention but do not fail the verification gate."},
+        "defaultConfiguration": {"level": "warning"},
+    },
 }
 
 
@@ -230,7 +236,23 @@ def export_sarif(verify_result: dict[str, Any]) -> str:
             },
         })
 
-    # 4. Check results from the VerificationReport
+    # 4. Handle Advisory Warning
+    elif status == "ADVISORY_WARN":
+        ensure_rule("advisory_warning")
+        locations = [_build_physical_location(f) for f in sorted(files)] if files else []
+        results.append({
+            "ruleId": "advisory_warning",
+            "level": "warning",
+            "kind": "review",
+            "message": {"text": rationale or "Advisory warning produced during verification."},
+            "locations": locations,
+            "properties": {
+                "verdict": "ADVISORY_WARN",
+                "rationale": rationale,
+            },
+        })
+
+    # 5. Check results from the VerificationReport
     if report and hasattr(report, "checks"):
         for check in report.checks:
             if check.passed:

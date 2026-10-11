@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 
 from verifyci.interface.limits import (
+    MAX_CHANGED_FILES,
+    MAX_CHANGED_LINES,
     MAX_DIFF_CHARS,
     MAX_K,
     MAX_QUERY_CHARS,
@@ -18,6 +20,7 @@ from verifyci.interface.limits import (
 
 __all__ = [
     "IngressValidationError",
+    "validate_diff_complexity",
     "validate_diff_ingress",
     "validate_task_ingress",
     "validate_query_ingress",
@@ -35,13 +38,78 @@ class IngressValidationError(ValueError):
         self.message = message
 
 
-def validate_diff_ingress(diff: str, max_chars: int = MAX_DIFF_CHARS) -> str:
-    """Validate incoming unified diff text before any AST or diff parsing occurs."""
+def validate_diff_complexity(
+    diff: str,
+    max_files: int = MAX_CHANGED_FILES,
+    max_lines: int = MAX_CHANGED_LINES,
+) -> None:
+    """Stateful single-pass pre-scan enforcing file and changed line limits before AST parsing.
+
+    Recognizes git and unified diff headers, /dev/null additions/deletions, renames,
+    and hunk boundaries without full parsing.
+    """
+    if not diff:
+        return
+
+    in_hunk = False
+    files_seen = 0
+    changed_lines = 0
+    in_git_file = False
+
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            in_hunk = False
+            in_git_file = True
+            files_seen += 1
+            if files_seen > max_files:
+                raise IngressValidationError(
+                    "diff_too_many_files",
+                    f"diff modifies {files_seen} files, exceeding limit of {max_files}",
+                )
+            continue
+
+        if not in_git_file and line.startswith(("--- a/", "--- /dev/null")):
+            in_hunk = False
+            files_seen += 1
+            if files_seen > max_files:
+                raise IngressValidationError(
+                    "diff_too_many_files",
+                    f"diff modifies {files_seen} files, exceeding limit of {max_files}",
+                )
+            continue
+
+        if line.startswith("+++ "):
+            continue
+
+        if line.startswith("@@ ") and " @@" in line[3:]:
+            in_hunk = True
+            in_git_file = False
+            continue
+
+        if in_hunk:
+            if line.startswith("+") and not line.startswith("+++ "):
+                changed_lines += 1
+            elif line.startswith("-") and not line.startswith("--- "):
+                changed_lines += 1
+
+            if changed_lines > max_lines:
+                raise IngressValidationError(
+                    "diff_too_many_lines",
+                    f"diff contains {changed_lines} changed lines, exceeding limit of {max_lines}",
+                )
+
+
+def validate_diff_ingress(diff: str, max_chars: int = MAX_DIFF_CHARS,
+                          max_files: int = MAX_CHANGED_FILES,
+                          max_lines: int = MAX_CHANGED_LINES) -> str:
+    """Validate incoming unified diff text and complexity before any AST or diff parsing occurs."""
     if not isinstance(diff, str):
         raise IngressValidationError("invalid_type", "diff must be a string")
     if len(diff) > max_chars:
         raise IngressValidationError("diff_too_large", f"diff exceeds maximum size of {max_chars} characters")
+    validate_diff_complexity(diff, max_files=max_files, max_lines=max_lines)
     return diff
+
 
 
 def validate_task_ingress(task: str, diff: str = "") -> tuple[str, str]:

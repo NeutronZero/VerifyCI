@@ -33,16 +33,18 @@ def blast_radius_check(
     vuln_cache: Any = None,
     node_map: dict | None = None,
     max_hops: int = 2,
+    budget: Any | None = None,
 ) -> tuple[BlastRadiusResult, CheckResult]:
     try:
         blast = compute_blast_radius(
             graph=graph,
             changed_entities=changed_entities,
-            test_entities=test_entities or set(),
+            test_entities=test_entities,
             dependency_graph=dependency_graph,
             vuln_cache=vuln_cache,
             node_map=node_map,
             max_hops=max_hops,
+            budget=budget,
         )
     except (NodeMapError, RuntimeError) as e:
         # An unreadable graph is inability (never PASS; policy routes the

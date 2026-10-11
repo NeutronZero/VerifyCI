@@ -48,7 +48,8 @@ def validate_entity(entity: Entity) -> list[str]:
     """Validate an Entity instance, returning a list of contract violation messages."""
     errors: list[str] = []
 
-    if entity.metadata is not None and not isinstance(entity.metadata, dict):
+    from collections.abc import Mapping
+    if entity.metadata is not None and not isinstance(entity.metadata, (dict, Mapping)):
         errors.append(
             f"entity.metadata must be a dict, got '{type(entity.metadata).__name__}'"
         )
