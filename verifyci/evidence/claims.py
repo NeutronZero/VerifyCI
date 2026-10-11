@@ -195,8 +195,8 @@ REQUIRED_FROZEN_FIELDS: dict[str, tuple[str, ...]] = {
 TRUSTED_RESULT_HASHES: dict[str, str] = {
     "H1_retrieval_fusion": "9a14540ce93d74704095f43a36daf64cfcfa22dee9c78be49c94494071dd7553",
     "H1_RR_reranked_hybrid": "66254e70677dfe22fe7e9d3204b688f3665b3ab1ea17fa1a265ef91c7a6ec4aa",
-    "patch_corpus_verifier": "f622583ce00404a3ac6c371bdbf1578324d66c7a171218fface91f2fa4a22107",
-    "blast_radius_bounds": "00ab5c6997107205fb0e5e2119452ae15066fa8df3a4aaec76d16f409961887d",
+    "patch_corpus_verifier": "5f9e455dcfd81717bce42842f7484300f0a65d89b65e3330b90f773bb8f59137",
+    "blast_radius_bounds": "3a6da80387d0a9b117da7ac276c144bedc772ed3311288473215a49957d8ac6b",
     "retrieval_manifest": "562f94561a6ffb3b0ce14b0bf7098d6d91787c2d582fe388c6572127c1a3c9ff",
 }
 
@@ -283,6 +283,10 @@ def _evaluate_blast(data: dict[str, Any]) -> dict[str, Any]:
             detected = r.get("detected")
             if not isinstance(expected, list) or not isinstance(detected, list):
                 return _missing_claim("malformed_case_record:expected_or_detected_not_list")
+            if not all(isinstance(x, str) and x for x in expected):
+                return _missing_claim("malformed_case_record:invalid_expected_entity_element")
+            if not all(isinstance(x, str) and x for x in detected):
+                return _missing_claim("malformed_case_record:invalid_detected_entity_element")
             # For cases with non-empty expected sets, compute derived recall directly
             if expected:
                 exp_set = set(expected)
@@ -348,6 +352,8 @@ def is_established(claim_name: str, evidence: EvidenceLoad | dict[str, Any] | No
 
 def _file_matches_hash(path: Path, expected: str) -> bool:
     """Check if file matches expected SHA-256 (supports raw bytes and LF-normalized)."""
+    if not isinstance(expected, str) or len(expected) != 64:
+        return False
     if not path.is_file():
         return False
     try:
@@ -356,8 +362,6 @@ def _file_matches_hash(path: Path, expected: str) -> bool:
         return False
     h1 = hashlib.sha256(raw).hexdigest()
     h2 = hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()
-    if len(expected) <= 16:
-        return h1.startswith(expected) or h2.startswith(expected)
     return h1 == expected or h2 == expected
 
 
@@ -384,7 +388,7 @@ def verify_claim_provenance(
     required_fields = REQUIRED_FROZEN_FIELDS.get(claim_name, ())
     for field in required_fields:
         val = frozen.get(field)
-        if not isinstance(val, str) or not val:
+        if not isinstance(val, str) or len(val) != 64:
             return False, f"missing_provenance:{claim_name}:missing_{field}"
 
     # Protocol & corpus checks

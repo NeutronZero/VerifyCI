@@ -106,7 +106,7 @@ def main():
     print(f"labeled known-gap misses: {m['known_gap_miss_ids']}")
     print(f"total FP: {m['total_fp']}")
     report = {"frozen": {"cases_sha256": hashlib.sha256(
-                (HERE / "cases.jsonl").read_bytes()).hexdigest()[:16]},
+                (HERE / "cases.jsonl").read_bytes()).hexdigest()},
               "cases": rows, "metrics": m}
     (HERE / "results.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"\nreport -> {HERE/'results.json'}")

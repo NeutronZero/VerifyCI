@@ -679,6 +679,49 @@ def test_h_blast_malformed_case_record_fails():
     assert "malformed_case_record" in result["error"]
 
 
+def test_h_blast_unhashable_entity_elements_produce_missing():
+    from verifyci.evidence.claims import evaluate_claim
+
+    for invalid_elem in [{"dict": 1}, [1, 2], 123, None, ""]:
+        res_exp = evaluate_claim(
+            "blast_radius_bounds",
+            {"cases": [{"expected": [invalid_elem], "detected": ["valid"]}]},
+        )
+        assert res_exp["status"] == "MISSING"
+        assert res_exp["error"] == "malformed_case_record:invalid_expected_entity_element"
+
+        res_det = evaluate_claim(
+            "blast_radius_bounds",
+            {"cases": [{"expected": ["valid"], "detected": [invalid_elem]}]},
+        )
+        assert res_det["status"] == "MISSING"
+        assert res_det["error"] == "malformed_case_record:invalid_detected_entity_element"
+
+
+def test_h_truncated_cases_sha_fails_provenance(tmp_path):
+    import json
+    import shutil
+    from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import verify_claim_provenance
+
+    shutil.copytree(build_evidence_bundle.ROOT / "benchmarks", tmp_path / "benchmarks")
+    shutil.copytree(build_evidence_bundle.ROOT / "verifyci", tmp_path / "verifyci")
+
+    patch_path = tmp_path / "benchmarks" / "patch_corpus" / "results.json"
+    data_patch = json.loads(patch_path.read_text(encoding="utf-8"))
+    data_patch["frozen"]["cases_sha256"] = data_patch["frozen"]["cases_sha256"][:16]
+    ok, err = verify_claim_provenance(tmp_path, "patch_corpus_verifier", data_patch, bind_result_artifact=False)
+    assert ok is False
+    assert err == "missing_provenance:patch_corpus_verifier:missing_cases_sha256"
+
+    blast_path = tmp_path / "benchmarks" / "blast_corpus" / "results.json"
+    data_blast = json.loads(blast_path.read_text(encoding="utf-8"))
+    data_blast["frozen"]["cases_sha256"] = data_blast["frozen"]["cases_sha256"][:16]
+    ok, err = verify_claim_provenance(tmp_path, "blast_radius_bounds", data_blast, bind_result_artifact=False)
+    assert ok is False
+    assert err == "missing_provenance:blast_radius_bounds:missing_cases_sha256"
+
+
 def test_sec_001_selector_allowlist_and_ci_transport():
     from scripts.ci_test_selector import validate_test_targets
 

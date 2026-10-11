@@ -156,9 +156,9 @@ def test_measurement_reproduces_recorded_report():
 
 def test_results_hash_pinned():
     data = (CORPUS / "cases.jsonl").read_bytes()
-    sha_raw = hashlib.sha256(data).hexdigest()[:16]
-    sha_crlf = hashlib.sha256(data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")).hexdigest()[:16]
-    sha_lf = hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()[:16]
+    sha_raw = hashlib.sha256(data).hexdigest()
+    sha_crlf = hashlib.sha256(data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")).hexdigest()
+    sha_lf = hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
     expected = _results()["frozen"]["cases_sha256"]
     assert expected in (sha_raw, sha_crlf, sha_lf), \
         "frozen corpus changed without re-measuring"
