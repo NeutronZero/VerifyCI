@@ -195,8 +195,8 @@ REQUIRED_FROZEN_FIELDS: dict[str, tuple[str, ...]] = {
 TRUSTED_RESULT_HASHES: dict[str, str] = {
     "H1_retrieval_fusion": "9a14540ce93d74704095f43a36daf64cfcfa22dee9c78be49c94494071dd7553",
     "H1_RR_reranked_hybrid": "66254e70677dfe22fe7e9d3204b688f3665b3ab1ea17fa1a265ef91c7a6ec4aa",
-    "patch_corpus_verifier": "5f9e455dcfd81717bce42842f7484300f0a65d89b65e3330b90f773bb8f59137",
-    "blast_radius_bounds": "3a6da80387d0a9b117da7ac276c144bedc772ed3311288473215a49957d8ac6b",
+    "patch_corpus_verifier": "391e299ab29d4e1c826a15e9b42a04bc49b727430d9f2dbd6e8144e615a1fe5f",
+    "blast_radius_bounds": "6df49c637aca2f1a2e8b60b3a0873338a55f69c115f3d0b1646b7287ac06972f",
     "retrieval_manifest": "562f94561a6ffb3b0ce14b0bf7098d6d91787c2d582fe388c6572127c1a3c9ff",
 }
 

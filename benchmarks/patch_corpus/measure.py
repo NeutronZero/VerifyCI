@@ -143,7 +143,7 @@ def main():
     for k, v in m["confusion"].items():
         print(f"  {k:20} {v}")
     report = {"frozen": {"cases_sha256": __import__("hashlib").sha256(
-                (BASE / "cases.jsonl").read_bytes()).hexdigest()},
+                (BASE / "cases.jsonl").read_bytes().replace(b"\r\n", b"\n")).hexdigest()},
               "verdicts": table,
               "metrics": {k: (v if not isinstance(v, Counter) else dict(v))
                           for k, v in m.items()}}
