@@ -75,3 +75,28 @@ def test_canonical_sorted_keys():
     m_pos = result.find(b"m_key")
     z_pos = result.find(b"z_key")
     assert a_pos < m_pos < z_pos
+
+
+def test_canonical_certificate_hash():
+    from verifyci.contracts.canonical import canonical_certificate_bytes, certificate_hash
+    from verifyci.contracts.verification_ir import Certificate, Conclusion
+
+    cert = Certificate(
+        certificate_id="cert_001",
+        premises=[],
+        evidence=[],
+        execution_traces=[],
+        conclusion=Conclusion(result="pass", reasoning="all checks passed"),
+        confidence=1.0,
+        generated_by="SemiFormalReasoner",
+        checked_by=["test_check"],
+        verification_method="deterministic_rules",
+        certificate_verified=True,
+        timestamp=1700000000.0,
+    )
+    b = canonical_certificate_bytes(cert)
+    assert isinstance(b, bytes)
+    assert b"cert_001" in b
+    h = certificate_hash(cert)
+    assert isinstance(h, str) and len(h) == 64
+    assert h == certificate_hash(cert)

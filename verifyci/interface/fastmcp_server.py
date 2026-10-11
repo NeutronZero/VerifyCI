@@ -14,6 +14,15 @@ from starlette.responses import JSONResponse
 
 from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_TASK_DIFF_CHARS
 
+__all__ = [
+    "MAX_DIFF_CHARS",
+    "MAX_TASK_DIFF_CHARS",
+    "create_fastmcp_server",
+    "create_fastmcp_http_app",
+    "serve",
+    "FastMCPAuthMiddleware",
+]
+
 
 def create_fastmcp_server(db_path: str | None, name: str = "verifyci"):
     from fastmcp import FastMCP
@@ -62,18 +71,22 @@ def create_fastmcp_server(db_path: str | None, name: str = "verifyci"):
     @mcp.tool()
     async def verify_diff(diff: str, revision_id: str = "", conversation_id: str = "") -> dict[str, Any]:
         """Verify a unified diff: semi-formal certificate + blast radius + policy decision."""
-        if len(diff) > MAX_DIFF_CHARS:
-            return {"revision_id": revision_id, "status": "FAILED", "error": "diff_too_large"}
+        from verifyci.interface.ingress import IngressValidationError, validate_diff_ingress
+        try:
+            validate_diff_ingress(diff)
+        except IngressValidationError as exc:
+            return {"revision_id": revision_id, "status": "FAILED", "error": exc.code}
         return await inner.call_tool("verify.diff", diff=diff, revision_id=revision_id,
                                      conversation_id=conversation_id)
 
     @mcp.tool()
     async def task_run(task: str, conversation_id: str = "", diff: str = "") -> dict[str, Any]:
         """Plan, compile, schedule and gate a task; returns the terminal decision."""
-        if len(diff) > MAX_TASK_DIFF_CHARS:
-            return {"task": task, "status": "FAILED", "error": "diff_too_large", "ledger_head": None}
-        if len(task) > MAX_TASK_DIFF_CHARS:
-            return {"task": task, "status": "FAILED", "error": "task_too_large", "ledger_head": None}
+        from verifyci.interface.ingress import IngressValidationError, validate_task_ingress
+        try:
+            validate_task_ingress(task, diff=diff)
+        except IngressValidationError as exc:
+            return {"task": task, "status": "FAILED", "error": exc.code, "ledger_head": None}
         return await inner.call_tool("task.run", task=task, conversation_id=conversation_id, diff=diff)
 
     @mcp.tool()

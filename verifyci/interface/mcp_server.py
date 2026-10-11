@@ -3,7 +3,7 @@ import time as _time
 from typing import Any
 
 from verifyci.contracts.scheduler import TERMINAL_STATUSES
-from verifyci.interface.limits import MAX_DIFF_CHARS, MAX_K, MAX_QUERY_CHARS, MAX_TASK_DIFF_CHARS
+from verifyci.interface.limits import MAX_K, MAX_QUERY_CHARS, MAX_TASK_DIFF_CHARS
 
 
 class MCPServer:
@@ -268,13 +268,16 @@ class MCPServerHandlers:
                     "files": [],
                     "changed_entities": [],
                 }
-            if len(diff) > MAX_DIFF_CHARS:
+            from verifyci.interface.ingress import IngressValidationError, validate_diff_ingress
+            try:
+                validate_diff_ingress(diff)
+            except IngressValidationError as exc:
                 return {
                     "revision_id": revision_id,
                     "status": "FAIL",
-                    "error": "diff_too_large",
+                    "error": exc.code,
                     "report_id": "",
-                    "rationale": "diff_too_large",
+                    "rationale": exc.code,
                     "files": [],
                     "changed_entities": [],
                 }

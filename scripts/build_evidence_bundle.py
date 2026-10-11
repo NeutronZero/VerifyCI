@@ -20,8 +20,11 @@ def get_environment_metadata() -> dict:
     """Capture forensic execution environment metadata."""
     try:
         git_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        status_out = subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()
+        is_clean = len(status_out) == 0
     except Exception:
         git_sha = "unknown"
+        is_clean = False
 
     branch = os.environ.get("GITHUB_REF_NAME", "local")
     pyproject_bytes = (ROOT / "pyproject.toml").read_bytes() if (ROOT / "pyproject.toml").exists() else b""
@@ -31,6 +34,7 @@ def get_environment_metadata() -> dict:
     return {
         "commit": git_sha,
         "branch": branch,
+        "clean_worktree": is_clean,
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "system": platform.system(),
