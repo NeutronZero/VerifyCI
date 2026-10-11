@@ -37,16 +37,12 @@ def _model_provenance() -> dict:
     for an ESTABLISHED claim).
     """
     from huggingface_hub import snapshot_download  # type: ignore
+    from verifyci.retrieval.model_attestation import compute_snapshot_manifest
 
     snap = Path(snapshot_download(MODEL, local_files_only=True))
-    h = hashlib.sha256()
-    files = {}
-    for p in sorted([x for x in snap.iterdir() if x.is_file()], key=lambda x: x.name):
-        data = p.read_bytes()
-        files[p.name] = hashlib.sha256(data).hexdigest()
-        h.update(p.name.encode() + b"\x00" + data)
+    snapshot_sha256, files, manifest = compute_snapshot_manifest(snap)
     return {"model": MODEL, "snapshot_commit": snap.name,
-            "snapshot_sha256": h.hexdigest(), "files": files}
+            "snapshot_sha256": snapshot_sha256, "files": files, "manifest": manifest}
 
 
 def main() -> None:
@@ -118,6 +114,7 @@ def main() -> None:
                    "model_snapshot_commit": model_prov["snapshot_commit"],
                    "model_snapshot_sha256": model_prov["snapshot_sha256"],
                    "model_files": model_prov["files"],
+                   "model_manifest": model_prov["manifest"],
                    "rerank_depth": RERANK_DEPTH,
                    "rrf_k": 60, "k_ndcg": 10},
         "run": {"provider": "cached:nomic-embed-text+local-cross-encoder",

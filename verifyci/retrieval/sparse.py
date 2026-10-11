@@ -26,6 +26,7 @@ class BM25Retriever:
         self._distinct = {}    # id -> set(tokens), drives df
         self._lengths = {}     # id -> doc length
         self._df = Counter()   # token -> number of documents containing it
+        self._postings: dict[str, list[tuple[str, int]]] = {}
         self._length_sum = 0
 
     @property
@@ -45,10 +46,21 @@ class BM25Retriever:
                     del self._df[token]
             for token in distinct - old_distinct:
                 self._df[token] += 1
+            for token in old_distinct:
+                if token in self._postings:
+                    self._postings[token] = [
+                        (doc_id, count)
+                        for doc_id, count in self._postings[token]
+                        if doc_id != id
+                    ]
+                    if not self._postings[token]:
+                        del self._postings[token]
             self._length_sum -= self._lengths[id]
         else:
             for token in distinct:
                 self._df[token] += 1
+        for token, count in tf.items():
+            self._postings.setdefault(token, []).append((id, count))
         self._documents[id] = text
         self._tf[id] = tf
         self._distinct[id] = distinct
@@ -59,12 +71,20 @@ class BM25Retriever:
         query_tokens = tokenize(query)
         if not self._documents or not query_tokens:
             return []
+        candidate_ids = set()
+        for token in set(query_tokens):
+            if token in self._postings:
+                for doc_id, _ in self._postings[token]:
+                    candidate_ids.add(doc_id)
+        if not candidate_ids:
+            return []
         total = len(self._documents)
         avgdl = self._avgdl or 1.0
         results = []
-        for id, tf in self._tf.items():
+        for id in candidate_ids:
             score = 0.0
             doc_len = self._lengths[id]
+            tf = self._tf[id]
             for token in query_tokens:
                 term_freq = tf.get(token, 0)
                 if not term_freq:
