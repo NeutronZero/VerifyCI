@@ -343,7 +343,7 @@ def test_h_evidence_bundle_self_consistency():
     from verifyci.evidence.claims import CLAIM_RESULT_PATHS, evaluate_claim, load_evidence
 
     root = Path(__file__).resolve().parent.parent.parent
-    evaluation = build_evidence_bundle.evaluate_claims()
+    evaluation = build_evidence_bundle.evaluate_claims(clean_worktree=True)
 
     for name, relative_path in CLAIM_RESULT_PATHS.items():
         raw = json.loads((root / relative_path).read_text(encoding="utf-8"))
@@ -461,6 +461,12 @@ def test_h_unknown_worktree_fails_establishment():
     assert evaluation["provenance_verified"] is False
     assert evaluation["overall_status"] == "UNESTABLISHED"
     assert evaluation["worktree_status"] == "unknown"
+    for claim in evaluation["claims"].values():
+        assert claim["status"] != "ESTABLISHED"
+    assert evaluation["claims"]["H1_RR_reranked_hybrid"]["status"] == "PROVENANCE_MISMATCH"
+    assert evaluation["claims"]["H1_RR_reranked_hybrid"]["provenance_error"] == "unknown_worktree"
+    assert evaluation["claims"]["blast_radius_bounds"]["status"] == "PROVENANCE_MISMATCH"
+    assert evaluation["claims"]["blast_radius_bounds"]["provenance_error"] == "unknown_worktree"
 
 
 def test_h_missing_frozen_metadata_fails(tmp_path):
@@ -567,6 +573,110 @@ def test_h_result_artifact_tampering_fails_binding(tmp_path):
     assert evaluation["provenance_verified"] is False
     assert evaluation["claims"]["blast_radius_bounds"]["status"] == "PROVENANCE_MISMATCH"
     assert "result_artifact_hash_mismatch:results.json" in evaluation["claims"]["blast_radius_bounds"]["provenance_error"]
+
+
+def test_h_retrieval_manifest_missing_entry_fails(tmp_path):
+    import json
+    import shutil
+    from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import evaluate_claims, verify_claim_provenance
+
+    shutil.copytree(build_evidence_bundle.ROOT / "benchmarks", tmp_path / "benchmarks")
+    shutil.copytree(build_evidence_bundle.ROOT / "verifyci", tmp_path / "verifyci")
+
+    ret_path = tmp_path / "benchmarks" / "retrieval" / "results.json"
+    ret_data = json.loads(ret_path.read_text(encoding="utf-8"))
+    del ret_data["frozen_sources"]["dense.py"]
+    ret_path.write_text(json.dumps(ret_data), encoding="utf-8")
+
+    h1_data = json.loads((tmp_path / "benchmarks" / "beir" / "results.json").read_text(encoding="utf-8"))
+    ok, err = verify_claim_provenance(tmp_path, "H1_retrieval_fusion", h1_data, bind_result_artifact=False)
+    assert ok is False
+    assert err == "missing_source_manifest_entry:dense.py"
+
+    evaluation = evaluate_claims(tmp_path, clean_worktree=True, bind_result_artifacts=False)
+    assert evaluation["provenance_verified"] is False
+    assert evaluation["overall_status"] == "UNESTABLISHED"
+    assert evaluation["claims"]["H1_retrieval_fusion"]["provenance_error"] == "missing_source_manifest_entry:dense.py"
+    assert evaluation["claims"]["H1_RR_reranked_hybrid"]["status"] == "PROVENANCE_MISMATCH"
+    assert evaluation["claims"]["H1_RR_reranked_hybrid"]["provenance_error"] == "missing_source_manifest_entry:dense.py"
+
+
+def test_h_retrieval_manifest_altered_hash_fails(tmp_path):
+    import json
+    import shutil
+    from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import evaluate_claims, verify_claim_provenance
+
+    shutil.copytree(build_evidence_bundle.ROOT / "benchmarks", tmp_path / "benchmarks")
+    shutil.copytree(build_evidence_bundle.ROOT / "verifyci", tmp_path / "verifyci")
+
+    ret_path = tmp_path / "benchmarks" / "retrieval" / "results.json"
+    ret_data = json.loads(ret_path.read_text(encoding="utf-8"))
+    ret_data["frozen_sources"]["dense.py"] = "0" * 64
+    ret_path.write_text(json.dumps(ret_data), encoding="utf-8")
+
+    h1_data = json.loads((tmp_path / "benchmarks" / "beir" / "results.json").read_text(encoding="utf-8"))
+    ok, err = verify_claim_provenance(tmp_path, "H1_retrieval_fusion", h1_data, bind_result_artifact=False)
+    assert ok is False
+    assert err == "source_manifest_hash_altered:dense.py"
+
+    evaluation = evaluate_claims(tmp_path, clean_worktree=True, bind_result_artifacts=False)
+    assert evaluation["provenance_verified"] is False
+    assert evaluation["overall_status"] == "UNESTABLISHED"
+    assert evaluation["claims"]["H1_retrieval_fusion"]["provenance_error"] == "source_manifest_hash_altered:dense.py"
+    assert evaluation["claims"]["H1_RR_reranked_hybrid"]["status"] == "PROVENANCE_MISMATCH"
+    assert evaluation["claims"]["H1_RR_reranked_hybrid"]["provenance_error"] == "source_manifest_hash_altered:dense.py"
+
+
+def test_h_per_case_blast_recall_derived_from_sets():
+    import json
+    from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import evaluate_claim
+
+    blast_path = build_evidence_bundle.ROOT / "benchmarks" / "blast_corpus" / "results.json"
+    blast_data = json.loads(blast_path.read_text(encoding="utf-8"))
+
+    # Tamper with stored recall field in cases (e.g. set all to 0.0)
+    tampered = dict(blast_data)
+    tampered["cases"] = [dict(c) for c in blast_data["cases"]]
+    for c in tampered["cases"]:
+        c["recall"] = 0.0
+
+    # Derived recall from expected and detected sets is unaffected by forged recall field
+    result = evaluate_claim("blast_radius_bounds", tampered)
+    assert result["recomputed_from_cases"] is True
+    assert result["coverage_all"] == 1.0
+    assert result["coverage_seeded_only"] == 1.0
+    assert result["status"] == "ESTABLISHED"
+
+
+def test_h_per_case_blast_recall_set_mismatch_drops_establishment():
+    import json
+    from scripts import build_evidence_bundle
+    from verifyci.evidence.claims import evaluate_claim
+
+    blast_path = build_evidence_bundle.ROOT / "benchmarks" / "blast_corpus" / "results.json"
+    blast_data = json.loads(blast_path.read_text(encoding="utf-8"))
+
+    tampered = dict(blast_data)
+    tampered["cases"] = [dict(c) for c in blast_data["cases"]]
+    # Tamper detected set of case 0 (B1) to be empty
+    tampered["cases"][0]["detected"] = []
+
+    result = evaluate_claim("blast_radius_bounds", tampered)
+    assert result["recomputed_from_cases"] is True
+    assert result["coverage_all"] < 0.90
+    assert result["status"] == "MEASURED"
+
+
+def test_h_blast_malformed_case_record_fails():
+    from verifyci.evidence.claims import evaluate_claim
+
+    malformed = {"cases": [{"expected": "not-a-list", "detected": []}]}
+    result = evaluate_claim("blast_radius_bounds", malformed)
+    assert result["status"] == "MISSING"
+    assert "malformed_case_record" in result["error"]
 
 
 def test_sec_001_selector_allowlist_and_ci_transport():

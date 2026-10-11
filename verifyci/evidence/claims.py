@@ -197,7 +197,24 @@ TRUSTED_RESULT_HASHES: dict[str, str] = {
     "H1_RR_reranked_hybrid": "66254e70677dfe22fe7e9d3204b688f3665b3ab1ea17fa1a265ef91c7a6ec4aa",
     "patch_corpus_verifier": "f622583ce00404a3ac6c371bdbf1578324d66c7a171218fface91f2fa4a22107",
     "blast_radius_bounds": "00ab5c6997107205fb0e5e2119452ae15066fa8df3a4aaec76d16f409961887d",
+    "retrieval_manifest": "562f94561a6ffb3b0ce14b0bf7098d6d91787c2d582fe388c6572127c1a3c9ff",
 }
+
+MANDATORY_RETRIEVAL_SOURCES: dict[str, str] = {
+    "vector_store.py": "verifyci/contracts/vector_store.py",
+    "dense.py": "verifyci/retrieval/dense.py",
+    "sparse.py": "verifyci/retrieval/sparse.py",
+    "fusion.py": "verifyci/retrieval/fusion.py",
+}
+
+PINNED_RETRIEVAL_SOURCE_HASHES: dict[str, str] = {
+    "vector_store.py": "f0d31cbc9594be0233950d4924cc3aac48f075757f7059921be6d85ea74483e9",
+    "dense.py": "3db2257d1cb39a92249e5b8831229d44ab9d7dc0e6fefa7a5112db798c33331a",
+    "sparse.py": "db0f8cdddf914e944006149c90c24ee1596b4687634e12300d1b96e0939ff1eb",
+    "fusion.py": "a212a8d220d6a5e283a0fad10973897214cf3a9653f66bb30344b56d18819084",
+}
+
+TRUSTED_RETRIEVAL_MANIFEST_HASH = TRUSTED_RESULT_HASHES["retrieval_manifest"]
 
 
 def _evaluate_patch(data: dict[str, Any]) -> dict[str, Any]:
@@ -255,10 +272,29 @@ def _evaluate_patch(data: dict[str, Any]) -> dict[str, Any]:
 def _evaluate_blast(data: dict[str, Any]) -> dict[str, Any]:
     cases = data.get("cases")
     if isinstance(cases, list) and cases:
-        # Recompute coverage metrics directly from per-case outputs and expectations
-        exp_rows = [r for r in cases if isinstance(r, dict) and r.get("expected")]
-        cov_all = (sum(r.get("recall", 0.0) for r in exp_rows) / len(exp_rows)) if exp_rows else 0.0
-        seeded = [r.get("recall", 0.0) for r in exp_rows if r.get("mode") == "seeded"]
+        # Recompute coverage metrics directly by deriving each case's recall
+        # from underlying expected and detected entity sets:
+        # Recall = |Expected & Detected| / |Expected|
+        exp_cases: list[tuple[float, str | None]] = []
+        for r in cases:
+            if not isinstance(r, dict):
+                return _missing_claim("malformed_case_record:expected_dict")
+            expected = r.get("expected")
+            detected = r.get("detected")
+            if not isinstance(expected, list) or not isinstance(detected, list):
+                return _missing_claim("malformed_case_record:expected_or_detected_not_list")
+            # For cases with non-empty expected sets, compute derived recall directly
+            if expected:
+                exp_set = set(expected)
+                det_set = set(detected)
+                case_recall = len(exp_set & det_set) / len(exp_set)
+                exp_cases.append((case_recall, r.get("mode")))
+
+        if not exp_cases:
+            return _missing_claim("missing_expected_cases")
+
+        cov_all = sum(rec for rec, _ in exp_cases) / len(exp_cases)
+        seeded = [rec for rec, mode in exp_cases if mode == "seeded"]
         cov_seeded = (sum(seeded) / len(seeded)) if seeded else 0.0
         cov_all = round(cov_all, 4)
         cov_seeded = round(cov_seeded, 4)
@@ -382,25 +418,35 @@ def verify_claim_provenance(
         retrieval_results = root / "benchmarks" / "retrieval" / "results.json"
         if not retrieval_results.is_file():
             return False, "missing_file:retrieval_results.json"
+        if bind_result_artifact and not _file_matches_hash(retrieval_results, TRUSTED_RETRIEVAL_MANIFEST_HASH):
+            return False, "result_artifact_hash_mismatch:retrieval_results.json"
         try:
             ret_data = json.loads(retrieval_results.read_text(encoding="utf-8"))
-            frozen_sources = ret_data.get("frozen_sources", {})
-            source_paths = {
-                "vector_store.py": "verifyci/contracts/vector_store.py",
-                "dense.py": "verifyci/retrieval/dense.py",
-                "sparse.py": "verifyci/retrieval/sparse.py",
-                "fusion.py": "verifyci/retrieval/fusion.py",
-            }
-            for name, exp_h in frozen_sources.items():
-                rel_src = source_paths.get(name)
-                if rel_src:
-                    src_file = root / rel_src
-                    if not src_file.is_file():
-                        return False, f"missing_source_file:{name}"
-                    if not _file_matches_hash(src_file, exp_h):
-                        return False, f"source_hash_mismatch:{name}"
         except Exception:
             return False, "measured_source_read_error"
+
+        frozen_sources = ret_data.get("frozen_sources")
+        if not isinstance(frozen_sources, dict):
+            return False, "missing_provenance:retrieval:no_frozen_sources"
+
+        # Mandatory source set check: reject missing, unexpected, or malformed entries
+        for name, rel_src in MANDATORY_RETRIEVAL_SOURCES.items():
+            if name not in frozen_sources or not isinstance(frozen_sources[name], str):
+                return False, f"missing_source_manifest_entry:{name}"
+            exp_h = frozen_sources[name]
+            pinned_h = PINNED_RETRIEVAL_SOURCE_HASHES.get(name)
+            if pinned_h and exp_h != pinned_h:
+                return False, f"source_manifest_hash_altered:{name}"
+            src_file = root / rel_src
+            if not src_file.is_file():
+                return False, f"missing_source_file:{name}"
+            if not _file_matches_hash(src_file, exp_h):
+                return False, f"source_hash_mismatch:{name}"
+
+        # Reject unexpected entries in frozen_sources
+        for name in frozen_sources:
+            if name not in MANDATORY_RETRIEVAL_SOURCES:
+                return False, f"unexpected_source_manifest_entry:{name}"
 
     elif claim_name == "patch_corpus_verifier":
         cases_path = root / "benchmarks" / "patch_corpus" / "cases.jsonl"
@@ -466,18 +512,22 @@ def evaluate_claims(
     if clean_worktree is None:
         tree_status = "unknown"
         tree_ok = False
+        tree_err = "unknown_worktree"
         dirty_override = False
     elif clean_worktree is False:
         tree_status = "dirty"
         if allow_dirty:
             tree_ok = True
+            tree_err = None
             dirty_override = True
         else:
             tree_ok = False
+            tree_err = "dirty_worktree"
             dirty_override = False
     else:
         tree_status = "clean"
         tree_ok = True
+        tree_err = None
         dirty_override = False
 
     for claim_name, relative_path in CLAIM_RESULT_PATHS.items():
@@ -500,11 +550,11 @@ def evaluate_claims(
                 else:
                     result = {**result, "provenance_error": prov_err}
 
-        if tree_status == "dirty" and not allow_dirty and result.get("status") == "ESTABLISHED":
+        if not tree_ok and result.get("status") == "ESTABLISHED":
             result = {
                 **result,
                 "status": "PROVENANCE_MISMATCH",
-                "provenance_error": "dirty_worktree",
+                "provenance_error": tree_err,
             }
 
         if dirty_override and result.get("status") == "ESTABLISHED":

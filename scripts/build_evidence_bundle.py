@@ -53,12 +53,14 @@ def evaluate_claims(
     root: Path | None = None,
     clean_worktree: bool | None = None,
     allow_dirty: bool = False,
+    bind_result_artifacts: bool = True,
 ) -> dict:
     """Evaluate claims using the canonical evidence predicates."""
     return _evaluate_claims(
         ROOT if root is None else root,
         clean_worktree=clean_worktree,
         allow_dirty=allow_dirty,
+        bind_result_artifacts=bind_result_artifacts,
     )
 
 
