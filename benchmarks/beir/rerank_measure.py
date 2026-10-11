@@ -41,10 +41,13 @@ def _model_provenance() -> dict:
     snap = Path(snapshot_download(MODEL, local_files_only=True))
     h = hashlib.sha256()
     files = {}
-    for p in sorted([x for x in snap.iterdir() if x.is_file()], key=lambda x: x.name):
+    file_paths = sorted([p for p in snap.rglob("*") if p.is_file()],
+                        key=lambda p: p.relative_to(snap).as_posix())
+    for p in file_paths:
+        rel = p.relative_to(snap).as_posix()
         data = p.read_bytes()
-        files[p.name] = hashlib.sha256(data).hexdigest()
-        h.update(p.name.encode() + b"\x00" + data)
+        files[rel] = hashlib.sha256(data).hexdigest()
+        h.update(rel.encode("utf-8") + b"\x00" + data)
     return {"model": MODEL, "snapshot_commit": snap.name,
             "snapshot_sha256": h.hexdigest(), "files": files}
 

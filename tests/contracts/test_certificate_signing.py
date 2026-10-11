@@ -310,3 +310,46 @@ def test_unknown_key_cannot_self_certify(monkeypatch):
     valid_cert = _sample_certificate().sign(trusted_key, key_id=trusted_pub_hex)
     assert valid_cert.verify_signature(trusted_keys=[trusted_pub_hex]) is True
     assert valid_cert.verify_signature() is True
+
+
+def test_malformed_metadata_and_non_finite_fields_fail_closed():
+    """Regression test: Malformed signer metadata types and non-finite float fields
+    fail closed without raising unhandled exceptions (AttributeError, ValueError, TypeError)."""
+    private_key = Ed25519PrivateKey.generate()
+    pub_key = private_key.public_key()
+    pub_hex = pub_key.public_bytes_raw().hex()
+    valid_cert = _sample_certificate().sign(private_key, key_id=pub_hex)
+    assert valid_cert.verify_signature(pub_key) is True
+
+    # 1. Malformed signature_algorithm types (non-string: int, list, dict, object)
+    for bad_alg in [123, ["ed25519"], {"algo": "ed25519"}, object(), 3.14, True]:
+        bad_cert = dataclasses.replace(valid_cert, signature_algorithm=bad_alg)
+        assert bad_cert.verify_signature(pub_key) is False
+        assert bad_cert.verify_signature(trusted_keys=[pub_hex]) is False
+
+    # 2. Malformed signing_key_id types (non-string: int, list, dict, object)
+    for bad_kid in [123, [pub_hex], {"key_id": pub_hex}, object(), False]:
+        bad_cert = dataclasses.replace(valid_cert, signing_key_id=bad_kid)
+        assert bad_cert.verify_signature(pub_key) is False
+        assert bad_cert.verify_signature(trusted_keys=[pub_hex]) is False
+
+    # 3. Malformed signature types (non-str/bytes/bytearray: int, list, dict)
+    for bad_sig in [123, [1, 2, 3], {"sig": "hex"}, object(), False]:
+        bad_cert = dataclasses.replace(valid_cert, signature=bad_sig)
+        assert bad_cert.verify_signature(pub_key) is False
+        assert bad_cert.verify_signature(trusted_keys=[pub_hex]) is False
+
+    # 4. Non-finite float fields (NaN, Infinity, -Infinity)
+    # json.dumps(..., allow_nan=False) raises ValueError on non-finite floats;
+    # verify_signature must catch this and return False fail-closed.
+    for bad_float in [float("nan"), float("inf"), float("-inf")]:
+        # Non-finite confidence
+        cert_bad_conf = dataclasses.replace(valid_cert, confidence=bad_float)
+        assert cert_bad_conf.verify_signature(pub_key) is False
+        assert cert_bad_conf.verify_signature(trusted_keys=[pub_hex]) is False
+
+        # Non-finite timestamp
+        cert_bad_ts = dataclasses.replace(valid_cert, timestamp=bad_float)
+        assert cert_bad_ts.verify_signature(pub_key) is False
+        assert cert_bad_ts.verify_signature(trusted_keys=[pub_hex]) is False
+

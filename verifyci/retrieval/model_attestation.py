@@ -79,7 +79,9 @@ def verify_runtime_model(
         }
 
     try:
-        file_paths = sorted([x for x in snap_path.iterdir() if x.is_file()], key=lambda x: x.name)
+        # Recursively enumerate all files affecting model loading, sorted by normalized relative posix path
+        raw_files = [x for x in snap_path.rglob("*") if x.is_file()]
+        file_paths = sorted(raw_files, key=lambda x: x.relative_to(snap_path).as_posix())
         if not file_paths:
             return False, {
                 "model": model_str,
@@ -91,9 +93,10 @@ def verify_runtime_model(
         h = hashlib.sha256()
         files: dict[str, str] = {}
         for p in file_paths:
+            rel_name = p.relative_to(snap_path).as_posix()
             data = p.read_bytes()
-            files[p.name] = hashlib.sha256(data).hexdigest()
-            h.update(p.name.encode("utf-8") + b"\x00" + data)
+            files[rel_name] = hashlib.sha256(data).hexdigest()
+            h.update(rel_name.encode("utf-8") + b"\x00" + data)
         snapshot_sha256 = h.hexdigest()
         snapshot_commit = snap_path.name
     except Exception as exc:

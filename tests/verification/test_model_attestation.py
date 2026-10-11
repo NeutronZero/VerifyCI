@@ -382,3 +382,69 @@ def test_verified_snapshot_path_is_passed_to_loader(monkeypatch, tmp_path: Path)
     assert passed_model_arg != model_identifier
     assert passed_local_files_only is True
     assert reranker.loaded_snapshot_path == str(model_dir.resolve())
+
+
+def test_recursive_subdirectory_model_attestation(tmp_path: Path):
+    """Test that model attestation recursively enumerates subdirectories and hashes them."""
+    commit = "nested-commit-123"
+    model_dir = tmp_path / commit
+    model_dir.mkdir(parents=True)
+
+    # Root file
+    (model_dir / "config.json").write_bytes(b'{"root": true}')
+    # Subdirectory files
+    sub_dir = model_dir / "1_Pooling"
+    sub_dir.mkdir()
+    (sub_dir / "config.json").write_bytes(b'{"pooling_mode": "mean"}')
+    nested_dir = model_dir / "sub" / "deep"
+    nested_dir.mkdir(parents=True)
+    (nested_dir / "weights.bin").write_bytes(b"\xaa\xbb\xcc\xdd")
+
+    ok, details = verify_runtime_model(str(model_dir), expected_snapshot_commit=commit)
+    assert ok is True
+    assert details["verified"] is True
+    assert "1_Pooling/config.json" in details["files"]
+    assert "config.json" in details["files"]
+    assert "sub/deep/weights.bin" in details["files"]
+    snapshot_sha = details["snapshot_sha256"]
+
+    # Validating with expected snapshot sha succeeds
+    ok2, details2 = verify_runtime_model(
+        str(model_dir),
+        expected_snapshot_commit=commit,
+        expected_snapshot_sha256=snapshot_sha,
+        require_pin=True,
+    )
+    assert ok2 is True
+    assert details2["verified"] is True
+
+
+def test_tampering_nested_subdirectory_file_invalidates_attestation(tmp_path: Path):
+    """Test that modifying a nested file in a subdirectory invalidates attestation."""
+    commit = "nested-tamper-commit"
+    model_dir = tmp_path / commit
+    model_dir.mkdir(parents=True)
+
+    (model_dir / "config.json").write_bytes(b'{"root": true}')
+    sub_dir = model_dir / "1_Pooling"
+    sub_dir.mkdir()
+    pooling_config = sub_dir / "config.json"
+    pooling_config.write_bytes(b'{"pooling_mode": "mean"}')
+
+    ok, details = verify_runtime_model(str(model_dir), expected_snapshot_commit=commit)
+    assert ok is True
+    original_sha = details["snapshot_sha256"]
+
+    # Tamper with nested file
+    pooling_config.write_bytes(b'{"pooling_mode": "tampered_max"}')
+
+    # Attestation against original expected sha MUST fail
+    ok_tampered, details_tampered = verify_runtime_model(
+        str(model_dir),
+        expected_snapshot_commit=commit,
+        expected_snapshot_sha256=original_sha,
+        require_pin=True,
+    )
+    assert ok_tampered is False
+    assert details_tampered["verified"] is False
+    assert "Snapshot SHA-256 mismatch" in details_tampered["error"]

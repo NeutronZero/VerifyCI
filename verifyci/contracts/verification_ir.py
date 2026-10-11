@@ -235,25 +235,29 @@ class Certificate:
            - If trusted store is a list/set of keys: the verifying key must be in the trusted set,
              and if self.signing_key_id is a 64-char hex string, it must match the trusted key.
         """
-        if not self.signature:
+        if not self.signature or not isinstance(self.signature, (str, bytes, bytearray)):
             return False
-        if self.signature_algorithm is not None and self.signature_algorithm.lower() != "ed25519":
+        if self.signature_algorithm is not None:
+            if not isinstance(self.signature_algorithm, str) or self.signature_algorithm.lower() != "ed25519":
+                return False
+        if self.signing_key_id is not None and not isinstance(self.signing_key_id, str):
             return False
 
         try:
             if isinstance(self.signature, str):
                 sig_bytes = bytes.fromhex(self.signature)
-            elif isinstance(self.signature, (bytes, bytearray)):
-                sig_bytes = bytes(self.signature)
             else:
-                return False
+                sig_bytes = bytes(self.signature)
         except (ValueError, TypeError):
             return False
 
         if len(sig_bytes) != 64:
             return False
 
-        canonical = self.canonical_bytes()
+        try:
+            canonical = self.canonical_bytes()
+        except Exception:
+            return False
 
         from cryptography.hazmat.primitives.asymmetric.ed25519 import (
             Ed25519PrivateKey,
