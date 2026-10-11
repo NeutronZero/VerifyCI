@@ -109,4 +109,33 @@ def test_graph_cache_failure_cleans_up_locks():
 
     # Subsequent attempt can succeed
     res = cache.get_or_load(key, lambda: ({"ok": True}, {}, [], []))
-    assert res[0] == {"ok": True}
+    assert res[0]["ok"] is True
+
+
+def test_graph_cache_immutable_view_rejects_mutation():
+    import rustworkx as rx
+    cache = GraphSnapshotCache(max_cost=1000)
+    key = ("db_rx", "repo", "rev", "v2", "", "")
+
+    def _loader():
+        g = rx.PyDiGraph()
+        n1 = g.add_node("node1")
+        n2 = g.add_node("node2")
+        g.add_edge(n1, n2, "edge")
+        return g, {"node1": n1, "node2": n2}, ["node1", "node2"], [("node1", "node2")]
+
+    g_view, _, _ = cache.get_or_load(key, _loader)
+    # Read operations succeed
+    assert len(g_view) == 2
+    assert g_view.successors(0) == ["node2"]
+
+    # Mutating operations fail closed with TypeError
+    with pytest.raises(TypeError, match="ImmutableGraphView cannot be modified"):
+        g_view.add_node("node3")
+
+    with pytest.raises(TypeError, match="ImmutableGraphView cannot be modified"):
+        g_view.add_edge(0, 1, "tampered")
+
+    with pytest.raises(TypeError, match="ImmutableGraphView cannot be modified"):
+        g_view.remove_node(0)
+

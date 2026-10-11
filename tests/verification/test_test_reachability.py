@@ -127,3 +127,17 @@ def test_blast_radius_check_preserves_none_test_entities():
     )
     assert blast.test_coverage_status == "UNKNOWN"
     assert blast.static_reachability_gap == ()
+
+
+def test_risk_score_calculation_unchanged_across_test_metadata_modes():
+    g, node_map = _build_test_graph()
+
+    # Identical changed entity: payment_handler (has 1 callee: charge_card, 0 callers)
+    # Base structural risk: 0 callers * 0.1 + 1 callee * 0.05 = 0.05
+    res_none = compute_blast_radius(g, ["payment_handler"], None, node_map=node_map)
+    res_empty = compute_blast_radius(g, ["payment_handler"], set(), node_map=node_map)
+
+    assert res_none.risk_score == pytest.approx(0.05)
+    assert res_empty.risk_score == pytest.approx(0.05)
+    assert res_none.risk_score == res_empty.risk_score
+

@@ -81,18 +81,16 @@ def compute_blast_radius(
     impacted = (affected_callers | affected_callees) | set(changed_entities)
     dependents = (affected_callers | affected_callees) - (set(test_entities) if test_entities is not None else set())
 
-    # Tri-state test coverage knowledge:
+    # Tri-state test coverage knowledge (reported exclusively through static_reachability_gap):
     # 1. test_entities is None: unindexed / missing test suite metadata
     # 2. test_entities is empty set: indexed test suite contains 0 tests
     # 3. test_entities is populated: evaluate static reachability
     if test_entities is None:
         test_coverage_status = "UNKNOWN"
-        static_reachability_gap = []
-        test_coverage_gap = []
+        static_reachability_gap = ()
     elif len(test_entities) == 0:
         test_coverage_status = "EVALUATED_EMPTY"
-        static_reachability_gap = sorted(dependents)
-        test_coverage_gap = []
+        static_reachability_gap = tuple(sorted(dependents))
     else:
         test_coverage_status = "STATIC_REACHABILITY_EVALUATED"
         covered = set()
@@ -104,8 +102,14 @@ def compute_blast_radius(
                     continue
                 test_callees = traverse(graph, test_idx, "outgoing", max_hops, node_map, CALL_FLOW_TYPES, budget=budget)
                 covered.update(reverse_map.get(c, str(c)) for c in test_callees)
-        static_reachability_gap = sorted(dependents - covered)
-        test_coverage_gap = list(static_reachability_gap)
+        static_reachability_gap = tuple(sorted(dependents - covered))
+
+    # Existing calibrated test_coverage_gap and frozen risk formula remain uncoupled:
+    # static reachability gaps are not mixed into risk_score without evidence calibration.
+    if test_entities:
+        test_coverage_gap = list((affected_callers | affected_callees) - set(test_entities))
+    else:
+        test_coverage_gap = []
 
     # Calibrated risk formula remains frozen: callers, callees, and coverage gaps
     risk_score = min(1.0, len(affected_callers) * 0.1 + len(affected_callees) * 0.05 + len(test_coverage_gap) * 0.2)

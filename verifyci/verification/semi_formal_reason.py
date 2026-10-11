@@ -191,7 +191,10 @@ class SemiFormalReasoner:
 
     def _sign_certificate(self, cert: Certificate) -> Certificate:
         if self.signing_key is not None:
-            return cert.sign(self.signing_key, key_id=self.signing_key_id)
+            try:
+                return cert.sign(self.signing_key, key_id=self.signing_key_id)
+            except Exception as exc:
+                raise RuntimeError(f"certificate_signing_failed: {exc}") from exc
         return cert
 
     def _handle_empty_diff(self, waivers_list: list) -> Certificate:

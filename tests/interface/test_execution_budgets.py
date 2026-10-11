@@ -135,3 +135,158 @@ def test_run_verify_advisory_policy_produces_advisory_warn(tmp_path):
     assert env.verdict == "ADVISORY_WARN"
 
 
+def test_signing_failure_is_fail_closed_infra_error(tmp_path, monkeypatch):
+    from verifyci.storage.graph_store import GraphStore
+    db = str(tmp_path / "valid.db")
+    GraphStore(db).close()
+
+    diff = (
+        "diff --git a/docs/README.md b/docs/README.md\n"
+        "--- a/docs/README.md\n"
+        "+++ b/docs/README.md\n"
+        "@@ -1,1 +1,1 @@\n"
+        "-old doc\n"
+        "+new doc\n"
+    )
+    # Pass an invalid signing key that causes signing to raise
+    res = run_verify(diff, db_path=db, signing_key="invalid_raw_key_string")
+    assert res["status"] == "INFRA_ERROR"
+    assert res["error"] == "signing_failed"
+    assert "envelope_signing_failed" in res["rationale"]
+    assert res["envelope"] is None
+
+
+def test_require_signed_envelope_policy_rejects_unsigned_result(tmp_path):
+    from verifyci.storage.graph_store import GraphStore
+    db = str(tmp_path / "valid.db")
+    GraphStore(db).close()
+
+    diff = (
+        "diff --git a/docs/README.md b/docs/README.md\n"
+        "--- a/docs/README.md\n"
+        "+++ b/docs/README.md\n"
+        "@@ -1,1 +1,1 @@\n"
+        "-old doc\n"
+        "+new doc\n"
+    )
+    policy = VerificationPolicy.strict_gate(
+        policy_id="strict_signed",
+        require_signed_envelope=True,
+    )
+    # Verification executed without signing key must fail-closed as INFRA_ERROR
+    res = run_verify(diff, db_path=db, policy=policy)
+    assert res["status"] == "INFRA_ERROR"
+    assert res["error"] == "signing_failed"
+    assert "envelope_signing_failed" in res["rationale"]
+    assert res["envelope"] is None
+
+
+def test_sarif_export_handles_advisory_warn():
+    from verifyci.export.sarif import export_sarif
+    res = {
+        "report_id": "rep_123",
+        "status": "ADVISORY_WARN",
+        "rationale": "non-blocking advisory finding in docs",
+        "revision_id": "rev_abc",
+        "files": ["docs/README.md"],
+    }
+    sarif_str = export_sarif(res)
+    import json
+    data = json.loads(sarif_str)
+    assert data["runs"][0]["invocations"][0]["properties"]["verdict"] == "ADVISORY_WARN"
+    results = data["runs"][0]["results"]
+    assert len(results) == 1
+    assert results[0]["ruleId"] == "advisory_warning"
+    assert results[0]["level"] == "warning"
+    assert results[0]["kind"] == "review"
+    assert results[0]["properties"]["verdict"] == "ADVISORY_WARN"
+
+
+def test_multi_seed_traversal_budget_accumulation():
+    import rustworkx as rx
+    from verifyci.graph.traverse import (
+        TraversalBudgetExceededError,
+        traverse,
+    )
+
+    g = rx.PyDiGraph()
+    n0 = g.add_node({"revision_entity_id": "seed0"})
+    n1 = g.add_node({"revision_entity_id": "n1"})
+    n2 = g.add_node({"revision_entity_id": "seed1"})
+    n3 = g.add_node({"revision_entity_id": "n3"})
+    g.add_edge(n0, n1, {"type": "CALLS"})
+    g.add_edge(n2, n3, {"type": "CALLS"})
+    nmap = {"seed0": n0, "n1": n1, "seed1": n2, "n3": n3}
+
+    # Budget with max 1 edge traversal allowed
+    b = ExecutionBudget.create(timeout_seconds=10.0, max_edges=1)
+    # First traversal consumes 1 edge
+    res1 = traverse(g, n0, direction="outgoing", max_hops=1, node_map=nmap, budget=b)
+    assert res1 == {n1}
+    assert b.edges_visited == 1
+
+    # Second traversal on same shared budget accumulates and must fail closed
+    with pytest.raises(TraversalBudgetExceededError):
+        traverse(g, n2, direction="outgoing", max_hops=1, node_map=nmap, budget=b)
+
+
+def test_http_verify_concurrent_backpressure_429():
+    from fastapi.testclient import TestClient
+    from verifyci.interface.http import GLOBAL_HTTP_BACKPRESSURE, app
+
+    # Provide loopback client host
+    client = TestClient(app, client=("127.0.0.1", 50000))
+    # Artificially saturate backpressure
+    original = GLOBAL_HTTP_BACKPRESSURE.active_and_queued
+    try:
+        GLOBAL_HTTP_BACKPRESSURE.active_and_queued = (
+            GLOBAL_HTTP_BACKPRESSURE.max_workers + GLOBAL_HTTP_BACKPRESSURE.max_queue
+        )
+        response = client.post("/verify/diff", json={"diff": "diff --git a/a.py b/a.py\n"})
+        assert response.status_code == 429
+        assert "Server overloaded" in response.json()["detail"]
+    finally:
+        GLOBAL_HTTP_BACKPRESSURE.active_and_queued = original
+
+
+def test_unusual_unified_diff_formats_grounding():
+    from verifyci.verification.diffmap import GroundingStatus, parse_unified_diff
+
+    # 1. /dev/null deletion
+    diff_del = (
+        "diff --git a/deleted.py b/deleted.py\n"
+        "deleted file mode 100644\n"
+        "--- a/deleted.py\n"
+        "+++ /dev/null\n"
+        "@@ -1,2 +0,0 @@\n"
+        "-line1\n"
+        "-line2\n"
+    )
+    res_del = parse_unified_diff(diff_del)
+    assert len(res_del) == 1
+    assert res_del[0].path == "deleted.py"
+    assert res_del[0].grounding_status == GroundingStatus.TEXT
+
+    # 2. File rename with similarity index
+    diff_rename = (
+        "diff --git a/old_name.py b/new_name.py\n"
+        "similarity index 100%\n"
+        "rename from old_name.py\n"
+        "rename to new_name.py\n"
+    )
+    res_rename = parse_unified_diff(diff_rename)
+    assert len(res_rename) == 1
+    assert res_rename[0].path == "new_name.py"
+
+    # 3. Mode change only
+    diff_mode = (
+        "diff --git a/run.sh b/run.sh\n"
+        "old mode 100644\n"
+        "new mode 100755\n"
+    )
+    res_mode = parse_unified_diff(diff_mode)
+    assert len(res_mode) == 1
+    assert res_mode[0].grounding_status == GroundingStatus.MODE_ONLY
+
+
+

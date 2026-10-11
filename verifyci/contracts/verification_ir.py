@@ -489,9 +489,10 @@ class VerificationPolicy:
     on_human_review: str
     require_deterministic_checker: bool
     profile: str = "strict_gate"
+    require_signed_envelope: bool = False
 
     @classmethod
-    def strict_gate(cls, policy_id: str = "default") -> "VerificationPolicy":
+    def strict_gate(cls, policy_id: str = "default", require_signed_envelope: bool = False) -> "VerificationPolicy":
         return cls(
             policy_id=policy_id,
             on_failure="block",
@@ -499,6 +500,7 @@ class VerificationPolicy:
             on_human_review="block",
             require_deterministic_checker=True,
             profile="strict_gate",
+            require_signed_envelope=require_signed_envelope,
         )
 
     @classmethod
@@ -510,6 +512,7 @@ class VerificationPolicy:
             on_human_review="warn",
             require_deterministic_checker=False,
             profile="advisory",
+            require_signed_envelope=False,
         )
 
     def canonical_bytes(self) -> bytes:
@@ -521,6 +524,7 @@ class VerificationPolicy:
             "policy_id": self.policy_id,
             "profile": self.profile,
             "require_deterministic_checker": self.require_deterministic_checker,
+            "require_signed_envelope": self.require_signed_envelope,
         }
         return json.dumps(d, sort_keys=True, separators=(",", ":")).encode("utf-8")
 

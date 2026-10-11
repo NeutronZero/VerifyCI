@@ -141,11 +141,32 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
                 return res
 
         budget.check_deadline()
-        reasoner = SemiFormalReasoner(signing_key=signing_key, signing_key_id=signing_key_id)
-        cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map or None,
-                               entities=entities or None, waivers=waivers)
+        try:
+            reasoner = SemiFormalReasoner(signing_key=signing_key, signing_key_id=signing_key_id)
+            cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map or None,
+                                   entities=entities or None, waivers=waivers)
+        except RuntimeError as r_err:
+            if "certificate_signing_failed" in str(r_err):
+                res = {
+                    "report_id": "",
+                    "status": "INFRA_ERROR",
+                    "rationale": f"envelope_signing_failed:{r_err}",
+                    "revision_id": resolved_revision,
+                    "files": parse_diff_files(diff),
+                    "changed_entities": [],
+                    "error": "signing_failed",
+                    "envelope": None,
+                }
+                if return_artifacts:
+                    res["certificate"] = None
+                    res["report"] = None
+                    res["decision"] = None
+                    res["policy"] = None
+                return res
+            raise
         files = parse_diff_files(diff)
         checks = [build_semi_check(cert, files, entities, diff=diff)]
+        budget.check_deadline()
         mapping = seed_entities_for_diff(files, entities, diff)
         changed = sorted({eid for eids in mapping.values() for eid in eids})
 
@@ -157,18 +178,26 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
                 if classify_path(e.file_path) == FilePartition.TEST_SUITE
             }
 
+        budget.check_deadline()
         blast, blast_check = blast_radius_check(
             graph=graph, changed_entities=changed, test_entities=test_entities,
             node_map=node_map or None, budget=budget)
         checks.append(blast_check)
+        budget.check_deadline()
         checks.append(removal_provenance_check(diff, entities or []))
+        budget.check_deadline()
         checks.append(return_statement_check(diff))
+        budget.check_deadline()
         checks.append(call_target_check(diff))
+        budget.check_deadline()
         checks.append(call_semantics_check(diff))
+        budget.check_deadline()
         from verifyci.verification.guard_inversion import guard_condition_check
         from verifyci.verification.import_resolution import import_resolution_check
         checks.append(guard_condition_check(diff))
+        budget.check_deadline()
         checks.append(import_resolution_check(diff))
+        budget.check_deadline()
         inv_evidence = list(cert.evidence)
         if not inv_evidence and cert.premises and all(classify_path(f) in (FilePartition.CONFIGURATION, FilePartition.TEST_SUITE) for f in files):
             inv_evidence = [p.statement for p in cert.premises]
@@ -176,6 +205,7 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
             diff, invariants, graph, evidence=inv_evidence)
         checks.extend(inv_checks)
 
+        budget.check_deadline()
         report = build_verification_report(task_id=task_id, policy_id="default", checks=checks, blast_radius=blast)
         effective_policy = policy if policy is not None else VerificationPolicy(
             policy_id="default", on_failure="block", on_inconclusive="human_review",
@@ -187,27 +217,31 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
         contract_flag: str | None = None
         if infra_error:
             if decision.status == "FAIL":
-                verdict = "FAIL"
+                authoritative_status = "FAIL"
                 rationale = decision.rationale
-                final_status = "FAIL"
                 contract_flag = "security_violation_preempts_infra_error"
             else:
-                verdict = "INFRA_ERROR"
+                authoritative_status = "INFRA_ERROR"
                 rationale = f"storage_unavailable:{infra_error}"
-                final_status = "INFRA_ERROR"
         elif policy_modified:
             if decision.status == "FAIL":
-                verdict = "FAIL"
+                authoritative_status = "FAIL"
                 rationale = decision.rationale
-                final_status = "FAIL"
             else:
-                verdict = "HUMAN_REVIEW"
+                authoritative_status = "HUMAN_REVIEW"
                 rationale = "unverified_policy_change: gate configuration modified in diff"
-                final_status = "HUMAN_REVIEW"
         else:
-            verdict = decision.status
+            authoritative_status = decision.status
             rationale = decision.rationale
-            final_status = decision.status
+
+        from verifyci.env import get_env
+        resolved_signing_key = signing_key or get_env("SIGNING_KEY")
+        resolved_key_id = signing_key_id or get_env("SIGNING_KEY_ID")
+
+        # Policy require_signed_envelope enforcement
+        if effective_policy.require_signed_envelope and not resolved_signing_key:
+            authoritative_status = "INFRA_ERROR"
+            rationale = "envelope_signing_failed: policy requires signed envelope but no signing key configured"
 
         repo_id = resolve_repository(db) or "verifyci"
         manifest_entries = []
@@ -235,12 +269,16 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
             policy=effective_policy,
             invariants=invariants,
             waivers=waivers,
+            checker_configs={
+                "max_hops": 2,
+                "require_deterministic_checker": effective_policy.require_deterministic_checker,
+            },
         )
         envelope = VerificationEnvelope(
             envelope_version="1.0",
             report_id=report.report_id,
             report_hash=report_hash(report),
-            verdict=verdict,
+            verdict=authoritative_status,
             rationale=rationale,
             repository_id=repo_id,
             revision_id=resolved_revision,
@@ -252,18 +290,23 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
             created_at=decision.timestamp,
             verifier_build_id="verifyci-0.1.0",
         )
-        from verifyci.env import get_env
-        resolved_signing_key = signing_key or get_env("SIGNING_KEY")
-        resolved_key_id = signing_key_id or get_env("SIGNING_KEY_ID")
         if resolved_signing_key:
             try:
                 envelope = envelope.sign(resolved_signing_key, key_id=resolved_key_id)
-            except Exception:
-                pass
+            except Exception as sign_err:
+                authoritative_status = "INFRA_ERROR"
+                rationale = f"envelope_signing_failed:{sign_err}"
+                envelope = None
+
+        if effective_policy.require_signed_envelope and (envelope is None or not envelope.signature):
+            authoritative_status = "INFRA_ERROR"
+            envelope = None
+            if not rationale.startswith("envelope_signing_failed"):
+                rationale = "envelope_signing_failed: unsigned envelope rejected under policy requirement"
 
         res = {
             "report_id": report.report_id,
-            "status": final_status,
+            "status": authoritative_status,
             "rationale": rationale,
             "revision_id": resolved_revision,
             "files": files,
@@ -276,6 +319,8 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
                 res["contract"] = contract_flag
             else:
                 res["error"] = infra_error
+        elif authoritative_status == "INFRA_ERROR" and "envelope_signing_failed" in rationale:
+            res["error"] = "signing_failed"
 
         if return_artifacts:
             res["certificate"] = cert
