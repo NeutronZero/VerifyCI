@@ -197,7 +197,7 @@ TRUSTED_RESULT_HASHES: dict[str, str] = {
     "H1_RR_reranked_hybrid": "66254e70677dfe22fe7e9d3204b688f3665b3ab1ea17fa1a265ef91c7a6ec4aa",
     "patch_corpus_verifier": "391e299ab29d4e1c826a15e9b42a04bc49b727430d9f2dbd6e8144e615a1fe5f",
     "blast_radius_bounds": "6df49c637aca2f1a2e8b60b3a0873338a55f69c115f3d0b1646b7287ac06972f",
-    "retrieval_manifest": "562f94561a6ffb3b0ce14b0bf7098d6d91787c2d582fe388c6572127c1a3c9ff",
+    "retrieval_manifest": "41ebe364ba3732e71a285e638c7322da2cfa075bd8fb4bba8d88b03d352cad13",
 }
 
 MANDATORY_RETRIEVAL_SOURCES: dict[str, str] = {
@@ -209,8 +209,8 @@ MANDATORY_RETRIEVAL_SOURCES: dict[str, str] = {
 
 PINNED_RETRIEVAL_SOURCE_HASHES: dict[str, str] = {
     "vector_store.py": "f0d31cbc9594be0233950d4924cc3aac48f075757f7059921be6d85ea74483e9",
-    "dense.py": "3db2257d1cb39a92249e5b8831229d44ab9d7dc0e6fefa7a5112db798c33331a",
-    "sparse.py": "db0f8cdddf914e944006149c90c24ee1596b4687634e12300d1b96e0939ff1eb",
+    "dense.py": "995fe2ab2f044bb8fec526c480cbf7ccc1466bc3ebb83c2401a16f3ac56a6d8b",
+    "sparse.py": "d03e71ff682cd367092d7abbc85b6e6ab225eca788dcc85901c5718af34b8ee3",
     "fusion.py": "a212a8d220d6a5e283a0fad10973897214cf3a9653f66bb30344b56d18819084",
 }
 

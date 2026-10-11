@@ -177,9 +177,22 @@ class SemiFormalReasoner:
     # production path stamped generated_by="llama3.1" on certificates
     # no model ever touched. Callers passing a real model name (an
     # LLM-assisted premise drafter, when one exists) keep working.
-    def __init__(self, model_name: str = "semi_formal_reasoner", max_hops: int = 2):
+    def __init__(
+        self,
+        model_name: str = "semi_formal_reasoner",
+        max_hops: int = 2,
+        signing_key: Any | None = None,
+        signing_key_id: str | None = None,
+    ):
         self.model_name = model_name
         self.max_hops = max_hops
+        self.signing_key = signing_key
+        self.signing_key_id = signing_key_id
+
+    def _sign_certificate(self, cert: Certificate) -> Certificate:
+        if self.signing_key is not None:
+            return cert.sign(self.signing_key, key_id=self.signing_key_id)
+        return cert
 
     def _handle_empty_diff(self, waivers_list: list) -> Certificate:
         det_checks = [
@@ -190,7 +203,7 @@ class SemiFormalReasoner:
             DeterministicCheck(checker_id="deletion_verification", passed=True, detail="deletion_hunks=0"),
         ]
         conclusion = Conclusion(result="inconclusive", reasoning="insufficient_evidence:diff_parsed,seeds_grounded,trace_supported,evidence_coverage (grounded=0 ungrounded=[])")
-        return Certificate(
+        return self._sign_certificate(Certificate(
             certificate_id=str(uuid.uuid4()),
             premises=[],
             evidence=[],
@@ -204,7 +217,7 @@ class SemiFormalReasoner:
             timestamp=time.time(),
             witnesses=(),
             waivers=(),
-        )
+        ))
 
     def _verify_non_code_files(
         self,
@@ -229,7 +242,7 @@ class SemiFormalReasoner:
                 DeterministicCheck(checker_id="documentation_policy", passed=True, detail=f"doc_files={len(doc_files)}"),
             ]
             conclusion = Conclusion(result="pass", reasoning="documentation_inert_change")
-            return Certificate(
+            return self._sign_certificate(Certificate(
                 certificate_id=str(uuid.uuid4()),
                 premises=premises,
                 evidence=[],
@@ -243,7 +256,7 @@ class SemiFormalReasoner:
                 timestamp=time.time(),
                 witnesses=(),
                 waivers=tuple(waivers_list),
-            )
+            ))
 
         if config_files and not test_files and not doc_files:
             cfg_status, err = _validate_configuration_diff(diff_str, config_files)
@@ -264,7 +277,7 @@ class SemiFormalReasoner:
                     result="inconclusive",
                     reasoning=f"insufficient_evidence:configuration_schema_validation ({err})",
                 )
-                return Certificate(
+                return self._sign_certificate(Certificate(
                     certificate_id=str(uuid.uuid4()),
                     premises=premises,
                     evidence=[],
@@ -278,7 +291,7 @@ class SemiFormalReasoner:
                     timestamp=time.time(),
                     witnesses=(),
                     waivers=tuple(waivers_list),
-                )
+                ))
             is_valid = (cfg_status == "pass")
             det_checks = [
                 DeterministicCheck(
@@ -292,7 +305,7 @@ class SemiFormalReasoner:
                 if is_valid
                 else Conclusion(result="fail", reasoning=f"configuration_schema_invalid: {err}")
             )
-            return Certificate(
+            return self._sign_certificate(Certificate(
                 certificate_id=str(uuid.uuid4()),
                 premises=premises,
                 evidence=[],
@@ -306,7 +319,7 @@ class SemiFormalReasoner:
                 timestamp=time.time(),
                 witnesses=(),
                 waivers=tuple(waivers_list),
-            )
+            ))
 
         if test_files:
             cfg_status = "pass"
@@ -339,7 +352,7 @@ class SemiFormalReasoner:
                     DeterministicCheck(checker_id="test_suite_policy", passed=False, detail=config_err),
                 ]
                 conclusion = Conclusion(result="inconclusive", reasoning=f"insufficient_evidence:test_suite_policy ({config_err})")
-                return Certificate(
+                return self._sign_certificate(Certificate(
                     certificate_id=str(uuid.uuid4()),
                     premises=premises,
                     evidence=[],
@@ -353,7 +366,7 @@ class SemiFormalReasoner:
                     timestamp=time.time(),
                     witnesses=tuple(witnesses),
                     waivers=tuple(waivers_list),
-                )
+                ))
             config_ok = (cfg_status == "pass")
             if del_status == "INCONCLUSIVE":
                 det_checks = [
@@ -362,7 +375,7 @@ class SemiFormalReasoner:
                     DeterministicCheck(checker_id="deletion_verification", passed=False, detail=del_reason),
                     DeterministicCheck(checker_id="test_suite_policy", passed=config_ok, detail=config_err or f"test_files={len(test_files)}"),
                 ]
-                return Certificate(
+                return self._sign_certificate(Certificate(
                     certificate_id=str(uuid.uuid4()),
                     premises=premises,
                     evidence=[],
@@ -376,7 +389,7 @@ class SemiFormalReasoner:
                     timestamp=time.time(),
                     witnesses=tuple(witnesses),
                     waivers=tuple(waivers_list),
-                )
+                ))
             deletion_ok = del_ok and del_status == "PASS"
             det_checks = [
                 DeterministicCheck(checker_id="diff_parsed", passed=True, detail=f"files={len(files)}"),
@@ -393,7 +406,7 @@ class SemiFormalReasoner:
                     else f"deletion_verification_failed: {del_reason}"
                 ))
             )
-            return Certificate(
+            return self._sign_certificate(Certificate(
                 certificate_id=str(uuid.uuid4()),
                 premises=premises,
                 evidence=[],
@@ -407,7 +420,7 @@ class SemiFormalReasoner:
                 timestamp=time.time(),
                 witnesses=tuple(witnesses),
                 waivers=tuple(waivers_list),
-            )
+            ))
 
         cfg_status = "pass"
         config_err = ""
@@ -419,7 +432,7 @@ class SemiFormalReasoner:
                 DeterministicCheck(checker_id="non_code_policy", passed=False, detail=config_err),
             ]
             conclusion = Conclusion(result="inconclusive", reasoning=f"insufficient_evidence:non_code_policy ({config_err})")
-            return Certificate(
+            return self._sign_certificate(Certificate(
                 certificate_id=str(uuid.uuid4()),
                 premises=premises,
                 evidence=[],
@@ -433,7 +446,7 @@ class SemiFormalReasoner:
                 timestamp=time.time(),
                 witnesses=(),
                 waivers=tuple(waivers_list),
-            )
+            ))
         config_ok = (cfg_status == "pass")
         det_checks = [
             DeterministicCheck(checker_id="diff_parsed", passed=True, detail=f"files={len(files)}"),
@@ -444,7 +457,7 @@ class SemiFormalReasoner:
             if config_ok
             else Conclusion(result="fail", reasoning=f"configuration_schema_invalid: {config_err}")
         )
-        return Certificate(
+        return self._sign_certificate(Certificate(
             certificate_id=str(uuid.uuid4()),
             premises=premises,
             evidence=[],
@@ -458,7 +471,7 @@ class SemiFormalReasoner:
             timestamp=time.time(),
             witnesses=(),
             waivers=tuple(waivers_list),
-        )
+        ))
 
     def verify(self, diff: Any, graph: Any, node_map: dict | None = None,
                entities: list | None = None,
@@ -577,7 +590,7 @@ class SemiFormalReasoner:
             and conclusion.result == "pass"
             and _covered
         )
-        return Certificate(
+        return self._sign_certificate(Certificate(
             certificate_id=str(uuid.uuid4()),
             premises=premises,
             evidence=evidence,
@@ -591,7 +604,7 @@ class SemiFormalReasoner:
             timestamp=time.time(),
             witnesses=tuple(witnesses),
             waivers=tuple(waivers_list),
-        )
+        ))
 
     def _graph_nodes(self, graph: Any) -> list[Any]:
         if graph is None:

@@ -160,6 +160,160 @@ class Certificate:
     timestamp: float
     witnesses: tuple[ExecutionWitness, ...] = ()
     waivers: tuple[SignedIntentWaiver, ...] = ()
+    signature: str | None = None
+    signing_key_id: str | None = None
+    signature_algorithm: str | None = None
+
+    def canonical_bytes(self) -> bytes:
+        from verifyci.contracts.canonical import canonical_certificate_bytes
+        return canonical_certificate_bytes(self)
+
+    def content_hash(self) -> str:
+        from verifyci.contracts.canonical import certificate_hash
+        return certificate_hash(self)
+
+    def sign(self, private_key: Any, key_id: str | None = None) -> "Certificate":
+        """Signs self.canonical_bytes() using Ed25519 and returns a new frozen Certificate."""
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        if isinstance(private_key, Ed25519PrivateKey):
+            priv = private_key
+        elif isinstance(private_key, (bytes, bytearray)):
+            priv = Ed25519PrivateKey.from_private_bytes(bytes(private_key))
+        elif isinstance(private_key, str):
+            priv = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(private_key.strip()))
+        else:
+            raise TypeError(f"Unsupported private key type: {type(private_key).__name__}")
+
+        if key_id is not None:
+            resolved_key_id = key_id
+        else:
+            pub = priv.public_key()
+            if hasattr(pub, "public_bytes_raw"):
+                resolved_key_id = pub.public_bytes_raw().hex()
+            else:
+                from cryptography.hazmat.primitives import serialization
+                resolved_key_id = pub.public_bytes(
+                    serialization.Encoding.Raw, serialization.PublicFormat.Raw
+                ).hex()
+
+        sig_bytes = priv.sign(self.canonical_bytes())
+        import dataclasses
+        return dataclasses.replace(
+            self,
+            signature=sig_bytes.hex(),
+            signing_key_id=resolved_key_id,
+            signature_algorithm="ed25519",
+        )
+
+    def verify_signature(self, public_key: Any | None = None) -> bool:
+        """Verifies self.signature over self.canonical_bytes().
+
+        If public_key is not provided, tries self.signing_key_id (if 32-byte hex
+        public key) or environment variable VERIFYCI_CERTIFICATE_PUBLIC_KEYS.
+        Fails closed (returns False) if signature is missing, invalid, or verification fails.
+        """
+        if not self.signature:
+            return False
+        if self.signature_algorithm is not None and self.signature_algorithm.lower() != "ed25519":
+            return False
+
+        try:
+            if isinstance(self.signature, str):
+                sig_bytes = bytes.fromhex(self.signature)
+            elif isinstance(self.signature, (bytes, bytearray)):
+                sig_bytes = bytes(self.signature)
+            else:
+                return False
+        except (ValueError, TypeError):
+            return False
+
+        if len(sig_bytes) != 64:
+            return False
+
+        canonical = self.canonical_bytes()
+
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey,
+            Ed25519PublicKey,
+        )
+
+        def _coerce(k: Any) -> Ed25519PublicKey | None:
+            if isinstance(k, Ed25519PublicKey):
+                return k
+            if isinstance(k, Ed25519PrivateKey):
+                return k.public_key()
+            if isinstance(k, (bytes, bytearray)):
+                if len(k) == 32:
+                    try:
+                        return Ed25519PublicKey.from_public_bytes(bytes(k))
+                    except Exception:
+                        return None
+                return None
+            if isinstance(k, str):
+                s = k.strip()
+                if len(s) == 64:
+                    try:
+                        return Ed25519PublicKey.from_public_bytes(bytes.fromhex(s))
+                    except Exception:
+                        return None
+                return None
+            return None
+
+        if public_key is not None:
+            pub = _coerce(public_key)
+            if pub is None:
+                return False
+            try:
+                pub.verify(sig_bytes, canonical)
+                return True
+            except Exception:
+                return False
+
+        # If public_key is not provided, try self.signing_key_id (if 32-byte hex public key)
+        if self.signing_key_id:
+            pub = _coerce(self.signing_key_id)
+            if pub is not None:
+                try:
+                    pub.verify(sig_bytes, canonical)
+                    return True
+                except Exception:
+                    pass
+
+        # Or environment variable VERIFYCI_CERTIFICATE_PUBLIC_KEYS
+        from verifyci.env import get_env as _get_env
+        import json
+        env_val = _get_env("CERTIFICATE_PUBLIC_KEYS")
+        if env_val:
+            candidate_keys: list[Any] = []
+            stripped = env_val.strip()
+            if stripped.startswith(("{", "[")):
+                try:
+                    parsed = json.loads(stripped)
+                    if isinstance(parsed, dict):
+                        if self.signing_key_id and self.signing_key_id in parsed:
+                            candidate_keys.append(parsed[self.signing_key_id])
+                        for v in parsed.values():
+                            if isinstance(v, (str, bytes)):
+                                candidate_keys.append(v)
+                    elif isinstance(parsed, list):
+                        candidate_keys.extend(parsed)
+                except Exception:
+                    pass
+            for part in stripped.replace(";", ",").replace("\n", ",").split(","):
+                part = part.strip()
+                if part and part not in candidate_keys:
+                    candidate_keys.append(part)
+
+            for cand in candidate_keys:
+                pub = _coerce(cand)
+                if pub is not None:
+                    try:
+                        pub.verify(sig_bytes, canonical)
+                        return True
+                    except Exception:
+                        continue
+
+        return False
 
 
 @dataclass(frozen=True)

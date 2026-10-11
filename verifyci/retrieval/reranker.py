@@ -7,8 +7,10 @@ environment (never downloads); otherwise it delegates to
 ``OfflineReranker`` and reports ``backend == "offline"``.
 """
 from abc import ABC, abstractmethod
+from typing import Any
 
 from verifyci.retrieval.dense import SearchResult
+from verifyci.retrieval.model_attestation import verify_runtime_model
 from verifyci.retrieval.textnorm import tokenize
 
 
@@ -106,20 +108,43 @@ class CrossEncoderReranker(Reranker):
     measured relevance study, not a drive-by constant change.
     """
 
-    def __init__(self, model: str | None = None, local_files_only: bool = True) -> None:
+    def __init__(
+        self,
+        model: str | None = None,
+        local_files_only: bool = True,
+        expected_snapshot_commit: str | None = None,
+        expected_snapshot_sha256: str | None = None,
+        enforce_attestation: bool = False,
+    ) -> None:
         self.model = model or "offline-overlap"
         self._delegate: Reranker = OfflineReranker(self.model)
         self.backend = "offline"
+        self.expected_snapshot_commit = expected_snapshot_commit
+        self.expected_snapshot_sha256 = expected_snapshot_sha256
+        self.enforce_attestation = enforce_attestation
+        self.model_attestation: dict[str, Any] | None = None
         if model:
             self._try_load(model, local_files_only)
 
     def _try_load(self, model: str, local_files_only: bool) -> None:
+        ok, attestation = verify_runtime_model(
+            model,
+            expected_snapshot_commit=self.expected_snapshot_commit,
+            expected_snapshot_sha256=self.expected_snapshot_sha256,
+        )
+        self.model_attestation = attestation
+
+        if self.enforce_attestation and not ok:
+            self.backend = "offline"
+            return
+
         try:
             from sentence_transformers import CrossEncoder  # type: ignore
+
             self._cross_encoder = CrossEncoder(model, local_files_only=local_files_only)
             self.backend = "cross_encoder"
         except Exception:  # noqa: BLE001, S110
-            pass
+            self.backend = "offline"
 
     def score(self, query: str, text: str) -> float:
         if self.backend == "cross_encoder":
