@@ -83,7 +83,11 @@ def test_http_backpressure_queue_rejection_429():
     assert "max worker queue depth exceeded" in exc.value.detail
 
 
-def test_run_verify_envelope_and_signature():
+def test_run_verify_envelope_and_signature(tmp_path):
+    from verifyci.storage.graph_store import GraphStore
+    db = str(tmp_path / "valid.db")
+    GraphStore(db).close()
+
     priv_key = Ed25519PrivateKey.generate()
     pub_key = priv_key.public_key()
     diff = (
@@ -94,7 +98,7 @@ def test_run_verify_envelope_and_signature():
         "-old doc\n"
         "+new doc\n"
     )
-    res = run_verify(diff, signing_key=priv_key, return_artifacts=True)
+    res = run_verify(diff, db_path=db, signing_key=priv_key, return_artifacts=True)
     assert res["status"] == "HUMAN_REVIEW"
     env = res.get("envelope")
     assert env is not None
@@ -109,7 +113,11 @@ def test_run_verify_envelope_and_signature():
     assert env.verify_signature(public_key=pub_key) is True
 
 
-def test_run_verify_advisory_policy_produces_advisory_warn():
+def test_run_verify_advisory_policy_produces_advisory_warn(tmp_path):
+    from verifyci.storage.graph_store import GraphStore
+    db = str(tmp_path / "valid.db")
+    GraphStore(db).close()
+
     # Non-blocking failure under advisory policy yields ADVISORY_WARN (exit 2), never PASS (0)
     diff = (
         "diff --git a/docs/README.md b/docs/README.md\n"
@@ -120,9 +128,10 @@ def test_run_verify_advisory_policy_produces_advisory_warn():
         "+new doc\n"
     )
     advisory_policy = VerificationPolicy.advisory(policy_id="test_advisory")
-    res = run_verify(diff, policy=advisory_policy, return_artifacts=True)
+    res = run_verify(diff, db_path=db, policy=advisory_policy, return_artifacts=True)
     assert res["status"] == "ADVISORY_WARN"
     env = res.get("envelope")
     assert env is not None
     assert env.verdict == "ADVISORY_WARN"
+
 
