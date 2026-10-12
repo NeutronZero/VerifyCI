@@ -117,9 +117,9 @@ class SecretDetector:
             context_signals_map = self.composite_engine.extract_context_signals(lines)
 
             # Multiline continuation state
-            # state: (opener_quote, paren_balance, backslash_flag, buffer_lines, start_lineno)
+            # state: [opener_quote, paren_balance, backslash_flag, buffer_lines, start_lineno, buffer_bytes]
             tdq, tsq = '"""', "'''"
-            st: list[Any] = [None, 0, False, [], None]
+            st: list[Any] = [None, 0, False, [], None, 0]
 
             for lineno, content in lines:
                 if ctx.is_timeout():
@@ -146,8 +146,9 @@ class SecretDetector:
                 # Multiline tracking
                 in_multiline = st[0] is not None or st[1] > 0 or st[2]
                 if in_multiline:
+                    content_len = len(content)
                     if len(st[3]) >= _MAX_MULTILINE_LINES or (
-                        sum(len(x) for x in st[3]) + len(content) > _MAX_MULTILINE_BYTES
+                        st[5] + content_len > _MAX_MULTILINE_BYTES
                     ):
                         raise ResourceLimitExceeded(
                             "Multiline buffer exceeded "
@@ -155,6 +156,7 @@ class SecretDetector:
                             limit_type="multiline_buffer",
                         )
                     st[3].append(content)
+                    st[5] += content_len
                     joined = " ".join(st[3])
                     clean_joined = re.sub(r"\\\s*", "", joined)
                     clean_joined = re.sub(r'"""|\'\'\'', '"', clean_joined)
@@ -191,16 +193,19 @@ class SecretDetector:
                             st[0] = None
                             st[3] = []
                             st[4] = None
+                            st[5] = 0
                     elif st[1] > 0:
                         st[1] += content.count("(") - content.count(")")
                         if st[1] <= 0:
                             st[1] = 0
                             st[3] = []
                             st[4] = None
+                            st[5] = 0
                     else:
                         st[2] = False
                         st[3] = []
                         st[4] = None
+                        st[5] = 0
                     continue
 
                 # Openers check
@@ -208,22 +213,26 @@ class SecretDetector:
                     st[0] = tdq
                     st[3] = [content]
                     st[4] = lineno
+                    st[5] = len(content)
                     continue
                 if content.count(tsq) % 2 == 1:
                     st[0] = tsq
                     st[3] = [content]
                     st[4] = lineno
+                    st[5] = len(content)
                     continue
                 if content.rstrip().endswith("\\"):
                     st[2] = True
                     st[3] = [content]
                     st[4] = lineno
+                    st[5] = len(content)
                     continue
                 stripped = content.rstrip()
                 if stripped.endswith("(") and stripped.count("(") > stripped.count(")"):
                     st[1] = stripped.count("(") - stripped.count(")")
                     st[3] = [content]
                     st[4] = lineno
+                    st[5] = len(content)
                     continue
 
         # 3. Specificity and overlap resolution

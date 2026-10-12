@@ -121,7 +121,7 @@ def edge_allowed(graph: Any, src_idx: int, dst_idx: int, allowed: set[str] | fro
 
 def traverse(
     graph: Any,
-    seed_idx: int,
+    seed_idx: int | Any,
     direction: str,
     max_hops: int,
     node_map: dict | None = None,
@@ -132,7 +132,7 @@ def traverse(
 ) -> set[int]:
     """BFS from seed following predecessors (incoming) or successors.
 
-    Returns visited indices excluding the seed.
+    Returns visited indices excluding the seed(s).
     Raises TraversalInconclusiveError on bounded contract violations or resource exhaustion.
     """
     if budget is not None:
@@ -146,9 +146,14 @@ def traverse(
             f"Traversal depth limit exceeded (max_hops={max_hops} > {MAX_DEPTH_LIMIT})"
         )
     node_map = node_map or {}
-    visited = {seed_idx}
-    current_level = {seed_idx}
+    if isinstance(seed_idx, (set, list, tuple, frozenset)):
+        seed_set = set(seed_idx)
+    else:
+        seed_set = {seed_idx}
+    visited = set(seed_set)
+    current_level = set(seed_set)
     total_expansions = 0
+
 
     for _ in range(max_hops):
         if budget is not None:
@@ -226,8 +231,9 @@ def traverse(
         if not current_level:
             break
 
-    visited.discard(seed_idx)
+    visited.difference_update(seed_set)
     return visited
+
 
 
 def iter_edge_payloads(graph: Any) -> list[Any]:

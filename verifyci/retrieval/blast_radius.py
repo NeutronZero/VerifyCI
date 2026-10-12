@@ -65,17 +65,15 @@ def compute_blast_radius(
         node_map = derive_node_map(graph)
 
     _check_structural_invariants(graph, changed_entities, node_map)
+    reverse_map = {v: k for k, v in node_map.items()} if node_map else {}
     affected_callers = set()
     affected_callees = set()
 
     if graph is not None and node_map:
-        reverse_map = {v: k for k, v in node_map.items()}
-        for entity_id in changed_entities:
-            node_idx = node_map.get(entity_id)
-            if node_idx is None:
-                continue
-            callers = traverse(graph, node_idx, "incoming", max_hops, node_map, CALL_FLOW_TYPES, budget=budget)
-            callees = traverse(graph, node_idx, "outgoing", max_hops, node_map, CALL_FLOW_TYPES, budget=budget)
+        c_indices = [node_map[eid] for eid in changed_entities if eid in node_map]
+        if c_indices:
+            callers = traverse(graph, c_indices, "incoming", max_hops, node_map, CALL_FLOW_TYPES, budget=budget)
+            callees = traverse(graph, c_indices, "outgoing", max_hops, node_map, CALL_FLOW_TYPES, budget=budget)
             affected_callers.update(reverse_map.get(c, str(c)) for c in callers)
             affected_callees.update(reverse_map.get(c, str(c)) for c in callees)
 
@@ -102,22 +100,22 @@ def compute_blast_radius(
         test_coverage_status = "STATIC_REACHABILITY_EVALUATED"
         covered = set()
         if graph is not None and node_map:
-            reverse_map = {v: k for k, v in node_map.items()}
-            for test_id in test_entities:
-                test_idx = node_map.get(test_id)
-                if test_idx is None:
-                    continue
-                test_callees = traverse(graph, test_idx, "outgoing", max_hops, node_map, CALL_FLOW_TYPES, budget=budget)
+            t_indices = [node_map[test_id] for test_id in test_entities if test_id in node_map]
+            if t_indices:
+                test_callees = traverse(graph, t_indices, "outgoing", max_hops, node_map, CALL_FLOW_TYPES, budget=budget)
                 covered.update(reverse_map.get(c, str(c)) for c in test_callees)
         gap = dependents - covered
         test_coverage_gap = list(gap)
         static_reachability_gap = tuple(sorted(gap))
 
+
     # Calibrated risk formula remains frozen: callers, callees, and coverage gaps
     risk_score = min(1.0, len(affected_callers) * 0.1 + len(affected_callees) * 0.05 + len(test_coverage_gap) * 0.2)
 
-    dependency_impact = _dependency_impact(dependency_graph, impacted, graph)
-    vulnerability_impact = _vulnerability_impact(vuln_cache, impacted, graph)
+    dep_packages = _graph_dependency_packages(graph, impacted)
+    dependency_impact = _dependency_impact(dependency_graph, impacted, graph, dep_packages=dep_packages)
+    vulnerability_impact = _vulnerability_impact(vuln_cache, impacted, graph, dep_packages=dep_packages)
+
 
     return BlastRadiusResult(
         affected_callers=sorted(affected_callers),
@@ -132,7 +130,14 @@ def compute_blast_radius(
 
 
 
-def _dependency_impact(dependency_graph, impacted: set[str], graph=None) -> list[str]:
+class _VulnLookupEdge:
+    __slots__ = ("metadata",)
+
+    def __init__(self, package: str) -> None:
+        self.metadata = {"package": package}
+
+
+def _dependency_impact(dependency_graph, impacted: set[str], graph=None, dep_packages: set[str] | None = None) -> list[str]:
     out: set[str] = set()
     if dependency_graph:
         try:
@@ -144,7 +149,9 @@ def _dependency_impact(dependency_graph, impacted: set[str], graph=None) -> list
                     out.update(dependency_graph.dependents(eid))
         except Exception:  # noqa: BLE001, S110
             pass
-    out.update(_graph_dependency_packages(graph, impacted))
+    if dep_packages is None:
+        dep_packages = _graph_dependency_packages(graph, impacted)
+    out.update(dep_packages)
     return sorted(str(d) for d in out)
 
 
@@ -170,7 +177,7 @@ def _graph_dependency_packages(graph, impacted: set[str]) -> set[str]:
     return packages
 
 
-def _vulnerability_impact(vuln_cache, impacted: set[str], graph=None) -> list[str]:
+def _vulnerability_impact(vuln_cache, impacted: set[str], graph=None, dep_packages: set[str] | None = None) -> list[str]:
     if vuln_cache is None or not impacted:
         return []
     findings: list[str] = []
@@ -178,11 +185,14 @@ def _vulnerability_impact(vuln_cache, impacted: set[str], graph=None) -> list[st
         lookup = getattr(vuln_cache, "lookup", None)
         if not callable(lookup):
             return []
-        packages = set(impacted) | _graph_dependency_packages(graph, impacted)
+        if dep_packages is None:
+            dep_packages = _graph_dependency_packages(graph, impacted)
+        packages = set(impacted) | dep_packages
         for package in packages:
-            edge = type("Edge", (), {"metadata": {"package": package}})()
+            edge = _VulnLookupEdge(package)
             for vuln in lookup(edge) or []:
                 findings.append(str(vuln.get("id", vuln) if isinstance(vuln, dict) else vuln))
     except Exception:  # noqa: BLE001, S110
         pass
     return sorted(set(findings))
+

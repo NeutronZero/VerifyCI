@@ -83,13 +83,28 @@ class OfflineReranker(Reranker):
     def rerank(self, query: str, results: list[SearchResult], k: int = 10) -> list[SearchResult]:
         # Scores are attached, not passed through: callers must see the
         # reranker's own verdict per item (previously input scores leaked).
-        scored = [
-            SearchResult(id=r.id, score=self.score(
-                query, f"{r.id} {' '.join(str(v) for v in r.metadata.values())}")
-                + self._symbol_bonuses(query, r.id),
-                metadata=r.metadata)
-            for r in results
-        ]
+        q = set(tokenize(query))
+        tokens = query.split()
+        token_set = set(tokens)
+        qualified_tails: set[str] = set()
+        for token in tokens:
+            tail = token.replace("::", ".").rsplit(".", 1)
+            if len(tail) == 2 and tail[0]:
+                qualified_tails.add(tail[1])
+
+        scored: list[SearchResult] = []
+        for r in results:
+            t = set(tokenize(f"{r.id} {' '.join(str(v) for v in r.metadata.values())}"))
+            lexical_score = len(q & t) / len(q | t) if (q and t) else 0.0
+
+            bonus = 0.0
+            if r.id and r.id in token_set:
+                bonus += self.exact_bonus
+            if r.id in qualified_tails:
+                bonus += self.qualified_bonus
+
+            scored.append(SearchResult(id=r.id, score=lexical_score + bonus, metadata=r.metadata))
+
         scored.sort(key=lambda r: (-r.score, r.id))
         return scored[:k]
 
