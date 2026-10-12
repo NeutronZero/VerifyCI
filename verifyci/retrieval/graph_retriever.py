@@ -76,25 +76,31 @@ class GraphRetriever:
 
             seed_set = set(seeds)
 
-            visited = set(seed_set)
-            current = set(seed_set)
-            distances: dict[int, int] = {}
-            for h in range(1, max_hops + 1):
-                nxt = set()
-                for u in current:
-                    for v in outgoing_adj.get(u, ()):
-                        if v not in visited:
-                            visited.add(v)
-                            distances[v] = h
-                            nxt.add(v)
-                    for v in incoming_adj.get(u, ()):
-                        if v not in visited:
-                            visited.add(v)
-                            distances[v] = h
-                            nxt.add(v)
-                current = nxt
-                if not current:
-                    break
+            def _bfs_dir(adj_map: dict[int, set[int]]) -> dict[int, int]:
+                visited = set(seed_set)
+                current = set(seed_set)
+                hop_map: dict[int, int] = {}
+                for h in range(1, max_hops + 1):
+                    nxt = set()
+                    for u in current:
+                        for v in adj_map.get(u, ()):
+                            if v not in visited:
+                                visited.add(v)
+                                hop_map[v] = h
+                                nxt.add(v)
+                    current = nxt
+                    if not current:
+                        break
+                return hop_map
+
+            callee_hops = _bfs_dir(outgoing_adj)
+            caller_hops = _bfs_dir(incoming_adj)
+
+            all_impacted = set(callee_hops.keys()) | set(caller_hops.keys())
+            distances = {
+                node: min(callee_hops.get(node, 999), caller_hops.get(node, 999))
+                for node in all_impacted
+            }
 
         else:
             successors = getattr(self.graph, "successors", None)
