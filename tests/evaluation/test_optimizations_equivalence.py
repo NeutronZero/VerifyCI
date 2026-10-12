@@ -137,6 +137,12 @@ def test_graph_cache_deep_immutability_and_aliasing():
     deeply_frozen_set = frozenset({"x", 1, 2})
     assert _freeze_payload(deeply_frozen_set) is deeply_frozen_set
 
+    # Test 5: Already deeply frozen MappingProxyType preserves identity
+    # (repeat-freeze fast path: zero reallocation).
+    frozen_inner = MappingProxyType({"count": 1, "tags": ("a", "b")})
+    frozen_outer = MappingProxyType({"secret": "initial", "nested": frozen_inner})
+    assert _freeze_payload(frozen_outer) is frozen_outer
+
 
 # ==============================================================================
 # 3. IR Line Attribution Interval Equivalence

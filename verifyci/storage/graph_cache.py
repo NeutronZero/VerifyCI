@@ -65,12 +65,20 @@ def _freeze_payload(val: Any) -> Any:
     if val is None or isinstance(val, (int, float, str, bool, bytes)):
         return val
     if isinstance(val, (Mapping, dict)):
+        if isinstance(val, MappingProxyType):
+            for v in val.values():
+                if _freeze_payload(v) is not v:
+                    break
+            else:
+                return val
         return MappingProxyType({k: _freeze_payload(v) for k, v in val.items()})
     if isinstance(val, tuple):
-        items = [_freeze_payload(x) for x in val]
-        if all(i is orig for i, orig in zip(items, val)):
+        for x in val:
+            if _freeze_payload(x) is not x:
+                break
+        else:
             return val
-        return tuple(items)
+        return tuple(_freeze_payload(x) for x in val)
     if isinstance(val, list):
         return tuple(_freeze_payload(x) for x in val)
     if isinstance(val, frozenset):
