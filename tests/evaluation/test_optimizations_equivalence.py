@@ -137,11 +137,36 @@ def test_graph_cache_deep_immutability_and_aliasing():
     deeply_frozen_set = frozenset({"x", 1, 2})
     assert _freeze_payload(deeply_frozen_set) is deeply_frozen_set
 
-    # Test 5: Already deeply frozen MappingProxyType preserves identity
-    # (repeat-freeze fast path: zero reallocation).
-    frozen_inner = MappingProxyType({"count": 1, "tags": ("a", "b")})
-    frozen_outer = MappingProxyType({"secret": "initial", "nested": frozen_inner})
-    assert _freeze_payload(frozen_outer) is frozen_outer
+    # Test 5: A proxy over a caller-retained dict must NOT preserve
+    # identity: the backing store stays mutable, so freeze must sever
+    # the alias with a fresh copy (deep-immutability guarantee).
+    retained = {"count": 1}
+    frozen_alias = _freeze_payload(MappingProxyType(retained))
+    assert frozen_alias == {"count": 1}
+    assert frozen_alias is not retained
+    retained["count"] = 999
+    assert frozen_alias["count"] == 1, "Frozen payload corrupted via retained alias!"
+
+
+def test_freeze_payload_single_deep_walk():
+    """Each node is frozen exactly once: no check-then-rebuild double walk."""
+    import verifyci.storage.graph_cache as gc_mod
+    payload = ({"a": 1}, ("b",))
+    calls = []
+    orig = gc_mod._freeze_payload
+
+    def counting(val):
+        calls.append(1)
+        return orig(val)
+
+    gc_mod._freeze_payload = counting
+    try:
+        gc_mod._freeze_payload(payload)
+    finally:
+        gc_mod._freeze_payload = orig
+    # Single walk: outer tuple, dict, 1, inner tuple, "b" = 5 visits.
+    # A check-then-rebuild implementation visits 9.
+    assert len(calls) == 5
 
 
 # ==============================================================================

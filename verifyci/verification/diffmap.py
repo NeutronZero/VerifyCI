@@ -725,7 +725,9 @@ def _seed_entities_indexed(
     Same match geometry as the O(E*F) reference: suffix-or-exact path
     match, whole-file seeding when the diff names no anchors for the
     file, span-overlap seeding otherwise. Non-seedable types (MODULE,
-    PARAMETER, IMPORT, VARIABLE) never seed.
+    PARAMETER, IMPORT, VARIABLE) never seed. Falsy file_path skips
+    (map_files parity); a degenerate [""] query no longer whole-file
+    seeds.
     """
     _, wanted_by_base, suffixes = index
     mapping: dict[str, list[str]] = {}
