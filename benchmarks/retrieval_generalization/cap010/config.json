@@ -1,0 +1,41 @@
+{
+  "experiment_id": "CAP-010",
+  "title": "Retrieval Generalization and Hard Negatives Benchmark",
+  "doc_count": 1050,
+  "query_count": 210,
+  "repo_count": 12,
+  "dev_repos": [
+    "dev_repo_01",
+    "dev_repo_02",
+    "dev_repo_03",
+    "dev_repo_04",
+    "dev_repo_05",
+    "dev_repo_06",
+    "dev_repo_07",
+    "dev_repo_08"
+  ],
+  "held_out_repos": [
+    "held_out_repo_09",
+    "held_out_repo_10",
+    "held_out_repo_11",
+    "held_out_repo_12"
+  ],
+  "category_denominators": {
+    "exact_symbol": 35,
+    "paraphrase": 35,
+    "rare_identifier": 35,
+    "misleading_lexical": 35,
+    "multi_hop": 35,
+    "no_relevant_result": 35
+  },
+  "corpus_sha256": "a312fe4ee9eea7e1cc81cf4c040ef60e9f5e38fb9d631f34d4d837d58cfc0f35",
+  "label_sha256": "e45d274e232b86cbb5b31ad5341ad74b4d047584c1f8ebe1c9a5160037fc4cc4",
+  "status": "CORPUS_FROZEN",
+  "freeze_rule": "Relevance judgments frozen clean-room; no-answer queries excluded from nDCG calculation.",
+  "gates": {
+    "recall_at_5_min": 0.8,
+    "ndcg_at_10_min": 0.5,
+    "correct_abstention_min": 0.9,
+    "false_relevant_max": 0.1
+  }
+}
