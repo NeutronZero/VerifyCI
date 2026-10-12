@@ -8,13 +8,13 @@ from collections.abc import Mapping
 import json
 from dataclasses import fields, is_dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 
 _FIELDS_CACHE: dict[type, tuple[str, ...]] = {}
 
 
-def _dataclass_field_names(cls: type) -> tuple[str, ...]:
+def _dataclass_field_names(cls: type[Any]) -> tuple[str, ...]:
     """Dataclass field names, introspected once per class.
 
     fields() walks the MRO on every call; records serialized in bulk
@@ -25,7 +25,10 @@ def _dataclass_field_names(cls: type) -> tuple[str, ...]:
     try:
         return _FIELDS_CACHE[cls]
     except KeyError:
-        names = tuple(f.name for f in fields(cls))
+        # Call site guarantees a dataclass type (guarded by is_dataclass);
+        # cast silences typeshed's DataclassInstance protocol, which is
+        # unavailable on the 3.12 floor (see ty unresolved-import).
+        names = tuple(f.name for f in fields(cast(Any, cls)))
         _FIELDS_CACHE[cls] = names
         return names
 
