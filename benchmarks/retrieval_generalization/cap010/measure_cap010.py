@@ -69,10 +69,15 @@ def get_git_provenance() -> tuple[str, bool]:
     except Exception:
         commit = "unknown"
     try:
-        status = subprocess.check_output(
+        status_lines = subprocess.check_output(
             ["git", "status", "--porcelain"], cwd=REPO_ROOT, text=True
-        ).strip()
-        dirty = bool(status)
+        ).splitlines()
+        code_dirty = any(
+            not (line.endswith("results.json") or line.endswith("RESULTS.md"))
+            for line in status_lines
+            if line.strip()
+        )
+        dirty = code_dirty
     except Exception:
         dirty = False
     return commit, dirty
