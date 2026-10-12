@@ -498,3 +498,30 @@ def test_parse_unified_diff_malformed_combined_hunk_header_fallback():
     assert result[0].hunks[0].old_start == 0
     assert result[0].hunks[0].new_start == 0
 
+
+def test_seed_entities_indexed_matches_seed_entities_for_diff():
+    from types import SimpleNamespace
+    from verifyci.verification.diffmap import (
+        _build_wanted_index,
+        _seed_entities_indexed,
+        changed_anchors_by_file,
+        seed_entities_for_diff,
+    )
+
+    def ent(eid, path, start, end, type_="FUNCTION"):
+        return SimpleNamespace(revision_entity_id=eid, name=eid,
+                               file_path=path, line_start=start,
+                               line_end=end, source_hash="h", type=type_)
+
+    entities = [ent("touched", "src/app.py", 10, 20),
+                ent("far", "src/app.py", 100, 120),
+                ent("mod", "src/app.py", 1, 1, "MODULE"),
+                ent("other", "pkg/app.py", 10, 20)]
+    diff = ("diff --git a/src/app.py b/src/app.py\n"
+            "--- a/src/app.py\n+++ b/src/app.py\n"
+            "@@ -12,3 +12,4 @@\n ctx\n-old\n+new\n+added\n ctx\n")
+    files = ["app.py"]
+    per_file = changed_anchors_by_file(diff)
+    assert _seed_entities_indexed(_build_wanted_index(files), entities, per_file) == \
+        seed_entities_for_diff(files, entities, diff)
+

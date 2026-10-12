@@ -705,19 +705,38 @@ def changed_anchors_by_file(diff: str | None) -> dict[str, set[int]]:
     return per_file
 
 
-def seed_entities_for_diff(files: list[str], entities: list, diff: str | None) -> dict[str, list[str]]:
-    hunks = iter_hunks(diff)
-    if not hunks:
-        return map_files_to_entity_ids(files, entities)
-    per_file = changed_anchors_by_file(diff)
+def _seed_entities_indexed(
+    index: tuple[set[str], dict[str, list[str]], dict[str, str]],
+    entities: list,
+    per_file: dict[str, set[int]],
+) -> dict[str, list[str]]:
+    """Seed entities against a prebuilt wanted index and hunk anchors.
+
+    Same match geometry as the O(E*F) reference: suffix-or-exact path
+    match, whole-file seeding when the diff names no anchors for the
+    file, span-overlap seeding otherwise. Non-seedable types (MODULE,
+    PARAMETER, IMPORT, VARIABLE) never seed.
+    """
+    _, wanted_by_base, suffixes = index
     mapping: dict[str, list[str]] = {}
-    wanted = {normalize_path(f) for f in files}
     for entity in entities:
         if not _is_seedable(entity):
             continue
-        epath = normalize_path(getattr(entity, "file_path", ""))
-        for f in wanted:
-            if not (epath == f or epath.endswith("/" + f) or f.endswith("/" + epath)):
+        raw = getattr(entity, "file_path", "")
+        if not raw:
+            continue
+        if isinstance(raw, str) and "\\" not in raw and not raw.startswith("./"):
+            epath = raw
+            base = raw.rsplit("/", 1)[-1]
+        else:
+            epath = normalize_path(raw)
+            base = epath.rsplit("/", 1)[-1]
+        candidates = wanted_by_base.get(base)
+        if not candidates:
+            continue
+        esuffix = "/" + epath
+        for f in candidates:
+            if not (epath == f or epath.endswith(suffixes[f]) or f.endswith(esuffix)):
                 continue
             lines = per_file.get(f)
             if lines is None:
@@ -728,6 +747,16 @@ def seed_entities_for_diff(files: list[str], entities: list, diff: str | None) -
             if any(start <= ln <= end for ln in lines):
                 mapping.setdefault(f, []).append(entity.revision_entity_id)
     return mapping
+
+
+def seed_entities_for_diff(files: list[str], entities: list, diff: str | None) -> dict[str, list[str]]:
+    hunks = iter_hunks(diff)
+    if not hunks:
+        return map_files_to_entity_ids(files, entities)
+    per_file = changed_anchors_by_file(diff)
+    if not files or not entities:
+        return {}
+    return _seed_entities_indexed(_build_wanted_index(files), entities, per_file)
 
 
 def _is_seedable(entity) -> bool:
