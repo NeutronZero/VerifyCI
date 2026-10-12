@@ -149,17 +149,17 @@ def _uncovered_from_parsed(parsed: list, entities: list) -> list[str]:
     # its own old line; a `+` anchors the insertion point), recomputed
     # here so the adjacency grace can see the changed line's content.
     for f in parsed:
+        file_path = f.path
+        if file_path is None:
+            continue
+        if classify_path(file_path) != FilePartition.CODE_CORE:
+            continue
+        norm_f = normalize_path(file_path)
+        file_spans = merged_spans.get(norm_f, [])
+        file_starts = span_starts.get(norm_f, [])
+        file_dec_starts = decorator_starts.get(norm_f)
+        file_endpoints = import_endpoints.get(norm_f, [])
         for h in f.hunks:
-            h.file = f.path
-            if h.file is None:
-                continue
-            if classify_path(h.file) != FilePartition.CODE_CORE:
-                continue
-            norm_f = normalize_path(h.file)
-            file_spans = merged_spans.get(norm_f, [])
-            file_starts = span_starts.get(norm_f, [])
-            file_dec_starts = decorator_starts.get(norm_f)
-            file_endpoints = import_endpoints.get(norm_f, [])
             old_ln = h.old_start
             prev_minus = False
             for body in h.lines:
@@ -189,11 +189,12 @@ def _uncovered_from_parsed(parsed: list, entities: list) -> list[str]:
                     # opaque checks own that case.
                 if any(_anchor_covered(ln, file_spans, file_starts, content, file_dec_starts, file_endpoints) for ln in coverable):
                     continue
-                key = f"{h.file}:{coverable[0]}"
+                key = f"{file_path}:{coverable[0]}"
                 if key not in seen:
                     seen.add(key)
                     out.append(key)
     return out
+
 
 
 def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:

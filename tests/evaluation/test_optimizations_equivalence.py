@@ -279,3 +279,87 @@ def test_dataclass_field_names_cached_per_class():
     from verifyci.contracts.jsonio import _dataclass_field_names
     assert _dataclass_field_names(_InnerDC) == ("flag", "count", "ratio", "name")
     assert _dataclass_field_names(_InnerDC) is _dataclass_field_names(_InnerDC)
+
+
+def test_witness_unnormalized_code_files_no_keyerror():
+    from verifyci.verification.witness import extract_execution_witnesses
+    diff = """--- a/tests/test_worker.py
++++ b/tests/test_worker.py
+@@ -1,3 +1,4 @@
++def test_worker_run():
++    import worker
++    worker.run()
+"""
+    witnesses = extract_execution_witnesses(
+        code_files=["verifyci\\sub\\worker.py"],
+        test_files=["tests/test_worker.py"],
+        diff=diff,
+    )
+    assert len(witnesses) == 1
+    assert witnesses[0].target_file == "verifyci\\sub\\worker.py"
+    assert witnesses[0].association_method == "direct_ast"
+
+
+def test_witness_target_patterns_hoisted_across_test_files(monkeypatch):
+    from verifyci.verification import witness
+    diff = """--- a/tests/test_a.py
++++ b/tests/test_a.py
+@@ -1,2 +1,3 @@
++def test_a():
++    import worker
+--- a/tests/test_b.py
++++ b/tests/test_b.py
+@@ -1,2 +1,3 @@
++def test_b():
++    import worker
+"""
+    compilation_count = 0
+    orig_compile = witness._compile_target_patterns
+
+    def counting_compile(*args, **kwargs):
+        nonlocal compilation_count
+        compilation_count += 1
+        return orig_compile(*args, **kwargs)
+
+    monkeypatch.setattr(witness, "_compile_target_patterns", counting_compile)
+    witnesses = witness.extract_execution_witnesses(
+        code_files=["verifyci/worker.py"],
+        test_files=["tests/test_a.py", "tests/test_b.py"],
+        diff=diff,
+    )
+    assert len(witnesses) == 2
+    assert compilation_count == 1
+
+
+def test_seed_entities_for_diff_empty_inputs_short_circuit(monkeypatch):
+    from verifyci.verification import diffmap
+    called = False
+
+    def boom(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("iter_hunks should not be called when files or entities are empty")
+
+    monkeypatch.setattr(diffmap, "iter_hunks", boom)
+    assert diffmap.seed_entities_for_diff([], ["mock_ent"], diff="diff") == {}
+    assert diffmap.seed_entities_for_diff(["a.py"], [], diff="diff") == {}
+    assert not called
+
+
+
+def test_uncovered_from_parsed_does_not_mutate_hunk_file():
+    from verifyci.verification.diffmap import FileDiff, Hunk
+    from verifyci.verification.verification_ir import _uncovered_from_parsed
+    hunk = Hunk(
+        file=None,
+        old_start=1,
+        old_count=1,
+        new_start=1,
+        new_count=1,
+        lines=["-old", "+new"],
+    )
+    diff_file = FileDiff(old_path="verifyci/core.py", new_path="verifyci/core.py", hunks=[hunk])
+    _ = _uncovered_from_parsed([diff_file], entities=[])
+    assert hunk.file is None, f"hunk.file was mutated to {hunk.file!r} by _uncovered_from_parsed"
+
+

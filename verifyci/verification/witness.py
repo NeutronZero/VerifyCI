@@ -32,7 +32,10 @@ def _compile_target_patterns(
     """
     compiled = []
     for cf in code_files:
-        stem = re.sub(r"\.[a-zA-Z0-9]+$", "", code_stems[cf])
+        norm_cf = normalize_path(cf)
+        raw_stem = code_stems[norm_cf] if norm_cf in code_stems else _module_stem(cf)
+        stem = re.sub(r"\.[a-zA-Z0-9]+$", "", raw_stem)
+
         bare = stem.split("/")[-1]
         if not bare:
             continue
@@ -44,6 +47,7 @@ def _compile_target_patterns(
             re.compile(rf"\b{esc}\.\w+"),
         ))
     return compiled
+
 
 
 def _module_stem(path: str) -> str:
@@ -108,6 +112,7 @@ def extract_execution_witnesses(
     diff_by_file = {normalize_path(f.path): f for f in parsed}
 
     code_stems = {normalize_path(cf): _module_stem(cf) for cf in code_files}
+    target_patterns = _compile_target_patterns(code_files, code_stems) if code_files else []
 
     witnesses: list[ExecutionWitness] = []
 
@@ -152,9 +157,8 @@ def extract_execution_witnesses(
                     break
 
         # 2. Direct AST reference / imports
-        if is_general and code_files:
+        if is_general and target_patterns:
             matches = set()
-            target_patterns = _compile_target_patterns(code_files, code_stems)
             for line in raw_lines:
                 for cf, import_re, call_re, attr_re in target_patterns:
                     if (import_re.search(line) or call_re.search(line)
@@ -164,6 +168,7 @@ def extract_execution_witnesses(
                 target_file = next(iter(matches))
                 association_method = "direct_ast"
                 is_general = False
+
 
         # 3. Fallback naming convention
         if is_general and code_files:

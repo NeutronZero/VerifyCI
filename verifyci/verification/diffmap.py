@@ -506,10 +506,8 @@ def map_files_to_entity_ids(files: list[str], entities: list) -> dict[str, list[
     if not files or not entities:
         return {}
     wanted, wanted_by_base, suffixes = _build_wanted_index(files)
-    if not wanted:
-        return {}
-
     mapping: dict[str, list[str]] = {}
+
     for entity in entities:
         raw = getattr(entity, "file_path", "")
         if not raw:
@@ -762,12 +760,12 @@ def _seed_entities_indexed(
 
 
 def seed_entities_for_diff(files: list[str], entities: list, diff: str | None) -> dict[str, list[str]]:
+    if not files or not entities:
+        return {}
     hunks = iter_hunks(diff)
     if not hunks:
         return map_files_to_entity_ids(files, entities)
     per_file = changed_anchors_by_file(diff)
-    if not files or not entities:
-        return {}
     return _seed_entities_indexed(_build_wanted_index(files), entities, per_file)
 
 
@@ -785,10 +783,8 @@ def find_ambiguous_files(files: list[str], entities: list) -> dict[str, list[str
     if not files or not entities:
         return {}
     wanted, wanted_by_base, suffixes = _build_wanted_index(files)
-    if not wanted:
-        return {}
-
     hits: dict[str, set[str]] = {}
+
     for entity in entities:
         raw = getattr(entity, "file_path", "")
         if not raw:
