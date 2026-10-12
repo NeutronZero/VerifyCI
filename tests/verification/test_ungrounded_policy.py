@@ -442,3 +442,18 @@ def test_tests_cannot_override_deterministic_blocker(tmp_path):
     # Must FAIL due to removal_provenance, passing test CANNOT override blocker
     assert out["status"] == "FAIL"
     assert out["rationale"] == "blocking_check_failed"
+
+
+def test_compile_target_patterns_precompiles_per_file():
+    import re
+    from verifyci.verification.witness import _compile_target_patterns
+    pats = _compile_target_patterns(["src/app.py"], {"src/app.py": "src/app"})
+    assert len(pats) == 1
+    cf, import_re, call_re, attr_re = pats[0]
+    assert cf == "src/app.py"
+    assert all(isinstance(p, re.Pattern) for p in (import_re, call_re, attr_re))
+    assert import_re.search("from app import x")
+    assert call_re.search("app()")
+    assert attr_re.search("app.run")
+    assert not call_re.search("application()")
+    assert _compile_target_patterns(["x"], {"x": ""}) == []

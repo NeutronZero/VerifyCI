@@ -20,6 +20,32 @@ _JS_TEST_RE = re.compile(r"^[+ ]\s*(?:it|test)(?:\.\w+)?\s*\(\s*['\"`]([^'\"`\n]
 _PROBE_META_RE = re.compile(r"test_probe\s*[:=]\s*[\"']?([a-zA-Z0-9_./]+)[\"']?")
 
 
+def _compile_target_patterns(
+    code_files: list[str], code_stems: dict[str, str]
+) -> list[tuple[str, "re.Pattern[str]", "re.Pattern[str]", "re.Pattern[str]"]]:
+    """Precompile per-file import/call/attribute patterns (step 2 of
+    extract_execution_witnesses).
+
+    Compiling once per file instead of once per (line, file) pair takes
+    the association scan from O(L*C) compilations to O(C). Files whose
+    stem is empty match nothing and are skipped, as before.
+    """
+    compiled = []
+    for cf in code_files:
+        stem = re.sub(r"\.[a-zA-Z0-9]+$", "", code_stems[cf])
+        bare = stem.split("/")[-1]
+        if not bare:
+            continue
+        esc = re.escape(bare)
+        compiled.append((
+            cf,
+            re.compile(rf"\b(import\s+[\w.]*{esc}|from\s+[\w.]*{esc}\s+import)\b"),
+            re.compile(rf"\b{esc}\s*\("),
+            re.compile(rf"\b{esc}\.\w+"),
+        ))
+    return compiled
+
+
 def _module_stem(path: str) -> str:
     norm = normalize_path(path)
     for prefix in ("verifyci/", "src/", "tests/", "lib/"):
@@ -128,17 +154,11 @@ def extract_execution_witnesses(
         # 2. Direct AST reference / imports
         if is_general and code_files:
             matches = set()
+            target_patterns = _compile_target_patterns(code_files, code_stems)
             for line in raw_lines:
-                for cf in code_files:
-                    stem = re.sub(r"\.[a-zA-Z0-9]+$", "", code_stems[cf])
-                    bare = stem.split("/")[-1]
-                    if not bare:
-                        continue
-                    if (
-                        re.search(rf"\b(import\s+[\w.]*{re.escape(bare)}|from\s+[\w.]*{re.escape(bare)}\s+import)\b", line)
-                        or re.search(rf"\b{re.escape(bare)}\s*\(", line)
-                        or re.search(rf"\b{re.escape(bare)}\.\w+", line)
-                    ):
+                for cf, import_re, call_re, attr_re in target_patterns:
+                    if (import_re.search(line) or call_re.search(line)
+                            or attr_re.search(line)):
                         matches.add(cf)
             if len(matches) == 1:
                 target_file = next(iter(matches))
