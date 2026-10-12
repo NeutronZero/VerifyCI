@@ -11,13 +11,33 @@ from enum import Enum
 from typing import Any
 
 
+_FIELDS_CACHE: dict[type, tuple[str, ...]] = {}
+
+
+def _dataclass_field_names(cls: type) -> tuple[str, ...]:
+    """Dataclass field names, introspected once per class.
+
+    fields() walks the MRO on every call; records serialized in bulk
+    (evidence bundles, envelopes) share a handful of classes, so the
+    per-instance cost is pure overhead. Cache is append-only and keyed
+    by the class object itself.
+    """
+    try:
+        return _FIELDS_CACHE[cls]
+    except KeyError:
+        names = tuple(f.name for f in fields(cls))
+        _FIELDS_CACHE[cls] = names
+        return names
+
+
 def to_json_dict(obj: Any) -> Any:
     if obj is None or isinstance(obj, (int, float, str, bool)):
         return obj
     if isinstance(obj, Enum):
         return obj.value
     if is_dataclass(obj) and not isinstance(obj, type):
-        return {f.name: to_json_dict(getattr(obj, f.name)) for f in fields(obj)}
+        return {name: to_json_dict(getattr(obj, name))
+                for name in _dataclass_field_names(type(obj))}
     if isinstance(obj, (Mapping, dict)):
         return {k: to_json_dict(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):

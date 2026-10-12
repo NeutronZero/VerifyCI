@@ -248,3 +248,9 @@ def test_json_serialization_equivalence():
     baseline_str = to_json(data)
     # Both use deterministic sorted keys
     assert to_json(baseline_dict) == baseline_str
+
+
+def test_dataclass_field_names_cached_per_class():
+    from verifyci.contracts.jsonio import _dataclass_field_names
+    assert _dataclass_field_names(_InnerDC) == ("flag", "count", "ratio", "name")
+    assert _dataclass_field_names(_InnerDC) is _dataclass_field_names(_InnerDC)
