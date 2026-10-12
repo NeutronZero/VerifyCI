@@ -1,0 +1,42 @@
+{
+  "experiment_id": "CAP-012",
+  "title": "End-to-End Repository Performance Envelope",
+  "status": "CORPUS_FROZEN",
+  "freeze_rule": "Predeclared performance tiers and budgets; timing gated only on pinned environments.",
+  "warmup_runs": 1,
+  "repetition_count": 3,
+  "benchmark_ordering": "fixed_order_cache_reset_between_tiers",
+  "peak_rss_method": "tracemalloc_process_peak",
+  "aggregation_rule": "median_across_repetitions",
+  "tiers": {
+    "small": {
+      "file_count": 10,
+      "commit_files": 1,
+      "description": "Small microservice repository with single-file commit"
+    },
+    "medium": {
+      "file_count": 50,
+      "commit_files": 10,
+      "description": "Medium application service with multi-module commit"
+    },
+    "large": {
+      "file_count": 200,
+      "commit_files": 50,
+      "description": "Large monolithic repository with high-fanout commit"
+    }
+  },
+  "budgets": {
+    "small": {
+      "p95_ms_max": 250.0,
+      "peak_rss_mb_max": 100.0
+    },
+    "medium": {
+      "p95_ms_max": 1000.0,
+      "peak_rss_mb_max": 250.0
+    },
+    "large": {
+      "p95_ms_max": 5000.0,
+      "peak_rss_mb_max": 500.0
+    }
+  }
+}

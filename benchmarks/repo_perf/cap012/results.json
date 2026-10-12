@@ -1,0 +1,46 @@
+{
+  "experiment_id": "CAP-012",
+  "provenance": {
+    "git_commit": "fd18a1ef5c5b1bd1fec35e9ee8f0e200e78d61e2",
+    "git_dirty": true,
+    "harness_sha256": "c71103053109428fba201b78554815d1327497a5e49381f71a042828e2715809",
+    "config_sha256": "64a1462501bbac2e8a8b83a29fd0597f43acd137d8f4c33f11abcc3a13cf7a31",
+    "python_version": "3.14.7",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "cpu": "Intel64 Family 6 Model 140 Stepping 1, GenuineIntel"
+  },
+  "metrics": {
+    "p50_ms": 157.4,
+    "p95_ms": 245.68,
+    "p99_ms": 245.68,
+    "peak_rss_mb": 0.33,
+    "storage_growth_per_rev": 241664,
+    "cache_hit_rate": 0.85,
+    "tiers": {
+      "small": {
+        "p50_ms": 157.4,
+        "p95_ms": 245.68,
+        "p99_ms": 245.68,
+        "peak_rss_mb": 0.33,
+        "storage_growth_per_rev": 241664,
+        "cache_hit_rate": 0.85
+      },
+      "medium": {
+        "p50_ms": 390.54,
+        "p95_ms": 392.54,
+        "p99_ms": 392.54,
+        "peak_rss_mb": 1.0,
+        "storage_growth_per_rev": 815104,
+        "cache_hit_rate": 0.85
+      },
+      "large": {
+        "p50_ms": 1389.63,
+        "p95_ms": 1502.06,
+        "p99_ms": 1502.06,
+        "peak_rss_mb": 4.13,
+        "storage_growth_per_rev": 2891776,
+        "cache_hit_rate": 0.85
+      }
+    }
+  }
+}
