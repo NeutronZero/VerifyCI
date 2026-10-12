@@ -5,7 +5,7 @@
 - **Corpus SHA-256**: `f588414156bd2eedbedbf94f5b7451cb1fa1939b05710a270cd72c7de74b7580`
 - **Labels SHA-256**: `6e6d2e5e3f74bf2e7e2a664782ca62eccbb1efd9f0be51f5ec4e9922e24aa774`
 - **Total Cases**: 225
-- **Provenance Commit**: `be0e70db07063450bd058c7408354d363c60d4f8` (dirty: False)
+- **Provenance Commit**: `45b351f913c544ed5281918b312d6284c47992c7` (dirty: False)
 
 ## 2. Gates Table with Predeclared Thresholds
 
@@ -16,7 +16,7 @@
 | Representative Seed Recall | >= 0.95 | 1.0 | Established |
 | Representative Impact Precision | >= 0.95 | 1.0 | Established |
 | Representative Impact Recall | >= 0.95 | 1.0 | Established |
-| Latency p95 | <= 50.0 ms | 0.0955 ms | Measured-Met, Not Established |
+| Latency p95 | <= 50.0 ms | 0.1384 ms | Measured-Met, Not Established |
 
 
 ## 3. Per-Slice Breakdown

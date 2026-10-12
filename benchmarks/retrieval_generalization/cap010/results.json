@@ -1,9 +1,9 @@
 {
   "experiment_id": "CAP-010",
   "provenance": {
-    "git_commit": "be0e70db07063450bd058c7408354d363c60d4f8",
-    "git_dirty": true,
-    "harness_sha256": "00d7063fdcba44795713dd71ce321a21caed4cf0f6bd8dd83c76a4c9b2254616",
+    "git_commit": "45b351f913c544ed5281918b312d6284c47992c7",
+    "git_dirty": false,
+    "harness_sha256": "a3e3022f9ed64021a42cf3767ebf8563b9105a67700747599050c67acb2e4f2f",
     "oracle_sha256": "25efe1ebb7f5a769568c2e7070cd7f60393848ba9308fe825d8306d02d114a01",
     "config_sha256": "0ae8a2136d69a171952a5c21e2f223db84b07bd9610140ffc8e836a2d3113aa9",
     "python_version": "3.14.7",

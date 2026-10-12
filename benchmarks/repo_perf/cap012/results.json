@@ -1,44 +1,44 @@
 {
   "experiment_id": "CAP-012",
   "provenance": {
-    "git_commit": "be0e70db07063450bd058c7408354d363c60d4f8",
-    "git_dirty": true,
-    "harness_sha256": "856f4a6bb701bae5f04c96ebbe500152c3af1bfd9125d0fa11f5eeb09a81d9ee",
+    "git_commit": "45b351f913c544ed5281918b312d6284c47992c7",
+    "git_dirty": false,
+    "harness_sha256": "7daa3febedbf2a0424047890d63e270dc72bc79f8be27d054e04ccd56f0f580c",
     "config_sha256": "7c6ff4226ef6c1719ce843bebe4f3a16ae35d9b1c1a0c8d835fc75e7321b6ebe",
     "python_version": "3.14.7",
     "platform": "Windows-11-10.0.26300-SP0",
     "cpu": "Intel64 Family 6 Model 140 Stepping 1, GenuineIntel"
   },
   "metrics": {
-    "p50_ms": 291.14,
-    "p95_ms": 486.2,
-    "p99_ms": 486.2,
-    "peak_rss_mb": 43.34,
+    "p50_ms": 225.18,
+    "p95_ms": 270.56,
+    "p99_ms": 270.56,
+    "peak_rss_mb": 43.75,
     "storage_growth_per_rev": 241664,
     "cache_hit_rate": 0.85,
     "tiers": {
       "small": {
-        "p50_ms": 291.14,
-        "p95_ms": 486.2,
-        "p99_ms": 486.2,
-        "peak_rss_mb": 43.34,
+        "p50_ms": 225.18,
+        "p95_ms": 270.56,
+        "p99_ms": 270.56,
+        "peak_rss_mb": 43.75,
         "storage_growth_per_rev": 241664,
         "cache_hit_rate": 0.85
       },
       "medium": {
-        "p50_ms": 415.0,
-        "p95_ms": 639.62,
-        "p99_ms": 639.62,
-        "peak_rss_mb": 47.37,
-        "storage_growth_per_rev": 815104,
+        "p50_ms": 356.72,
+        "p95_ms": 377.91,
+        "p99_ms": 377.91,
+        "peak_rss_mb": 47.45,
+        "storage_growth_per_rev": 811008,
         "cache_hit_rate": 0.85
       },
       "large": {
-        "p50_ms": 1583.09,
-        "p95_ms": 2388.7,
-        "p99_ms": 2388.7,
-        "peak_rss_mb": 61.77,
-        "storage_growth_per_rev": 2887680,
+        "p50_ms": 1284.05,
+        "p95_ms": 1367.08,
+        "p99_ms": 1367.08,
+        "peak_rss_mb": 61.58,
+        "storage_growth_per_rev": 2883584,
         "cache_hit_rate": 0.85
       }
     }
