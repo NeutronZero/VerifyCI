@@ -4,7 +4,7 @@
 
 **Goal:** Add five frozen benchmark corpora (CAP-009 diff-to-impact, CAP-010 retrieval generalization, CAP-011 secret held-out, CAP-012 repo performance envelope, CAP-013 differential/mutation) following existing CAP conventions.
 
-**Architecture:** Each CAP is an independent frozen corpus directory with hash-pinned cases/labels, a standalone `measure_cap*.py` harness using clean-room oracles, a thin `tests/evaluation/test_cap*.py` reproduction test, and a `RESULTS.md` adjudicated under the evidence taxonomy in `docs/benchmarks.md:22-30`. Shared conventions are locked in Task 1; CAP tasks consume them.
+**Architecture:** Each CAP is an independent frozen corpus directory with hash-pinned cases/labels, a standalone `measure_cap*.py` harness using clean-room oracles, a thin `tests/verification/test_*_cap0XX.py` reproduction test, and a `RESULTS.md` adjudicated under the evidence taxonomy in `docs/benchmarks.md:22-30`. Shared conventions are locked in Task 1; CAP tasks consume them.
 
 **Tech Stack:** Python (>=3.12 floor), pytest (`tests/evaluation/`), existing `verifyci` APIs (`seed_entities_for_diff` in `verifyci/verification/diffmap.py:762`, `SecretDetector`, `GraphStore`, `run_verify`), SHA-256 freeze files.
 
@@ -40,7 +40,7 @@
 
 **Interfaces:**
 - Consumes: existing CAP-004/CAP-002B layouts.
-- Produces: directory/file contract every CAP task follows: `cases.jsonl`, `labels.jsonl`, `config.json` (with `experiment_id`, `case_count`, `slice_counts`, `corpus_sha256`, `label_sha256`, `status`, `freeze_rule`), `CORPUS_SHA256`, `LABEL_SHA256`, `author_cap*.py`, `measure_cap*.py` (validates freeze hashes before measuring), `MODE_PROTOCOL.md`, `results.json` (per-case rows + provenance binding: impl commit, worktree state, harness/oracle hashes, config, env), `RESULTS.md`, `tests/evaluation/test_cap*_*.py`.
+- Produces: directory/file contract every CAP task follows: `cases.jsonl`, `labels.jsonl`, `config.json` (with `experiment_id`, `case_count`, `slice_counts`, `corpus_sha256`, `label_sha256`, `status`, `freeze_rule`), `CORPUS_SHA256`, `LABEL_SHA256`, `author_cap*.py`, `measure_cap*.py` (validates freeze hashes before measuring), `MODE_PROTOCOL.md`, `results.json` (per-case rows + provenance binding: impl commit, worktree state, harness/oracle hashes, config, env), `RESULTS.md`, `tests/verification/test_*_cap0XX.py`.
 - Stage gate: this task is Stage 1 — independent review approves the contract before any corpus is created (P0-6: contract mandates per-case recomputation, provenance binding, verdict-from-canonical-data).
 
 - [ ] **Step 1: Write `benchmarks/CAP_CONVENTIONS.md`** naming the required files, the freeze-hash validation order (hashes checked before any measurement), the RESULTS.md sections (gates table with predeclared thresholds, per-slice breakdown, evidence classification per gate), the oracle-independence rule (ground truth authored independently of production code; the oracle's provenance recorded), and the provenance binding every `results.json` carries (implementation commit, clean/dirty worktree, harness hash, oracle hash, config hash, environment).
@@ -55,8 +55,8 @@ git commit -m "docs: record shared frozen-corpus conventions for CAP-009-013"
 
 **Files:**
 - Create: `benchmarks/diff_impact_corpus/cap009/` (`cases.jsonl`, `labels.jsonl`, `config.json`, `CORPUS_SHA256`, `LABEL_SHA256`, `author_cap009.py`, `measure_cap009.py`, `MODE_PROTOCOL.md`, `results.json`, `RESULTS.md`)
-- Create: `tests/evaluation/test_cap009_repro.py`
-- Test: `tests/evaluation/test_cap009_repro.py`
+- Create: `tests/verification/test_diff_impact_cap009.py`
+- Test: `tests/verification/test_diff_impact_cap009.py`
 
 **Interfaces:**
 - Consumes: Task 1 contract; `seed_entities_for_diff(files, entities, diff)` (`verifyci/verification/diffmap.py:762`), `parse_diff_files` (`diffmap.py:407`).
@@ -79,20 +79,20 @@ def test_cap009_freeze_pins():
 
 - [ ] **Step 2: Run test, expect FAIL** (files do not exist).
 
-Run: `pytest tests/evaluation/test_cap009_repro.py -q`
+Run: `pytest tests/verification/test_diff_impact_cap009.py -q`
 Expected: FAIL (missing corpus).
 
 - [ ] **Step 3: Author corpus** with `author_cap009.py`: ≥200 labeled diffs covering pure insertions at function boundaries, deletions, multi-hunk, renames, nested scopes, decorators, same-basename collisions, mixed-language files; adversarial critical slice labeled separately. Labels: expected changed-entity ids + expected impact sets, sealed before measurement.
 - [ ] **Step 4: Implement `measure_cap009.py`** validating freeze hashes first, then computing seed and impact precision/recall against an independent oracle (not the production seeder's own output), writing `results.json` + `RESULTS.md` with the predeclared gates.
-- [ ] **Step 5: Run full check**: `pytest tests/evaluation/test_cap009_repro.py -q` PASS, `ruff check` clean, `ty check verifyci` clean.
+- [ ] **Step 5: Run full check**: `pytest tests/verification/test_diff_impact_cap009.py -q` PASS, `ruff check` clean, `ty check verifyci` clean.
 - [ ] **Step 6: Commit** corpus + harness + test in one commit.
 
 ### Task 3: CAP-010 retrieval generalization and hard negatives
 
 **Files:**
 - Create: `benchmarks/retrieval_generalization/cap010/` (same contract as Task 2)
-- Create: `tests/evaluation/test_cap010_repro.py`
-- Test: `tests/evaluation/test_cap010_repro.py`
+- Create: `tests/verification/test_generalization_cap010.py`
+- Test: `tests/verification/test_generalization_cap010.py`
 
 **Interfaces:**
 - Consumes: Task 1 contract; existing BEIR harness patterns (`tests/evaluation/test_beir_harness.py`, `benchmarks/beir/results.json` schema).
@@ -113,8 +113,8 @@ No-answer scoring (P0-2, mandatory): a no-relevant-result query has ideal DCG 0,
 
 **Files:**
 - Create: `benchmarks/secret_heldout/cap011/` (same contract)
-- Create: `tests/evaluation/test_cap011_repro.py`
-- Test: `tests/evaluation/test_cap011_repro.py`
+- Create: `tests/verification/test_secrets_heldout_cap011.py`
+- Test: `tests/verification/test_secrets_heldout_cap011.py`
 
 **Interfaces:**
 - Consumes: Task 1 contract; `SecretDetector.scan_diff` (`verifyci/secrets/engine.py`), `assert_no_secret_leak` (`verifyci/secrets/redaction.py:65`); CAP-002B corpus stays untouched.
@@ -135,8 +135,8 @@ Redaction boundary (P0-3, mandatory): synthetic credential values MUST remain in
 
 **Files:**
 - Create: `benchmarks/repo_perf/cap012/` (`config.json` with workload tiers + budgets, `measure_cap012.py`, `MODE_PROTOCOL.md`, `results.json`, `RESULTS.md`; repos generated/synthetic, not frozen source dumps)
-- Create: `tests/evaluation/test_cap012_repro.py`
-- Test: `tests/evaluation/test_cap012_repro.py`
+- Create: `tests/verification/test_repo_perf_cap012.py`
+- Test: `tests/verification/test_repo_perf_cap012.py`
 
 **Interfaces:**
 - Consumes: Task 1 contract; full pipeline entry points (`run_ingest`, `run_verify`, blast-radius, evidence export).
@@ -157,8 +157,8 @@ Reproducible gates (P1-4, mandatory): hard pass/fail timing gates run ONLY in a 
 
 **Files:**
 - Create: `benchmarks/robustness/cap013/` (`generators.py` seeded topology/diff/call-arg/history fuzzers, `mutations.py` fault injectors, `measure_cap013.py`, `MODE_PROTOCOL.md`, `results.json`, `RESULTS.md`, `config.json` with stored seeds)
-- Create: `tests/evaluation/test_cap013_repro.py`
-- Test: `tests/evaluation/test_cap013_repro.py`
+- Create: `tests/verification/test_robustness_cap013.py`
+- Test: `tests/verification/test_robustness_cap013.py`
 
 **Interfaces:**
 - Consumes: Task 1 contract; equivalence-test patterns (`tests/evaluation/test_optimizations_equivalence.py`); production checkers under test.
@@ -189,7 +189,7 @@ Mutation accounting (P1-5, mandatory): every source mutation executes in an isol
 - [ ] **Step 1: Add catalog rows** to `docs/benchmarks.md:9-18` table for CAP-009–013 (digest prefix, cases, scope one-liners) plus missing CAP-002B/003A/004/005 rows per audit §4.
 - [ ] **Step 2: Extend `benchmarks.yml`** with one step per CAP pointing at its measure script + eval test; keep manual-dispatch trigger. CAP-012's hard-gate step is conditioned on the pinned-env marker; default CI runs its functional/report-only mode.
 - [ ] **Step 3: Harden `scripts/adjudicate_performance_evidence.py`** (or add `scripts/adjudicate_cap.py` if the existing script is suite-specific): verdicts computed from canonical per-case rows + provenance binding (impl commit, worktree state, harness/oracle/config hashes, env); any recorded `"PASS"`/`"established"` field is cross-checked, never trusted; mismatch → adjudication FAIL.
-- [ ] **Step 4: Run `pytest tests/evaluation/ -q`** (all CAP repro tests green together) and `ruff check`.
+- [ ] **Step 4: Run `pytest tests/evaluation/ tests/verification/ -q`** (all CAP repro tests green together) and `ruff check`.
 - [ ] **Step 5: Commit.**
 
 ## Execution Stages (per approval)
