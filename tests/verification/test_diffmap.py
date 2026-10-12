@@ -37,6 +37,14 @@ def test_dev_null_and_duplicates():
     assert parse_diff_files(diff) == ["a.py"]
 
 
+def test_build_wanted_index_precomputes_match_structures():
+    from verifyci.verification.diffmap import _build_wanted_index
+    wanted, by_base, suffixes = _build_wanted_index(["src/a.py", "b.py", "./src/a.py"])
+    assert wanted == {"src/a.py", "b.py"}
+    assert by_base == {"a.py": ["src/a.py"], "b.py": ["b.py"]}
+    assert suffixes == {"src/a.py": "/src/a.py", "b.py": "/b.py"}
+
+
 def test_truncated_diff_still_grounds():
     diff = (
         "diff --git a/src/app.py b/src/app.py\n"

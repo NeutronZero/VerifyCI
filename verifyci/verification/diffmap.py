@@ -485,27 +485,47 @@ def normalize_path(path: str | None) -> str:
     return p
 
 
-def map_files_to_entity_ids(files: list[str], entities: list) -> dict[str, list[str]]:
+def _build_wanted_index(
+    files: list[str],
+) -> tuple[set[str], dict[str, list[str]], dict[str, str]]:
+    """Precomputed match structures for a wanted-path set.
+
+    Returns (wanted, by_base, suffixes): normalized exact set, basename
+    buckets, and prebuilt ``"/" + path`` suffix keys so the per-entity
+    loop performs zero string concatenation (the collision-case cost).
+    """
     wanted = {normalize_path(f) for f in files}
-    if not wanted or not entities:
-        return {}
-    wanted_by_base: dict[str, list[str]] = {}
+    by_base: dict[str, list[str]] = {}
     for f in wanted:
-        b = f.rsplit("/", 1)[-1]
-        wanted_by_base.setdefault(b, []).append(f)
+        by_base.setdefault(f.rsplit("/", 1)[-1], []).append(f)
+    suffixes = {f: "/" + f for f in wanted}
+    return wanted, by_base, suffixes
+
+
+def map_files_to_entity_ids(files: list[str], entities: list) -> dict[str, list[str]]:
+    if not files or not entities:
+        return {}
+    wanted, wanted_by_base, suffixes = _build_wanted_index(files)
+    if not wanted:
+        return {}
 
     mapping: dict[str, list[str]] = {}
     for entity in entities:
         raw = getattr(entity, "file_path", "")
         if not raw:
             continue
-        base = str(raw).replace("\\", "/").rsplit("/", 1)[-1]
+        if isinstance(raw, str) and "\\" not in raw and not raw.startswith("./"):
+            epath = raw
+            base = raw.rsplit("/", 1)[-1]
+        else:
+            epath = normalize_path(raw)
+            base = epath.rsplit("/", 1)[-1]
         candidates = wanted_by_base.get(base)
         if not candidates:
             continue
-        epath = normalize_path(raw)
+        esuffix = "/" + epath
         for f in candidates:
-            if epath == f or epath.endswith("/" + f) or f.endswith("/" + epath):
+            if epath == f or epath.endswith(suffixes[f]) or f.endswith(esuffix):
                 mapping.setdefault(f, []).append(entity.revision_entity_id)
     return mapping
 
@@ -721,25 +741,28 @@ def _is_seedable(entity) -> bool:
 
 
 def find_ambiguous_files(files: list[str], entities: list) -> dict[str, list[str]]:
-    wanted = {normalize_path(f) for f in files}
-    if not wanted or not entities:
+    if not files or not entities:
         return {}
-    wanted_by_base: dict[str, list[str]] = {}
-    for f in wanted:
-        b = f.rsplit("/", 1)[-1]
-        wanted_by_base.setdefault(b, []).append(f)
+    wanted, wanted_by_base, suffixes = _build_wanted_index(files)
+    if not wanted:
+        return {}
 
     hits: dict[str, set[str]] = {}
     for entity in entities:
         raw = getattr(entity, "file_path", "")
         if not raw:
             continue
-        base = str(raw).replace("\\", "/").rsplit("/", 1)[-1]
+        if isinstance(raw, str) and "\\" not in raw and not raw.startswith("./"):
+            epath = raw
+            base = raw.rsplit("/", 1)[-1]
+        else:
+            epath = normalize_path(raw)
+            base = epath.rsplit("/", 1)[-1]
         candidates = wanted_by_base.get(base)
         if not candidates:
             continue
-        epath = normalize_path(raw)
+        esuffix = "/" + epath
         for f in candidates:
-            if epath == f or epath.endswith("/" + f) or f.endswith("/" + epath):
+            if epath == f or epath.endswith(suffixes[f]) or f.endswith(esuffix):
                 hits.setdefault(f, set()).add(epath)
     return {f: sorted(paths) for f, paths in hits.items() if len(paths) > 1}
