@@ -1,0 +1,102 @@
+{
+  "environment": {
+    "python_version": "3.14.4",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "processor": "Intel64 Family 6 Model 140 Stepping 1, GenuineIntel",
+    "cpu_count": 8,
+    "git_commit": "382c49288c9f506c095a08f414f73e040665c965",
+    "timestamp_utc": "2026-10-12T05:17:58Z"
+  },
+  "benchmarks": {
+    "diff_mapping": {
+      "large_repo_10k_entities": {
+        "baseline": {
+          "p50_us": 21000.4,
+          "p95_us": 28547.6,
+          "p99_us": 29302.1,
+          "mean_us": 21960.09
+        },
+        "optimized": {
+          "p50_us": 5921.2,
+          "p95_us": 12890.1,
+          "p99_us": 15649.0,
+          "mean_us": 6902.77
+        },
+        "speedup_p50": 3.55,
+        "baseline_peak_bytes": 2989,
+        "optimized_peak_bytes": 4092
+      },
+      "basename_collisions_5k_entities": {
+        "baseline": {
+          "p50_us": 5553.7,
+          "p95_us": 6281.6,
+          "p99_us": 6910.3,
+          "mean_us": 5668.29
+        },
+        "optimized": {
+          "p50_us": 7473.7,
+          "p95_us": 8194.5,
+          "p99_us": 12148.0,
+          "mean_us": 7558.39
+        },
+        "speedup_p50": 0.74
+      }
+    },
+    "graph_cache_freezing": {
+      "repeated_freeze_already_frozen": {
+        "baseline": {
+          "p50_us": 906.3,
+          "p95_us": 1558.5,
+          "p99_us": 1848.2,
+          "mean_us": 978.35
+        },
+        "optimized": {
+          "p50_us": 988.7,
+          "p95_us": 1144.0,
+          "p99_us": 1401.9,
+          "mean_us": 984.38
+        },
+        "speedup_p50": 0.92,
+        "baseline_peak_bytes": 58624,
+        "optimized_peak_bytes": 58664,
+        "memory_reduction_ratio": 1.0
+      }
+    },
+    "ir_line_attribution": {
+      "dense_spans_500_intervals": {
+        "baseline": {
+          "p50_us": 2080.7,
+          "p95_us": 2234.5,
+          "p99_us": 3010.2,
+          "mean_us": 2083.44
+        },
+        "optimized": {
+          "p50_us": 86.2,
+          "p95_us": 93.8,
+          "p99_us": 120.7,
+          "mean_us": 87.78
+        },
+        "speedup_p50": 24.14,
+        "baseline_peak_bytes": 440,
+        "optimized_peak_bytes": 72
+      }
+    },
+    "json_serialization": {
+      "complex_records_100_items": {
+        "baseline": {
+          "p50_us": 1456.9,
+          "p95_us": 1683.0,
+          "p99_us": 2190.3,
+          "mean_us": 1462.33
+        },
+        "optimized": {
+          "p50_us": 640.4,
+          "p95_us": 1235.0,
+          "p99_us": 1504.8,
+          "mean_us": 685.04
+        },
+        "speedup_p50": 2.27
+      }
+    }
+  }
+}

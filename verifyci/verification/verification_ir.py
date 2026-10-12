@@ -1,3 +1,4 @@
+from bisect import bisect_left, bisect_right
 import time
 import uuid
 
@@ -89,8 +90,23 @@ def build_semi_check(cert, files: list[str], entities: list,
     )
 
 
+def _merge_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Merge overlapping and contiguous entity spans into disjoint sorted intervals."""
+    if not spans:
+        return []
+    sorted_spans = sorted(spans)
+    merged = [sorted_spans[0]]
+    for s, en in sorted_spans[1:]:
+        prev_s, prev_en = merged[-1]
+        if s <= prev_en:
+            merged[-1] = (prev_s, max(prev_en, en))
+        else:
+            merged.append((s, en))
+    return merged
+
+
 def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
-    """Changed lines no code entity spans: `path:line` items.
+    """Changed lines in CODE_CORE files that fall outside any entity span.
 
     File-level grounding (the certificate seeds a whole file) used to
     let an edit to a module constant, flag, import, or decorator PASS
@@ -118,7 +134,7 @@ def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
     )
     from verifyci.verification.partition import classify_path, FilePartition
 
-    spans: dict[str, list[tuple[int, int]]] = {}
+    raw_spans: dict[str, list[tuple[int, int]]] = {}
     for e in entities:
         t = getattr(e, "type", None)
         if t is not None and str(getattr(t, "value", t)) == "MODULE":
@@ -131,11 +147,20 @@ def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
             en = int(getattr(e, "line_end", s) or s)
         except (TypeError, ValueError):
             continue
-        spans.setdefault(p, []).append((s, en))
+        raw_spans.setdefault(p, []).append((s, en))
+
+    merged_spans: dict[str, list[tuple[int, int]]] = {}
+    span_starts: dict[str, list[int]] = {}
     decorator_starts: dict[str, set[int]] = {}
-    for p, span_list in spans.items():
-        span_list.sort()
+    import_endpoints: dict[str, list[int]] = {}
+
+    for p, span_list in raw_spans.items():
+        merged = _merge_spans(span_list)
+        merged_spans[p] = merged
+        span_starts[p] = [s for s, _ in merged]
         decorator_starts[p] = {s - 1 for s, _ in span_list}
+        import_endpoints[p] = sorted({s for s, _ in span_list} | {en for _, en in span_list})
+
     out: list[str] = []
     seen: set[str] = set()
     # Same anchor geometry as changed_line_anchor_sets (a `-` line anchors
@@ -147,8 +172,10 @@ def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
         if classify_path(h.file) != FilePartition.CODE_CORE:
             continue
         norm_f = normalize_path(h.file)
-        file_spans = spans.get(norm_f, [])
+        file_spans = merged_spans.get(norm_f, [])
+        file_starts = span_starts.get(norm_f, [])
         file_dec_starts = decorator_starts.get(norm_f)
+        file_endpoints = import_endpoints.get(norm_f, [])
         old_ln = h.old_start
         prev_minus = False
         for body in h.lines:
@@ -176,7 +203,7 @@ def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
                 continue  # positionless content (new-file `+` at old
                 # line 0): nothing to attribute; ungrounded-file and
                 # opaque checks own that case.
-            if any(_anchor_covered(ln, file_spans, content, file_dec_starts) for ln in coverable):
+            if any(_anchor_covered(ln, file_spans, file_starts, content, file_dec_starts, file_endpoints) for ln in coverable):
                 continue
             key = f"{h.file}:{coverable[0]}"
             if key not in seen:
@@ -188,22 +215,41 @@ def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
 def _anchor_covered(
     ln: int,
     file_spans: list[tuple[int, int]],
+    starts: list[int] | None = None,
     content: str = "",
     dec_starts: set[int] | None = None,
+    endpoints: list[int] | None = None,
 ) -> bool:
-    for s, en in file_spans:
-        if s <= ln <= en:
-            return True
-        if s > ln:
-            break
+    if file_spans:
+        if starts is not None and len(starts) == len(file_spans):
+            idx = bisect_right(starts, ln) - 1
+            if idx >= 0:
+                s, en = file_spans[idx]
+                if s <= ln <= en:
+                    return True
+        else:
+            for s, en in file_spans:
+                if s <= ln <= en:
+                    return True
+                if s > ln:
+                    break
+
     # One line above a span start is only the decorator when the changed
     # line is itself a decorator line.
     if content.lstrip().startswith("@"):
         if dec_starts is not None:
             return ln in dec_starts
         return any(s - ln == 1 for s, en in file_spans)
+
     # An import statement added adjacent to an existing import/code entity span
     if content.lstrip().startswith(("import ", "from ")):
+        if endpoints:
+            idx = bisect_left(endpoints, ln)
+            if idx < len(endpoints) and abs(endpoints[idx] - ln) <= 2:
+                return True
+            if idx > 0 and abs(endpoints[idx - 1] - ln) <= 2:
+                return True
+            return False
         return any(abs(s - ln) <= 2 or abs(en - ln) <= 2 for s, en in file_spans)
     return False
 

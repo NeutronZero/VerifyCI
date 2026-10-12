@@ -64,8 +64,6 @@ def _freeze_payload(val: Any) -> Any:
     """Recursively freeze dictionaries, lists, sets, and dataclasses to prevent caller mutation of cached payloads."""
     if val is None or isinstance(val, (int, float, str, bool, bytes)):
         return val
-    if isinstance(val, MappingProxyType):
-        return val
     if isinstance(val, (Mapping, dict)):
         return MappingProxyType({k: _freeze_payload(v) for k, v in val.items()})
     if isinstance(val, tuple):
