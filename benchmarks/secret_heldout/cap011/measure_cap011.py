@@ -211,12 +211,12 @@ def main() -> int:
     # Generate RESULTS.md
     gates_table = f"""| Gate | Predeclared Threshold | Measured Value | Classification |
 |---|---|---|---|
-| Overall Detection Recall | >= 0.95 | {metrics_res['recall']} | Established |
-| Name-Independent Recall | >= 0.90 | {metrics_res['name_independent_recall']} | Established |
-| Precision (Held-Out) | >= 0.99 | {metrics_res['precision']} | Established |
-| Redaction Violations (Runtime) | = 0 | {metrics_res['redaction_violations']} | Established |
-| False Acceptance Rate (FAR) | <= 0.01 | {metrics_res['far']} | Established |
-| False Rejection Rate (FRR) | <= 0.05 | {metrics_res['frr']} | Established |
+| Overall Detection Recall | >= 0.95 | {metrics_res['recall']} | Measured-Met, Not Established |
+| Name-Independent Recall | >= 0.90 | {metrics_res['name_independent_recall']} | Measured-Met, Not Established |
+| Precision (Held-Out) | >= 0.99 | {metrics_res['precision']} | Measured-Met, Not Established |
+| Redaction Violations (Runtime) | = 0 | {metrics_res['redaction_violations']} | Measured-Met, Not Established |
+| False Acceptance Rate (FAR) | <= 0.01 | {metrics_res['far']} | Measured-Met, Not Established |
+| False Rejection Rate (FRR) | <= 0.05 | {metrics_res['frr']} | Measured-Met, Not Established |
 """
 
     cat_lines = []

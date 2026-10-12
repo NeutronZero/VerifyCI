@@ -27,28 +27,38 @@ def evaluate_mutation(mutation_def: dict[str, Any]) -> dict[str, Any]:
         sandbox = Path(tmp_str)
 
         if m_id == "MUT-01_EDGE_DIRECTION_FLIP":
-            # Graph with caller (1) -> callee (2). Mutation flips edge direction.
+            node_map = {"caller": 1, "callee": 2}
+
             class GraphNormal:
+                def __getitem__(self, idx: int) -> Any:
+                    name = "caller" if idx == 1 else "callee"
+                    return SimpleNamespace(name=name, file_path="src/pkg.py", metadata={})
+
                 def predecessors(self, idx: int) -> list[int]:
                     return [1] if idx == 2 else []
+
                 def successors(self, idx: int) -> list[int]:
                     return [2] if idx == 1 else []
 
             class GraphMutated:
+                def __getitem__(self, idx: int) -> Any:
+                    name = "caller" if idx == 1 else "callee"
+                    return SimpleNamespace(name=name, file_path="src/pkg.py", metadata={})
+
                 def predecessors(self, idx: int) -> list[int]:
                     return [2] if idx == 1 else []
+
                 def successors(self, idx: int) -> list[int]:
                     return [1] if idx == 2 else []
 
-            node_map = {"caller": 1, "callee": 2}
-            _, c_norm = blast_radius_check(
+            b_norm, c_norm = blast_radius_check(
                 graph=GraphNormal(), changed_entities=["callee"], node_map=node_map, max_hops=1
             )
-            _, c_mut = blast_radius_check(
+            b_mut, c_mut = blast_radius_check(
                 graph=GraphMutated(), changed_entities=["callee"], node_map=node_map, max_hops=1
             )
-            # The mutation altered affected callers (caller is no longer identified as calling callee)
-            diff_detected = (c_norm.score != c_mut.score or c_norm.passed != c_mut.passed or True)
+            # The mutation altered affected callers: caller was calling callee, now flipped
+            diff_detected = (b_norm.affected_callers != b_mut.affected_callers)
             classification = "killed" if diff_detected else "survived"
 
         elif m_id == "MUT-02_MISSING_LINEAGE_LINK":

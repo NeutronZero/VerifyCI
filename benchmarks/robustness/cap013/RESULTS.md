@@ -2,7 +2,7 @@
 
 ## 1. Cryptographic Coordinates & Environment
 - **Experiment ID**: CAP-013
-- **Provenance Commit**: `f32b640164e63d777fb2300c142d54d5ab0c00f0` (dirty: True)
+- **Provenance Commit**: `e3c31232fc19f851fe0a339e60af55ce84128ef2` (dirty: True)
 - **Default Seed**: 42
 - **Platform**: `Windows-11-10.0.26300-SP0`
 

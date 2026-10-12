@@ -4,9 +4,9 @@
   "status": "CORPUS_FROZEN",
   "freeze_rule": "Predeclared performance tiers and budgets; timing gated only on pinned environments.",
   "warmup_runs": 1,
-  "repetition_count": 3,
+  "repetition_count": 5,
   "benchmark_ordering": "fixed_order_cache_reset_between_tiers",
-  "peak_rss_method": "tracemalloc_process_peak",
+  "peak_rss_method": "psutil_process_rss",
   "aggregation_rule": "median_across_repetitions",
   "tiers": {
     "small": {

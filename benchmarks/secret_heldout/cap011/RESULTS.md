@@ -5,18 +5,18 @@
 - **Corpus SHA-256**: `72865e81db5bbd975ec8cb1710940b5203347ca39f12334a26c7cc339bd0c57f`
 - **Labels SHA-256**: `9e3bbc98a9ca549f981db3f25d280663c42d2c855e556e29ae6569da2d8572b7`
 - **Total Cases**: 50 (30 positive, 20 negative)
-- **Provenance Commit**: `f32b640164e63d777fb2300c142d54d5ab0c00f0` (dirty: True)
+- **Provenance Commit**: `e3c31232fc19f851fe0a339e60af55ce84128ef2` (dirty: True)
 
 ## 2. Gates Table with Predeclared Thresholds
 
 | Gate | Predeclared Threshold | Measured Value | Classification |
 |---|---|---|---|
-| Overall Detection Recall | >= 0.95 | 1.0 | Established |
-| Name-Independent Recall | >= 0.90 | 1.0 | Established |
-| Precision (Held-Out) | >= 0.99 | 1.0 | Established |
-| Redaction Violations (Runtime) | = 0 | 0 | Established |
-| False Acceptance Rate (FAR) | <= 0.01 | 0.0 | Established |
-| False Rejection Rate (FRR) | <= 0.05 | 0.0 | Established |
+| Overall Detection Recall | >= 0.95 | 1.0 | Measured-Met, Not Established |
+| Name-Independent Recall | >= 0.90 | 1.0 | Measured-Met, Not Established |
+| Precision (Held-Out) | >= 0.99 | 1.0 | Measured-Met, Not Established |
+| Redaction Violations (Runtime) | = 0 | 0 | Measured-Met, Not Established |
+| False Acceptance Rate (FAR) | <= 0.01 | 0.0 | Measured-Met, Not Established |
+| False Rejection Rate (FRR) | <= 0.05 | 0.0 | Measured-Met, Not Established |
 
 
 ## 3. Per-Slice Breakdown

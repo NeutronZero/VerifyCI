@@ -14,12 +14,13 @@ import subprocess
 import sys
 import tempfile
 import time
-import tracemalloc
 from pathlib import Path
 from typing import Any
 
 from verifyci.interface.commands.ingest import run_ingest
 from verifyci.interface.commands.verify import run_verify
+
+import psutil
 
 CORPUS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = CORPUS_DIR.parent.parent.parent
@@ -48,8 +49,8 @@ def get_git_provenance() -> tuple[str, bool]:
     return commit, dirty
 
 
-def _synthesize_repo(repo_dir: Path, file_count: int) -> tuple[list[str], str]:
-    """Generate synthetic python files and a matching unified diff."""
+def _synthesize_repo(repo_dir: Path, file_count: int, commit_files: int = 1) -> tuple[list[str], str]:
+    """Generate synthetic python files and a matching unified diff across commit_files."""
     files_created = []
     repo_dir.mkdir(parents=True, exist_ok=True)
     src_dir = repo_dir / "src"
@@ -68,30 +69,35 @@ def _synthesize_repo(repo_dir: Path, file_count: int) -> tuple[list[str], str]:
         file_path.write_text(content, encoding="utf-8")
         files_created.append(rel_path)
 
-    # Synthetic diff adding a new function to module_1.py
-    diff = (
-        "diff --git a/src/module_1.py b/src/module_1.py\n"
-        "--- a/src/module_1.py\n"
-        "+++ b/src/module_1.py\n"
-        "@@ -6,0 +7,3 @@\n"
-        "+def helper_1(val: int) -> int:\n"
-        "+    return val + 1\n"
-        "+\n"
-    )
+    # Synthetic diff spanning commit_files modules
+    diff_hunks = []
+    num_to_modify = min(file_count, max(1, commit_files))
+    for i in range(1, num_to_modify + 1):
+        diff_hunks.append(
+            f"diff --git a/src/module_{i}.py b/src/module_{i}.py\n"
+            f"--- a/src/module_{i}.py\n"
+            f"+++ b/src/module_{i}.py\n"
+            f"@@ -6,0 +7,3 @@\n"
+            f"+def helper_{i}(val: int) -> int:\n"
+            f"+    return val + 1\n"
+            f"+\n"
+        )
+    diff = "".join(diff_hunks)
     return files_created, diff
 
 
-def _measure_tier(file_count: int, repetitions: int = 3) -> dict[str, Any]:
+def _measure_tier(file_count: int, commit_files: int = 1, repetitions: int = 5) -> dict[str, Any]:
     latencies: list[float] = []
     peak_rss_values: list[float] = []
     storage_deltas: list[int] = []
 
+    proc = psutil.Process()
+
     for _ in range(repetitions):
         with tempfile.TemporaryDirectory() as tmp_str:
             tmp_path = Path(tmp_str)
-            _, diff = _synthesize_repo(tmp_path, file_count)
+            _, diff = _synthesize_repo(tmp_path, file_count, commit_files=commit_files)
 
-            tracemalloc.start()
             t0 = time.perf_counter()
 
             # 1. Ingest
@@ -103,11 +109,10 @@ def _measure_tier(file_count: int, repetitions: int = 3) -> dict[str, Any]:
             assert "status" in res, f"Verify missing status: {res}"
 
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
-            _, peak_bytes = tracemalloc.get_traced_memory()
-            tracemalloc.stop()
+            current_rss_mb = proc.memory_info().rss / (1024 * 1024)
 
             latencies.append(elapsed_ms)
-            peak_rss_values.append(peak_bytes / (1024 * 1024))
+            peak_rss_values.append(current_rss_mb)
 
             db_size = Path(db_path).stat().st_size if Path(db_path).exists() else 0
             storage_deltas.append(db_size)
@@ -139,8 +144,9 @@ def run_cap012(smoke_tier_only: bool = False) -> dict[str, Any]:
     tier_results: dict[str, Any] = {}
     for tier in tiers_to_run:
         fcount = tier_defs[tier]["file_count"]
-        reps = 1 if smoke_tier_only else cfg.get("repetition_count", 3)
-        tier_results[tier] = _measure_tier(file_count=fcount, repetitions=reps)
+        cfiles = tier_defs[tier].get("commit_files", 1)
+        reps = 1 if smoke_tier_only else cfg.get("repetition_count", 5)
+        tier_results[tier] = _measure_tier(file_count=fcount, commit_files=cfiles, repetitions=reps)
 
     # Fill default / estimated envelope for tiers not executed during smoke run
     for tier in tier_defs:
