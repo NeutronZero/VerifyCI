@@ -487,10 +487,24 @@ def normalize_path(path: str | None) -> str:
 
 def map_files_to_entity_ids(files: list[str], entities: list) -> dict[str, list[str]]:
     wanted = {normalize_path(f) for f in files}
+    if not wanted or not entities:
+        return {}
+    wanted_by_base: dict[str, list[str]] = {}
+    for f in wanted:
+        b = f.rsplit("/", 1)[-1]
+        wanted_by_base.setdefault(b, []).append(f)
+
     mapping: dict[str, list[str]] = {}
     for entity in entities:
-        epath = normalize_path(getattr(entity, "file_path", ""))
-        for f in wanted:
+        raw = getattr(entity, "file_path", "")
+        if not raw:
+            continue
+        base = str(raw).replace("\\", "/").rsplit("/", 1)[-1]
+        candidates = wanted_by_base.get(base)
+        if not candidates:
+            continue
+        epath = normalize_path(raw)
+        for f in candidates:
             if epath == f or epath.endswith("/" + f) or f.endswith("/" + epath):
                 mapping.setdefault(f, []).append(entity.revision_entity_id)
     return mapping
@@ -708,14 +722,24 @@ def _is_seedable(entity) -> bool:
 
 def find_ambiguous_files(files: list[str], entities: list) -> dict[str, list[str]]:
     wanted = {normalize_path(f) for f in files}
+    if not wanted or not entities:
+        return {}
+    wanted_by_base: dict[str, list[str]] = {}
+    for f in wanted:
+        b = f.rsplit("/", 1)[-1]
+        wanted_by_base.setdefault(b, []).append(f)
+
     hits: dict[str, set[str]] = {}
     for entity in entities:
-        epath = normalize_path(getattr(entity, "file_path", ""))
-        if not epath:
+        raw = getattr(entity, "file_path", "")
+        if not raw:
             continue
-        for f in wanted:
-            if epath == f:
-                hits.setdefault(f, set()).add(epath)
-            elif epath.endswith("/" + f) or f.endswith("/" + epath):
+        base = str(raw).replace("\\", "/").rsplit("/", 1)[-1]
+        candidates = wanted_by_base.get(base)
+        if not candidates:
+            continue
+        epath = normalize_path(raw)
+        for f in candidates:
+            if epath == f or epath.endswith("/" + f) or f.endswith("/" + epath):
                 hits.setdefault(f, set()).add(epath)
     return {f: sorted(paths) for f, paths in hits.items() if len(paths) > 1}

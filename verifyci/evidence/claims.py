@@ -351,7 +351,7 @@ def is_established(claim_name: str, evidence: EvidenceLoad | dict[str, Any] | No
 
 
 def _file_matches_hash(path: Path, expected: str) -> bool:
-    """Check if file matches expected SHA-256 (supports raw bytes and LF-normalized)."""
+    """Check if file matches expected SHA-256 (supports raw bytes, LF-normalized, and CRLF-normalized)."""
     if not isinstance(expected, str) or len(expected) != 64:
         return False
     if not path.is_file():
@@ -361,8 +361,15 @@ def _file_matches_hash(path: Path, expected: str) -> bool:
     except OSError:
         return False
     h1 = hashlib.sha256(raw).hexdigest()
-    h2 = hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()
-    return h1 == expected or h2 == expected
+    if h1 == expected:
+        return True
+    lf_raw = raw.replace(b"\r\n", b"\n")
+    h2 = hashlib.sha256(lf_raw).hexdigest()
+    if h2 == expected:
+        return True
+    crlf_raw = lf_raw.replace(b"\n", b"\r\n")
+    h3 = hashlib.sha256(crlf_raw).hexdigest()
+    return h3 == expected
 
 
 def verify_claim_provenance(

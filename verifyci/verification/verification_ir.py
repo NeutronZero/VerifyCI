@@ -132,6 +132,10 @@ def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
         except (TypeError, ValueError):
             continue
         spans.setdefault(p, []).append((s, en))
+    decorator_starts: dict[str, set[int]] = {}
+    for p, span_list in spans.items():
+        span_list.sort()
+        decorator_starts[p] = {s - 1 for s, _ in span_list}
     out: list[str] = []
     seen: set[str] = set()
     # Same anchor geometry as changed_line_anchor_sets (a `-` line anchors
@@ -142,7 +146,9 @@ def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
             continue
         if classify_path(h.file) != FilePartition.CODE_CORE:
             continue
-        file_spans = spans.get(normalize_path(h.file), [])
+        norm_f = normalize_path(h.file)
+        file_spans = spans.get(norm_f, [])
+        file_dec_starts = decorator_starts.get(norm_f)
         old_ln = h.old_start
         prev_minus = False
         for body in h.lines:
@@ -170,7 +176,7 @@ def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
                 continue  # positionless content (new-file `+` at old
                 # line 0): nothing to attribute; ungrounded-file and
                 # opaque checks own that case.
-            if any(_anchor_covered(ln, file_spans, content) for ln in coverable):
+            if any(_anchor_covered(ln, file_spans, content, file_dec_starts) for ln in coverable):
                 continue
             key = f"{h.file}:{coverable[0]}"
             if key not in seen:
@@ -179,12 +185,22 @@ def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
     return out
 
 
-def _anchor_covered(ln: int, file_spans: list[tuple[int, int]], content: str = "") -> bool:
-    if any(s <= ln <= en for s, en in file_spans):
-        return True
+def _anchor_covered(
+    ln: int,
+    file_spans: list[tuple[int, int]],
+    content: str = "",
+    dec_starts: set[int] | None = None,
+) -> bool:
+    for s, en in file_spans:
+        if s <= ln <= en:
+            return True
+        if s > ln:
+            break
     # One line above a span start is only the decorator when the changed
     # line is itself a decorator line.
     if content.lstrip().startswith("@"):
+        if dec_starts is not None:
+            return ln in dec_starts
         return any(s - ln == 1 for s, en in file_spans)
     # An import statement added adjacent to an existing import/code entity span
     if content.lstrip().startswith(("import ", "from ")):

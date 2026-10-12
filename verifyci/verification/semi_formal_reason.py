@@ -400,9 +400,10 @@ class SemiFormalReasoner:
                 DeterministicCheck(checker_id="deletion_verification", passed=deletion_ok, detail=del_reason),
                 DeterministicCheck(checker_id="test_suite_policy", passed=config_ok, detail=config_err or f"test_files={len(test_files)}"),
             ]
+            cert_ok = bool(config_ok and deletion_ok)
             conclusion = (
                 Conclusion(result="pass", reasoning="test_suite_only_change")
-                if config_ok and deletion_ok
+                if cert_ok
                 else Conclusion(result="fail", reasoning=(
                     f"configuration_schema_invalid: {config_err}"
                     if not config_ok
@@ -415,11 +416,11 @@ class SemiFormalReasoner:
                 evidence=[],
                 execution_traces=[],
                 conclusion=conclusion,
-                confidence=1.0 if config_ok else 0.0,
+                confidence=1.0 if cert_ok else 0.0,
                 generated_by=self.model_name,
                 checked_by=[c.checker_id for c in det_checks],
                 verification_method="test_suite_policy",
-                certificate_verified=config_ok,
+                certificate_verified=cert_ok,
                 timestamp=time.time(),
                 witnesses=tuple(witnesses),
                 waivers=tuple(waivers_list),

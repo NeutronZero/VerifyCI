@@ -186,7 +186,9 @@ def _read_diff(diff: str, diff_file: str) -> str:
                     raise _DiffTooLarge()
                 return _decode_diff_bytes(data)
             return data
-        with open(diff_file, "rb") as fh:
+        from verifyci.interface.ingress import validate_safe_path
+        safe_diff_path = validate_safe_path(diff_file)
+        with open(safe_diff_path, "rb") as fh:
             data = fh.read(MAX_DIFF_CHARS + 1)
         if len(data) > MAX_DIFF_CHARS:
             raise _DiffTooLarge()
@@ -239,28 +241,33 @@ def verify_diff(diff: str = typer.Argument("", help="Unified diff (or use --diff
     result = run_verify(diff_text, revision_id, db_path=db or None,
                         return_artifacts=need_artifacts)
 
+    safe_output = None
+    if output:
+        from verifyci.interface.ingress import validate_safe_path
+        safe_output = validate_safe_path(output)
+
     if fmt == "text":
         out_text = f"{result['status']}: {result['rationale']} ({result['report_id']})"
         if result.get("files"):
             out_text += f"\nfiles: {', '.join(result['files'])}"
-        if output:
-            with open(output, "w", encoding="utf-8") as fh:
+        if safe_output:
+            with open(safe_output, "w", encoding="utf-8") as fh:
                 fh.write(out_text + "\n")
         else:
             typer.echo(out_text)
     elif fmt == "json":
         from verifyci.export.json import export_certificate_json
         rendered = export_certificate_json(result)
-        if output:
-            with open(output, "w", encoding="utf-8") as fh:
+        if safe_output:
+            with open(safe_output, "w", encoding="utf-8") as fh:
                 fh.write(rendered + "\n")
         else:
             typer.echo(rendered)
     elif fmt == "sarif":
         from verifyci.export.sarif import export_sarif
         rendered = export_sarif(result)
-        if output:
-            with open(output, "w", encoding="utf-8") as fh:
+        if safe_output:
+            with open(safe_output, "w", encoding="utf-8") as fh:
                 fh.write(rendered + "\n")
         else:
             typer.echo(rendered)
@@ -279,6 +286,9 @@ def run(task: str, diff: str = typer.Option("", "--diff", "-d",
           help="Append (task, revision, ledger head) to a JSONL anchor log (L2 tamper evidence)")):
     from verifyci.interface.commands.run import run_task
     import json
+    if anchor_file:
+        from verifyci.interface.ingress import validate_safe_path
+        validate_safe_path(anchor_file)
     try:
         diff_text = _read_diff(diff, diff_file)
     except _DiffTooLarge:
@@ -305,6 +315,9 @@ def verify_chain(db: str = "",
     """
     from verifyci.interface.commands.anchor import run_verify_chain
     import json
+    if anchor_file:
+        from verifyci.interface.ingress import validate_safe_path
+        validate_safe_path(anchor_file)
     result = run_verify_chain(db or None, anchor_file or None, task_id or None)
     typer.echo(json.dumps(result, indent=2))
     if result["status"] == "INFRA_ERROR":

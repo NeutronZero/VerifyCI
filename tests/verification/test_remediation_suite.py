@@ -895,3 +895,66 @@ def test_l_bare_name_ambiguity():
     assert builder.resolution_stats["resolved"] == 0, (
         f"Expected 0 resolved calls: {builder.resolution_stats}"
     )
+
+
+# ============================================================================
+# Test M: Audit remediation tests (Certificate consistency, CRLF/LF hashes, CLI safe paths)
+# ============================================================================
+def test_test_suite_policy_failed_deletion_unverified(monkeypatch):
+    from verifyci.verification.semi_formal_reason import SemiFormalReasoner
+
+    r = SemiFormalReasoner()
+    monkeypatch.setattr(
+        "verifyci.verification.deletion.evaluate_deletions",
+        lambda **kwargs: (False, "FAIL", "guard_removed", []),
+    )
+
+    diff = (
+        "diff --git a/tests/test_foo.py b/tests/test_foo.py\n"
+        "--- a/tests/test_foo.py\n"
+        "+++ b/tests/test_foo.py\n"
+        "@@ -1,3 +1,1 @@\n"
+        "-def test_one(): pass\n"
+        "-def test_two(): pass\n"
+        "+def test_one(): pass\n"
+    )
+    cert = r.verify(diff=diff, graph=None, node_map={}, entities=[])
+    assert cert.conclusion.result == "fail"
+    assert "deletion_verification_failed" in cert.conclusion.reasoning
+    assert cert.certificate_verified is False
+    assert cert.confidence == 0.0
+
+
+def test_file_matches_hash_bidirectional_crlf_lf(tmp_path):
+    import hashlib
+    from verifyci.evidence.claims import _file_matches_hash
+
+    # Case 1: File on disk has LF, expected hash is computed from CRLF
+    lf_file = tmp_path / "lf_file.txt"
+    lf_file.write_bytes(b"line 1\nline 2\n")
+    expected_crlf_hash = hashlib.sha256(b"line 1\r\nline 2\r\n").hexdigest()
+    assert _file_matches_hash(lf_file, expected_crlf_hash) is True
+
+    # Case 2: File on disk has CRLF, expected hash is computed from LF
+    crlf_file = tmp_path / "crlf_file.txt"
+    crlf_file.write_bytes(b"line 1\r\nline 2\r\n")
+    expected_lf_hash = hashlib.sha256(b"line 1\nline 2\n").hexdigest()
+    assert _file_matches_hash(crlf_file, expected_lf_hash) is True
+
+
+def test_cli_safe_path_rejection_exit_3():
+    from typer.testing import CliRunner
+    from verifyci.interface.cli import app
+
+    runner = CliRunner()
+    # Path traversal in output path
+    res = runner.invoke(app, ["verify-diff", "diff --git a/a.py b/a.py\n", "--output", "../escape.txt"])
+    assert res.exit_code == 3
+
+    # Path traversal in anchor file
+    res = runner.invoke(app, ["run", "dummy_task", "--anchor-file", "../escape.jsonl"])
+    assert res.exit_code == 3
+
+    # Path traversal in verify-chain
+    res = runner.invoke(app, ["verify-chain", "--anchor-file", "../escape.jsonl"])
+    assert res.exit_code == 3
