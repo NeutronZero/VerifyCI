@@ -399,3 +399,119 @@ def test_corpus_correct_diffs_shadow_silent():
     assert len(correct) == 8
     for c in correct:
         assert shadowed_assignments(c["diff"]) == [], f"collateral on {c['id']}"
+
+
+def _mint_receipt(secret, commit, targets, rid="r-ci-1"):
+    import hashlib
+    import hmac
+    from verifyci.verification.receipts import canonical_receipt_bytes
+    payload = {"receipt_id": rid, "ci_system": "probe-ci", "run_id": "run-9",
+               "commit_sha": commit, "targets": list(targets),
+               "executed_at": "2026-10-12T08:00:00Z", "algorithm": "hmac-sha256",
+               "key_id": "probe", "signature": ""}
+    payload["signature"] = hmac.new(secret.encode(), canonical_receipt_bytes(payload),
+                                    hashlib.sha256).hexdigest()
+    return payload
+
+
+def test_f2t_verified_receipt_closes_to_pass(db_path):
+    """F2 + test diff + SIGNED receipt bound to the resolved revision:
+    witness predicate satisfied -> semi passes -> no detector fires ->
+    PASS. This is the F2 closure demonstration: attested execution
+    establishes Class-2 (garbage-in-garbage-out is the CI's problem;
+    trust pins + commit binding are the only defense, by design)."""
+    from verifyci.interface.commands.graph_loader import load_graph
+    from verifyci.interface.commands import open_for_read
+    from verifyci.storage.graph_store import resolve_commit_for_revision
+    from verifyci.verification.receipts import ReceiptTrust
+    graph, node_map, entities, resolved_revision = load_graph(db_path, "", return_revision=True)
+    auth_ids = [e.revision_entity_id for e in entities
+                if getattr(e, "file_path", "") == "src/auth.py"]
+    assert auth_ids, "no ingested entities for src/auth.py"
+    probe = open_for_read(db_path)
+    try:
+        bound = resolve_commit_for_revision(probe, resolved_revision) or resolved_revision
+    finally:
+        probe.close()
+    assert bound, "no DB-resolved revision identity to bind the receipt"
+    secret = "probe-secret"
+    receipt = _mint_receipt(secret, bound, auth_ids)
+    trust = ReceiptTrust(keys={"probe": ("hmac-sha256", secret)})
+    import verifyci.interface.commands.verify as verify_mod
+    assert hasattr(verify_mod, "run_verify")
+    r = run_verify(F2T_CODE + F2T_TEST_IMPORT, db_path=db_path,
+                   receipts=[receipt], receipt_trust=trust)
+    assert r["status"] == "PASS", r
+    assert r["rationale"] == "all_checks_passed_behavior_not_verified", r
+
+
+def _signed_for_db(db_path, targets, secret="probe-secret", commit=None, rid="r-ci-1", **kw):
+    from verifyci.interface.commands.graph_loader import load_graph
+    from verifyci.interface.commands import open_for_read
+    from verifyci.storage.graph_store import resolve_commit_for_revision
+    _, _, entities, resolved_revision = load_graph(db_path, "", return_revision=True)
+    eids = [e.revision_entity_id for e in entities
+            if getattr(e, "file_path", "") == "src/auth.py"]
+    probe = open_for_read(db_path)
+    try:
+        bound = commit or resolve_commit_for_revision(probe, resolved_revision) or resolved_revision
+    finally:
+        probe.close()
+    return _mint_receipt(secret, bound, targets or eids, rid=rid, **kw), eids
+
+
+def test_f2t_forged_receipt_declines(db_path):
+    from verifyci.verification.receipts import ReceiptTrust
+    receipt, _ = _signed_for_db(db_path, None)
+    receipt["signature"] = "0" * 64
+    trust = ReceiptTrust(keys={"probe": ("hmac-sha256", "probe-secret")})
+    r = run_verify(F2T_CODE + F2T_TEST_IMPORT, db_path=db_path,
+                   receipts=[receipt], receipt_trust=trust)
+    assert r["status"] == "INCONCLUSIVE", r
+
+
+def test_f2t_unknown_key_declines(db_path):
+    from verifyci.verification.receipts import ReceiptTrust
+    receipt, _ = _signed_for_db(db_path, None)
+    trust = ReceiptTrust(keys={"other": ("hmac-sha256", "something-else")})
+    r = run_verify(F2T_CODE + F2T_TEST_IMPORT, db_path=db_path,
+                   receipts=[receipt], receipt_trust=trust)
+    assert r["status"] == "INCONCLUSIVE", r
+
+
+def test_f2t_stale_commit_declines(db_path):
+    from verifyci.verification.receipts import ReceiptTrust
+    receipt, _ = _signed_for_db(db_path, None, commit="f" * 40)
+    trust = ReceiptTrust(keys={"probe": ("hmac-sha256", "probe-secret")})
+    r = run_verify(F2T_CODE + F2T_TEST_IMPORT, db_path=db_path,
+                   receipts=[receipt], receipt_trust=trust)
+    assert r["status"] == "INCONCLUSIVE", r
+
+
+def test_f2t_target_mismatch_declines(db_path):
+    from verifyci.verification.receipts import ReceiptTrust
+    receipt, _ = _signed_for_db(db_path, ["e_elsewhere"])
+    trust = ReceiptTrust(keys={"probe": ("hmac-sha256", "probe-secret")})
+    r = run_verify(F2T_CODE + F2T_TEST_IMPORT, db_path=db_path,
+                   receipts=[receipt], receipt_trust=trust)
+    assert r["status"] == "INCONCLUSIVE", r
+
+
+def test_f2t_no_pin_declines(db_path):
+    from verifyci.verification.receipts import ReceiptTrust
+    receipt, _ = _signed_for_db(db_path, None)
+    r = run_verify(F2T_CODE + F2T_TEST_IMPORT, db_path=db_path,
+                   receipts=[receipt], receipt_trust=ReceiptTrust(keys={}))
+    assert r["status"] == "INCONCLUSIVE", r
+
+
+def test_blocking_finding_survives_valid_receipt(db_path):
+    # C7 non-erasure: F4a trips removal provenance (blocking FAIL);
+    # a fully valid receipt for the same file must not clear it.
+    from verifyci.verification.receipts import ReceiptTrust
+    receipt, _ = _signed_for_db(db_path, None, rid="r-ci-2")
+    trust = ReceiptTrust(keys={"probe": ("hmac-sha256", "probe-secret")})
+    r = run_verify(F4A_STR_WRAP, db_path=db_path,
+                   receipts=[receipt], receipt_trust=trust)
+    assert r["status"] == "FAIL", r
+    assert r["rationale"] == "blocking_check_failed", r

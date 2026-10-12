@@ -34,7 +34,9 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
                signing_key: Any | None = None, signing_key_id: str | None = None,
                policy: VerificationPolicy | None = None,
                budget: ExecutionBudget | None = None,
-               trusted_keys: Any | None = None) -> dict:
+               trusted_keys: Any | None = None,
+               receipts: list[dict] | None = None,
+               receipt_trust: Any | None = None) -> dict:
     from verifyci.interface.ingress import IngressValidationError, validate_diff_ingress
     try:
         diff = validate_diff_ingress(diff)
@@ -144,9 +146,27 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
 
         budget.check_deadline()
         try:
+            # Receipt binding target: DB-resolved revision identity
+            # (commit when mapped, else revision id) — never caller
+            # input. Unresolvable -> None -> receipts unevaluated.
+            receipt_expected: str | None = None
+            if receipts:
+                try:
+                    from verifyci.storage.graph_store import resolve_commit_for_revision
+                    probe = open_for_read(db)
+                    try:
+                        receipt_expected = (
+                            resolve_commit_for_revision(probe, resolved_revision)
+                            or resolved_revision or None)
+                    finally:
+                        probe.close()
+                except Exception:
+                    receipt_expected = None
             reasoner = SemiFormalReasoner(signing_key=signing_key, signing_key_id=signing_key_id)
             cert = reasoner.verify(diff=diff, graph=graph, node_map=node_map or None,
-                                   entities=entities or None, waivers=waivers)
+                                   entities=entities or None, waivers=waivers,
+                                   receipts=receipts, expected_revision=receipt_expected,
+                                   receipt_trust=receipt_trust)
         except RuntimeError as r_err:
             if "certificate_signing_failed" in str(r_err):
                 res = {

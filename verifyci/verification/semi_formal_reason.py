@@ -479,7 +479,10 @@ class SemiFormalReasoner:
 
     def verify(self, diff: Any, graph: Any, node_map: dict | None = None,
                entities: list | None = None,
-               waivers: list | None = None) -> Certificate:
+               waivers: list | None = None,
+               receipts: list[dict] | None = None,
+               expected_revision: str | None = None,
+               receipt_trust: Any | None = None) -> Certificate:
         from verifyci.verification.partition import classify_path, FilePartition
         from verifyci.verification.witness import extract_execution_witnesses
 
@@ -523,6 +526,16 @@ class SemiFormalReasoner:
             entities=entities,
         )
 
+        receipt_dispositions: list[str] = []
+        if receipts:
+            from verifyci.verification.receipts import (
+                ReceiptTrust, witnesses_from_receipts,
+            )
+            trust = receipt_trust if receipt_trust is not None else ReceiptTrust.from_env()
+            verified, receipt_dispositions = witnesses_from_receipts(
+                receipts, expected_revision, trust)
+            witnesses = list(witnesses) + verified
+
         from verifyci.verification.deletion import evaluate_deletions
         del_ok, del_status, del_reason, _ = evaluate_deletions(
             diff=diff_str,
@@ -533,6 +546,8 @@ class SemiFormalReasoner:
             witnesses=witnesses,
             waivers=waivers_list,
         )
+        if receipt_dispositions:
+            del_reason = f"{del_reason}; receipts={','.join(receipt_dispositions)}"
 
         premises = [
             Premise(premise_id=str(uuid.uuid4()), statement=f"file_changed:{f}", source=f)
