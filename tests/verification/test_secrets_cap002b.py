@@ -286,3 +286,28 @@ def test_adversarial_anti_circularity():
         assert "CAP002B" not in rule.rule_id
         assert "cases.jsonl" not in rule.description
         assert "benchmarks" not in str(rule.pattern_strategy)
+
+
+# 18. Multiline buffer byte budget exhaustion bounds
+def test_adversarial_multiline_buffer_byte_exhaustion(monkeypatch):
+    import verifyci.secrets.engine as eng
+    # Set buffer byte limit lower than line scan byte limit to isolate multiline buffer trigger
+    monkeypatch.setattr(eng, "_MAX_MULTILINE_BYTES", 500)
+    detector = eng.SecretDetector()
+
+    line_chunk = "x" * 100
+    num_lines = 7
+    diff_body = "\n".join(f"+{line_chunk}" for _ in range(num_lines))
+    diff = (
+        "diff --git a/src/huge.py b/src/huge.py\n"
+        "--- a/src/huge.py\n"
+        "+++ b/src/huge.py\n"
+        f"@@ -1,0 +1,{num_lines + 2} @@\n"
+        '+blob = """\n'
+        f"{diff_body}\n"
+        '+"""\n'
+    )
+    with pytest.raises(ResourceLimitExceeded) as exc_info:
+        detector.scan_diff(diff)
+    assert exc_info.value.limit_type == "multiline_buffer"
+

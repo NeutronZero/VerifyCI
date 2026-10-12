@@ -324,3 +324,25 @@ def test_positive_control_high_scale_within_budget_passes():
     assert res.status in (None, "PASS")
     assert res.affected_callees == [hub_id]
     assert res.affected_callers == []
+
+
+def test_multi_source_traversal_exhaustion_and_shared_budget():
+    """Verify that multi-source BFS correctly tracks visit budget across all seeds and fails closed."""
+    from verifyci.graph.traverse import traverse, TraversalInconclusiveError
+
+    class LinearGraph:
+        def __init__(self, n: int):
+            self.n = n
+        def successors(self, u: int) -> list[int]:
+            return [u + 1] if u + 1 < self.n else []
+        def predecessors(self, u: int) -> list[int]:
+            return [u - 1] if u - 1 >= 0 else []
+
+    g = LinearGraph(100)
+    # Seeds [0, 50], visit budget = 15
+    # Traversal should raise TraversalInconclusiveError when cumulative visited exceeds 15
+    with pytest.raises(TraversalInconclusiveError) as exc_info:
+        traverse(g, [0, 50], direction="outgoing", max_hops=20, max_visit_budget=15)
+
+    assert "visit budget exceeded" in str(exc_info.value).lower()
+
