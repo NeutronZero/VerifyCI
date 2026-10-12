@@ -1,0 +1,85 @@
+{
+  "experiment_id": "CAP-013",
+  "provenance": {
+    "git_commit": "6df59169a26732d3ca83811c859196135786cb2a",
+    "git_dirty": true,
+    "harness_sha256": "629d4f5275cfd7fed643b88c632f72b3e9a9dcbb970823cf0300645a18a486af",
+    "config_sha256": "1d745bc823b1b5edc4e0d82fbe73d2b515515d80e52dec6e72a19310e0a5e676",
+    "python_version": "3.14.7",
+    "platform": "Windows-11-10.0.26300-SP0"
+  },
+  "metrics": {
+    "oracle_disagreement_rate": 0.0,
+    "incorrect_pass_rate": 0.0,
+    "mutation_kill_rate": 1.0,
+    "false_decline_rate": 0.0
+  },
+  "mutations": [
+    {
+      "mutation_id": "MUT-01_EDGE_DIRECTION_FLIP",
+      "target": "verifyci.retrieval.blast_radius",
+      "description": "Inverted caller->callee direction in call-graph traversal",
+      "applied_evidence": {
+        "target": "verifyci.retrieval.blast_radius",
+        "diff": "- predecessors(2) -> [1]\n+ predecessors(2) -> []",
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpq72slj08"
+      },
+      "classification": "killed"
+    },
+    {
+      "mutation_id": "MUT-02_MISSING_LINEAGE_LINK",
+      "target": "verifyci.verification.removal",
+      "description": "Removed security check with missing lineage link / receipt",
+      "applied_evidence": {
+        "target": "verifyci.verification.removal",
+        "diff": "- def critical_security_check(): pass",
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmp6cia2uau"
+      },
+      "classification": "killed"
+    },
+    {
+      "mutation_id": "MUT-03_ALTERED_ARG_VALUE",
+      "target": "verifyci.verification.call_semantics",
+      "description": "Mutated strict=True to strict=False in function invocation",
+      "applied_evidence": {
+        "target": "verifyci.verification.call_semantics",
+        "diff": "- verify_session(strict=True)\n+ verify_session(strict=False)",
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmprkyhq5co"
+      },
+      "classification": "killed"
+    },
+    {
+      "mutation_id": "MUT-04_PATH_COLLISION",
+      "target": "verifyci.verification.diffmap",
+      "description": "Identical file basenames in separate subsystem directories",
+      "applied_evidence": {
+        "target": "verifyci.verification.diffmap",
+        "diff": "auth/service.py vs billing/service.py collision",
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpktb90i2l"
+      },
+      "classification": "killed"
+    },
+    {
+      "mutation_id": "MUT-05_RELAXED_FAIL_CLOSED_CHECK",
+      "target": "verifyci.interface.ingress",
+      "description": "Malformed corrupt hunk header injected into verification ingress",
+      "applied_evidence": {
+        "target": "verifyci.interface.ingress",
+        "diff": "@@ CORRUPT_HUNK @@",
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmp60zhlgsl"
+      },
+      "classification": "killed"
+    },
+    {
+      "mutation_id": "EQUIV-01_WHITESPACE_REORDER",
+      "target": "formatting",
+      "description": "Benign whitespace comment reordering",
+      "applied_evidence": {
+        "target": "formatting",
+        "diff": "+ # formatting comment",
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpjoxvnr7c"
+      },
+      "classification": "equivalent"
+    }
+  ]
+}

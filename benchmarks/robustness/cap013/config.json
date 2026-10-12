@@ -1,0 +1,23 @@
+{
+  "experiment_id": "CAP-013",
+  "title": "Differential, Property-Based, and Mutation Benchmark",
+  "status": "CORPUS_FROZEN",
+  "freeze_rule": "Declared critical mutations evaluated in isolated sandboxes; 100% kill rate required.",
+  "default_seed": 42,
+  "critical_mutations": [
+    "MUT-01_EDGE_DIRECTION_FLIP",
+    "MUT-02_MISSING_LINEAGE_LINK",
+    "MUT-03_ALTERED_ARG_VALUE",
+    "MUT-04_PATH_COLLISION",
+    "MUT-05_RELAXED_FAIL_CLOSED_CHECK"
+  ],
+  "equivalent_mutations": [
+    "EQUIV-01_WHITESPACE_REORDER"
+  ],
+  "gates": {
+    "critical_mutation_kill_rate_min": 1.0,
+    "incorrect_pass_rate_max": 0.0,
+    "oracle_disagreement_rate_max": 0.0,
+    "false_decline_rate_max": 0.05
+  }
+}
