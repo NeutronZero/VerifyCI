@@ -591,16 +591,10 @@ def diff_grounding_statuses(diff: str | None) -> dict[str, "GroundingStatus"]:
     return statuses
 
 
-def uninspectable_files(diff: str | None) -> list[str]:
-    """Files the diff names whose content it does not carry (binary, or
-    header-only with no hunks and no rename target). A verification that
-    cannot read the change must not certify it: these force inconclusive
-    rather than a PASS earned by the text-only siblings of a mixed diff.
-    Hunk-less renames/copies are the same class: the diff carries no
-    content for the move, so a same-named entity in the base graph must
-    not ground a PASS for it."""
+def _uninspectable_from_parsed(parsed: list[FileDiff]) -> list[str]:
+    """uninspectable_files over an already-parsed diff (parse once)."""
     out: list[str | None] = []
-    for f in parse_unified_diff(diff):
+    for f in parsed:
         if f.binary:
             out.append(f.path)
         elif f.mode_only and not f.hunks and not f.stray_added and not f.stray_removed:
@@ -610,19 +604,35 @@ def uninspectable_files(diff: str | None) -> list[str]:
     return [p for p in out if p is not None]
 
 
+def uninspectable_files(diff: str | None) -> list[str]:
+    """Files the diff names whose content it does not carry (binary, or
+    header-only with no hunks and no rename target). A verification that
+    cannot read the change must not certify it: these force inconclusive
+    rather than a PASS earned by the text-only siblings of a mixed diff.
+    Hunk-less renames/copies are the same class: the diff carries no
+    content for the move, so a same-named entity in the base graph must
+    not ground a PASS for it."""
+    return _uninspectable_from_parsed(parse_unified_diff(diff))
+
+
+def _strays_from_parsed(parsed: list[FileDiff]) -> list[str]:
+    """files_with_stray_lines over an already-parsed diff (parse once)."""
+    out: list[str] = []
+    for f in parsed:
+        if f.path is None:
+            continue
+        if (f.stray_added or f.stray_removed) and f.path not in out:
+            out.append(f.path)
+    return out
+
+
 def files_with_stray_lines(diff: str | None) -> list[str]:
     """Files carrying `+`/`-` lines outside any hunk (git mode/index noise
     or hand-edited content). Strays have no old-side anchor, so the
     seeding/coverage geometry cannot attribute them: consumers treat them
     as uncovered (fail closed) rather than letting sibling hunks certify
     the file. Preamble strays (no file yet, path None) are excluded."""
-    out: list[str] = []
-    for f in parse_unified_diff(diff):
-        if f.path is None:
-            continue
-        if (f.stray_added or f.stray_removed) and f.path not in out:
-            out.append(f.path)
-    return out
+    return _strays_from_parsed(parse_unified_diff(diff))
 
 
 def changed_line_anchor_sets(diff: str | None) -> dict[str, list[set[int]]]:
