@@ -1,7 +1,7 @@
 {
   "experiment_id": "CAP-013",
   "provenance": {
-    "git_commit": "6df59169a26732d3ca83811c859196135786cb2a",
+    "git_commit": "f32b640164e63d777fb2300c142d54d5ab0c00f0",
     "git_dirty": true,
     "harness_sha256": "629d4f5275cfd7fed643b88c632f72b3e9a9dcbb970823cf0300645a18a486af",
     "config_sha256": "1d745bc823b1b5edc4e0d82fbe73d2b515515d80e52dec6e72a19310e0a5e676",
@@ -22,7 +22,7 @@
       "applied_evidence": {
         "target": "verifyci.retrieval.blast_radius",
         "diff": "- predecessors(2) -> [1]\n+ predecessors(2) -> []",
-        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpq72slj08"
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmp7seipksb"
       },
       "classification": "killed"
     },
@@ -33,7 +33,7 @@
       "applied_evidence": {
         "target": "verifyci.verification.removal",
         "diff": "- def critical_security_check(): pass",
-        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmp6cia2uau"
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmp4y06r55t"
       },
       "classification": "killed"
     },
@@ -44,7 +44,7 @@
       "applied_evidence": {
         "target": "verifyci.verification.call_semantics",
         "diff": "- verify_session(strict=True)\n+ verify_session(strict=False)",
-        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmprkyhq5co"
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpb2fvmibr"
       },
       "classification": "killed"
     },
@@ -55,7 +55,7 @@
       "applied_evidence": {
         "target": "verifyci.verification.diffmap",
         "diff": "auth/service.py vs billing/service.py collision",
-        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpktb90i2l"
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpgk0y6s28"
       },
       "classification": "killed"
     },
@@ -66,7 +66,7 @@
       "applied_evidence": {
         "target": "verifyci.interface.ingress",
         "diff": "@@ CORRUPT_HUNK @@",
-        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmp60zhlgsl"
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpx5o8ztkg"
       },
       "classification": "killed"
     },
@@ -77,7 +77,7 @@
       "applied_evidence": {
         "target": "formatting",
         "diff": "+ # formatting comment",
-        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpjoxvnr7c"
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpw0id8n2_"
       },
       "classification": "equivalent"
     }

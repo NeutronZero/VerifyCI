@@ -13,9 +13,18 @@ VerifyCI treats verification claims as empirical, reproducible hypotheses. All b
 | **C1: Patch Corpus** | `benchmarks/patch_corpus/cases.jsonl` | `5ff5ab1b4d075559` | 17 cases | Deterministic vs semantic agent wrong-patch detection |
 | **C2: Blast Radius** | `benchmarks/blast_corpus/cases.jsonl` | `efbf6b4e12e62fd1` | 9 cases | Multi-hop call graph impact and tail-insertion geometry |
 | **C3: Latency** | `benchmarks/latency/config.json` | `efc6451e97f6fc65` | 1,000 samples | Incremental AST re-parse and temporal query latency |
+| **CAP-002B: Secrets** | `benchmarks/secret_corpus/cap002b/` | `b6c7df17e334f684` | 35 cases | Multi-signal secret detection and redaction |
+| **CAP-003A: Removal** | `benchmarks/removal_corpus/cap003a/` | `51a09c91d27d23af` | 36 cases | Removal provenance verification and fabricated removal detection |
+| **CAP-004: Call Semantics** | `benchmarks/call_semantics_corpus/cap004/` | `305da66ef4282c75` | 36 cases | Argument-value and call-semantics verification |
+| **CAP-005: Generalization** | `benchmarks/patch_real/cap005/` | `ca475b33a385e8d1` | 64 cases | Real-world multi-language patch generalization |
 | **CAP006: Temporal** | `benchmarks/temporal_corpus/cap006/` | Pinned manifest | 64 cases | Lineage replay attestation & truncated-lineage tripwires |
 | **CAP007: Scale** | `benchmarks/retrieval_corpus/cap007/` | Pinned manifest | 64 cases | 174,779 nodes / 165,570 edges topology retrieval |
 | **CAP008: Concurrency**| `benchmarks/concurrency_corpus/cap008/` | Pinned manifest | 64 cases | Multi-process worker contention & SQLite WAL locks |
+| **CAP-009: Diff-to-Impact** | `benchmarks/diff_impact_corpus/cap009/` | `f588414156bd2eed` | 225 cases | End-to-end diff-to-impact correctness & rename-collision isolation |
+| **CAP-010: Retrieval Gen** | `benchmarks/retrieval_generalization/cap010/` | `a312fe4ee9eea7e1` | 210 queries<br>1,050 docs | Cross-repo generalization, hard negatives & no-answer abstention |
+| **CAP-011: Held-out Secrets** | `benchmarks/secret_heldout/cap011/` | `72865e81db5bbd97` | 50 cases | Held-out synthetic secret detection & runtime redaction boundary |
+| **CAP-012: Repo Perf** | `benchmarks/repo_perf/cap012/` | Pinned manifest | Multi-tier repos | End-to-end repository performance envelope & memory profiling |
+| **CAP-013: Robustness** | `benchmarks/robustness/cap013/` | Pinned seed | 5 critical / 20 fuzz | Differential, property-based fuzzing & mutation accounting |
 
 ---
 
@@ -44,10 +53,21 @@ All benchmark evaluations use **clean-room independent oracles**:
 Run evaluation and performance reproduction tests:
 
 ```bash
-pytest tests/evaluation/ tests/performance/ -q
+pytest tests/evaluation/ tests/performance/ tests/verification/ -q
 ```
 
-### 2. Run Re-Measure Guards
+### 2. Run CAP-009 through CAP-013 Reproduction Tests
+Run the standalone reproduction tests for newly added benchmark corpora:
+
+```bash
+pytest tests/verification/test_diff_impact_cap009.py \
+       tests/verification/test_generalization_cap010.py \
+       tests/verification/test_secrets_heldout_cap011.py \
+       tests/verification/test_repo_perf_cap012.py \
+       tests/verification/test_robustness_cap013.py -q
+```
+
+### 3. Run Re-Measure Guards
 Opt in to full corpus re-execution across all frozen fixtures:
 
 ```bash

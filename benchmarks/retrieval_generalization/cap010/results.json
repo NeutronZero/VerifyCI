@@ -1,7 +1,7 @@
 {
   "experiment_id": "CAP-010",
   "provenance": {
-    "git_commit": "9c552980940a7fef00681dd3be1ab7e4ac287eba",
+    "git_commit": "f32b640164e63d777fb2300c142d54d5ab0c00f0",
     "git_dirty": true,
     "harness_sha256": "6e0557d8edc27064d3cca01c201ff25b0079619d9e1278159014120d2fd07467",
     "oracle_sha256": "ec21b132a91bd496bdfce9cd1c393a8c950d96a1601361e6b4811cb508ee2941",

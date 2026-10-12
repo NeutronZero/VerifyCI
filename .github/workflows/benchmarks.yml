@@ -28,6 +28,29 @@ jobs:
         run: uv run --no-sync python -m pytest tests/evaluation/test_optimizations_equivalence.py -v
       - name: Run Optimization Benchmarks
         run: uv run --no-sync python scripts/benchmark_optimizations.py benchmark-results-${{ matrix.os }}.json
+      - name: Run CAP-009 Diff-to-Impact Benchmark
+        run: |
+          uv run --no-sync python benchmarks/diff_impact_corpus/cap009/measure_cap009.py
+          uv run --no-sync python -m pytest tests/verification/test_diff_impact_cap009.py -v
+      - name: Run CAP-010 Retrieval Generalization Benchmark
+        run: |
+          uv run --no-sync python benchmarks/retrieval_generalization/cap010/measure_cap010.py
+          uv run --no-sync python -m pytest tests/verification/test_generalization_cap010.py -v
+      - name: Run CAP-011 Secret Held-Out Benchmark
+        run: |
+          uv run --no-sync python benchmarks/secret_heldout/cap011/measure_cap011.py
+          uv run --no-sync python -m pytest tests/verification/test_secrets_heldout_cap011.py -v
+      - name: Run CAP-012 Repo Performance Benchmark (Functional)
+        run: |
+          uv run --no-sync python benchmarks/repo_perf/cap012/measure_cap012.py
+          uv run --no-sync python -m pytest tests/verification/test_repo_perf_cap012.py -v
+      - name: Run CAP-012 Hard Pinned Timing Gate
+        if: env.VERIFYCI_PINNED_BENCHMARK_ENV == '1'
+        run: uv run --no-sync python -m pytest tests/verification/test_repo_perf_cap012.py -k test_cap012_hardware_pinned_timing_gate -v
+      - name: Run CAP-013 Differential & Mutation Benchmark
+        run: |
+          uv run --no-sync python benchmarks/robustness/cap013/measure_cap013.py
+          uv run --no-sync python -m pytest tests/verification/test_robustness_cap013.py -v
       - name: Upload Benchmark Results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

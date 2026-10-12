@@ -1,7 +1,7 @@
 {
   "experiment_id": "CAP-012",
   "provenance": {
-    "git_commit": "fd18a1ef5c5b1bd1fec35e9ee8f0e200e78d61e2",
+    "git_commit": "f32b640164e63d777fb2300c142d54d5ab0c00f0",
     "git_dirty": true,
     "harness_sha256": "c71103053109428fba201b78554815d1327497a5e49381f71a042828e2715809",
     "config_sha256": "64a1462501bbac2e8a8b83a29fd0597f43acd137d8f4c33f11abcc3a13cf7a31",
@@ -10,35 +10,35 @@
     "cpu": "Intel64 Family 6 Model 140 Stepping 1, GenuineIntel"
   },
   "metrics": {
-    "p50_ms": 157.4,
-    "p95_ms": 245.68,
-    "p99_ms": 245.68,
+    "p50_ms": 147.96,
+    "p95_ms": 242.14,
+    "p99_ms": 242.14,
     "peak_rss_mb": 0.33,
     "storage_growth_per_rev": 241664,
     "cache_hit_rate": 0.85,
     "tiers": {
       "small": {
-        "p50_ms": 157.4,
-        "p95_ms": 245.68,
-        "p99_ms": 245.68,
+        "p50_ms": 147.96,
+        "p95_ms": 242.14,
+        "p99_ms": 242.14,
         "peak_rss_mb": 0.33,
         "storage_growth_per_rev": 241664,
         "cache_hit_rate": 0.85
       },
       "medium": {
-        "p50_ms": 390.54,
-        "p95_ms": 392.54,
-        "p99_ms": 392.54,
+        "p50_ms": 378.26,
+        "p95_ms": 408.56,
+        "p99_ms": 408.56,
         "peak_rss_mb": 1.0,
-        "storage_growth_per_rev": 815104,
+        "storage_growth_per_rev": 806912,
         "cache_hit_rate": 0.85
       },
       "large": {
-        "p50_ms": 1389.63,
-        "p95_ms": 1502.06,
-        "p99_ms": 1502.06,
+        "p50_ms": 1398.72,
+        "p95_ms": 1399.1,
+        "p99_ms": 1399.1,
         "peak_rss_mb": 4.13,
-        "storage_growth_per_rev": 2891776,
+        "storage_growth_per_rev": 2883584,
         "cache_hit_rate": 0.85
       }
     }
