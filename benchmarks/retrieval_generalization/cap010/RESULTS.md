@@ -6,7 +6,7 @@
 - **Labels SHA-256**: `431c0909626cb728a0174ba59a0716d180421218c700ce9ef9eab3caf2f7f8e6`
 - **Total Queries**: 210
 - **Total Documents**: 1050 across 12 repositories
-- **Provenance Commit**: `45b351f913c544ed5281918b312d6284c47992c7` (dirty: False)
+- **Provenance Commit**: `c744788e06af75164defc813a07ebf5cbf9faa70` (dirty: False)
 
 ## 2. Gates Table with Predeclared Thresholds
 
@@ -21,12 +21,12 @@
 
 ## 3. Per-Category Breakdown (With Wilson Score 95% Confidence Intervals)
 
-- **exact_symbol**: Recall@5 1.0 (Wilson 95% CI: [0.9011, 1.0]), nDCG@10 0.931
-- **misleading_lexical**: Recall@5 0.6857 (Wilson 95% CI: [0.5202, 0.8145]), nDCG@10 0.4599
-- **multi_hop**: Recall@5 0.7143 (Wilson 95% CI: [0.9011, 1.0]), nDCG@10 0.5383
+- **exact_symbol**: Recall@5 1.0 (Bootstrap Mean 95% CI: [1.0, 1.0], Hit-Rate Wilson 95% CI: [0.9011, 1.0]), nDCG@10 0.931
+- **misleading_lexical**: Recall@5 0.6857 (Bootstrap Mean 95% CI: [0.5143, 0.8], Hit-Rate Wilson 95% CI: [0.5202, 0.8145]), nDCG@10 0.4599
+- **multi_hop**: Recall@5 0.7143 (Bootstrap Mean 95% CI: [0.6429, 0.8], Hit-Rate Wilson 95% CI: [0.9011, 1.0]), nDCG@10 0.5383
 - **no_relevant_result**: Abstention 1.0 (Wilson 95% CI: [0.9011, 1.0])
-- **paraphrase**: Recall@5 0.9143 (Wilson 95% CI: [0.7762, 0.9704]), nDCG@10 0.6212
-- **rare_identifier**: Recall@5 1.0 (Wilson 95% CI: [0.9011, 1.0]), nDCG@10 0.8908
+- **paraphrase**: Recall@5 0.9143 (Bootstrap Mean 95% CI: [0.8, 1.0], Hit-Rate Wilson 95% CI: [0.7762, 0.9704]), nDCG@10 0.6212
+- **rare_identifier**: Recall@5 1.0 (Bootstrap Mean 95% CI: [1.0, 1.0], Hit-Rate Wilson 95% CI: [0.9011, 1.0]), nDCG@10 0.8908
 
 - **Cross-Repo Split**: Dev Recall@5 = 0.8348, Held-Out Recall@5 = 0.9167
 

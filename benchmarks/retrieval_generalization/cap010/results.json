@@ -1,12 +1,12 @@
 {
   "experiment_id": "CAP-010",
   "provenance": {
-    "git_commit": "45b351f913c544ed5281918b312d6284c47992c7",
+    "git_commit": "c744788e06af75164defc813a07ebf5cbf9faa70",
     "git_dirty": false,
-    "harness_sha256": "a3e3022f9ed64021a42cf3767ebf8563b9105a67700747599050c67acb2e4f2f",
+    "harness_sha256": "a2c0c1c6fbb71636daee9bc86b5b3d32ed1962814075821a1335e5c5abb70d44",
     "oracle_sha256": "25efe1ebb7f5a769568c2e7070cd7f60393848ba9308fe825d8306d02d114a01",
     "config_sha256": "0ae8a2136d69a171952a5c21e2f223db84b07bd9610140ffc8e836a2d3113aa9",
-    "python_version": "3.14.7",
+    "python_version": "3.14.4",
     "platform": "Windows-11-10.0.26300-SP0"
   },
   "metrics": {
@@ -22,7 +22,11 @@
       "exact_symbol": {
         "count": 35,
         "recall_at_5": 1.0,
-        "recall_at_5_wilson_ci95": [
+        "recall_at_5_bootstrap_ci95": [
+          1.0,
+          1.0
+        ],
+        "hit_rate_at_5_wilson_ci95": [
           0.9011,
           1.0
         ],
@@ -31,7 +35,11 @@
       "misleading_lexical": {
         "count": 35,
         "recall_at_5": 0.6857,
-        "recall_at_5_wilson_ci95": [
+        "recall_at_5_bootstrap_ci95": [
+          0.5143,
+          0.8
+        ],
+        "hit_rate_at_5_wilson_ci95": [
           0.5202,
           0.8145
         ],
@@ -40,7 +48,11 @@
       "multi_hop": {
         "count": 35,
         "recall_at_5": 0.7143,
-        "recall_at_5_wilson_ci95": [
+        "recall_at_5_bootstrap_ci95": [
+          0.6429,
+          0.8
+        ],
+        "hit_rate_at_5_wilson_ci95": [
           0.9011,
           1.0
         ],
@@ -58,7 +70,11 @@
       "paraphrase": {
         "count": 35,
         "recall_at_5": 0.9143,
-        "recall_at_5_wilson_ci95": [
+        "recall_at_5_bootstrap_ci95": [
+          0.8,
+          1.0
+        ],
+        "hit_rate_at_5_wilson_ci95": [
           0.7762,
           0.9704
         ],
@@ -67,7 +83,11 @@
       "rare_identifier": {
         "count": 35,
         "recall_at_5": 1.0,
-        "recall_at_5_wilson_ci95": [
+        "recall_at_5_bootstrap_ci95": [
+          1.0,
+          1.0
+        ],
+        "hit_rate_at_5_wilson_ci95": [
           0.9011,
           1.0
         ],
@@ -85,7 +105,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0002",
@@ -96,7 +117,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0003",
@@ -107,7 +129,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0004",
@@ -118,7 +141,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0005",
@@ -129,7 +153,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0006",
@@ -140,7 +165,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0007",
@@ -151,7 +177,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0008",
@@ -162,7 +189,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0009",
@@ -173,7 +201,8 @@
       "ndcg_at_10": 0.4307,
       "mrr": 0.25,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0010",
@@ -184,7 +213,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0011",
@@ -195,7 +225,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0012",
@@ -206,7 +237,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0013",
@@ -217,7 +249,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0014",
@@ -228,7 +261,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0015",
@@ -239,7 +273,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0016",
@@ -250,7 +285,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0017",
@@ -261,7 +297,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0018",
@@ -272,7 +309,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0019",
@@ -283,7 +321,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0020",
@@ -294,7 +333,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0021",
@@ -305,7 +345,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0022",
@@ -316,7 +357,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0023",
@@ -327,7 +369,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0024",
@@ -338,7 +381,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0025",
@@ -349,7 +393,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0026",
@@ -360,7 +405,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0027",
@@ -371,7 +417,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0028",
@@ -382,7 +429,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0029",
@@ -393,7 +441,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0030",
@@ -404,7 +453,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0031",
@@ -415,7 +465,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0032",
@@ -426,7 +477,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0033",
@@ -437,7 +489,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0034",
@@ -448,7 +501,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0035",
@@ -459,7 +513,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0036",
@@ -470,7 +525,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0037",
@@ -481,7 +537,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0038",
@@ -492,7 +549,8 @@
       "ndcg_at_10": 0.5,
       "mrr": 0.3333,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0039",
@@ -503,7 +561,8 @@
       "ndcg_at_10": 0.4307,
       "mrr": 0.25,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0040",
@@ -514,7 +573,8 @@
       "ndcg_at_10": 0.3869,
       "mrr": 0.2,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0041",
@@ -525,7 +585,8 @@
       "ndcg_at_10": 0.4307,
       "mrr": 0.25,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0042",
@@ -536,7 +597,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0043",
@@ -547,7 +609,8 @@
       "ndcg_at_10": 0.5,
       "mrr": 0.3333,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0044",
@@ -558,7 +621,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0045",
@@ -569,7 +633,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0046",
@@ -580,7 +645,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0047",
@@ -591,7 +657,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0048",
@@ -602,7 +669,8 @@
       "ndcg_at_10": 0.4307,
       "mrr": 0.25,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0049",
@@ -613,7 +681,8 @@
       "ndcg_at_10": 0.0,
       "mrr": 0.0769,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0050",
@@ -624,7 +693,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0051",
@@ -635,7 +705,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0052",
@@ -646,7 +717,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0053",
@@ -657,7 +729,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0054",
@@ -668,7 +741,8 @@
       "ndcg_at_10": 0.3869,
       "mrr": 0.2,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0055",
@@ -679,7 +753,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0056",
@@ -690,7 +765,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0057",
@@ -701,7 +777,8 @@
       "ndcg_at_10": 0.5,
       "mrr": 0.3333,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0058",
@@ -712,7 +789,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0059",
@@ -723,7 +801,8 @@
       "ndcg_at_10": 0.3869,
       "mrr": 0.2,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0060",
@@ -734,7 +813,8 @@
       "ndcg_at_10": 0.301,
       "mrr": 0.1111,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0061",
@@ -745,7 +825,8 @@
       "ndcg_at_10": 0.5,
       "mrr": 0.3333,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0062",
@@ -756,7 +837,8 @@
       "ndcg_at_10": 0.4307,
       "mrr": 0.25,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0063",
@@ -767,7 +849,8 @@
       "ndcg_at_10": 0.5,
       "mrr": 0.3333,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0064",
@@ -778,7 +861,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0065",
@@ -789,7 +873,8 @@
       "ndcg_at_10": 0.0,
       "mrr": 0.0833,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0066",
@@ -800,7 +885,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0067",
@@ -811,7 +897,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0068",
@@ -822,7 +909,8 @@
       "ndcg_at_10": 0.3869,
       "mrr": 0.2,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0069",
@@ -833,7 +921,8 @@
       "ndcg_at_10": 0.3869,
       "mrr": 0.2,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0070",
@@ -844,7 +933,8 @@
       "ndcg_at_10": 0.5,
       "mrr": 0.3333,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0071",
@@ -855,7 +945,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0072",
@@ -866,7 +957,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0073",
@@ -877,7 +969,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0074",
@@ -888,7 +981,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0075",
@@ -899,7 +993,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0076",
@@ -910,7 +1005,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0077",
@@ -921,7 +1017,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0078",
@@ -932,7 +1029,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0079",
@@ -943,7 +1041,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0080",
@@ -954,7 +1053,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0081",
@@ -965,7 +1065,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0082",
@@ -976,7 +1077,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0083",
@@ -987,7 +1089,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0084",
@@ -998,7 +1101,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0085",
@@ -1009,7 +1113,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0086",
@@ -1020,7 +1125,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0087",
@@ -1031,7 +1137,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0088",
@@ -1042,7 +1149,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0089",
@@ -1053,7 +1161,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0090",
@@ -1064,7 +1173,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0091",
@@ -1075,7 +1185,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0092",
@@ -1086,7 +1197,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0093",
@@ -1097,7 +1209,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0094",
@@ -1108,7 +1221,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0095",
@@ -1119,7 +1233,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0096",
@@ -1130,7 +1245,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0097",
@@ -1141,7 +1257,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0098",
@@ -1152,7 +1269,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0099",
@@ -1163,7 +1281,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0100",
@@ -1174,7 +1293,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0101",
@@ -1185,7 +1305,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0102",
@@ -1196,7 +1317,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0103",
@@ -1207,7 +1329,8 @@
       "ndcg_at_10": 0.5,
       "mrr": 0.3333,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0104",
@@ -1218,7 +1341,8 @@
       "ndcg_at_10": 0.6309,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0105",
@@ -1229,7 +1353,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0106",
@@ -1240,7 +1365,8 @@
       "ndcg_at_10": 0.3549,
       "mrr": 0.2,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0107",
@@ -1251,7 +1377,8 @@
       "ndcg_at_10": 0.9173,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0108",
@@ -1262,7 +1389,8 @@
       "ndcg_at_10": 0.2894,
       "mrr": 0.125,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0109",
@@ -1273,7 +1401,8 @@
       "ndcg_at_10": 0.5788,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0110",
@@ -1284,7 +1413,8 @@
       "ndcg_at_10": 0.3549,
       "mrr": 0.2,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0111",
@@ -1295,7 +1425,8 @@
       "ndcg_at_10": 0.5788,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0112",
@@ -1306,7 +1437,8 @@
       "ndcg_at_10": 0.5788,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0113",
@@ -1317,7 +1449,8 @@
       "ndcg_at_10": 0.0,
       "mrr": 0.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0114",
@@ -1328,7 +1461,8 @@
       "ndcg_at_10": 0.0,
       "mrr": 0.05,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0115",
@@ -1339,7 +1473,8 @@
       "ndcg_at_10": 0.4587,
       "mrr": 0.3333,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0116",
@@ -1350,7 +1485,8 @@
       "ndcg_at_10": 0.4587,
       "mrr": 0.3333,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0117",
@@ -1361,7 +1497,8 @@
       "ndcg_at_10": 0.9173,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0118",
@@ -1372,7 +1509,8 @@
       "ndcg_at_10": 0.3268,
       "mrr": 0.1667,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0119",
@@ -1383,7 +1521,8 @@
       "ndcg_at_10": 0.9173,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0120",
@@ -1394,7 +1533,8 @@
       "ndcg_at_10": 0.5788,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0121",
@@ -1405,7 +1545,8 @@
       "ndcg_at_10": 0.5788,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0122",
@@ -1416,7 +1557,8 @@
       "ndcg_at_10": 0.3951,
       "mrr": 0.25,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0123",
@@ -1427,7 +1569,8 @@
       "ndcg_at_10": 0.2761,
       "mrr": 0.1111,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0124",
@@ -1438,7 +1581,8 @@
       "ndcg_at_10": 0.3951,
       "mrr": 0.25,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0125",
@@ -1449,7 +1593,8 @@
       "ndcg_at_10": 0.3268,
       "mrr": 0.1667,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0126",
@@ -1460,7 +1605,8 @@
       "ndcg_at_10": 0.0,
       "mrr": 0.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0127",
@@ -1471,7 +1617,8 @@
       "ndcg_at_10": 0.9173,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0128",
@@ -1482,7 +1629,8 @@
       "ndcg_at_10": 0.5788,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0129",
@@ -1493,7 +1641,8 @@
       "ndcg_at_10": 0.3951,
       "mrr": 0.25,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0130",
@@ -1504,7 +1653,8 @@
       "ndcg_at_10": 0.2761,
       "mrr": 0.1111,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0131",
@@ -1515,7 +1665,8 @@
       "ndcg_at_10": 0.2761,
       "mrr": 0.1111,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0132",
@@ -1526,7 +1677,8 @@
       "ndcg_at_10": 0.0,
       "mrr": 0.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0133",
@@ -1537,7 +1689,8 @@
       "ndcg_at_10": 0.2894,
       "mrr": 0.125,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0134",
@@ -1548,7 +1701,8 @@
       "ndcg_at_10": 0.4587,
       "mrr": 0.3333,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0135",
@@ -1559,7 +1713,8 @@
       "ndcg_at_10": 0.3549,
       "mrr": 0.2,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0136",
@@ -1570,7 +1725,8 @@
       "ndcg_at_10": 0.4587,
       "mrr": 0.3333,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0137",
@@ -1581,7 +1737,8 @@
       "ndcg_at_10": 0.5788,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0138",
@@ -1592,7 +1749,8 @@
       "ndcg_at_10": 0.9173,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0139",
@@ -1603,7 +1761,8 @@
       "ndcg_at_10": 0.3951,
       "mrr": 0.25,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0140",
@@ -1614,7 +1773,8 @@
       "ndcg_at_10": 0.9173,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0141",
@@ -1625,7 +1785,8 @@
       "ndcg_at_10": 0.5857,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0142",
@@ -1636,7 +1797,8 @@
       "ndcg_at_10": 0.2128,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0143",
@@ -1647,7 +1809,8 @@
       "ndcg_at_10": 0.5174,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0144",
@@ -1658,7 +1821,8 @@
       "ndcg_at_10": 0.3374,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0145",
@@ -1669,7 +1833,8 @@
       "ndcg_at_10": 0.6177,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0146",
@@ -1680,7 +1845,8 @@
       "ndcg_at_10": 0.7309,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0147",
@@ -1691,7 +1857,8 @@
       "ndcg_at_10": 0.3374,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0148",
@@ -1702,7 +1869,8 @@
       "ndcg_at_10": 0.7309,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0149",
@@ -1713,7 +1881,8 @@
       "ndcg_at_10": 0.6764,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0150",
@@ -1724,7 +1893,8 @@
       "ndcg_at_10": 1.0,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0151",
@@ -1735,7 +1905,8 @@
       "ndcg_at_10": 0.6764,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0152",
@@ -1746,7 +1917,8 @@
       "ndcg_at_10": 0.5997,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0153",
@@ -1757,7 +1929,8 @@
       "ndcg_at_10": 0.1687,
       "mrr": 0.3333,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0154",
@@ -1768,7 +1941,8 @@
       "ndcg_at_10": 0.3374,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0155",
@@ -1779,7 +1953,8 @@
       "ndcg_at_10": 0.3374,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0156",
@@ -1790,7 +1965,8 @@
       "ndcg_at_10": 0.5743,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0157",
@@ -1801,7 +1977,8 @@
       "ndcg_at_10": 0.3374,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0158",
@@ -1812,7 +1989,8 @@
       "ndcg_at_10": 0.1305,
       "mrr": 0.2,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0159",
@@ -1823,7 +2001,8 @@
       "ndcg_at_10": 0.417,
       "mrr": 0.3333,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0160",
@@ -1834,7 +2013,8 @@
       "ndcg_at_10": 0.834,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0161",
@@ -1845,7 +2025,8 @@
       "ndcg_at_10": 0.834,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0162",
@@ -1856,7 +2037,8 @@
       "ndcg_at_10": 0.7309,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0163",
@@ -1867,7 +2049,8 @@
       "ndcg_at_10": 0.4491,
       "mrr": 0.3333,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0164",
@@ -1878,7 +2061,8 @@
       "ndcg_at_10": 0.6177,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0165",
@@ -1889,7 +2073,8 @@
       "ndcg_at_10": 0.3374,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0166",
@@ -1900,7 +2085,8 @@
       "ndcg_at_10": 0.6764,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0167",
@@ -1911,7 +2097,8 @@
       "ndcg_at_10": 0.3788,
       "mrr": 0.2,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0168",
@@ -1922,7 +2109,8 @@
       "ndcg_at_10": 0.3374,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0169",
@@ -1933,7 +2121,8 @@
       "ndcg_at_10": 0.7309,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0170",
@@ -1944,7 +2133,8 @@
       "ndcg_at_10": 0.7309,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0171",
@@ -1955,7 +2145,8 @@
       "ndcg_at_10": 0.2128,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0172",
@@ -1966,7 +2157,8 @@
       "ndcg_at_10": 0.5174,
       "mrr": 0.5,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0173",
@@ -1977,7 +2169,8 @@
       "ndcg_at_10": 0.6177,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0174",
@@ -1988,7 +2181,8 @@
       "ndcg_at_10": 0.6764,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0175",
@@ -1999,7 +2193,8 @@
       "ndcg_at_10": 0.834,
       "mrr": 1.0,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "grounded_answer"
     },
     {
       "qid": "Q-0176",
@@ -2010,7 +2205,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0177",
@@ -2021,7 +2217,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0178",
@@ -2032,7 +2229,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0179",
@@ -2043,7 +2241,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0180",
@@ -2054,7 +2253,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0181",
@@ -2065,7 +2265,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0182",
@@ -2076,7 +2277,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0183",
@@ -2087,7 +2289,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0184",
@@ -2098,7 +2301,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0185",
@@ -2109,7 +2313,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0186",
@@ -2120,7 +2325,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0187",
@@ -2131,7 +2337,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0188",
@@ -2142,7 +2349,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0189",
@@ -2153,7 +2361,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0190",
@@ -2164,7 +2373,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0191",
@@ -2175,7 +2385,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0192",
@@ -2186,7 +2397,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0193",
@@ -2197,7 +2409,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0194",
@@ -2208,7 +2421,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0195",
@@ -2219,7 +2433,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0196",
@@ -2230,7 +2445,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0197",
@@ -2241,7 +2457,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0198",
@@ -2252,7 +2469,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0199",
@@ -2263,7 +2481,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0200",
@@ -2274,7 +2493,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0201",
@@ -2285,7 +2505,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0202",
@@ -2296,7 +2517,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0203",
@@ -2307,7 +2529,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0204",
@@ -2318,7 +2541,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0205",
@@ -2329,7 +2553,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0206",
@@ -2340,7 +2565,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0207",
@@ -2351,7 +2577,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0208",
@@ -2362,7 +2589,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0209",
@@ -2373,7 +2601,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     },
     {
       "qid": "Q-0210",
@@ -2384,7 +2613,8 @@
       "ndcg_at_10": null,
       "mrr": null,
       "abstention_correct": true,
-      "false_relevant": false
+      "false_relevant": false,
+      "abstention_reason": "ungrounded_symbol_abstention"
     }
   ]
 }
