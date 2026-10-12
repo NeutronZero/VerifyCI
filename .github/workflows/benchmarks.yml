@@ -1,0 +1,35 @@
+name: benchmarks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  run-benchmarks:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --frozen --extra dev
+      - name: Validate Semantic Equivalence
+        run: uv run --no-sync python -m pytest tests/evaluation/test_optimizations_equivalence.py -v
+      - name: Run Optimization Benchmarks
+        run: uv run --no-sync python scripts/benchmark_optimizations.py benchmark-results-${{ matrix.os }}.json
+      - name: Upload Benchmark Results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: benchmark-results-${{ matrix.os }}
+          path: benchmark-results-${{ matrix.os }}.json

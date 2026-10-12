@@ -15,7 +15,9 @@ import json
 import os
 import platform
 import subprocess
+import sys
 import time
+
 import tracemalloc
 from types import MappingProxyType
 from typing import Any
@@ -314,8 +316,9 @@ def run_all_benchmarks() -> dict[str, Any]:
 
 if __name__ == "__main__":
     report = run_all_benchmarks()
-    out_path = "scripts/benchmark_results.json"
+    out_path = sys.argv[1] if len(sys.argv) > 1 else "scripts/benchmark_results.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
     print(f"\n[OK] Benchmarks complete. Results saved to {out_path}\n")
     print(json.dumps(report, indent=2))
+
