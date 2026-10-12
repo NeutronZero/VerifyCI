@@ -65,12 +65,19 @@ def _freeze_payload(val: Any) -> Any:
     if val is None or isinstance(val, (int, float, str, bool, bytes)):
         return val
     if isinstance(val, (Mapping, dict)):
+        # Always copy: a MappingProxyType aliases its caller's mutable
+        # backing dict, so identity would leak later mutations into the
+        # "frozen" payload. Only immutable-by-construction tuples keep
+        # an identity fast path below.
         return MappingProxyType({k: _freeze_payload(v) for k, v in val.items()})
     if isinstance(val, tuple):
-        items = [_freeze_payload(x) for x in val]
-        if all(i is orig for i, orig in zip(items, val)):
+        # Single deep walk: build once, then decide identity from the
+        # results. A check-then-rebuild pass would freeze miss-path
+        # subtrees twice (exponential in depth).
+        frozen = tuple(_freeze_payload(x) for x in val)
+        if all(f is o for f, o in zip(frozen, val)):
             return val
-        return tuple(items)
+        return frozen
     if isinstance(val, list):
         return tuple(_freeze_payload(x) for x in val)
     if isinstance(val, frozenset):

@@ -262,3 +262,44 @@ def test_pure_text_diff_still_establishes():
     cert = SemiFormalReasoner().verify(diff=d, graph=None, entities=ents)
     check = build_semi_check(cert, ["m.py"], ents, diff=d)
     assert check.established is True
+
+
+def test_from_parsed_helpers_match_public_wrappers():
+    from verifyci.verification.diffmap import (
+        _strays_from_parsed,
+        _uninspectable_from_parsed,
+        files_with_stray_lines,
+    )
+    d = ("diff --git a/logo.png b/logo.png\n"
+         "Binary files a/logo.png and b/logo.png differ\n"
+         + "diff --git a/m.py b/m.py\n--- a/m.py\n+++ b/m.py\n"
+           "+stray line\n@@ -1,1 +1,1 @@\n-old\n+new\n")
+    parsed = parse_unified_diff(d)
+    assert _uninspectable_from_parsed(parsed) == uninspectable_files(d)
+    assert _strays_from_parsed(parsed) == files_with_stray_lines(d)
+    assert _uninspectable_from_parsed(parsed) == ["logo.png"]
+    assert _strays_from_parsed(parsed) == ["m.py"]
+
+
+def test_build_semi_check_parses_diff_once():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from verifyci.verification import diffmap as diffmap_mod
+    from verifyci.verification.semi_formal_reason import SemiFormalReasoner
+    from verifyci.verification.verification_ir import build_semi_check
+
+    d = ("diff --git a/logo.png b/logo.png\n"
+         "Binary files a/logo.png and b/logo.png differ\n"
+         + _git("m.py", "+stray\n@@ -1,1 +1,1 @@\n-old\n+new\n"))
+    ents = [SimpleNamespace(revision_entity_id="e1", name="m", file_path="m.py",
+                            line_start=1, line_end=1, source_hash="h",
+                            type=SimpleNamespace(value="FUNCTION"))]
+    cert = SemiFormalReasoner().verify(diff=d, graph=None, entities=ents)
+    real_parse = diffmap_mod.parse_unified_diff
+    calls = []
+    def counting_parse(diff):
+        calls.append(1)
+        return real_parse(diff)
+    with patch.object(diffmap_mod, "parse_unified_diff", counting_parse):
+        build_semi_check(cert, ["m.py"], ents, diff=d)
+    assert len(calls) == 1

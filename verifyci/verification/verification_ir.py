@@ -28,8 +28,9 @@ def build_semi_check(cert, files: list[str], entities: list,
     tests — skip the check; the production call sites pass it.)
     """
     from verifyci.verification.diffmap import (
+        _strays_from_parsed, _uninspectable_from_parsed,
         find_ambiguous_files, map_files_to_entity_ids, normalize_path,
-        uninspectable_files, files_with_stray_lines,
+        parse_unified_diff,
     )
     from verifyci.verification.partition import classify_path, FilePartition
 
@@ -53,21 +54,22 @@ def build_semi_check(cert, files: list[str], entities: list,
         explanation = (f"{explanation}; suffix-only grounding "
                        f"(no exact stored path): {', '.join(suffix_only)}")
     opaque: list[str] = []
+    uncovered: list[str] = []
+    stray_uncovered: list[str] = []
     if diff is not None:
-        opaque = sorted(uninspectable_files(diff))
+        # One parse serves all three diff projections (opaque, uncovered,
+        # strays): O(D) instead of O(3D).
+        parsed = parse_unified_diff(diff)
+        opaque = sorted(_uninspectable_from_parsed(parsed))
         if opaque:
             explanation = (f"{explanation}; opaque change (content not in "
                             f"diff): {', '.join(opaque)}")
-    uncovered: list[str] = []
-    if diff is not None:
-        uncovered = sorted(_uncovered_changed_lines(diff, entities or []))
+        uncovered = sorted(_uncovered_from_parsed(parsed, entities or []))
         if uncovered:
             explanation = (f"{explanation}; changed lines outside every "
                            f"entity span: {', '.join(uncovered[:8])}")
-    stray_uncovered: list[str] = []
-    if diff is not None:
         stray_uncovered = sorted(
-            f for f in files_with_stray_lines(diff)
+            f for f in _strays_from_parsed(parsed)
             if classify_path(f) == FilePartition.CODE_CORE
         )
         if stray_uncovered:
@@ -105,33 +107,13 @@ def _merge_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
     return merged
 
 
-def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
-    """Changed lines in CODE_CORE files that fall outside any entity span.
+def _uncovered_from_parsed(parsed: list, entities: list) -> list[str]:
+    """_uncovered_changed_lines over an already-parsed diff (parse once).
 
-    File-level grounding (the certificate seeds a whole file) used to
-    let an edit to a module constant, flag, import, or decorator PASS
-    on the back of unrelated entities in the same file, with blast
-    radius 0. Every changed LINE must have at least one old-side
-    anchor inside some non-MODULE entity span, else the check reports
-    established=False (INCONCLUSIVE at policy — inability, never a
-    pass on unseen code). Per-line (not per-anchor): a tail insertion
-    at a function's last line straddles the span edge by construction
-    (the A2 geometry), so one covered anchor covers the line.
-
-    Decorator adjacency: extractor spans start at `def`/`class`
-    (extractor.py is frozen by the latency guard, so the span fix lives
-    here, not there); a changed line exactly one line above a span start
-    is the decorated definition's decorator — but ONLY when the changed
-    line itself is a decorator (`@...`). Any other line one above a span
-    (a module constant, flag, or stray statement) is uncovered.
-
-    Duplicate `path:line` anchors collapse preserving order: a
-    replacement pair (`-` then `+`) anchors the same old line twice but
-    reports one uncovered item.
+    Span geometry untouched: same per-line anchors, same decorator and
+    import adjacency grace, same order-preserving duplicate collapse.
     """
-    from verifyci.verification.diffmap import (
-        iter_hunks, normalize_path,
-    )
+    from verifyci.verification.diffmap import normalize_path
     from verifyci.verification.partition import classify_path, FilePartition
 
     raw_spans: dict[str, list[tuple[int, int]]] = {}
@@ -166,50 +148,81 @@ def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
     # Same anchor geometry as changed_line_anchor_sets (a `-` line anchors
     # its own old line; a `+` anchors the insertion point), recomputed
     # here so the adjacency grace can see the changed line's content.
-    for h in iter_hunks(diff):
-        if h.file is None:
+    for f in parsed:
+        file_path = f.path
+        if file_path is None:
             continue
-        if classify_path(h.file) != FilePartition.CODE_CORE:
+        if classify_path(file_path) != FilePartition.CODE_CORE:
             continue
-        norm_f = normalize_path(h.file)
+        norm_f = normalize_path(file_path)
         file_spans = merged_spans.get(norm_f, [])
         file_starts = span_starts.get(norm_f, [])
         file_dec_starts = decorator_starts.get(norm_f)
         file_endpoints = import_endpoints.get(norm_f, [])
-        old_ln = h.old_start
-        prev_minus = False
-        for body in h.lines:
-            if body.startswith("\\"):
-                continue
-            if body.startswith("-"):
-                anchors = {old_ln}
-                content = body[1:]
-                old_ln += 1
-                prev_minus = True
-            elif body.startswith("+"):
-                if prev_minus:
-                    anchors = {old_ln - 1} if old_ln > 1 else {old_ln}
-                else:
+        for h in f.hunks:
+            old_ln = h.old_start
+            prev_minus = False
+            for body in h.lines:
+                if body.startswith("\\"):
+                    continue
+                if body.startswith("-"):
                     anchors = {old_ln}
-                    if old_ln > 1:
-                        anchors.add(old_ln - 1)
-                content = body[1:]
-            else:
-                old_ln += 1
-                prev_minus = False
-                continue
-            coverable = sorted(ln for ln in anchors if ln > 0)
-            if not coverable:
-                continue  # positionless content (new-file `+` at old
-                # line 0): nothing to attribute; ungrounded-file and
-                # opaque checks own that case.
-            if any(_anchor_covered(ln, file_spans, file_starts, content, file_dec_starts, file_endpoints) for ln in coverable):
-                continue
-            key = f"{h.file}:{coverable[0]}"
-            if key not in seen:
-                seen.add(key)
-                out.append(key)
+                    content = body[1:]
+                    old_ln += 1
+                    prev_minus = True
+                elif body.startswith("+"):
+                    if prev_minus:
+                        anchors = {old_ln - 1} if old_ln > 1 else {old_ln}
+                    else:
+                        anchors = {old_ln}
+                        if old_ln > 1:
+                            anchors.add(old_ln - 1)
+                    content = body[1:]
+                else:
+                    old_ln += 1
+                    prev_minus = False
+                    continue
+                coverable = sorted(ln for ln in anchors if ln > 0)
+                if not coverable:
+                    continue  # positionless content (new-file `+` at old
+                    # line 0): nothing to attribute; ungrounded-file and
+                    # opaque checks own that case.
+                if any(_anchor_covered(ln, file_spans, file_starts, content, file_dec_starts, file_endpoints) for ln in coverable):
+                    continue
+                key = f"{file_path}:{coverable[0]}"
+                if key not in seen:
+                    seen.add(key)
+                    out.append(key)
     return out
+
+
+
+def _uncovered_changed_lines(diff: str, entities: list) -> list[str]:
+    """Changed lines in CODE_CORE files that fall outside any entity span.
+
+    File-level grounding (the certificate seeds a whole file) used to
+    let an edit to a module constant, flag, import, or decorator PASS
+    on the back of unrelated entities in the same file, with blast
+    radius 0. Every changed LINE must have at least one old-side
+    anchor inside some non-MODULE entity span, else the check reports
+    established=False (INCONCLUSIVE at policy — inability, never a
+    pass on unseen code). Per-line (not per-anchor): a tail insertion
+    at a function's last line straddles the span edge by construction
+    (the A2 geometry), so one covered anchor covers the line.
+
+    Decorator adjacency: extractor spans start at `def`/`class`
+    (extractor.py is frozen by the latency guard, so the span fix lives
+    here, not there); a changed line exactly one line above a span start
+    is the decorated definition's decorator — but ONLY when the changed
+    line itself is a decorator (`@...`). Any other line one above a span
+    (a module constant, flag, or stray statement) is uncovered.
+
+    Duplicate `path:line` anchors collapse preserving order: a
+    replacement pair (`-` then `+`) anchors the same old line twice but
+    reports one uncovered item.
+    """
+    from verifyci.verification.diffmap import parse_unified_diff
+    return _uncovered_from_parsed(parse_unified_diff(diff), entities)
 
 
 def _anchor_covered(

@@ -137,6 +137,37 @@ def test_graph_cache_deep_immutability_and_aliasing():
     deeply_frozen_set = frozenset({"x", 1, 2})
     assert _freeze_payload(deeply_frozen_set) is deeply_frozen_set
 
+    # Test 5: A proxy over a caller-retained dict must NOT preserve
+    # identity: the backing store stays mutable, so freeze must sever
+    # the alias with a fresh copy (deep-immutability guarantee).
+    retained = {"count": 1}
+    frozen_alias = _freeze_payload(MappingProxyType(retained))
+    assert frozen_alias == {"count": 1}
+    assert frozen_alias is not retained
+    retained["count"] = 999
+    assert frozen_alias["count"] == 1, "Frozen payload corrupted via retained alias!"
+
+
+def test_freeze_payload_single_deep_walk():
+    """Each node is frozen exactly once: no check-then-rebuild double walk."""
+    import verifyci.storage.graph_cache as gc_mod
+    payload = ({"a": 1}, ("b",))
+    calls = []
+    orig = gc_mod._freeze_payload
+
+    def counting(val):
+        calls.append(1)
+        return orig(val)
+
+    gc_mod._freeze_payload = counting
+    try:
+        gc_mod._freeze_payload(payload)
+    finally:
+        gc_mod._freeze_payload = orig
+    # Single walk: outer tuple, dict, 1, inner tuple, "b" = 5 visits.
+    # A check-then-rebuild implementation visits 9.
+    assert len(calls) == 5
+
 
 # ==============================================================================
 # 3. IR Line Attribution Interval Equivalence
@@ -242,3 +273,93 @@ def test_json_serialization_equivalence():
     baseline_str = to_json(data)
     # Both use deterministic sorted keys
     assert to_json(baseline_dict) == baseline_str
+
+
+def test_dataclass_field_names_cached_per_class():
+    from verifyci.contracts.jsonio import _dataclass_field_names
+    assert _dataclass_field_names(_InnerDC) == ("flag", "count", "ratio", "name")
+    assert _dataclass_field_names(_InnerDC) is _dataclass_field_names(_InnerDC)
+
+
+def test_witness_unnormalized_code_files_no_keyerror():
+    from verifyci.verification.witness import extract_execution_witnesses
+    diff = """--- a/tests/test_worker.py
++++ b/tests/test_worker.py
+@@ -1,3 +1,4 @@
++def test_worker_run():
++    import worker
++    worker.run()
+"""
+    witnesses = extract_execution_witnesses(
+        code_files=["verifyci\\sub\\worker.py"],
+        test_files=["tests/test_worker.py"],
+        diff=diff,
+    )
+    assert len(witnesses) == 1
+    assert witnesses[0].target_file == "verifyci\\sub\\worker.py"
+    assert witnesses[0].association_method == "direct_ast"
+
+
+def test_witness_target_patterns_hoisted_across_test_files(monkeypatch):
+    from verifyci.verification import witness
+    diff = """--- a/tests/test_a.py
++++ b/tests/test_a.py
+@@ -1,2 +1,3 @@
++def test_a():
++    import worker
+--- a/tests/test_b.py
++++ b/tests/test_b.py
+@@ -1,2 +1,3 @@
++def test_b():
++    import worker
+"""
+    compilation_count = 0
+    orig_compile = witness._compile_target_patterns
+
+    def counting_compile(*args, **kwargs):
+        nonlocal compilation_count
+        compilation_count += 1
+        return orig_compile(*args, **kwargs)
+
+    monkeypatch.setattr(witness, "_compile_target_patterns", counting_compile)
+    witnesses = witness.extract_execution_witnesses(
+        code_files=["verifyci/worker.py"],
+        test_files=["tests/test_a.py", "tests/test_b.py"],
+        diff=diff,
+    )
+    assert len(witnesses) == 2
+    assert compilation_count == 1
+
+
+def test_seed_entities_for_diff_empty_inputs_short_circuit(monkeypatch):
+    from verifyci.verification import diffmap
+    called = False
+
+    def boom(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("iter_hunks should not be called when files or entities are empty")
+
+    monkeypatch.setattr(diffmap, "iter_hunks", boom)
+    assert diffmap.seed_entities_for_diff([], ["mock_ent"], diff="diff") == {}
+    assert diffmap.seed_entities_for_diff(["a.py"], [], diff="diff") == {}
+    assert not called
+
+
+
+def test_uncovered_from_parsed_does_not_mutate_hunk_file():
+    from verifyci.verification.diffmap import FileDiff, Hunk
+    from verifyci.verification.verification_ir import _uncovered_from_parsed
+    hunk = Hunk(
+        file=None,
+        old_start=1,
+        old_count=1,
+        new_start=1,
+        new_count=1,
+        lines=["-old", "+new"],
+    )
+    diff_file = FileDiff(old_path="verifyci/core.py", new_path="verifyci/core.py", hunks=[hunk])
+    _ = _uncovered_from_parsed([diff_file], entities=[])
+    assert hunk.file is None, f"hunk.file was mutated to {hunk.file!r} by _uncovered_from_parsed"
+
+

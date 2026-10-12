@@ -485,27 +485,45 @@ def normalize_path(path: str | None) -> str:
     return p
 
 
-def map_files_to_entity_ids(files: list[str], entities: list) -> dict[str, list[str]]:
-    wanted = {normalize_path(f) for f in files}
-    if not wanted or not entities:
-        return {}
-    wanted_by_base: dict[str, list[str]] = {}
-    for f in wanted:
-        b = f.rsplit("/", 1)[-1]
-        wanted_by_base.setdefault(b, []).append(f)
+def _build_wanted_index(
+    files: list[str],
+) -> tuple[set[str], dict[str, list[str]], dict[str, str]]:
+    """Precomputed match structures for a wanted-path set.
 
+    Returns (wanted, by_base, suffixes): normalized exact set, basename
+    buckets, and prebuilt ``"/" + path`` suffix keys so the per-entity
+    loop performs zero string concatenation (the collision-case cost).
+    """
+    wanted = {normalize_path(f) for f in files}
+    by_base: dict[str, list[str]] = {}
+    for f in wanted:
+        by_base.setdefault(f.rsplit("/", 1)[-1], []).append(f)
+    suffixes = {f: "/" + f for f in wanted}
+    return wanted, by_base, suffixes
+
+
+def map_files_to_entity_ids(files: list[str], entities: list) -> dict[str, list[str]]:
+    if not files or not entities:
+        return {}
+    wanted, wanted_by_base, suffixes = _build_wanted_index(files)
     mapping: dict[str, list[str]] = {}
+
     for entity in entities:
         raw = getattr(entity, "file_path", "")
         if not raw:
             continue
-        base = str(raw).replace("\\", "/").rsplit("/", 1)[-1]
+        if isinstance(raw, str) and "\\" not in raw and not raw.startswith("./"):
+            epath = raw
+            base = raw.rsplit("/", 1)[-1]
+        else:
+            epath = normalize_path(raw)
+            base = epath.rsplit("/", 1)[-1]
         candidates = wanted_by_base.get(base)
         if not candidates:
             continue
-        epath = normalize_path(raw)
+        esuffix = "/" + epath
         for f in candidates:
-            if epath == f or epath.endswith("/" + f) or f.endswith("/" + epath):
+            if epath == f or epath.endswith(suffixes[f]) or f.endswith(esuffix):
                 mapping.setdefault(f, []).append(entity.revision_entity_id)
     return mapping
 
@@ -571,16 +589,10 @@ def diff_grounding_statuses(diff: str | None) -> dict[str, "GroundingStatus"]:
     return statuses
 
 
-def uninspectable_files(diff: str | None) -> list[str]:
-    """Files the diff names whose content it does not carry (binary, or
-    header-only with no hunks and no rename target). A verification that
-    cannot read the change must not certify it: these force inconclusive
-    rather than a PASS earned by the text-only siblings of a mixed diff.
-    Hunk-less renames/copies are the same class: the diff carries no
-    content for the move, so a same-named entity in the base graph must
-    not ground a PASS for it."""
+def _uninspectable_from_parsed(parsed: list[FileDiff]) -> list[str]:
+    """uninspectable_files over an already-parsed diff (parse once)."""
     out: list[str | None] = []
-    for f in parse_unified_diff(diff):
+    for f in parsed:
         if f.binary:
             out.append(f.path)
         elif f.mode_only and not f.hunks and not f.stray_added and not f.stray_removed:
@@ -590,19 +602,35 @@ def uninspectable_files(diff: str | None) -> list[str]:
     return [p for p in out if p is not None]
 
 
+def uninspectable_files(diff: str | None) -> list[str]:
+    """Files the diff names whose content it does not carry (binary, or
+    header-only with no hunks and no rename target). A verification that
+    cannot read the change must not certify it: these force inconclusive
+    rather than a PASS earned by the text-only siblings of a mixed diff.
+    Hunk-less renames/copies are the same class: the diff carries no
+    content for the move, so a same-named entity in the base graph must
+    not ground a PASS for it."""
+    return _uninspectable_from_parsed(parse_unified_diff(diff))
+
+
+def _strays_from_parsed(parsed: list[FileDiff]) -> list[str]:
+    """files_with_stray_lines over an already-parsed diff (parse once)."""
+    out: list[str] = []
+    for f in parsed:
+        if f.path is None:
+            continue
+        if (f.stray_added or f.stray_removed) and f.path not in out:
+            out.append(f.path)
+    return out
+
+
 def files_with_stray_lines(diff: str | None) -> list[str]:
     """Files carrying `+`/`-` lines outside any hunk (git mode/index noise
     or hand-edited content). Strays have no old-side anchor, so the
     seeding/coverage geometry cannot attribute them: consumers treat them
     as uncovered (fail closed) rather than letting sibling hunks certify
     the file. Preamble strays (no file yet, path None) are excluded."""
-    out: list[str] = []
-    for f in parse_unified_diff(diff):
-        if f.path is None:
-            continue
-        if (f.stray_added or f.stray_removed) and f.path not in out:
-            out.append(f.path)
-    return out
+    return _strays_from_parsed(parse_unified_diff(diff))
 
 
 def changed_line_anchor_sets(diff: str | None) -> dict[str, list[set[int]]]:
@@ -685,19 +713,40 @@ def changed_anchors_by_file(diff: str | None) -> dict[str, set[int]]:
     return per_file
 
 
-def seed_entities_for_diff(files: list[str], entities: list, diff: str | None) -> dict[str, list[str]]:
-    hunks = iter_hunks(diff)
-    if not hunks:
-        return map_files_to_entity_ids(files, entities)
-    per_file = changed_anchors_by_file(diff)
+def _seed_entities_indexed(
+    index: tuple[set[str], dict[str, list[str]], dict[str, str]],
+    entities: list,
+    per_file: dict[str, set[int]],
+) -> dict[str, list[str]]:
+    """Seed entities against a prebuilt wanted index and hunk anchors.
+
+    Same match geometry as the O(E*F) reference: suffix-or-exact path
+    match, whole-file seeding when the diff names no anchors for the
+    file, span-overlap seeding otherwise. Non-seedable types (MODULE,
+    PARAMETER, IMPORT, VARIABLE) never seed. Falsy file_path skips
+    (map_files parity); a degenerate [""] query no longer whole-file
+    seeds.
+    """
+    _, wanted_by_base, suffixes = index
     mapping: dict[str, list[str]] = {}
-    wanted = {normalize_path(f) for f in files}
     for entity in entities:
         if not _is_seedable(entity):
             continue
-        epath = normalize_path(getattr(entity, "file_path", ""))
-        for f in wanted:
-            if not (epath == f or epath.endswith("/" + f) or f.endswith("/" + epath)):
+        raw = getattr(entity, "file_path", "")
+        if not raw:
+            continue
+        if isinstance(raw, str) and "\\" not in raw and not raw.startswith("./"):
+            epath = raw
+            base = raw.rsplit("/", 1)[-1]
+        else:
+            epath = normalize_path(raw)
+            base = epath.rsplit("/", 1)[-1]
+        candidates = wanted_by_base.get(base)
+        if not candidates:
+            continue
+        esuffix = "/" + epath
+        for f in candidates:
+            if not (epath == f or epath.endswith(suffixes[f]) or f.endswith(esuffix)):
                 continue
             lines = per_file.get(f)
             if lines is None:
@@ -708,6 +757,16 @@ def seed_entities_for_diff(files: list[str], entities: list, diff: str | None) -
             if any(start <= ln <= end for ln in lines):
                 mapping.setdefault(f, []).append(entity.revision_entity_id)
     return mapping
+
+
+def seed_entities_for_diff(files: list[str], entities: list, diff: str | None) -> dict[str, list[str]]:
+    if not files or not entities:
+        return {}
+    hunks = iter_hunks(diff)
+    if not hunks:
+        return map_files_to_entity_ids(files, entities)
+    per_file = changed_anchors_by_file(diff)
+    return _seed_entities_indexed(_build_wanted_index(files), entities, per_file)
 
 
 def _is_seedable(entity) -> bool:
@@ -721,25 +780,26 @@ def _is_seedable(entity) -> bool:
 
 
 def find_ambiguous_files(files: list[str], entities: list) -> dict[str, list[str]]:
-    wanted = {normalize_path(f) for f in files}
-    if not wanted or not entities:
+    if not files or not entities:
         return {}
-    wanted_by_base: dict[str, list[str]] = {}
-    for f in wanted:
-        b = f.rsplit("/", 1)[-1]
-        wanted_by_base.setdefault(b, []).append(f)
-
+    wanted, wanted_by_base, suffixes = _build_wanted_index(files)
     hits: dict[str, set[str]] = {}
+
     for entity in entities:
         raw = getattr(entity, "file_path", "")
         if not raw:
             continue
-        base = str(raw).replace("\\", "/").rsplit("/", 1)[-1]
+        if isinstance(raw, str) and "\\" not in raw and not raw.startswith("./"):
+            epath = raw
+            base = raw.rsplit("/", 1)[-1]
+        else:
+            epath = normalize_path(raw)
+            base = epath.rsplit("/", 1)[-1]
         candidates = wanted_by_base.get(base)
         if not candidates:
             continue
-        epath = normalize_path(raw)
+        esuffix = "/" + epath
         for f in candidates:
-            if epath == f or epath.endswith("/" + f) or f.endswith("/" + epath):
+            if epath == f or epath.endswith(suffixes[f]) or f.endswith(esuffix):
                 hits.setdefault(f, set()).add(epath)
     return {f: sorted(paths) for f, paths in hits.items() if len(paths) > 1}
