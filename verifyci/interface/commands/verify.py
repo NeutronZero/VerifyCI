@@ -23,6 +23,7 @@ from verifyci.verification.policy import PolicyEvaluator
 from verifyci.verification.removal import removal_provenance_check
 from verifyci.verification.return_swap import return_statement_check
 from verifyci.verification.call_swap import call_target_check
+from verifyci.verification.shadow_assign import shadow_assignment_check
 from verifyci.verification.call_semantics import call_semantics_check
 from verifyci.verification.semi_formal_reason import SemiFormalReasoner
 from verifyci.verification.verification_ir import build_semi_check, build_verification_report
@@ -198,6 +199,8 @@ def run_verify(diff: str, revision_id: str = "", task_id: str = "cli_verify",
         checks.append(guard_condition_check(diff))
         budget.check_deadline()
         checks.append(import_resolution_check(diff))
+        budget.check_deadline()
+        checks.append(shadow_assignment_check(diff))
         budget.check_deadline()
         inv_evidence = list(cert.evidence)
         if not inv_evidence and cert.premises and all(classify_path(f) in (FilePartition.CONFIGURATION, FilePartition.TEST_SUITE) for f in files):

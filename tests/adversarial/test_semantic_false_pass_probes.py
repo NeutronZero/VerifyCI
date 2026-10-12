@@ -17,6 +17,7 @@ fire: detector silence vs correct rejection) and (b) the pipeline
 status/rationale via run_verify on a freshly ingested base.
 """
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -380,4 +381,21 @@ def test_p1_pure_addition_shadow(db_path):
     assert m["call_target_swap"] and m["return_statement_swap"] and m["guard_inversion"]
     status, rationale, checks = _run(P1_SHADOW_ADD, db_path)
     print(f"\nP1 status={status} rationale={rationale} checks={checks}")
-    assert status in ("PASS", "FAIL", "HUMAN_REVIEW", "INCONCLUSIVE")
+    # P0 remediation: shadowed_assignment fires (non-blocking) while
+    # semi stays established+passed -> HUMAN_REVIEW, never PASS.
+    assert status == "HUMAN_REVIEW"
+    assert rationale == "non_blocking_failures"
+    assert checks.get("shadowed_assignment") == (False, False)
+    assert checks.get("semi_formal") == (True, True)
+
+
+def test_corpus_correct_diffs_shadow_silent():
+    """No correct patch in the frozen corpus may trip the new tripwire
+    (zero collateral on the contracted set). Frozen corpus read-only."""
+    from verifyci.verification.shadow_assign import shadowed_assignments
+    correct = [json.loads(line) for line in
+               (CORPUS / "cases.jsonl").read_text(encoding="utf-8").splitlines()
+               if line.strip() and json.loads(line)["ground_truth"] == "correct"]
+    assert len(correct) == 8
+    for c in correct:
+        assert shadowed_assignments(c["diff"]) == [], f"collateral on {c['id']}"

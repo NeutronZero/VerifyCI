@@ -267,6 +267,7 @@ class MCPServerHandlers:
         from verifyci.verification.call_semantics import call_semantics_check
         from verifyci.verification.guard_inversion import guard_condition_check
         from verifyci.verification.import_resolution import import_resolution_check
+        from verifyci.verification.shadow_assign import shadow_assignment_check
         from verifyci.verification.config import (
             is_policy_file,
             load_trusted_base_invariants,
@@ -327,6 +328,7 @@ class MCPServerHandlers:
             checks.append(call_semantics_check(diff))
             checks.append(guard_condition_check(diff))
             checks.append(import_resolution_check(diff))
+            checks.append(shadow_assignment_check(diff))
             inv_checks, _metrics = evaluate_invariants(
                 diff, repo_invariants, self.graph, evidence=list(cert.evidence))
             checks.extend(inv_checks)
