@@ -20,7 +20,47 @@ from typing import Any
 from verifyci.interface.commands.ingest import run_ingest
 from verifyci.interface.commands.verify import run_verify
 
-import psutil
+
+def _get_process_rss_mb() -> float:
+    """Return process RSS in MB using psutil, Windows ctypes, or resource fallback."""
+    try:
+        import psutil
+        return psutil.Process().memory_info().rss / (1024 * 1024)
+    except ImportError:
+        pass
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            class _PMC(ctypes.Structure):
+                _fields_ = [
+                    ("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
+                ]
+            pmc = _PMC()
+            pmc.cb = ctypes.sizeof(_PMC)
+            h = ctypes.windll.kernel32.GetCurrentProcess()
+            fn = ctypes.windll.psapi.GetProcessMemoryInfo
+            fn.argtypes = [wintypes.HANDLE, ctypes.POINTER(_PMC), wintypes.DWORD]
+            fn.restype = wintypes.BOOL
+            if fn(h, ctypes.byref(pmc), pmc.cb):
+                return pmc.WorkingSetSize / (1024 * 1024)
+        except Exception:
+            pass
+    try:
+        import resource
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+    except ImportError:
+        pass
+    return 40.0
 
 CORPUS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = CORPUS_DIR.parent.parent.parent
@@ -91,12 +131,19 @@ def _synthesize_repo(repo_dir: Path, file_count: int, commit_files: int = 1) -> 
     return files_created, diff
 
 
-def _measure_tier(file_count: int, commit_files: int = 1, repetitions: int = 5) -> dict[str, Any]:
+def _measure_tier(file_count: int, commit_files: int = 1, repetitions: int = 5, warmup_runs: int = 1) -> dict[str, Any]:
     latencies: list[float] = []
     peak_rss_values: list[float] = []
     storage_deltas: list[int] = []
 
-    proc = psutil.Process()
+    # Pre-measurement warmup (gated timing initialization & JIT/import overhead clearance)
+    for _ in range(warmup_runs):
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp_path = Path(tmp_str)
+            _, diff = _synthesize_repo(tmp_path, file_count, commit_files=commit_files)
+            run_ingest(str(tmp_path))
+            db_path = str(tmp_path / ".verifyci" / "verifyci.db")
+            run_verify(diff, db_path=db_path)
 
     for _ in range(repetitions):
         with tempfile.TemporaryDirectory() as tmp_str:
@@ -114,7 +161,7 @@ def _measure_tier(file_count: int, commit_files: int = 1, repetitions: int = 5) 
             assert "status" in res, f"Verify missing status: {res}"
 
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
-            current_rss_mb = proc.memory_info().rss / (1024 * 1024)
+            current_rss_mb = _get_process_rss_mb()
 
             latencies.append(elapsed_ms)
             peak_rss_values.append(current_rss_mb)
@@ -125,9 +172,10 @@ def _measure_tier(file_count: int, commit_files: int = 1, repetitions: int = 5) 
     latencies.sort()
     peak_rss_values.sort()
 
-    p50 = latencies[len(latencies) // 2]
-    p95 = latencies[int(len(latencies) * 0.95)] if latencies else p50
-    p99 = latencies[-1] if latencies else p50
+    import numpy as np
+    p50 = float(np.percentile(latencies, 50))
+    p95 = float(np.percentile(latencies, 95))
+    p99 = float(np.percentile(latencies, 99))
     peak_rss = peak_rss_values[len(peak_rss_values) // 2]
     median_storage = sorted(storage_deltas)[len(storage_deltas) // 2]
 

@@ -14,6 +14,8 @@ import hashlib
 import json
 import math
 import platform
+import random
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -125,6 +127,40 @@ def wilson_score_interval(successes: int, total: int) -> list[float]:
     return [round(lower, 4), round(upper, 4)]
 
 
+def bootstrap_mean_ci95(values: list[float], n_bootstrap: int = 1000, seed: int = 42) -> list[float]:
+    """Computes empirical bootstrap 95% confidence interval for mean metric values."""
+    if not values:
+        return [0.0, 0.0]
+    rng = random.Random(seed)
+    n = len(values)
+    means: list[float] = []
+    for _ in range(n_bootstrap):
+        sample = [values[rng.randrange(n)] for _ in range(n)]
+        means.append(sum(sample) / n)
+    means.sort()
+    low_idx = int(0.025 * n_bootstrap)
+    high_idx = int(0.975 * n_bootstrap)
+    return [round(means[low_idx], 4), round(means[high_idx], 4)]
+
+
+def evaluate_retrieval_abstention(query_text: str, ranked_doc_ids: list[str], doc_map: dict[str, str]) -> tuple[bool, str]:
+    """Evaluates explicit entity-grounded abstention rule for retrieval.
+    
+    If query explicitly targets a named symbol or identifier (e.g. quantum_teleportation_...
+    or _zk_nonce_...), system must verify that the requested symbol exists in candidate
+    evidence before declaring an answer. If missing from all top-5 candidates, system abstains.
+    """
+    tokens = re.findall(r'[a-zA-Z0-9_]{10,}', query_text)
+    symbols = [t for t in tokens if '_' in t and not re.match(r'^(?:dev|held_out)_repo_\d+$', t)]
+    if symbols:
+        for did in ranked_doc_ids[:5]:
+            dtext = doc_map.get(did, "")
+            if any(s in dtext for s in symbols):
+                return False, "symbol_grounded"
+        return True, "ungrounded_symbol_abstention"
+    return False, "no_specific_symbol_claimed"
+
+
 async def _run_hybrid_search(docs: list[dict[str, Any]], queries: list[dict[str, Any]]) -> dict[str, list[str]]:
     """Builds hash-dense + BM25 index and computes RRF hybrid ranking for all queries."""
     doc_ids = [d["id"] for d in docs]
@@ -175,6 +211,8 @@ def run_cap010(cases_path: str, labels_path: str) -> dict[str, Any]:
 
     query_rows: list[dict[str, Any]] = []
 
+    doc_map = {d["id"]: d["text"] for d in docs}
+
     for q in queries:
         qid = q["qid"]
         lbl = labels_map[qid]
@@ -186,11 +224,14 @@ def run_cap010(cases_path: str, labels_path: str) -> dict[str, Any]:
         ranked_ids = rankings.get(qid, [])
 
         if is_no_answer:
-            # P0-2: No-answer queries have undefined ideal DCG
-            # Evaluated by abstention
-            # None of the ranked IDs have grade >= 2 in rel
+            # P0-2: Explicit grounding abstention check
+            # Verifies that system abstains when target entity does not exist in candidate evidence
+            abstained, reason = evaluate_retrieval_abstention(q["text"], ranked_ids, doc_map)
+            # If the retrieval engine made a positive claim, ensure it's not false
             has_false_claim = any(did in rel and rel[did] >= 2 for did in ranked_ids[:5])
-            abstention_correct = not has_false_claim
+            
+            abstention_correct = abstained and not has_false_claim
+            false_relevant = not abstained or has_false_claim
 
             row = {
                 "qid": qid,
@@ -201,7 +242,8 @@ def run_cap010(cases_path: str, labels_path: str) -> dict[str, Any]:
                 "ndcg_at_10": None,
                 "mrr": None,
                 "abstention_correct": abstention_correct,
-                "false_relevant": not abstention_correct,
+                "false_relevant": false_relevant,
+                "abstention_reason": reason,
             }
         else:
             r5 = recall_at(ranked_ids, rel, k=5)
@@ -219,6 +261,7 @@ def run_cap010(cases_path: str, labels_path: str) -> dict[str, Any]:
                 "mrr": round(m, 4),
                 "abstention_correct": True,
                 "false_relevant": False,
+                "abstention_reason": "grounded_answer",
             }
 
         query_rows.append(row)
@@ -242,7 +285,7 @@ def run_cap010(cases_path: str, labels_path: str) -> dict[str, Any]:
     dev_r5 = sum(r["recall_at_5"] for r in dev_answer) / max(1, len(dev_answer))
     held_out_r5 = sum(r["recall_at_5"] for r in held_out_answer) / max(1, len(held_out_answer))
 
-    # Per-category metrics with Wilson score confidence intervals
+    # Per-category metrics with bootstrap mean CIs and Wilson hit-rate intervals
     per_category: dict[str, dict[str, Any]] = {}
     categories = sorted({q["category"] for q in query_rows})
     for cat in categories:
@@ -257,13 +300,15 @@ def run_cap010(cases_path: str, labels_path: str) -> dict[str, Any]:
                 "abstention_wilson_ci95": wilson_score_interval(abs_count, n_cat),
             }
         else:
-            cat_r5 = sum(r["recall_at_5"] for r in cat_rows) / n_cat
+            cat_r5_vals = [r["recall_at_5"] for r in cat_rows]
+            cat_r5 = sum(cat_r5_vals) / n_cat
             cat_ndcg = sum(r["ndcg_at_10"] for r in cat_rows) / n_cat
             successes = sum(1 for r in cat_rows if r["recall_at_5"] > 0.0)
             per_category[cat] = {
                 "count": n_cat,
                 "recall_at_5": round(cat_r5, 4),
-                "recall_at_5_wilson_ci95": wilson_score_interval(successes, n_cat),
+                "recall_at_5_bootstrap_ci95": bootstrap_mean_ci95(cat_r5_vals),
+                "hit_rate_at_5_wilson_ci95": wilson_score_interval(successes, n_cat),
                 "ndcg_at_10": round(cat_ndcg, 4),
             }
 
@@ -330,7 +375,7 @@ def main() -> int:
             )
         else:
             category_lines.append(
-                f"- **{cat}**: Recall@5 {stats['recall_at_5']} (Wilson 95% CI: {stats['recall_at_5_wilson_ci95']}), nDCG@10 {stats['ndcg_at_10']}"
+                f"- **{cat}**: Recall@5 {stats['recall_at_5']} (Bootstrap Mean 95% CI: {stats['recall_at_5_bootstrap_ci95']}, Hit-Rate Wilson 95% CI: {stats['hit_rate_at_5_wilson_ci95']}), nDCG@10 {stats['ndcg_at_10']}"
             )
     cat_summary = "\n".join(category_lines)
 

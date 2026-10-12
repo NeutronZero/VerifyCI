@@ -51,8 +51,12 @@ jobs:
         run: |
           uv run --no-sync python benchmarks/robustness/cap013/measure_cap013.py
           uv run --no-sync python -m pytest tests/verification/test_robustness_cap013.py -v
+      - name: Execute Canonical Evidence Adjudication (CAP-009 through CAP-013)
+        run: uv run --no-sync python scripts/adjudicate_cap.py
       - name: Upload Benchmark Results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: benchmark-results-${{ matrix.os }}
-          path: benchmark-results-${{ matrix.os }}.json
+          path: |
+            benchmark-results-${{ matrix.os }}.json
+            evidence/cap-adjudication-bundle.json

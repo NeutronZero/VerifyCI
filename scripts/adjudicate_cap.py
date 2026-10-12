@@ -39,11 +39,18 @@ def adjudicate_cap009(cap_dir: Path) -> dict[str, Any]:
     assert c_hash == cfg["corpus_sha256"], f"CAP-009 cases.jsonl drift: {c_hash} != {cfg['corpus_sha256']}"
     assert l_hash == cfg["label_sha256"], f"CAP-009 labels.jsonl drift: {l_hash} != {cfg['label_sha256']}"
 
+    # Join result rows directly with frozen labels to verify correspondence
+    labels_raw = [json.loads(line) for line in (cap_dir / "labels.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    labels_by_id = {lbl["case_id"]: lbl for lbl in labels_raw}
+    assert len(labels_by_id) == cfg["case_count"], "CAP-009 labels count mismatch"
+
     rows = res["cases"]
     assert len(rows) == cfg["case_count"], "CAP-009 case count mismatch"
+    res_case_ids = {r["case_id"] for r in rows}
+    assert res_case_ids == set(labels_by_id.keys()), "CAP-009 case ID mismatch between results and frozen labels"
 
-    rep_rows = [r for r in rows if not r.get("is_critical_adversarial", False)]
-    adv_rows = [r for r in rows if r.get("is_critical_adversarial", False)]
+    rep_rows = [r for r in rows if not labels_by_id[r["case_id"]].get("is_critical_adversarial", False)]
+    adv_rows = [r for r in rows if labels_by_id[r["case_id"]].get("is_critical_adversarial", False)]
 
     # Canonical recomputations
     s_tp = sum(r["seed_tp"] for r in rep_rows)
@@ -71,7 +78,8 @@ def adjudicate_cap009(cap_dir: Path) -> dict[str, Any]:
         raise ValueError(f"CAP-009 canonical gate failure: seed_p={seed_p}, impact_p={impact_p}")
 
     return {
-        "status": "ESTABLISHED",
+        "status": "MEASURED_MET",
+        "evidence_classification": "Measured-Met, Not Established",
         "cases_evaluated": len(rows),
         "recomputed_metrics": {
             "seed_precision": round(seed_p, 4),
@@ -151,20 +159,27 @@ def adjudicate_cap011(cap_dir: Path) -> dict[str, Any]:
     assert c_hash == cfg["corpus_sha256"], f"CAP-011 cases.jsonl drift: {c_hash} != {cfg['corpus_sha256']}"
     assert l_hash == cfg["label_sha256"], f"CAP-011 labels.jsonl drift: {l_hash} != {cfg['label_sha256']}"
 
+    # Verify label and case correspondence
+    labels_raw = [json.loads(line) for line in (cap_dir / "labels.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    labels_by_id = {lbl["case_id"]: lbl for lbl in labels_raw}
+    assert len(labels_by_id) == cfg["case_count"], "CAP-011 labels count mismatch"
+
     rows = res["cases"]
     assert len(rows) == cfg["case_count"], "CAP-011 case count mismatch"
+    res_case_ids = {r["case_id"] for r in rows}
+    assert res_case_ids == set(labels_by_id.keys()), "CAP-011 case ID mismatch between results and frozen labels"
 
-    tp = sum(1 for r in rows if r["is_secret"] and r["detected"])
-    fn = sum(1 for r in rows if r["is_secret"] and not r["detected"])
-    fp = sum(1 for r in rows if not r["is_secret"] and r["detected"])
-    tn = sum(1 for r in rows if not r["is_secret"] and not r["detected"])
+    tp = sum(1 for r in rows if labels_by_id[r["case_id"]]["is_secret"] and r["detected"])
+    fn = sum(1 for r in rows if labels_by_id[r["case_id"]]["is_secret"] and not r["detected"])
+    fp = sum(1 for r in rows if not labels_by_id[r["case_id"]]["is_secret"] and r["detected"])
+    tn = sum(1 for r in rows if not labels_by_id[r["case_id"]]["is_secret"] and not r["detected"])
 
     rec = tp / max(1, tp + fn)
     prec = tp / max(1, tp + fp)
     far = fp / max(1, fp + tn)
     frr = fn / max(1, tp + fn)
 
-    ni_rows = [r for r in rows if r.get("slice") == "name_independent" and r["is_secret"]]
+    ni_rows = [r for r in rows if labels_by_id[r["case_id"]].get("slice") == "name_independent" and labels_by_id[r["case_id"]]["is_secret"]]
     ni_rec = sum(1 for r in ni_rows if r["detected"]) / max(1, len(ni_rows))
 
     violations = res["metrics"]["redaction_violations"]
@@ -204,6 +219,8 @@ def adjudicate_cap012(cap_dir: Path) -> dict[str, Any]:
 
     tiers = res["metrics"]["tiers"]
     budget_adjudications = {}
+    all_budgets_met = True
+
     for tier_name in ("small", "medium", "large"):
         assert tier_name in tiers, f"CAP-012 missing tier {tier_name}"
         assert tier_name in cfg["budgets"], f"CAP-012 missing budget for {tier_name}"
@@ -213,6 +230,9 @@ def adjudicate_cap012(cap_dir: Path) -> dict[str, Any]:
         p95_ok = t_data["p95_ms"] <= b_data["p95_ms_max"]
         mem_ok = t_data["peak_rss_mb"] <= b_data["peak_rss_mb_max"]
 
+        if not (p95_ok and mem_ok):
+            all_budgets_met = False
+
         budget_adjudications[tier_name] = {
             "p95_ms": t_data["p95_ms"],
             "p95_ms_max": b_data["p95_ms_max"],
@@ -221,6 +241,9 @@ def adjudicate_cap012(cap_dir: Path) -> dict[str, Any]:
             "peak_rss_mb_max": b_data["peak_rss_mb_max"],
             "peak_rss_met": mem_ok,
         }
+
+    if not all_budgets_met:
+        raise ValueError(f"CAP-012 performance budget exceeded (Fail-Closed): {budget_adjudications}")
 
     return {
         "status": "MEASURED_MET",
@@ -288,7 +311,7 @@ def main() -> int:
 
     try:
         bundle["CAP-009"] = adjudicate_cap009(ROOT / "benchmarks" / "diff_impact_corpus" / "cap009")
-        print("CAP-009: ADJUDICATED ESTABLISHED")
+        print("CAP-009: ADJUDICATED MEASURED_MET")
         bundle["CAP-010"] = adjudicate_cap010(ROOT / "benchmarks" / "retrieval_generalization" / "cap010")
         print("CAP-010: ADJUDICATED MEASURED_MET")
         bundle["CAP-011"] = adjudicate_cap011(ROOT / "benchmarks" / "secret_heldout" / "cap011")
