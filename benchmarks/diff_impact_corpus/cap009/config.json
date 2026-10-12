@@ -1,0 +1,27 @@
+{
+  "experiment_id": "CAP-009",
+  "title": "End-to-End Diff-to-Impact Correctness Benchmark",
+  "case_count": 225,
+  "slice_counts": {
+    "pure_insertions": 25,
+    "deletions": 25,
+    "multi_hunk": 25,
+    "renames": 25,
+    "nested_scopes": 25,
+    "decorators": 25,
+    "same_basename_collisions": 25,
+    "mixed_language": 25,
+    "adversarial_critical": 25
+  },
+  "corpus_sha256": "f588414156bd2eedbedbf94f5b7451cb1fa1939b05710a270cd72c7de74b7580",
+  "label_sha256": "6e6d2e5e3f74bf2e7e2a664782ca62eccbb1efd9f0be51f5ec4e9922e24aa774",
+  "status": "CORPUS_FROZEN",
+  "freeze_rule": "Gold labels independently authored without production diffmap dependencies.",
+  "gates": {
+    "critical_adversarial_false_passes": 0,
+    "representative_seed_precision_min": 0.95,
+    "representative_seed_recall_min": 0.95,
+    "representative_impact_precision_min": 0.95,
+    "representative_impact_recall_min": 0.95
+  }
+}

@@ -1,0 +1,225 @@
+{"case_id": "CAP009-001", "expected_impact": ["worker_1:orchestrator"], "expected_seeds": ["worker_1:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-002", "expected_impact": ["worker_2:orchestrator"], "expected_seeds": ["worker_2:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-003", "expected_impact": ["worker_3:orchestrator"], "expected_seeds": ["worker_3:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-004", "expected_impact": ["worker_4:orchestrator"], "expected_seeds": ["worker_4:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-005", "expected_impact": ["worker_5:orchestrator"], "expected_seeds": ["worker_5:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-006", "expected_impact": ["worker_6:orchestrator"], "expected_seeds": ["worker_6:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-007", "expected_impact": ["worker_7:orchestrator"], "expected_seeds": ["worker_7:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-008", "expected_impact": ["worker_8:orchestrator"], "expected_seeds": ["worker_8:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-009", "expected_impact": ["worker_9:orchestrator"], "expected_seeds": ["worker_9:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-010", "expected_impact": ["worker_10:orchestrator"], "expected_seeds": ["worker_10:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-011", "expected_impact": ["worker_11:orchestrator"], "expected_seeds": ["worker_11:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-012", "expected_impact": ["worker_12:orchestrator"], "expected_seeds": ["worker_12:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-013", "expected_impact": ["worker_13:orchestrator"], "expected_seeds": ["worker_13:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-014", "expected_impact": ["worker_14:orchestrator"], "expected_seeds": ["worker_14:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-015", "expected_impact": ["worker_15:orchestrator"], "expected_seeds": ["worker_15:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-016", "expected_impact": ["worker_16:orchestrator"], "expected_seeds": ["worker_16:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-017", "expected_impact": ["worker_17:orchestrator"], "expected_seeds": ["worker_17:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-018", "expected_impact": ["worker_18:orchestrator"], "expected_seeds": ["worker_18:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-019", "expected_impact": ["worker_19:orchestrator"], "expected_seeds": ["worker_19:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-020", "expected_impact": ["worker_20:orchestrator"], "expected_seeds": ["worker_20:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-021", "expected_impact": ["worker_21:orchestrator"], "expected_seeds": ["worker_21:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-022", "expected_impact": ["worker_22:orchestrator"], "expected_seeds": ["worker_22:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-023", "expected_impact": ["worker_23:orchestrator"], "expected_seeds": ["worker_23:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-024", "expected_impact": ["worker_24:orchestrator"], "expected_seeds": ["worker_24:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-025", "expected_impact": ["worker_25:orchestrator"], "expected_seeds": ["worker_25:process"], "is_critical_adversarial": false}
+{"case_id": "CAP009-026", "expected_impact": ["handler_1:entrypoint"], "expected_seeds": ["handler_1:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-027", "expected_impact": ["handler_2:entrypoint"], "expected_seeds": ["handler_2:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-028", "expected_impact": ["handler_3:entrypoint"], "expected_seeds": ["handler_3:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-029", "expected_impact": ["handler_4:entrypoint"], "expected_seeds": ["handler_4:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-030", "expected_impact": ["handler_5:entrypoint"], "expected_seeds": ["handler_5:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-031", "expected_impact": ["handler_6:entrypoint"], "expected_seeds": ["handler_6:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-032", "expected_impact": ["handler_7:entrypoint"], "expected_seeds": ["handler_7:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-033", "expected_impact": ["handler_8:entrypoint"], "expected_seeds": ["handler_8:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-034", "expected_impact": ["handler_9:entrypoint"], "expected_seeds": ["handler_9:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-035", "expected_impact": ["handler_10:entrypoint"], "expected_seeds": ["handler_10:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-036", "expected_impact": ["handler_11:entrypoint"], "expected_seeds": ["handler_11:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-037", "expected_impact": ["handler_12:entrypoint"], "expected_seeds": ["handler_12:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-038", "expected_impact": ["handler_13:entrypoint"], "expected_seeds": ["handler_13:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-039", "expected_impact": ["handler_14:entrypoint"], "expected_seeds": ["handler_14:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-040", "expected_impact": ["handler_15:entrypoint"], "expected_seeds": ["handler_15:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-041", "expected_impact": ["handler_16:entrypoint"], "expected_seeds": ["handler_16:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-042", "expected_impact": ["handler_17:entrypoint"], "expected_seeds": ["handler_17:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-043", "expected_impact": ["handler_18:entrypoint"], "expected_seeds": ["handler_18:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-044", "expected_impact": ["handler_19:entrypoint"], "expected_seeds": ["handler_19:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-045", "expected_impact": ["handler_20:entrypoint"], "expected_seeds": ["handler_20:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-046", "expected_impact": ["handler_21:entrypoint"], "expected_seeds": ["handler_21:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-047", "expected_impact": ["handler_22:entrypoint"], "expected_seeds": ["handler_22:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-048", "expected_impact": ["handler_23:entrypoint"], "expected_seeds": ["handler_23:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-049", "expected_impact": ["handler_24:entrypoint"], "expected_seeds": ["handler_24:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-050", "expected_impact": ["handler_25:entrypoint"], "expected_seeds": ["handler_25:main"], "is_critical_adversarial": false}
+{"case_id": "CAP009-051", "expected_impact": ["pipeline_1:runner", "pipeline_1:scheduler"], "expected_seeds": ["pipeline_1:configure", "pipeline_1:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-052", "expected_impact": ["pipeline_2:runner", "pipeline_2:scheduler"], "expected_seeds": ["pipeline_2:configure", "pipeline_2:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-053", "expected_impact": ["pipeline_3:runner", "pipeline_3:scheduler"], "expected_seeds": ["pipeline_3:configure", "pipeline_3:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-054", "expected_impact": ["pipeline_4:runner", "pipeline_4:scheduler"], "expected_seeds": ["pipeline_4:configure", "pipeline_4:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-055", "expected_impact": ["pipeline_5:runner", "pipeline_5:scheduler"], "expected_seeds": ["pipeline_5:configure", "pipeline_5:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-056", "expected_impact": ["pipeline_6:runner", "pipeline_6:scheduler"], "expected_seeds": ["pipeline_6:configure", "pipeline_6:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-057", "expected_impact": ["pipeline_7:runner", "pipeline_7:scheduler"], "expected_seeds": ["pipeline_7:configure", "pipeline_7:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-058", "expected_impact": ["pipeline_8:runner", "pipeline_8:scheduler"], "expected_seeds": ["pipeline_8:configure", "pipeline_8:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-059", "expected_impact": ["pipeline_9:runner", "pipeline_9:scheduler"], "expected_seeds": ["pipeline_9:configure", "pipeline_9:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-060", "expected_impact": ["pipeline_10:runner", "pipeline_10:scheduler"], "expected_seeds": ["pipeline_10:configure", "pipeline_10:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-061", "expected_impact": ["pipeline_11:runner", "pipeline_11:scheduler"], "expected_seeds": ["pipeline_11:configure", "pipeline_11:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-062", "expected_impact": ["pipeline_12:runner", "pipeline_12:scheduler"], "expected_seeds": ["pipeline_12:configure", "pipeline_12:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-063", "expected_impact": ["pipeline_13:runner", "pipeline_13:scheduler"], "expected_seeds": ["pipeline_13:configure", "pipeline_13:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-064", "expected_impact": ["pipeline_14:runner", "pipeline_14:scheduler"], "expected_seeds": ["pipeline_14:configure", "pipeline_14:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-065", "expected_impact": ["pipeline_15:runner", "pipeline_15:scheduler"], "expected_seeds": ["pipeline_15:configure", "pipeline_15:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-066", "expected_impact": ["pipeline_16:runner", "pipeline_16:scheduler"], "expected_seeds": ["pipeline_16:configure", "pipeline_16:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-067", "expected_impact": ["pipeline_17:runner", "pipeline_17:scheduler"], "expected_seeds": ["pipeline_17:configure", "pipeline_17:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-068", "expected_impact": ["pipeline_18:runner", "pipeline_18:scheduler"], "expected_seeds": ["pipeline_18:configure", "pipeline_18:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-069", "expected_impact": ["pipeline_19:runner", "pipeline_19:scheduler"], "expected_seeds": ["pipeline_19:configure", "pipeline_19:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-070", "expected_impact": ["pipeline_20:runner", "pipeline_20:scheduler"], "expected_seeds": ["pipeline_20:configure", "pipeline_20:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-071", "expected_impact": ["pipeline_21:runner", "pipeline_21:scheduler"], "expected_seeds": ["pipeline_21:configure", "pipeline_21:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-072", "expected_impact": ["pipeline_22:runner", "pipeline_22:scheduler"], "expected_seeds": ["pipeline_22:configure", "pipeline_22:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-073", "expected_impact": ["pipeline_23:runner", "pipeline_23:scheduler"], "expected_seeds": ["pipeline_23:configure", "pipeline_23:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-074", "expected_impact": ["pipeline_24:runner", "pipeline_24:scheduler"], "expected_seeds": ["pipeline_24:configure", "pipeline_24:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-075", "expected_impact": ["pipeline_25:runner", "pipeline_25:scheduler"], "expected_seeds": ["pipeline_25:configure", "pipeline_25:validate"], "is_critical_adversarial": false}
+{"case_id": "CAP009-076", "expected_impact": ["service_1:client"], "expected_seeds": ["service_1:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-077", "expected_impact": ["service_2:client"], "expected_seeds": ["service_2:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-078", "expected_impact": ["service_3:client"], "expected_seeds": ["service_3:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-079", "expected_impact": ["service_4:client"], "expected_seeds": ["service_4:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-080", "expected_impact": ["service_5:client"], "expected_seeds": ["service_5:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-081", "expected_impact": ["service_6:client"], "expected_seeds": ["service_6:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-082", "expected_impact": ["service_7:client"], "expected_seeds": ["service_7:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-083", "expected_impact": ["service_8:client"], "expected_seeds": ["service_8:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-084", "expected_impact": ["service_9:client"], "expected_seeds": ["service_9:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-085", "expected_impact": ["service_10:client"], "expected_seeds": ["service_10:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-086", "expected_impact": ["service_11:client"], "expected_seeds": ["service_11:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-087", "expected_impact": ["service_12:client"], "expected_seeds": ["service_12:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-088", "expected_impact": ["service_13:client"], "expected_seeds": ["service_13:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-089", "expected_impact": ["service_14:client"], "expected_seeds": ["service_14:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-090", "expected_impact": ["service_15:client"], "expected_seeds": ["service_15:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-091", "expected_impact": ["service_16:client"], "expected_seeds": ["service_16:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-092", "expected_impact": ["service_17:client"], "expected_seeds": ["service_17:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-093", "expected_impact": ["service_18:client"], "expected_seeds": ["service_18:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-094", "expected_impact": ["service_19:client"], "expected_seeds": ["service_19:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-095", "expected_impact": ["service_20:client"], "expected_seeds": ["service_20:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-096", "expected_impact": ["service_21:client"], "expected_seeds": ["service_21:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-097", "expected_impact": ["service_22:client"], "expected_seeds": ["service_22:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-098", "expected_impact": ["service_23:client"], "expected_seeds": ["service_23:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-099", "expected_impact": ["service_24:client"], "expected_seeds": ["service_24:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-100", "expected_impact": ["service_25:client"], "expected_seeds": ["service_25:run"], "is_critical_adversarial": false}
+{"case_id": "CAP009-101", "expected_impact": ["nested_1:caller"], "expected_seeds": ["nested_1:OuterClass", "nested_1:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-102", "expected_impact": ["nested_2:caller"], "expected_seeds": ["nested_2:OuterClass", "nested_2:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-103", "expected_impact": ["nested_3:caller"], "expected_seeds": ["nested_3:OuterClass", "nested_3:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-104", "expected_impact": ["nested_4:caller"], "expected_seeds": ["nested_4:OuterClass", "nested_4:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-105", "expected_impact": ["nested_5:caller"], "expected_seeds": ["nested_5:OuterClass", "nested_5:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-106", "expected_impact": ["nested_6:caller"], "expected_seeds": ["nested_6:OuterClass", "nested_6:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-107", "expected_impact": ["nested_7:caller"], "expected_seeds": ["nested_7:OuterClass", "nested_7:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-108", "expected_impact": ["nested_8:caller"], "expected_seeds": ["nested_8:OuterClass", "nested_8:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-109", "expected_impact": ["nested_9:caller"], "expected_seeds": ["nested_9:OuterClass", "nested_9:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-110", "expected_impact": ["nested_10:caller"], "expected_seeds": ["nested_10:OuterClass", "nested_10:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-111", "expected_impact": ["nested_11:caller"], "expected_seeds": ["nested_11:OuterClass", "nested_11:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-112", "expected_impact": ["nested_12:caller"], "expected_seeds": ["nested_12:OuterClass", "nested_12:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-113", "expected_impact": ["nested_13:caller"], "expected_seeds": ["nested_13:OuterClass", "nested_13:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-114", "expected_impact": ["nested_14:caller"], "expected_seeds": ["nested_14:OuterClass", "nested_14:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-115", "expected_impact": ["nested_15:caller"], "expected_seeds": ["nested_15:OuterClass", "nested_15:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-116", "expected_impact": ["nested_16:caller"], "expected_seeds": ["nested_16:OuterClass", "nested_16:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-117", "expected_impact": ["nested_17:caller"], "expected_seeds": ["nested_17:OuterClass", "nested_17:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-118", "expected_impact": ["nested_18:caller"], "expected_seeds": ["nested_18:OuterClass", "nested_18:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-119", "expected_impact": ["nested_19:caller"], "expected_seeds": ["nested_19:OuterClass", "nested_19:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-120", "expected_impact": ["nested_20:caller"], "expected_seeds": ["nested_20:OuterClass", "nested_20:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-121", "expected_impact": ["nested_21:caller"], "expected_seeds": ["nested_21:OuterClass", "nested_21:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-122", "expected_impact": ["nested_22:caller"], "expected_seeds": ["nested_22:OuterClass", "nested_22:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-123", "expected_impact": ["nested_23:caller"], "expected_seeds": ["nested_23:OuterClass", "nested_23:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-124", "expected_impact": ["nested_24:caller"], "expected_seeds": ["nested_24:OuterClass", "nested_24:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-125", "expected_impact": ["nested_25:caller"], "expected_seeds": ["nested_25:OuterClass", "nested_25:OuterClass.method"], "is_critical_adversarial": false}
+{"case_id": "CAP009-126", "expected_impact": ["routes_1:gateway"], "expected_seeds": ["routes_1:endpoint_1"], "is_critical_adversarial": false}
+{"case_id": "CAP009-127", "expected_impact": ["routes_2:gateway"], "expected_seeds": ["routes_2:endpoint_2"], "is_critical_adversarial": false}
+{"case_id": "CAP009-128", "expected_impact": ["routes_3:gateway"], "expected_seeds": ["routes_3:endpoint_3"], "is_critical_adversarial": false}
+{"case_id": "CAP009-129", "expected_impact": ["routes_4:gateway"], "expected_seeds": ["routes_4:endpoint_4"], "is_critical_adversarial": false}
+{"case_id": "CAP009-130", "expected_impact": ["routes_5:gateway"], "expected_seeds": ["routes_5:endpoint_5"], "is_critical_adversarial": false}
+{"case_id": "CAP009-131", "expected_impact": ["routes_6:gateway"], "expected_seeds": ["routes_6:endpoint_6"], "is_critical_adversarial": false}
+{"case_id": "CAP009-132", "expected_impact": ["routes_7:gateway"], "expected_seeds": ["routes_7:endpoint_7"], "is_critical_adversarial": false}
+{"case_id": "CAP009-133", "expected_impact": ["routes_8:gateway"], "expected_seeds": ["routes_8:endpoint_8"], "is_critical_adversarial": false}
+{"case_id": "CAP009-134", "expected_impact": ["routes_9:gateway"], "expected_seeds": ["routes_9:endpoint_9"], "is_critical_adversarial": false}
+{"case_id": "CAP009-135", "expected_impact": ["routes_10:gateway"], "expected_seeds": ["routes_10:endpoint_10"], "is_critical_adversarial": false}
+{"case_id": "CAP009-136", "expected_impact": ["routes_11:gateway"], "expected_seeds": ["routes_11:endpoint_11"], "is_critical_adversarial": false}
+{"case_id": "CAP009-137", "expected_impact": ["routes_12:gateway"], "expected_seeds": ["routes_12:endpoint_12"], "is_critical_adversarial": false}
+{"case_id": "CAP009-138", "expected_impact": ["routes_13:gateway"], "expected_seeds": ["routes_13:endpoint_13"], "is_critical_adversarial": false}
+{"case_id": "CAP009-139", "expected_impact": ["routes_14:gateway"], "expected_seeds": ["routes_14:endpoint_14"], "is_critical_adversarial": false}
+{"case_id": "CAP009-140", "expected_impact": ["routes_15:gateway"], "expected_seeds": ["routes_15:endpoint_15"], "is_critical_adversarial": false}
+{"case_id": "CAP009-141", "expected_impact": ["routes_16:gateway"], "expected_seeds": ["routes_16:endpoint_16"], "is_critical_adversarial": false}
+{"case_id": "CAP009-142", "expected_impact": ["routes_17:gateway"], "expected_seeds": ["routes_17:endpoint_17"], "is_critical_adversarial": false}
+{"case_id": "CAP009-143", "expected_impact": ["routes_18:gateway"], "expected_seeds": ["routes_18:endpoint_18"], "is_critical_adversarial": false}
+{"case_id": "CAP009-144", "expected_impact": ["routes_19:gateway"], "expected_seeds": ["routes_19:endpoint_19"], "is_critical_adversarial": false}
+{"case_id": "CAP009-145", "expected_impact": ["routes_20:gateway"], "expected_seeds": ["routes_20:endpoint_20"], "is_critical_adversarial": false}
+{"case_id": "CAP009-146", "expected_impact": ["routes_21:gateway"], "expected_seeds": ["routes_21:endpoint_21"], "is_critical_adversarial": false}
+{"case_id": "CAP009-147", "expected_impact": ["routes_22:gateway"], "expected_seeds": ["routes_22:endpoint_22"], "is_critical_adversarial": false}
+{"case_id": "CAP009-148", "expected_impact": ["routes_23:gateway"], "expected_seeds": ["routes_23:endpoint_23"], "is_critical_adversarial": false}
+{"case_id": "CAP009-149", "expected_impact": ["routes_24:gateway"], "expected_seeds": ["routes_24:endpoint_24"], "is_critical_adversarial": false}
+{"case_id": "CAP009-150", "expected_impact": ["routes_25:gateway"], "expected_seeds": ["routes_25:endpoint_25"], "is_critical_adversarial": false}
+{"case_id": "CAP009-151", "expected_impact": ["auth_client_1:login"], "expected_seeds": ["auth_client_1:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-152", "expected_impact": ["auth_client_2:login"], "expected_seeds": ["auth_client_2:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-153", "expected_impact": ["auth_client_3:login"], "expected_seeds": ["auth_client_3:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-154", "expected_impact": ["auth_client_4:login"], "expected_seeds": ["auth_client_4:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-155", "expected_impact": ["auth_client_5:login"], "expected_seeds": ["auth_client_5:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-156", "expected_impact": ["auth_client_6:login"], "expected_seeds": ["auth_client_6:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-157", "expected_impact": ["auth_client_7:login"], "expected_seeds": ["auth_client_7:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-158", "expected_impact": ["auth_client_8:login"], "expected_seeds": ["auth_client_8:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-159", "expected_impact": ["auth_client_9:login"], "expected_seeds": ["auth_client_9:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-160", "expected_impact": ["auth_client_10:login"], "expected_seeds": ["auth_client_10:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-161", "expected_impact": ["auth_client_11:login"], "expected_seeds": ["auth_client_11:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-162", "expected_impact": ["auth_client_12:login"], "expected_seeds": ["auth_client_12:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-163", "expected_impact": ["auth_client_13:login"], "expected_seeds": ["auth_client_13:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-164", "expected_impact": ["auth_client_14:login"], "expected_seeds": ["auth_client_14:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-165", "expected_impact": ["auth_client_15:login"], "expected_seeds": ["auth_client_15:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-166", "expected_impact": ["auth_client_16:login"], "expected_seeds": ["auth_client_16:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-167", "expected_impact": ["auth_client_17:login"], "expected_seeds": ["auth_client_17:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-168", "expected_impact": ["auth_client_18:login"], "expected_seeds": ["auth_client_18:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-169", "expected_impact": ["auth_client_19:login"], "expected_seeds": ["auth_client_19:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-170", "expected_impact": ["auth_client_20:login"], "expected_seeds": ["auth_client_20:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-171", "expected_impact": ["auth_client_21:login"], "expected_seeds": ["auth_client_21:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-172", "expected_impact": ["auth_client_22:login"], "expected_seeds": ["auth_client_22:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-173", "expected_impact": ["auth_client_23:login"], "expected_seeds": ["auth_client_23:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-174", "expected_impact": ["auth_client_24:login"], "expected_seeds": ["auth_client_24:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-175", "expected_impact": ["auth_client_25:login"], "expected_seeds": ["auth_client_25:connect"], "is_critical_adversarial": false}
+{"case_id": "CAP009-176", "expected_impact": ["engine_1:driver"], "expected_seeds": ["engine_1:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-177", "expected_impact": ["engine_2:driver"], "expected_seeds": ["engine_2:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-178", "expected_impact": ["engine_3:driver"], "expected_seeds": ["engine_3:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-179", "expected_impact": ["engine_4:driver"], "expected_seeds": ["engine_4:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-180", "expected_impact": ["engine_5:driver"], "expected_seeds": ["engine_5:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-181", "expected_impact": ["engine_6:driver"], "expected_seeds": ["engine_6:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-182", "expected_impact": ["engine_7:driver"], "expected_seeds": ["engine_7:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-183", "expected_impact": ["engine_8:driver"], "expected_seeds": ["engine_8:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-184", "expected_impact": ["engine_9:driver"], "expected_seeds": ["engine_9:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-185", "expected_impact": ["engine_10:driver"], "expected_seeds": ["engine_10:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-186", "expected_impact": ["engine_11:driver"], "expected_seeds": ["engine_11:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-187", "expected_impact": ["engine_12:driver"], "expected_seeds": ["engine_12:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-188", "expected_impact": ["engine_13:driver"], "expected_seeds": ["engine_13:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-189", "expected_impact": ["engine_14:driver"], "expected_seeds": ["engine_14:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-190", "expected_impact": ["engine_15:driver"], "expected_seeds": ["engine_15:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-191", "expected_impact": ["engine_16:driver"], "expected_seeds": ["engine_16:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-192", "expected_impact": ["engine_17:driver"], "expected_seeds": ["engine_17:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-193", "expected_impact": ["engine_18:driver"], "expected_seeds": ["engine_18:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-194", "expected_impact": ["engine_19:driver"], "expected_seeds": ["engine_19:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-195", "expected_impact": ["engine_20:driver"], "expected_seeds": ["engine_20:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-196", "expected_impact": ["engine_21:driver"], "expected_seeds": ["engine_21:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-197", "expected_impact": ["engine_22:driver"], "expected_seeds": ["engine_22:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-198", "expected_impact": ["engine_23:driver"], "expected_seeds": ["engine_23:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-199", "expected_impact": ["engine_24:driver"], "expected_seeds": ["engine_24:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-200", "expected_impact": ["engine_25:driver"], "expected_seeds": ["engine_25:compute_hash"], "is_critical_adversarial": false}
+{"case_id": "CAP009-201", "expected_impact": ["security_provider_1:guard"], "expected_seeds": ["security_provider_1:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-202", "expected_impact": ["security_provider_2:guard"], "expected_seeds": ["security_provider_2:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-203", "expected_impact": ["security_provider_3:guard"], "expected_seeds": ["security_provider_3:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-204", "expected_impact": ["security_provider_4:guard"], "expected_seeds": ["security_provider_4:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-205", "expected_impact": ["security_provider_5:guard"], "expected_seeds": ["security_provider_5:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-206", "expected_impact": ["security_provider_6:guard"], "expected_seeds": ["security_provider_6:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-207", "expected_impact": ["security_provider_7:guard"], "expected_seeds": ["security_provider_7:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-208", "expected_impact": ["security_provider_8:guard"], "expected_seeds": ["security_provider_8:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-209", "expected_impact": ["security_provider_9:guard"], "expected_seeds": ["security_provider_9:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-210", "expected_impact": ["security_provider_10:guard"], "expected_seeds": ["security_provider_10:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-211", "expected_impact": ["security_provider_11:guard"], "expected_seeds": ["security_provider_11:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-212", "expected_impact": ["security_provider_12:guard"], "expected_seeds": ["security_provider_12:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-213", "expected_impact": ["security_provider_13:guard"], "expected_seeds": ["security_provider_13:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-214", "expected_impact": ["security_provider_14:guard"], "expected_seeds": ["security_provider_14:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-215", "expected_impact": ["security_provider_15:guard"], "expected_seeds": ["security_provider_15:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-216", "expected_impact": ["security_provider_16:guard"], "expected_seeds": ["security_provider_16:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-217", "expected_impact": ["security_provider_17:guard"], "expected_seeds": ["security_provider_17:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-218", "expected_impact": ["security_provider_18:guard"], "expected_seeds": ["security_provider_18:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-219", "expected_impact": ["security_provider_19:guard"], "expected_seeds": ["security_provider_19:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-220", "expected_impact": ["security_provider_20:guard"], "expected_seeds": ["security_provider_20:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-221", "expected_impact": ["security_provider_21:guard"], "expected_seeds": ["security_provider_21:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-222", "expected_impact": ["security_provider_22:guard"], "expected_seeds": ["security_provider_22:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-223", "expected_impact": ["security_provider_23:guard"], "expected_seeds": ["security_provider_23:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-224", "expected_impact": ["security_provider_24:guard"], "expected_seeds": ["security_provider_24:auth_token"], "is_critical_adversarial": true}
+{"case_id": "CAP009-225", "expected_impact": ["security_provider_25:guard"], "expected_seeds": ["security_provider_25:auth_token"], "is_critical_adversarial": true}
