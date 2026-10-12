@@ -110,3 +110,76 @@ def test_st_provider_is_lazy_and_named():
     provider = SentenceTransformerProvider()
     assert provider.model_name() == "sentence-transformers/all-MiniLM-L6-v2"
     assert provider._embedder is None
+
+
+def test_reranker_exact_symbol_bonus_equivalence():
+    """Verify that hoisted rerank scoring exactly matches reference _symbol_bonuses + score.
+
+    Tests edge cases:
+    - repeated qualified tokens
+    - multiple paths with same or different tails
+    - '::' and '.' separators
+    - empty / whitespace / missing identifiers
+    - varying query length and non-alphanumeric punctuation
+    - bonus overrides / ablations (exact=0, qual=0, customs)
+    """
+    test_queries = [
+        "pkg.mod.foo",
+        "ns::sub::bar",
+        "pkg.foo ns::foo other.foo",
+        "foo",
+        "foo foo foo",
+        "pkg..broken ..foo .foo",
+        "::leading trailing::",
+        "a.b.c d::e::f",
+        "",
+        "   ",
+        "random query without symbols",
+        "pkg.sym and sym and ns::sym",
+    ]
+
+    candidate_ids = [
+        "foo",
+        "bar",
+        "sym",
+        "pkg",
+        "mod",
+        "ns",
+        "",
+        "unknown",
+        "leading",
+        "trailing",
+    ]
+
+    bonus_configs = [
+        (None, None),
+        (0.0, 0.0),
+        (0.8, 0.0),
+        (0.0, 0.4),
+        (1.5, 0.75),
+    ]
+
+    for exact_b, qual_b in bonus_configs:
+        reranker = OfflineReranker(exact_bonus=exact_b, qualified_bonus=qual_b)
+        results = [
+            SearchResult(id=cid, score=0.0, metadata={"text": f"description of {cid} in code"})
+            for cid in candidate_ids
+        ]
+
+        for query in test_queries:
+            # Output from optimized rerank()
+            reranked = reranker.rerank(query, results, k=len(results))
+            reranked_scores = {r.id: r.score for r in reranked}
+
+            # Reference output using score() + _symbol_bonuses() directly
+            for r in results:
+                ref_score = reranker.score(
+                    query, f"{r.id} {' '.join(str(v) for v in r.metadata.values())}"
+                ) + reranker._symbol_bonuses(query, r.id)
+
+                actual_score = reranked_scores[r.id]
+                assert abs(actual_score - ref_score) < 1e-9, (
+                    f"Mismatch for query={query!r}, id={r.id!r}: "
+                    f"actual={actual_score}, ref={ref_score}"
+                )
+

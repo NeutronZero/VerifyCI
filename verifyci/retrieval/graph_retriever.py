@@ -101,6 +101,7 @@ class GraphRetriever:
                 node: min(callee_hops.get(node, 999), caller_hops.get(node, 999))
                 for node in all_impacted
             }
+
         else:
             successors = getattr(self.graph, "successors", None)
             predecessors = getattr(self.graph, "predecessors", None)

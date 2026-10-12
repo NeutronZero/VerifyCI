@@ -129,3 +129,41 @@ def test_graph_without_edge_index_map_falls_back_to_neighbors():
             return []
     hits = {h.id for h in GraphRetriever(_OldGraph(), {}).retrieve(["a"])}
     assert hits == {"b"}
+
+
+def test_bidirectional_bfs_preserves_shortest_hops_without_cross_direction_suppression():
+    """Ensure mixed-direction paths and multiple seeds discover true minimum hop distances.
+
+    Topology:
+      Seed S1:
+        S1 -> X -> Y (outgoing hops: X=1, Y=2)
+      Seed S2:
+        Y -> S2 (incoming hop from S2: Y=1)
+      If traversals shared a visited set and explored S1's outgoing path first,
+      Y could be recorded at hop 2 from S1, suppressing the shorter 1-hop path from S2.
+      Both directional traversals must be independent and take min(out_hops, in_hops).
+    """
+    ents = [
+        _ent("s1", "s1"),
+        _ent("s2", "s2"),
+        _ent("x", "x"),
+        _ent("y", "y"),
+    ]
+    edges = [
+        _edge("e1", "s1", "x", EdgeType.CALLS),
+        _edge("e2", "x", "y", EdgeType.CALLS),
+        _edge("e3", "y", "s2", EdgeType.CALLS),  # incoming to s2 from y
+    ]
+    nm = {e.revision_entity_id: i for i, e in enumerate(ents)}
+    g = _FakeRxGraph(ents, edges)
+    r = GraphRetriever(g, nm)
+
+    # Retrieval from both seeds simultaneously:
+    res = r.retrieve(["s1", "s2"], max_hops=2)
+    scores = {h.id: h.score for h in res}
+
+    # x is 1 hop from s1 (outgoing) -> score 1.0 / 1 = 1.0
+    assert scores.get("x") == 1.0
+    # y is 1 hop from s2 (incoming: y -> s2) -> score 1.0 / 1 = 1.0 (NOT 0.5 from 2-hop s1 -> x -> y)
+    assert scores.get("y") == 1.0
+
