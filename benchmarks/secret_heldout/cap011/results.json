@@ -1,0 +1,469 @@
+{
+  "experiment_id": "CAP-011",
+  "provenance": {
+    "git_commit": "d4d191280f23b71877e7d4527f35b22901fbd78a",
+    "git_dirty": true,
+    "harness_sha256": "9607fa1893f47ccf713dc8c1d925efe5dc64e6357d6fad77f800ccc4fee60035",
+    "oracle_sha256": "a573087ec901303bc2fe73e854e5eb332be5f1c31a9dc95230f694266546d774",
+    "config_sha256": "7689284e28041cd7f7c4608c189b20e8cd53d2a9e4a1c3f8f5c9c8af5d154d3a",
+    "python_version": "3.14.7",
+    "platform": "Windows-11-10.0.26300-SP0"
+  },
+  "metrics": {
+    "recall": 1.0,
+    "recall_by_category": {
+      "connection_strings": {
+        "total": 5,
+        "recall": 1.0,
+        "precision": 1.0
+      },
+      "encoded": {
+        "total": 5,
+        "recall": 1.0,
+        "precision": 1.0
+      },
+      "name_independent": {
+        "total": 10,
+        "recall": 1.0,
+        "precision": 1.0
+      },
+      "negatives_placeholders": {
+        "total": 10,
+        "recall": 1.0,
+        "precision": 1.0
+      },
+      "negatives_test_fixtures": {
+        "total": 10,
+        "recall": 1.0,
+        "precision": 1.0
+      },
+      "private_keys": {
+        "total": 5,
+        "recall": 1.0,
+        "precision": 1.0
+      },
+      "provider_structured": {
+        "total": 5,
+        "recall": 1.0,
+        "precision": 1.0
+      }
+    },
+    "precision": 1.0,
+    "far": 0.0,
+    "frr": 0.0,
+    "name_independent_recall": 1.0,
+    "redaction_violations": 0
+  },
+  "cases": [
+    {
+      "case_id": "CAP011-001",
+      "slice": "name_independent",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_openai_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-002",
+      "slice": "name_independent",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_openai_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-003",
+      "slice": "name_independent",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_openai_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-004",
+      "slice": "name_independent",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_openai_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-005",
+      "slice": "name_independent",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_openai_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-006",
+      "slice": "name_independent",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_github_token"
+      ]
+    },
+    {
+      "case_id": "CAP011-007",
+      "slice": "name_independent",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_github_token"
+      ]
+    },
+    {
+      "case_id": "CAP011-008",
+      "slice": "name_independent",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_github_token"
+      ]
+    },
+    {
+      "case_id": "CAP011-009",
+      "slice": "name_independent",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_github_token"
+      ]
+    },
+    {
+      "case_id": "CAP011-010",
+      "slice": "name_independent",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_github_token"
+      ]
+    },
+    {
+      "case_id": "CAP011-011",
+      "slice": "provider_structured",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_aws_access_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-012",
+      "slice": "provider_structured",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_aws_access_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-013",
+      "slice": "provider_structured",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_aws_access_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-014",
+      "slice": "provider_structured",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_aws_access_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-015",
+      "slice": "provider_structured",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_aws_access_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-016",
+      "slice": "encoded",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_openai_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-017",
+      "slice": "encoded",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_openai_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-018",
+      "slice": "encoded",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_openai_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-019",
+      "slice": "encoded",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_openai_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-020",
+      "slice": "encoded",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "provider_openai_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-021",
+      "slice": "connection_strings",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "credential_connection_string"
+      ]
+    },
+    {
+      "case_id": "CAP011-022",
+      "slice": "connection_strings",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "credential_connection_string"
+      ]
+    },
+    {
+      "case_id": "CAP011-023",
+      "slice": "connection_strings",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "credential_connection_string"
+      ]
+    },
+    {
+      "case_id": "CAP011-024",
+      "slice": "connection_strings",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "credential_connection_string"
+      ]
+    },
+    {
+      "case_id": "CAP011-025",
+      "slice": "connection_strings",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "credential_connection_string"
+      ]
+    },
+    {
+      "case_id": "CAP011-026",
+      "slice": "private_keys",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "crypto_private_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-027",
+      "slice": "private_keys",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "crypto_private_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-028",
+      "slice": "private_keys",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "crypto_private_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-029",
+      "slice": "private_keys",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "crypto_private_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-030",
+      "slice": "private_keys",
+      "is_secret": true,
+      "detected": true,
+      "detected_rules": [
+        "crypto_private_key"
+      ]
+    },
+    {
+      "case_id": "CAP011-031",
+      "slice": "negatives_placeholders",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-032",
+      "slice": "negatives_placeholders",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-033",
+      "slice": "negatives_placeholders",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-034",
+      "slice": "negatives_placeholders",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-035",
+      "slice": "negatives_placeholders",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-036",
+      "slice": "negatives_placeholders",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-037",
+      "slice": "negatives_placeholders",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-038",
+      "slice": "negatives_placeholders",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-039",
+      "slice": "negatives_placeholders",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-040",
+      "slice": "negatives_placeholders",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-041",
+      "slice": "negatives_test_fixtures",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-042",
+      "slice": "negatives_test_fixtures",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-043",
+      "slice": "negatives_test_fixtures",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-044",
+      "slice": "negatives_test_fixtures",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-045",
+      "slice": "negatives_test_fixtures",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-046",
+      "slice": "negatives_test_fixtures",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-047",
+      "slice": "negatives_test_fixtures",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-048",
+      "slice": "negatives_test_fixtures",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-049",
+      "slice": "negatives_test_fixtures",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    },
+    {
+      "case_id": "CAP011-050",
+      "slice": "negatives_test_fixtures",
+      "is_secret": false,
+      "detected": false,
+      "detected_rules": []
+    }
+  ]
+}

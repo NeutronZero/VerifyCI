@@ -1,0 +1,50 @@
+{"case_id": "CAP011-001", "expected_rules": ["provider_openai_key"], "is_secret": true, "slice": "name_independent", "synthetic_secret": "sk-live-3a4a40a2d2c0049e89fa8d4d28680f79"}
+{"case_id": "CAP011-002", "expected_rules": ["provider_openai_key"], "is_secret": true, "slice": "name_independent", "synthetic_secret": "sk-live-c0aec7b2581e50004a732e4108f88434"}
+{"case_id": "CAP011-003", "expected_rules": ["provider_openai_key"], "is_secret": true, "slice": "name_independent", "synthetic_secret": "sk-live-8bf38f2ab3a2217230f8f616d3dc7ec8"}
+{"case_id": "CAP011-004", "expected_rules": ["provider_openai_key"], "is_secret": true, "slice": "name_independent", "synthetic_secret": "sk-live-18da54166fefd53a3e7f25803f0550f2"}
+{"case_id": "CAP011-005", "expected_rules": ["provider_openai_key"], "is_secret": true, "slice": "name_independent", "synthetic_secret": "sk-live-3232c7a69f9194a7a89d182a42068b1f"}
+{"case_id": "CAP011-006", "expected_rules": ["provider_github_token"], "is_secret": true, "slice": "name_independent", "synthetic_secret": "ghp_7ef257195ac30980a489874bb195d18264a7"}
+{"case_id": "CAP011-007", "expected_rules": ["provider_github_token"], "is_secret": true, "slice": "name_independent", "synthetic_secret": "ghp_62a384179eb9cbc825ac94858a67c160d3a4"}
+{"case_id": "CAP011-008", "expected_rules": ["provider_github_token"], "is_secret": true, "slice": "name_independent", "synthetic_secret": "ghp_a9cf04bc1636bbb95e027a9565c2590b3bf1"}
+{"case_id": "CAP011-009", "expected_rules": ["provider_github_token"], "is_secret": true, "slice": "name_independent", "synthetic_secret": "ghp_a0a1c1a1614814d5f0472b9624f284932878"}
+{"case_id": "CAP011-010", "expected_rules": ["provider_github_token"], "is_secret": true, "slice": "name_independent", "synthetic_secret": "ghp_450fcae15097c807051d12b6ed61900de003"}
+{"case_id": "CAP011-011", "expected_rules": ["provider_aws_access_key"], "is_secret": true, "slice": "provider_structured", "synthetic_secret": "AKIA69382A0A1039BAC6"}
+{"case_id": "CAP011-012", "expected_rules": ["provider_aws_access_key"], "is_secret": true, "slice": "provider_structured", "synthetic_secret": "AKIA4C0693F22BA176B8"}
+{"case_id": "CAP011-013", "expected_rules": ["provider_aws_access_key"], "is_secret": true, "slice": "provider_structured", "synthetic_secret": "AKIA69DDFB42087DE3A6"}
+{"case_id": "CAP011-014", "expected_rules": ["provider_aws_access_key"], "is_secret": true, "slice": "provider_structured", "synthetic_secret": "AKIA4B1F1B294626392E"}
+{"case_id": "CAP011-015", "expected_rules": ["provider_aws_access_key"], "is_secret": true, "slice": "provider_structured", "synthetic_secret": "AKIAB7F9D98369EABECE"}
+{"case_id": "CAP011-016", "expected_rules": ["provider_openai_key"], "is_secret": true, "slice": "encoded", "synthetic_secret": "sk-live-675ab99b4f9750abd5db14ea7e9d1dcf"}
+{"case_id": "CAP011-017", "expected_rules": ["provider_openai_key"], "is_secret": true, "slice": "encoded", "synthetic_secret": "sk-live-68f4a2e0e29e19ea639f9634a4bd0164"}
+{"case_id": "CAP011-018", "expected_rules": ["provider_openai_key"], "is_secret": true, "slice": "encoded", "synthetic_secret": "sk-live-24758fa61e4073922a2c8010e9c4e54b"}
+{"case_id": "CAP011-019", "expected_rules": ["provider_openai_key"], "is_secret": true, "slice": "encoded", "synthetic_secret": "sk-live-a257e556cd7d5f87b77c270d7fb43e1d"}
+{"case_id": "CAP011-020", "expected_rules": ["provider_openai_key"], "is_secret": true, "slice": "encoded", "synthetic_secret": "sk-live-f29459bc0844bcb08958a85ed281fea3"}
+{"case_id": "CAP011-021", "expected_rules": ["credential_connection_string"], "is_secret": true, "slice": "connection_strings", "synthetic_secret": "postgres://db_user_1:S3cur3Pass_1!@db.production.internal:5432/orders_1"}
+{"case_id": "CAP011-022", "expected_rules": ["credential_connection_string"], "is_secret": true, "slice": "connection_strings", "synthetic_secret": "postgres://db_user_2:S3cur3Pass_2!@db.production.internal:5432/orders_2"}
+{"case_id": "CAP011-023", "expected_rules": ["credential_connection_string"], "is_secret": true, "slice": "connection_strings", "synthetic_secret": "postgres://db_user_3:S3cur3Pass_3!@db.production.internal:5432/orders_3"}
+{"case_id": "CAP011-024", "expected_rules": ["credential_connection_string"], "is_secret": true, "slice": "connection_strings", "synthetic_secret": "postgres://db_user_4:S3cur3Pass_4!@db.production.internal:5432/orders_4"}
+{"case_id": "CAP011-025", "expected_rules": ["credential_connection_string"], "is_secret": true, "slice": "connection_strings", "synthetic_secret": "postgres://db_user_5:S3cur3Pass_5!@db.production.internal:5432/orders_5"}
+{"case_id": "CAP011-026", "expected_rules": ["crypto_private_key"], "is_secret": true, "slice": "private_keys", "synthetic_secret": "-----BEGIN RSA PRIVATE KEY-----"}
+{"case_id": "CAP011-027", "expected_rules": ["crypto_private_key"], "is_secret": true, "slice": "private_keys", "synthetic_secret": "-----BEGIN RSA PRIVATE KEY-----"}
+{"case_id": "CAP011-028", "expected_rules": ["crypto_private_key"], "is_secret": true, "slice": "private_keys", "synthetic_secret": "-----BEGIN RSA PRIVATE KEY-----"}
+{"case_id": "CAP011-029", "expected_rules": ["crypto_private_key"], "is_secret": true, "slice": "private_keys", "synthetic_secret": "-----BEGIN RSA PRIVATE KEY-----"}
+{"case_id": "CAP011-030", "expected_rules": ["crypto_private_key"], "is_secret": true, "slice": "private_keys", "synthetic_secret": "-----BEGIN RSA PRIVATE KEY-----"}
+{"case_id": "CAP011-031", "expected_rules": [], "is_secret": false, "slice": "negatives_placeholders", "synthetic_secret": null}
+{"case_id": "CAP011-032", "expected_rules": [], "is_secret": false, "slice": "negatives_placeholders", "synthetic_secret": null}
+{"case_id": "CAP011-033", "expected_rules": [], "is_secret": false, "slice": "negatives_placeholders", "synthetic_secret": null}
+{"case_id": "CAP011-034", "expected_rules": [], "is_secret": false, "slice": "negatives_placeholders", "synthetic_secret": null}
+{"case_id": "CAP011-035", "expected_rules": [], "is_secret": false, "slice": "negatives_placeholders", "synthetic_secret": null}
+{"case_id": "CAP011-036", "expected_rules": [], "is_secret": false, "slice": "negatives_placeholders", "synthetic_secret": null}
+{"case_id": "CAP011-037", "expected_rules": [], "is_secret": false, "slice": "negatives_placeholders", "synthetic_secret": null}
+{"case_id": "CAP011-038", "expected_rules": [], "is_secret": false, "slice": "negatives_placeholders", "synthetic_secret": null}
+{"case_id": "CAP011-039", "expected_rules": [], "is_secret": false, "slice": "negatives_placeholders", "synthetic_secret": null}
+{"case_id": "CAP011-040", "expected_rules": [], "is_secret": false, "slice": "negatives_placeholders", "synthetic_secret": null}
+{"case_id": "CAP011-041", "expected_rules": [], "is_secret": false, "slice": "negatives_test_fixtures", "synthetic_secret": null}
+{"case_id": "CAP011-042", "expected_rules": [], "is_secret": false, "slice": "negatives_test_fixtures", "synthetic_secret": null}
+{"case_id": "CAP011-043", "expected_rules": [], "is_secret": false, "slice": "negatives_test_fixtures", "synthetic_secret": null}
+{"case_id": "CAP011-044", "expected_rules": [], "is_secret": false, "slice": "negatives_test_fixtures", "synthetic_secret": null}
+{"case_id": "CAP011-045", "expected_rules": [], "is_secret": false, "slice": "negatives_test_fixtures", "synthetic_secret": null}
+{"case_id": "CAP011-046", "expected_rules": [], "is_secret": false, "slice": "negatives_test_fixtures", "synthetic_secret": null}
+{"case_id": "CAP011-047", "expected_rules": [], "is_secret": false, "slice": "negatives_test_fixtures", "synthetic_secret": null}
+{"case_id": "CAP011-048", "expected_rules": [], "is_secret": false, "slice": "negatives_test_fixtures", "synthetic_secret": null}
+{"case_id": "CAP011-049", "expected_rules": [], "is_secret": false, "slice": "negatives_test_fixtures", "synthetic_secret": null}
+{"case_id": "CAP011-050", "expected_rules": [], "is_secret": false, "slice": "negatives_test_fixtures", "synthetic_secret": null}

@@ -1,0 +1,26 @@
+{
+  "experiment_id": "CAP-011",
+  "title": "Held-Out Secret Detection and Redaction Safety Benchmark",
+  "case_count": 50,
+  "positive_count": 30,
+  "negative_count": 20,
+  "slice_counts": {
+    "name_independent": 10,
+    "provider_structured": 5,
+    "encoded": 5,
+    "connection_strings": 5,
+    "private_keys": 5,
+    "negatives_placeholders": 10,
+    "negatives_test_fixtures": 10
+  },
+  "corpus_sha256": "72865e81db5bbd975ec8cb1710940b5203347ca39f12334a26c7cc339bd0c57f",
+  "label_sha256": "9e3bbc98a9ca549f981db3f25d280663c42d2c855e556e29ae6569da2d8572b7",
+  "status": "CORPUS_FROZEN",
+  "freeze_rule": "Held-out synthetic credentials sealed; CAP-002B corpus left untouched.",
+  "gates": {
+    "recall_min": 0.95,
+    "name_independent_recall_min": 0.9,
+    "precision_min": 0.99,
+    "redaction_violations_max": 0
+  }
+}
