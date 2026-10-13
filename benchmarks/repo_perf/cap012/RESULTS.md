@@ -2,7 +2,7 @@
 
 ## 1. Cryptographic Coordinates & Hardware Context
 - **Experiment ID**: CAP-012
-- **Provenance Commit**: `495822baa8bc15427dcedb4cbcef3091e46e0eef` (dirty: False)
+- **Provenance Commit**: `f7c7f5b0bd0417f4b3f79ced3c0918487836d857` (dirty: False)
 - **Platform**: `Windows-11-10.0.26300-SP0`
 - **Processor**: `Intel64 Family 6 Model 140 Stepping 1, GenuineIntel`
 - **Python**: `3.14.4`
@@ -12,9 +12,9 @@
 
 | Tier | Budget p95 Max | Measured p95 | Budget Peak RSS Max | Measured Peak RSS |
 |---|---|---|---|---|
-| `small` | 250.0 ms | 146.99 ms (MET) | 100.0 MB | 45.17 MB (MET) |
-| `medium` | 1000.0 ms | 249.03 ms (MET) | 250.0 MB | 50.0 MB (MET) |
-| `large` | 5000.0 ms | 1644.17 ms (MET) | 500.0 MB | 68.44 MB (MET) |
+| `small` | 250.0 ms | 120.64 ms (MET) | 100.0 MB | 44.47 MB (MET) |
+| `medium` | 1000.0 ms | 240.45 ms (MET) | 250.0 MB | 50.04 MB (MET) |
+| `large` | 5000.0 ms | 1592.3 ms (MET) | 500.0 MB | 69.57 MB (MET) |
 
 ## 3. Evidence Classification
 - **Functional Completion & Schema**: Measured-Met, Not Established
