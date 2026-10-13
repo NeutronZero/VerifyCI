@@ -115,6 +115,10 @@ def adjudicate_cap010(cap_dir: Path) -> dict[str, Any]:
     res_qids = {q["qid"] for q in queries}
     assert res_qids == expected_qids, "CAP-010 query ID mismatch between results and frozen labels"
 
+    labels_by_qid = {lbl["qid"]: lbl for lbl in labels_raw}
+    answer_queries = [q for q in queries if q["category"] != "no_relevant_result"]
+    no_answer_queries = [q for q in queries if q["category"] == "no_relevant_result"]
+
     # Recompute ranking metrics directly from raw rankings against frozen labels
     recomputed_r5: list[float] = []
     recomputed_ndcg10: list[float] = []
