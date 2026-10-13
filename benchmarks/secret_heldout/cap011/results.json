@@ -1,12 +1,12 @@
 {
   "experiment_id": "CAP-011",
   "provenance": {
-    "git_commit": "f7c7f5b0bd0417f4b3f79ced3c0918487836d857",
+    "git_commit": "5bab3b2e163b9c0bb246de90bb12808394f6e5cd",
     "git_dirty": false,
-    "harness_sha256": "0042f835548e39a68abee6042d1a789c9347d4f8a30bae66684b1af699ff96ad",
+    "harness_sha256": "c7032afdbd1144c981eb15cac3e683c1daaa70c08a0041d51b2acd63bce505d4",
     "oracle_sha256": "0a0b2a2140543042f88013a7a703a5a25e9344c2fda5e7a33e99a8beafa6ccc5",
     "config_sha256": "56046c09927e85b13a4af83a51bc5ee3072d164bcdab2e57cd0304a5464c9f41",
-    "python_version": "3.14.4",
+    "python_version": "3.14.7",
     "platform": "Windows-11-10.0.26300-SP0"
   },
   "metrics": {
