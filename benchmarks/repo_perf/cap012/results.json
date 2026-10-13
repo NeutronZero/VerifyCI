@@ -1,45 +1,45 @@
 {
   "experiment_id": "CAP-012",
   "provenance": {
-    "git_commit": "c744788e06af75164defc813a07ebf5cbf9faa70",
+    "git_commit": "f5ef360f4b9df6e26590e4ceb9959ac7b7b31c53",
     "git_dirty": false,
-    "harness_sha256": "4f481cec9e81ab8784e25b3b3615cc66506d1325241c810c81670f7483255bb7",
+    "harness_sha256": "a39708f1d5110de3c46c89f0ee855b84496bfdf5ebf700ff3fe184f57e7e5961",
     "config_sha256": "7c6ff4226ef6c1719ce843bebe4f3a16ae35d9b1c1a0c8d835fc75e7321b6ebe",
     "python_version": "3.14.4",
     "platform": "Windows-11-10.0.26300-SP0",
     "cpu": "Intel64 Family 6 Model 140 Stepping 1, GenuineIntel"
   },
   "metrics": {
-    "p50_ms": 112.57,
-    "p95_ms": 121.72,
-    "p99_ms": 122.56,
-    "peak_rss_mb": 42.53,
-    "storage_growth_per_rev": 241664,
-    "cache_hit_rate": 0.85,
+    "p50_ms": 142.13,
+    "p95_ms": 178.71,
+    "p99_ms": 184.87,
+    "peak_rss_mb": 44.77,
+    "storage_growth_per_rev": 159744,
+    "cache_hit_rate": 0.4545,
     "tiers": {
       "small": {
-        "p50_ms": 112.57,
-        "p95_ms": 121.72,
-        "p99_ms": 122.56,
-        "peak_rss_mb": 42.53,
-        "storage_growth_per_rev": 241664,
-        "cache_hit_rate": 0.85
+        "p50_ms": 142.13,
+        "p95_ms": 178.71,
+        "p99_ms": 184.87,
+        "peak_rss_mb": 44.77,
+        "storage_growth_per_rev": 159744,
+        "cache_hit_rate": 0.4545
       },
       "medium": {
-        "p50_ms": 258.07,
-        "p95_ms": 261.99,
-        "p99_ms": 262.64,
-        "peak_rss_mb": 56.13,
-        "storage_growth_per_rev": 806912,
-        "cache_hit_rate": 0.85
+        "p50_ms": 230.77,
+        "p95_ms": 515.08,
+        "p99_ms": 543.2,
+        "peak_rss_mb": 59.3,
+        "storage_growth_per_rev": 692224,
+        "cache_hit_rate": 0.4545
       },
       "large": {
-        "p50_ms": 1188.81,
-        "p95_ms": 1224.68,
-        "p99_ms": 1230.18,
-        "peak_rss_mb": 74.86,
-        "storage_growth_per_rev": 2867200,
-        "cache_hit_rate": 0.85
+        "p50_ms": 1539.1,
+        "p95_ms": 1909.09,
+        "p99_ms": 1947.88,
+        "peak_rss_mb": 83.31,
+        "storage_growth_per_rev": 2752512,
+        "cache_hit_rate": 0.4545
       }
     }
   }

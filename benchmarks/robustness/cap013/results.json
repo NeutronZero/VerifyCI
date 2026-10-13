@@ -1,7 +1,7 @@
 {
   "experiment_id": "CAP-013",
   "provenance": {
-    "git_commit": "c744788e06af75164defc813a07ebf5cbf9faa70",
+    "git_commit": "f5ef360f4b9df6e26590e4ceb9959ac7b7b31c53",
     "git_dirty": false,
     "harness_sha256": "e2e123eeadb02c6a18dfb36540c419b0e777efdc1c29404d9740282cd3abe5eb",
     "config_sha256": "1d745bc823b1b5edc4e0d82fbe73d2b515515d80e52dec6e72a19310e0a5e676",
@@ -24,10 +24,13 @@
         "diff": "- predecessors(2) -> [1]\n+ predecessors(2) -> []",
         "target_file": "verifyci/graph/traverse.py",
         "patch_applied": "Flip traversal direction: direction == \"incoming\" -> direction == \"outgoing\"",
-        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmp5vwsfj2r",
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpb240pkp9",
+        "cwd": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpb240pkp9",
+        "verified_module_path": "VERIFYCI_LOCATION:C:\\Users\\satya\\AppData\\Local\\Temp\\tmpb240pkp9\\verifyci\\__init__.py",
         "test_command": "pytest tests/evaluation/test_blast_eval.py -k test_blast_finds_true_caller -q",
         "exit_status": 1,
-        "stdout_summary": "1 failed, 2 deselected in 0.29s"
+        "stdout_summary": "1 failed, 2 deselected in 0.31s",
+        "stderr_summary": ""
       },
       "classification": "killed"
     },
@@ -40,10 +43,13 @@
         "diff": "- def critical_security_check(): pass",
         "target_file": "verifyci/verification/removal.py",
         "patch_applied": "Bypass removal provenance: force verdict = \"verified\"",
-        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpf852rwg3",
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpxdn00np_",
+        "cwd": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpxdn00np_",
+        "verified_module_path": "VERIFYCI_LOCATION:C:\\Users\\satya\\AppData\\Local\\Temp\\tmpxdn00np_\\verifyci\\__init__.py",
         "test_command": "pytest tests/verification/test_removal_cap003a.py -k test_deep_deletion_catches_fabrication_past_snippet_truncation -q",
         "exit_status": 1,
-        "stdout_summary": "1 failed, 7 deselected in 0.14s"
+        "stdout_summary": "1 failed, 7 deselected in 0.14s",
+        "stderr_summary": ""
       },
       "classification": "killed"
     },
@@ -56,10 +62,13 @@
         "diff": "- verify_session(strict=True)\n+ verify_session(strict=False)",
         "target_file": "verifyci/verification/call_semantics.py",
         "patch_applied": "Disable call argument mutation detector: if False",
-        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmptl88ev_o",
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmppddsubsm",
+        "cwd": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmppddsubsm",
+        "verified_module_path": "VERIFYCI_LOCATION:C:\\Users\\satya\\AppData\\Local\\Temp\\tmppddsubsm\\verifyci\\__init__.py",
         "test_command": "pytest tests/verification/test_call_semantics_cap004.py -k test_cap002_n_s4_falsifier_resolved -q",
         "exit_status": 1,
-        "stdout_summary": "1 failed, 7 deselected in 0.14s"
+        "stdout_summary": "1 failed, 7 deselected in 0.14s",
+        "stderr_summary": ""
       },
       "classification": "killed"
     },
@@ -72,10 +81,13 @@
         "diff": "auth/service.py vs billing/service.py collision",
         "target_file": "verifyci/verification/diffmap.py",
         "patch_applied": "Suppress path ambiguity detection: return empty collision dict",
-        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmphklh76q4",
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpt044nqvf",
+        "cwd": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpt044nqvf",
+        "verified_module_path": "VERIFYCI_LOCATION:C:\\Users\\satya\\AppData\\Local\\Temp\\tmpt044nqvf\\verifyci\\__init__.py",
         "test_command": "pytest tests/verification/test_diffmap.py -k test_suffix_ambiguity_flagged_not_silent -q",
         "exit_status": 1,
-        "stdout_summary": "1 failed, 40 deselected in 0.14s"
+        "stdout_summary": "1 failed, 40 deselected in 0.21s",
+        "stderr_summary": ""
       },
       "classification": "killed"
     },
@@ -88,10 +100,13 @@
         "diff": "@@ CORRUPT_HUNK @@",
         "target_file": "verifyci/interface/ingress.py",
         "patch_applied": "Relax ingress size limit: 1M -> 100M chars",
-        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpvomac3yy",
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpz1e_ky3a",
+        "cwd": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpz1e_ky3a",
+        "verified_module_path": "VERIFYCI_LOCATION:C:\\Users\\satya\\AppData\\Local\\Temp\\tmpz1e_ky3a\\verifyci\\__init__.py",
         "test_command": "pytest tests/interface/test_ingress.py -k test_validate_diff_ingress_oversized -q",
         "exit_status": 2,
-        "stdout_summary": "1 error in 0.29s"
+        "stdout_summary": "1 error in 0.37s",
+        "stderr_summary": ""
       },
       "classification": "killed"
     },
@@ -104,10 +119,13 @@
         "diff": "+ # formatting comment",
         "target_file": "verifyci/interface/limits.py",
         "patch_applied": "Benign documentation comment modification",
-        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmp6m_cb0nb",
+        "sandbox_path": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpme7ai581",
+        "cwd": "C:\\Users\\satya\\AppData\\Local\\Temp\\tmpme7ai581",
+        "verified_module_path": "VERIFYCI_LOCATION:C:\\Users\\satya\\AppData\\Local\\Temp\\tmpme7ai581\\verifyci\\__init__.py",
         "test_command": "pytest tests/interface/test_ingress.py -k test_validate_diff_ingress_valid -q",
         "exit_status": 0,
-        "stdout_summary": "1 passed, 12 deselected in 0.03s"
+        "stdout_summary": "1 passed, 12 deselected in 0.03s",
+        "stderr_summary": ""
       },
       "classification": "equivalent"
     }
