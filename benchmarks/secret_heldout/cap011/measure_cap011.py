@@ -68,9 +68,9 @@ def get_git_provenance() -> tuple[str, bool]:
         raise RuntimeError("Git commit provenance is invalid or unknown")
 
     try:
-        status_lines = subprocess.check_output(
-            ["git", "status", "--porcelain"], cwd=REPO_ROOT, text=True
-        ).splitlines()
+        raw_z = subprocess.check_output(
+            ["git", "status", "--porcelain", "-z"], cwd=REPO_ROOT
+        )
     except Exception as exc:
         raise RuntimeError(f"Failed to obtain git status for provenance: {exc}") from exc
 
@@ -88,23 +88,41 @@ def get_git_provenance() -> tuple[str, bool]:
         "evidence/cap-adjudication-bundle.json",
     }
 
-    dirty = False
-    for line in status_lines:
-        line_clean = line.strip()
-        if not line_clean:
-            continue
-        rel_path = line_clean[2:].strip()
-        if " -> " in rel_path:
-            rel_path = rel_path.split(" -> ", 1)[1].strip()
-        rel_norm = rel_path.replace("\\", "/")
-
-        is_exempt = (
-            rel_norm in allowed_exact
-            or fnmatch.fnmatchcase(rel_norm, "benchmark-results-*.json")
+    def _is_path_exempt(p: str) -> bool:
+        norm = p.strip().replace("\\", "/")
+        return (
+            norm in allowed_exact
+            or fnmatch.fnmatchcase(norm, "benchmark-results-*.json")
         )
-        if not is_exempt:
+
+    dirty = False
+    tokens = raw_z.split(b"\0")
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if not t:
+            i += 1
+            continue
+        if len(t) < 3:
             dirty = True
             break
+        status = t[:2].decode("utf-8", errors="replace")
+        p1 = t[3:].decode("utf-8", errors="replace")
+        if "R" in status or "C" in status:
+            if i + 1 < len(tokens):
+                i += 1
+                p2 = tokens[i].decode("utf-8", errors="replace")
+                if not (_is_path_exempt(p1) and _is_path_exempt(p2)):
+                    dirty = True
+                    break
+            else:
+                dirty = True
+                break
+        else:
+            if not _is_path_exempt(p1):
+                dirty = True
+                break
+        i += 1
 
     return commit, dirty
 
