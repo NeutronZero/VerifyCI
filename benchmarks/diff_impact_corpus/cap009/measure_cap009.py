@@ -67,7 +67,12 @@ def get_git_provenance() -> tuple[str, bool]:
             ["git", "status", "--porcelain"], cwd=REPO_ROOT, text=True
         ).splitlines()
         code_dirty = any(
-            not (line.endswith("results.json") or line.endswith("RESULTS.md"))
+            not (
+                line.endswith("results.json")
+                or line.endswith("RESULTS.md")
+                or "benchmark-results" in line
+                or "evidence/" in line
+            )
             for line in status_lines
             if line.strip()
         )

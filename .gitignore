@@ -15,5 +15,6 @@ benchmarks/beir/__pycache__/
 *.tmp
 opencode.json
 /evidence/
+benchmark-results*.json
 dist/
 *.egg-info/
