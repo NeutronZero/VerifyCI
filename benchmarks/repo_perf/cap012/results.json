@@ -1,44 +1,44 @@
 {
   "experiment_id": "CAP-012",
   "provenance": {
-    "git_commit": "becb9a01c30a6e3f8cfb9f5336ba6d57e9fa1806",
+    "git_commit": "bd57eb0f1cafe1b4e6d623732dcd3df4d22debc2",
     "git_dirty": false,
-    "harness_sha256": "cfc3ccc45cc00020b9d73bbafb457daae477b23dfbabf34f7d39b535007a29b6",
+    "harness_sha256": "c7927e941a828d5deaad1ce29976731a5344237374c14d720e356cddab9d3b4b",
     "config_sha256": "7c6ff4226ef6c1719ce843bebe4f3a16ae35d9b1c1a0c8d835fc75e7321b6ebe",
     "python_version": "3.14.4",
     "platform": "Windows-11-10.0.26300-SP0",
     "cpu": "Intel64 Family 6 Model 140 Stepping 1, GenuineIntel"
   },
   "metrics": {
-    "p50_ms": 107.27,
-    "p95_ms": 111.64,
-    "p99_ms": 111.85,
-    "peak_rss_mb": 44.43,
-    "storage_growth_per_rev": 139264,
+    "p50_ms": 130.47,
+    "p95_ms": 142.65,
+    "p99_ms": 144.73,
+    "peak_rss_mb": 44.9,
+    "storage_growth_per_rev": 147456,
     "cache_hit_rate": 0.4545,
     "tiers": {
       "small": {
-        "p50_ms": 107.27,
-        "p95_ms": 111.64,
-        "p99_ms": 111.85,
-        "peak_rss_mb": 44.43,
-        "storage_growth_per_rev": 139264,
+        "p50_ms": 130.47,
+        "p95_ms": 142.65,
+        "p99_ms": 144.73,
+        "peak_rss_mb": 44.9,
+        "storage_growth_per_rev": 147456,
         "cache_hit_rate": 0.4545
       },
       "medium": {
-        "p50_ms": 234.17,
-        "p95_ms": 236.67,
-        "p99_ms": 236.83,
-        "peak_rss_mb": 49.09,
-        "storage_growth_per_rev": 688128,
+        "p50_ms": 260.47,
+        "p95_ms": 318.75,
+        "p99_ms": 323.14,
+        "peak_rss_mb": 48.99,
+        "storage_growth_per_rev": 696320,
         "cache_hit_rate": 0.4545
       },
       "large": {
-        "p50_ms": 1070.63,
-        "p95_ms": 1125.72,
-        "p99_ms": 1130.94,
-        "peak_rss_mb": 63.48,
-        "storage_growth_per_rev": 2736128,
+        "p50_ms": 1508.42,
+        "p95_ms": 2425.89,
+        "p99_ms": 2601.99,
+        "peak_rss_mb": 63.69,
+        "storage_growth_per_rev": 2768896,
         "cache_hit_rate": 0.4545
       }
     }

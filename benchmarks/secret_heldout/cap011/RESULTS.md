@@ -5,7 +5,7 @@
 - **Corpus SHA-256**: `8dcb519d55df0a1828a70d0c857606be40f81551239dbe8d34cdf808b01dbe52`
 - **Labels SHA-256**: `5dbdf268508b62f071c65942bbb262ba969a695a99e4c08471ad35d9d49b0307`
 - **Total Cases**: 50 (30 positive, 20 negative)
-- **Provenance Commit**: `becb9a01c30a6e3f8cfb9f5336ba6d57e9fa1806` (dirty: False)
+- **Provenance Commit**: `bd57eb0f1cafe1b4e6d623732dcd3df4d22debc2` (dirty: False)
 
 ## 2. Gates Table with Predeclared Thresholds
 

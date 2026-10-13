@@ -6,7 +6,7 @@
 - **Labels SHA-256**: `ea461629678dff8be90069fd8b3cf6b9ebec0937b23a6efb85054effb33c1a4e`
 - **Total Queries**: 210
 - **Total Documents**: 1050 across 12 repositories
-- **Provenance Commit**: `becb9a01c30a6e3f8cfb9f5336ba6d57e9fa1806` (dirty: False)
+- **Provenance Commit**: `bd57eb0f1cafe1b4e6d623732dcd3df4d22debc2` (dirty: False)
 
 ## 2. Gates Table with Predeclared Thresholds
 
