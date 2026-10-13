@@ -1,44 +1,44 @@
 {
   "experiment_id": "CAP-012",
   "provenance": {
-    "git_commit": "5bab3b2e163b9c0bb246de90bb12808394f6e5cd",
+    "git_commit": "9684c795613ad8c4c501c7c752e92da98029f9fe",
     "git_dirty": false,
-    "harness_sha256": "31955e30db028e1c85e1147abb5c22354fccdb1c8fa217e86330bf17724d7314",
+    "harness_sha256": "05995bbde30a6e2b2ab5f5800bd125a2523527c424c000d347462a7beacacd42",
     "config_sha256": "7c6ff4226ef6c1719ce843bebe4f3a16ae35d9b1c1a0c8d835fc75e7321b6ebe",
-    "python_version": "3.14.7",
+    "python_version": "3.14.4",
     "platform": "Windows-11-10.0.26300-SP0",
     "cpu": "Intel64 Family 6 Model 140 Stepping 1, GenuineIntel"
   },
   "metrics": {
-    "p50_ms": 114.74,
-    "p95_ms": 150.62,
-    "p99_ms": 157.59,
-    "peak_rss_mb": 45.3,
-    "storage_growth_per_rev": 155648,
+    "p50_ms": 113.46,
+    "p95_ms": 128.97,
+    "p99_ms": 130.71,
+    "peak_rss_mb": 45.58,
+    "storage_growth_per_rev": 147456,
     "cache_hit_rate": 0.4167,
     "tiers": {
       "small": {
-        "p50_ms": 114.74,
-        "p95_ms": 150.62,
-        "p99_ms": 157.59,
-        "peak_rss_mb": 45.3,
-        "storage_growth_per_rev": 155648,
+        "p50_ms": 113.46,
+        "p95_ms": 128.97,
+        "p99_ms": 130.71,
+        "peak_rss_mb": 45.58,
+        "storage_growth_per_rev": 147456,
         "cache_hit_rate": 0.4167
       },
       "medium": {
-        "p50_ms": 226.24,
-        "p95_ms": 234.09,
-        "p99_ms": 234.36,
-        "peak_rss_mb": 52.55,
-        "storage_growth_per_rev": 679936,
+        "p50_ms": 229.06,
+        "p95_ms": 244.8,
+        "p99_ms": 246.1,
+        "peak_rss_mb": 52.16,
+        "storage_growth_per_rev": 675840,
         "cache_hit_rate": 0.4167
       },
       "large": {
-        "p50_ms": 1049.35,
-        "p95_ms": 1085.24,
-        "p99_ms": 1087.54,
-        "peak_rss_mb": 74.37,
-        "storage_growth_per_rev": 2736128,
+        "p50_ms": 1610.33,
+        "p95_ms": 2159.14,
+        "p99_ms": 2253.02,
+        "peak_rss_mb": 75.73,
+        "storage_growth_per_rev": 2760704,
         "cache_hit_rate": 0.4167
       }
     }

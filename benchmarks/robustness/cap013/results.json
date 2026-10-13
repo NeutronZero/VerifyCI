@@ -1,11 +1,11 @@
 {
   "experiment_id": "CAP-013",
   "provenance": {
-    "git_commit": "5bab3b2e163b9c0bb246de90bb12808394f6e5cd",
+    "git_commit": "9684c795613ad8c4c501c7c752e92da98029f9fe",
     "git_dirty": false,
-    "harness_sha256": "2db273ba1d0427825c8157e85497346db4d22f68028086a43bf0cad720943a3e",
+    "harness_sha256": "8799a617f0cdc2e3a6f9efdf3a4077a9c7c76eea30537cbfc4d7aff99cff7589",
     "config_sha256": "1d745bc823b1b5edc4e0d82fbe73d2b515515d80e52dec6e72a19310e0a5e676",
-    "python_version": "3.14.7",
+    "python_version": "3.14.4",
     "platform": "Windows-11-10.0.26300-SP0"
   },
   "metrics": {
@@ -29,7 +29,7 @@
         "verified_module_path": "VERIFYCI_LOCATION:<SANDBOX>/verifyci/__init__.py",
         "test_command": "pytest tests/evaluation/test_blast_eval.py -k test_blast_finds_true_caller -q",
         "exit_status": 1,
-        "stdout_summary": "1 failed, 2 deselected in 0.46s",
+        "stdout_summary": "1 failed, 2 deselected in 0.27s",
         "stderr_summary": ""
       },
       "classification": "killed"
@@ -48,7 +48,7 @@
         "verified_module_path": "VERIFYCI_LOCATION:<SANDBOX>/verifyci/__init__.py",
         "test_command": "pytest tests/verification/test_removal_cap003a.py -k test_deep_deletion_catches_fabrication_past_snippet_truncation -q",
         "exit_status": 1,
-        "stdout_summary": "1 failed, 7 deselected in 0.29s",
+        "stdout_summary": "1 failed, 7 deselected in 0.15s",
         "stderr_summary": ""
       },
       "classification": "killed"
@@ -67,7 +67,7 @@
         "verified_module_path": "VERIFYCI_LOCATION:<SANDBOX>/verifyci/__init__.py",
         "test_command": "pytest tests/verification/test_call_semantics_cap004.py -k test_cap002_n_s4_falsifier_resolved -q",
         "exit_status": 1,
-        "stdout_summary": "1 failed, 7 deselected in 0.32s",
+        "stdout_summary": "1 failed, 7 deselected in 0.18s",
         "stderr_summary": ""
       },
       "classification": "killed"
@@ -86,7 +86,7 @@
         "verified_module_path": "VERIFYCI_LOCATION:<SANDBOX>/verifyci/__init__.py",
         "test_command": "pytest tests/verification/test_diffmap.py -k test_suffix_ambiguity_flagged_not_silent -q",
         "exit_status": 1,
-        "stdout_summary": "1 failed, 40 deselected in 0.32s",
+        "stdout_summary": "1 failed, 40 deselected in 0.15s",
         "stderr_summary": ""
       },
       "classification": "killed"
@@ -105,7 +105,7 @@
         "verified_module_path": "VERIFYCI_LOCATION:<SANDBOX>/verifyci/__init__.py",
         "test_command": "pytest tests/interface/test_ingress.py -k test_validate_diff_ingress_oversized -q",
         "exit_status": 1,
-        "stdout_summary": "1 failed, 12 deselected in 0.27s",
+        "stdout_summary": "1 failed, 12 deselected in 0.11s",
         "stderr_summary": ""
       },
       "classification": "killed"
@@ -124,7 +124,7 @@
         "verified_module_path": "VERIFYCI_LOCATION:<SANDBOX>/verifyci/__init__.py",
         "test_command": "pytest tests/interface/test_ingress.py -k test_validate_diff_ingress_valid -q",
         "exit_status": 0,
-        "stdout_summary": "1 passed, 12 deselected in 0.23s",
+        "stdout_summary": "1 passed, 12 deselected in 0.03s",
         "stderr_summary": ""
       },
       "classification": "equivalent"
