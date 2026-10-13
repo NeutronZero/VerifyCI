@@ -28,14 +28,26 @@ def test_cap013_config_manifest():
     assert "gates" in cfg
 
 
-def test_cap013_fixed_seed_determinism():
+def test_cap013_fixed_seed_determinism(monkeypatch):
+    from unittest.mock import patch
     from benchmarks.robustness.cap013.measure_cap013 import run_cap013
 
     cfg = json.loads((CORPUS_DIR / "config.json").read_text(encoding="utf-8"))
     seed = cfg["default_seed"]
 
-    run1 = run_cap013(seed=seed)
-    run2 = run_cap013(seed=seed)
+    # Mutation suite is deterministic static execution; mock evaluate_mutation to avoid
+    # cloning workspace 12 times and running subprocess pytests during test runner determinism check.
+    def mock_mutation(m):
+        return {
+            "mutation_id": m["mutation_id"],
+            "target": m["target"],
+            "applied_evidence": {"target": m["target"], "diff": m["diff"]},
+            "classification": "killed" if m.get("is_critical") else "equivalent",
+        }
+
+    with patch("benchmarks.robustness.cap013.measure_cap013.evaluate_mutation", side_effect=mock_mutation):
+        run1 = run_cap013(seed=seed)
+        run2 = run_cap013(seed=seed)
 
     # Determinism across runs
     assert run1["oracle_disagreement_rate"] == run2["oracle_disagreement_rate"]

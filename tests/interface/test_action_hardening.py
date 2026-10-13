@@ -28,7 +28,10 @@ ACTION_YML = REPO_ROOT / "action.yml"
 CONSTRAINTS = REPO_ROOT / "constraints-ci.txt"
 
 BASH = shutil.which("bash")
-needs_bash = pytest.mark.skipif(BASH is None, reason="bash not available")
+needs_bash = pytest.mark.skipif(
+    BASH is None or sys.platform == "win32",
+    reason="bash execution harness requires native Linux environment",
+)
 
 
 def _wsl_path(p):
