@@ -74,10 +74,37 @@ def test_cap012_results_schema_and_functional_completion():
     }
     assert required_keys.issubset(metrics.keys())
 
-    # Fast smoke run of run_cap012 interface
+    # Fast smoke run of run_cap012 interface: must NOT fabricate unexecuted tiers
     res = run_cap012(smoke_tier_only=True)
     assert required_keys.issubset(res.keys())
     assert "small" in res["tiers"]
+    assert "medium" not in res["tiers"]
+    assert "large" not in res["tiers"]
+    assert res.get("evaluation_mode") == "SMOKE_SUBSET"
+    assert res.get("adjudication_verdict") == "INCOMPLETE"
+
+
+def test_cap012_cache_context_manager_restoration():
+    from verifyci.storage.graph_cache import GLOBAL_GRAPH_CACHE
+    from benchmarks.repo_perf.cap012.measure_cap012 import instrument_graph_cache
+
+    original_fn = GLOBAL_GRAPH_CACHE.get_or_load
+
+    # 1. Normal exit restoration
+    with instrument_graph_cache() as get_stats:
+        assert GLOBAL_GRAPH_CACHE.get_or_load != original_fn
+        hits, misses = get_stats()
+        assert hits == 0 and misses == 0
+
+    assert GLOBAL_GRAPH_CACHE.get_or_load == original_fn
+
+    # 2. Exception exit restoration
+    with pytest.raises(ZeroDivisionError):
+        with instrument_graph_cache():
+            assert GLOBAL_GRAPH_CACHE.get_or_load != original_fn
+            _ = 1 / 0
+
+    assert GLOBAL_GRAPH_CACHE.get_or_load == original_fn
 
 
 def test_cap012_hardware_pinned_timing_gate():

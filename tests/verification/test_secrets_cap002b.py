@@ -311,3 +311,23 @@ def test_adversarial_multiline_buffer_byte_exhaustion(monkeypatch):
         detector.scan_diff(diff)
     assert exc_info.value.limit_type == "multiline_buffer"
 
+
+def test_dynamic_wilson_ci_bounds():
+    from benchmarks.secret_corpus.cap002b.measure_cap002b import format_wilson_ci, wilson_score_interval
+    # Bounds for k=20, n=23
+    low23, high23 = wilson_score_interval(20, 23)
+    assert round(low23, 4) == 0.6787
+    assert round(high23, 4) == 0.9546
+    assert format_wilson_ci(20, 23) == "67.9% – 95.5%"
+
+    # Bounds for k=20, n=20
+    low20, high20 = wilson_score_interval(20, 20)
+    assert round(low20, 4) == 0.8389
+    assert round(high20, 4) == 1.0
+    assert format_wilson_ci(20, 20) == "83.9% – 100.0%"
+
+    # Bounds for edge cases
+    assert wilson_score_interval(0, 0) == (0.0, 0.0)
+    assert wilson_score_interval(0, 10)[0] == 0.0
+    assert wilson_score_interval(10, 10)[1] == 1.0
+

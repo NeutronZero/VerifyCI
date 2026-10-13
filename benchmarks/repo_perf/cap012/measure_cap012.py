@@ -21,6 +21,7 @@ from verifyci.interface.commands.ingest import run_ingest
 from verifyci.interface.commands.verify import run_verify
 
 
+import contextlib
 import threading
 from verifyci.storage.graph_cache import GLOBAL_GRAPH_CACHE
 
@@ -65,7 +66,7 @@ def _get_process_rss_mb() -> float:
         return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
     except ImportError:
         pass
-    return 40.0
+    raise RuntimeError("Process RSS measurement unsupported or failed: no valid platform memory provider")
 
 
 CORPUS_DIR = Path(__file__).resolve().parent
@@ -213,28 +214,35 @@ class RssMonitor:
         return self.peak_mb
 
 
+@contextlib.contextmanager
+def instrument_graph_cache():
+    """Safely instrument graph cache hits and misses with guaranteed restoration."""
+    hits = 0
+    misses = 0
+    orig_get_or_load = GLOBAL_GRAPH_CACHE.get_or_load
+
+    def _instrumented_get_or_load(key: tuple, loader_fn: Any) -> Any:
+        nonlocal hits, misses
+        with GLOBAL_GRAPH_CACHE._lock:
+            if key in GLOBAL_GRAPH_CACHE._cache:
+                hits += 1
+            else:
+                misses += 1
+        return orig_get_or_load(key, loader_fn)
+
+    GLOBAL_GRAPH_CACHE.get_or_load = _instrumented_get_or_load
+    try:
+        yield lambda: (hits, misses)
+    finally:
+        GLOBAL_GRAPH_CACHE.get_or_load = orig_get_or_load
+
+
 def _measure_tier(file_count: int, commit_files: int = 1, repetitions: int = 5, warmup_runs: int = 2) -> dict[str, Any]:
     latencies: list[float] = []
     peak_rss_values: list[float] = []
     storage_deltas: list[int] = []
 
-    # Instrument graph cache activity
-    cache_hits = 0
-    cache_misses = 0
-    orig_get_or_load = GLOBAL_GRAPH_CACHE.get_or_load
-
-    def _instrumented_get_or_load(key: tuple, loader_fn: Any) -> Any:
-        nonlocal cache_hits, cache_misses
-        with GLOBAL_GRAPH_CACHE._lock:
-            if key in GLOBAL_GRAPH_CACHE._cache:
-                cache_hits += 1
-            else:
-                cache_misses += 1
-        return orig_get_or_load(key, loader_fn)
-
-    GLOBAL_GRAPH_CACHE.get_or_load = _instrumented_get_or_load
-
-    try:
+    with instrument_graph_cache() as get_cache_stats:
         # Pre-measurement warmup (gated timing initialization & JIT/import overhead clearance)
         for _ in range(warmup_runs):
             with tempfile.TemporaryDirectory() as tmp_str:
@@ -284,8 +292,7 @@ def _measure_tier(file_count: int, commit_files: int = 1, repetitions: int = 5, 
                 peak_rss_values.append(run_peak_mb)
                 storage_deltas.append(max(0, rev2_db_size - base_db_size))
 
-    finally:
-        GLOBAL_GRAPH_CACHE.get_or_load = orig_get_or_load
+        cache_hits, cache_misses = get_cache_stats()
 
     latencies.sort()
     peak_rss_values.sort()
@@ -294,7 +301,7 @@ def _measure_tier(file_count: int, commit_files: int = 1, repetitions: int = 5, 
     p50 = float(np.percentile(latencies, 50))
     p95 = float(np.percentile(latencies, 95))
     p99 = float(np.percentile(latencies, 99))
-    peak_rss = peak_rss_values[len(peak_rss_values) // 2]
+    peak_rss = max(peak_rss_values) if peak_rss_values else 0.0
     median_storage = sorted(storage_deltas)[len(storage_deltas) // 2]
 
     total_cache_ops = cache_hits + cache_misses
@@ -345,17 +352,25 @@ def run_cap012(smoke_tier_only: bool = False) -> dict[str, Any]:
 
         tier_results[tier] = json.loads(tier_json_str)
 
-    # Fill default / estimated envelope for tiers not executed during smoke run
+    if smoke_tier_only:
+        primary = tier_results.get("small")
+        if not primary:
+            raise RuntimeError("Smoke evaluation failed to produce small tier results")
+        return {
+            "p50_ms": primary["p50_ms"],
+            "p95_ms": primary["p95_ms"],
+            "p99_ms": primary["p99_ms"],
+            "peak_rss_mb": primary["peak_rss_mb"],
+            "storage_growth_per_rev": primary["storage_growth_per_rev"],
+            "cache_hit_rate": primary["cache_hit_rate"],
+            "tiers": tier_results,
+            "evaluation_mode": "SMOKE_SUBSET",
+            "adjudication_verdict": "INCOMPLETE",
+        }
+
     for tier in tier_defs:
         if tier not in tier_results:
-            tier_results[tier] = {
-                "p50_ms": 150.0 if tier == "medium" else 450.0,
-                "p95_ms": 220.0 if tier == "medium" else 650.0,
-                "p99_ms": 280.0 if tier == "medium" else 850.0,
-                "peak_rss_mb": 45.0 if tier == "medium" else 95.0,
-                "storage_growth_per_rev": 15000 if tier == "medium" else 45000,
-                "cache_hit_rate": 0.85,
-            }
+            raise RuntimeError(f"Required tier '{tier}' missing from full evaluation execution")
 
     # Top-level aggregated envelope (representative from small/primary tier)
     primary = tier_results["small"]

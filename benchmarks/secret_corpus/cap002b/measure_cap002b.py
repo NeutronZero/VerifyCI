@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,27 @@ ROOT = HERE.parent.parent.parent
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from verifyci.secrets.redaction import assert_no_secret_leak
+
+
+def wilson_score_interval(successes: int, total: int, z: float = 1.959963984540054) -> tuple[float, float]:
+    """Computes two-sided 95% Wilson score interval for binomial proportion."""
+    if total <= 0:
+        return 0.0, 0.0
+    p = successes / total
+    denom = 1.0 + (z**2) / total
+    center = (p + (z**2) / (2.0 * total)) / denom
+    spread = (z * math.sqrt((p * (1.0 - p) / total) + (z**2) / (4.0 * (total**2)))) / denom
+    lower = 0.0 if successes == 0 else max(0.0, center - spread)
+    upper = 1.0 if successes == total else min(1.0, center + spread)
+    return lower, upper
+
+
+def format_wilson_ci(successes: int, total: int) -> str:
+    low, high = wilson_score_interval(successes, total)
+    return f"{low * 100:.1f}% – {high * 100:.1f}%"
+
 
 FROZEN_CORPUS_SHA256 = "b6c7df17e334f6847453012fe3a05bae82181a31411039f7d724df1a4a0ff65c"
 FROZEN_LABELS_SHA256 = "6f7bc1edb7ff282b93b70e403830e199faab652f91d43753f3d97f1f1f4ac8f8"
@@ -192,6 +214,18 @@ def main():
                 rule_name = parts[-1] if len(parts) >= 3 else ""
                 if not rule_name.startswith("provider_") and not rule_name.startswith("structured_"):
                     redaction_violations += 1
+            if c.get("expected_violated"):
+                for line in c.get("diff", "").splitlines():
+                    if line.startswith("+") and ('"' in line or "'" in line):
+                        for quote in ['"', "'"]:
+                            if quote in line:
+                                segs = line.split(quote)
+                                for seg in segs[1::2]:
+                                    if len(seg) >= 8:
+                                        try:
+                                            assert_no_secret_leak(ev, seg)
+                                        except AssertionError:
+                                            redaction_violations += 1
     metrics_d2["redaction_violations"] = redaction_violations
 
     output = {
@@ -247,16 +281,8 @@ def main():
     )
     _recall_n = metrics_d2["tp"] + metrics_d2["fn"]
     _prec_n = metrics_d2["tp"] + metrics_d2["fp"]
-    _recall_wilson = (
-        "67.9% – 95.5%"
-        if (metrics_d2["tp"] == 20 and _recall_n == 23)
-        else "not precomputed for these counts"
-    )
-    _prec_wilson = (
-        "83.9% – 100.0%"
-        if (metrics_d2["tp"] == 20 and _prec_n == 20)
-        else "not precomputed for these counts"
-    )
+    _recall_wilson = format_wilson_ci(metrics_d2["tp"], _recall_n)
+    _prec_wilson = format_wilson_ci(metrics_d2["tp"], _prec_n)
     _decision = "PROMOTE" if (_falsifier_resolved and _safe) else "HOLD"
     _status = "ESTABLISHED" if (_falsifier_resolved and _safe) else "MEASURED"
     output["adjudication_verdict"] = _decision
