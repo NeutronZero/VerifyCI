@@ -25,6 +25,18 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def assert_frozen_companion_hashes(cap_dir: Path, c_hash: str, l_hash: str, cap_name: str) -> None:
+    c_file = cap_dir / "CORPUS_SHA256"
+    if c_file.exists():
+        expected_c = c_file.read_text(encoding="utf-8").strip()
+        assert c_hash == expected_c, f"{cap_name} CORPUS_SHA256 file drift: {c_hash} != {expected_c}"
+
+    l_file = cap_dir / "LABEL_SHA256"
+    if l_file.exists():
+        expected_l = l_file.read_text(encoding="utf-8").strip()
+        assert l_hash == expected_l, f"{cap_name} LABEL_SHA256 file drift: {l_hash} != {expected_l}"
+
+
 def adjudicate_cap009(cap_dir: Path) -> dict[str, Any]:
     cfg = json.loads((cap_dir / "config.json").read_text(encoding="utf-8"))
     res = json.loads((cap_dir / "results.json").read_text(encoding="utf-8"))
@@ -40,6 +52,7 @@ def adjudicate_cap009(cap_dir: Path) -> dict[str, Any]:
     l_hash = sha256_file(cap_dir / "labels.jsonl")
     assert c_hash == cfg["corpus_sha256"], f"CAP-009 cases.jsonl drift: {c_hash} != {cfg['corpus_sha256']}"
     assert l_hash == cfg["label_sha256"], f"CAP-009 labels.jsonl drift: {l_hash} != {cfg['label_sha256']}"
+    assert_frozen_companion_hashes(cap_dir, c_hash, l_hash, "CAP-009")
 
     # Join result rows directly with frozen labels to verify correspondence
     labels_raw = [json.loads(line) for line in (cap_dir / "labels.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -109,6 +122,7 @@ def adjudicate_cap010(cap_dir: Path) -> dict[str, Any]:
     l_hash = sha256_file(cap_dir / "labels.jsonl")
     assert c_hash == cfg["corpus_sha256"], f"CAP-010 cases.jsonl drift: {c_hash} != {cfg['corpus_sha256']}"
     assert l_hash == cfg["label_sha256"], f"CAP-010 labels.jsonl drift: {l_hash} != {cfg['label_sha256']}"
+    assert_frozen_companion_hashes(cap_dir, c_hash, l_hash, "CAP-010")
 
     # Verify query IDs match the frozen query set exactly
     cases_raw = [json.loads(line) for line in (cap_dir / "cases.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -221,6 +235,7 @@ def adjudicate_cap011(cap_dir: Path) -> dict[str, Any]:
     l_hash = sha256_file(cap_dir / "labels.jsonl")
     assert c_hash == cfg["corpus_sha256"], f"CAP-011 cases.jsonl drift: {c_hash} != {cfg['corpus_sha256']}"
     assert l_hash == cfg["label_sha256"], f"CAP-011 labels.jsonl drift: {l_hash} != {cfg['label_sha256']}"
+    assert_frozen_companion_hashes(cap_dir, c_hash, l_hash, "CAP-011")
 
     # Verify label and case correspondence
     labels_raw = [json.loads(line) for line in (cap_dir / "labels.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -352,10 +367,14 @@ def adjudicate_cap013(cap_dir: Path) -> dict[str, Any]:
         assert evidence.get("cwd") and evidence["cwd"] == evidence["sandbox_path"], f"CAP-013 mutation {m['mutation_id']} did not execute with cwd in isolated sandbox"
         assert "exit_status" in evidence, f"CAP-013 mutation {m['mutation_id']} missing exit status"
 
-        sb_norm = str(Path(evidence["sandbox_path"]).resolve()).lower()
-        v_path_raw = evidence.get("verified_module_path", "").replace("VERIFYCI_LOCATION:", "").strip()
-        v_path_norm = str(Path(v_path_raw).resolve()).lower() if v_path_raw else ""
-        assert v_path_norm.startswith(sb_norm), f"CAP-013 mutation {m['mutation_id']} module {v_path_norm} was not loaded from sandbox {sb_norm}"
+        sb_str = evidence["sandbox_path"].replace("\\", "/").lower()
+        v_path_raw = evidence.get("verified_module_path", "").replace("VERIFYCI_LOCATION:", "").strip().replace("\\", "/").lower()
+        if sb_str == "<sandbox>":
+            assert v_path_raw.startswith("<sandbox>"), f"CAP-013 mutation {m['mutation_id']} module {v_path_raw} was not loaded from sandbox {sb_str}"
+        else:
+            sb_norm = str(Path(evidence["sandbox_path"]).resolve()).lower()
+            v_path_norm = str(Path(v_path_raw).resolve()).lower() if v_path_raw else ""
+            assert v_path_norm.startswith(sb_norm), f"CAP-013 mutation {m['mutation_id']} module {v_path_norm} was not loaded from sandbox {sb_norm}"
 
         m_id = m["mutation_id"]
         if m_id in crit_set:
