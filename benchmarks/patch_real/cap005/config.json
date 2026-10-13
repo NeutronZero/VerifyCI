@@ -28,7 +28,7 @@
   "corpus_sha256": "ca475b33a385e8d1478afedf00d2eeeefdc8ae0f72c9e5527f20fc1fe814e17c",
   "label_sha256": "589231d38fdf85a764eab85ba19f1ad9e2839fe63c043c3c9636d745f1893075",
   "source_manifest_sha256": "f330fca7d317ec9a1e8398295d930c49f802e2cc25cf94b3906d7b9b0d47af8d",
-  "status": "CORPUS_FROZEN_IMPLEMENTATION_NOT_YET_EVALUATED",
+  "status": "CORPUS_FROZEN_EVALUATED",
   "freeze_rule": "Gold labels sealed from implementation path; no reclassification permitted.",
   "latency_target": {
     "p95_ms": 500.0,

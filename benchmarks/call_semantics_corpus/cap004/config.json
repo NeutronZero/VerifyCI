@@ -19,6 +19,6 @@
   },
   "corpus_sha256": "305da66ef4282c7537d9d0366f5d6726acb2b5557114823298e053dbf038c064",
   "label_sha256": "1733902248e7bc4dcad51c01ffe6e10e362f1a34e899317f958aa4d04d95ab59",
-  "status": "CORPUS_FROZEN_IMPLEMENTATION_NOT_YET_EVALUATED",
+  "status": "CORPUS_FROZEN_EVALUATED",
   "freeze_rule": "Gold labels sealed from implementation path; no reclassification permitted."
 }

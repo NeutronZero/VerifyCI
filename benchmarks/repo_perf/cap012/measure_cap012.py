@@ -79,77 +79,7 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def get_git_provenance() -> tuple[str, bool]:
-    import fnmatch
-
-    try:
-        commit = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True
-        ).strip()
-    except Exception as exc:
-        raise RuntimeError(f"Failed to obtain git commit provenance: {exc}") from exc
-
-    if not commit or commit == "unknown":
-        raise RuntimeError("Git commit provenance is invalid or unknown")
-
-    try:
-        raw_z = subprocess.check_output(
-            ["git", "status", "--porcelain", "-z"], cwd=REPO_ROOT
-        )
-    except Exception as exc:
-        raise RuntimeError(f"Failed to obtain git status for provenance: {exc}") from exc
-
-    allowed_exact = {
-        "benchmarks/diff_impact_corpus/cap009/results.json",
-        "benchmarks/diff_impact_corpus/cap009/RESULTS.md",
-        "benchmarks/retrieval_generalization/cap010/results.json",
-        "benchmarks/retrieval_generalization/cap010/RESULTS.md",
-        "benchmarks/secret_heldout/cap011/results.json",
-        "benchmarks/secret_heldout/cap011/RESULTS.md",
-        "benchmarks/repo_perf/cap012/results.json",
-        "benchmarks/repo_perf/cap012/RESULTS.md",
-        "benchmarks/robustness/cap013/results.json",
-        "benchmarks/robustness/cap013/RESULTS.md",
-        "evidence/cap-adjudication-bundle.json",
-    }
-
-    def _is_path_exempt(p: str) -> bool:
-        norm = p.strip().replace("\\", "/")
-        return (
-            norm in allowed_exact
-            or fnmatch.fnmatchcase(norm, "benchmark-results-*.json")
-        )
-
-    dirty = False
-    tokens = raw_z.split(b"\0")
-    i = 0
-    while i < len(tokens):
-        t = tokens[i]
-        if not t:
-            i += 1
-            continue
-        if len(t) < 3:
-            dirty = True
-            break
-        status = t[:2].decode("utf-8", errors="replace")
-        p1 = t[3:].decode("utf-8", errors="replace")
-        if "R" in status or "C" in status:
-            if i + 1 < len(tokens):
-                i += 1
-                p2 = tokens[i].decode("utf-8", errors="replace")
-                if not (_is_path_exempt(p1) and _is_path_exempt(p2)):
-                    dirty = True
-                    break
-            else:
-                dirty = True
-                break
-        else:
-            if not _is_path_exempt(p1):
-                dirty = True
-                break
-        i += 1
-
-    return commit, dirty
+from benchmarks.common.provenance import get_git_provenance
 
 
 def _synthesize_repo(repo_dir: Path, file_count: int, commit_files: int = 1) -> tuple[list[str], str]:

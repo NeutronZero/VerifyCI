@@ -137,18 +137,7 @@ def adjudicate_cap010(cap_dir: Path) -> dict[str, Any]:
     res_qids = {q["qid"] for q in queries}
     assert res_qids == expected_qids, "CAP-010 query ID mismatch between results and frozen labels"
 
-    import re
-
-    def _eval_abstention(query_text: str, ranked_ids: list[str], docs: dict[str, str]) -> tuple[bool, str]:
-        tokens = re.findall(r"[a-zA-Z0-9_]{10,}", query_text)
-        symbols = [t for t in tokens if "_" in t and not re.match(r"^(?:dev|held_out)_repo_\d+$", t)]
-        if symbols:
-            for did in ranked_ids[:5]:
-                dtext = docs.get(did, "")
-                if any(s in dtext for s in symbols):
-                    return False, "symbol_grounded"
-            return True, "ungrounded_symbol_abstention"
-        return False, "no_specific_symbol_claimed"
+    from benchmarks.common.retrieval_rules import evaluate_retrieval_abstention
 
     recomputed_r5: list[float] = []
     recomputed_ndcg10: list[float] = []
@@ -170,7 +159,7 @@ def adjudicate_cap010(cap_dir: Path) -> dict[str, Any]:
 
         if is_no_answer:
             no_answer_count += 1
-            abstained, _ = _eval_abstention(q_case["text"], ranked_ids, doc_map)
+            abstained, _ = evaluate_retrieval_abstention(q_case["text"], ranked_ids, doc_map)
             has_false_claim = any(did in rel and rel[did] >= 2 for did in ranked_ids[:5])
             if abstained and not has_false_claim:
                 no_answer_correct_abs += 1

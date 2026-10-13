@@ -63,77 +63,7 @@ def validate_freeze_hashes() -> dict[str, Any]:
     return cfg
 
 
-def get_git_provenance() -> tuple[str, bool]:
-    import fnmatch
-
-    try:
-        commit = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True
-        ).strip()
-    except Exception as exc:
-        raise RuntimeError(f"Failed to obtain git commit provenance: {exc}") from exc
-
-    if not commit or commit == "unknown":
-        raise RuntimeError("Git commit provenance is invalid or unknown")
-
-    try:
-        raw_z = subprocess.check_output(
-            ["git", "status", "--porcelain", "-z"], cwd=REPO_ROOT
-        )
-    except Exception as exc:
-        raise RuntimeError(f"Failed to obtain git status for provenance: {exc}") from exc
-
-    allowed_exact = {
-        "benchmarks/diff_impact_corpus/cap009/results.json",
-        "benchmarks/diff_impact_corpus/cap009/RESULTS.md",
-        "benchmarks/retrieval_generalization/cap010/results.json",
-        "benchmarks/retrieval_generalization/cap010/RESULTS.md",
-        "benchmarks/secret_heldout/cap011/results.json",
-        "benchmarks/secret_heldout/cap011/RESULTS.md",
-        "benchmarks/repo_perf/cap012/results.json",
-        "benchmarks/repo_perf/cap012/RESULTS.md",
-        "benchmarks/robustness/cap013/results.json",
-        "benchmarks/robustness/cap013/RESULTS.md",
-        "evidence/cap-adjudication-bundle.json",
-    }
-
-    def _is_path_exempt(p: str) -> bool:
-        norm = p.strip().replace("\\", "/")
-        return (
-            norm in allowed_exact
-            or fnmatch.fnmatchcase(norm, "benchmark-results-*.json")
-        )
-
-    dirty = False
-    tokens = raw_z.split(b"\0")
-    i = 0
-    while i < len(tokens):
-        t = tokens[i]
-        if not t:
-            i += 1
-            continue
-        if len(t) < 3:
-            dirty = True
-            break
-        status = t[:2].decode("utf-8", errors="replace")
-        p1 = t[3:].decode("utf-8", errors="replace")
-        if "R" in status or "C" in status:
-            if i + 1 < len(tokens):
-                i += 1
-                p2 = tokens[i].decode("utf-8", errors="replace")
-                if not (_is_path_exempt(p1) and _is_path_exempt(p2)):
-                    dirty = True
-                    break
-            else:
-                dirty = True
-                break
-        else:
-            if not _is_path_exempt(p1):
-                dirty = True
-                break
-        i += 1
-
-    return commit, dirty
+from benchmarks.common.provenance import get_git_provenance
 
 
 def _dcg(ranked_ids: list[str], rel: dict[str, int], k: int) -> float:
@@ -194,22 +124,7 @@ def bootstrap_mean_ci95(values: list[float], n_bootstrap: int = 1000, seed: int 
     return [round(means[low_idx], 4), round(means[high_idx], 4)]
 
 
-def evaluate_retrieval_abstention(query_text: str, ranked_doc_ids: list[str], doc_map: dict[str, str]) -> tuple[bool, str]:
-    """Evaluates explicit entity-grounded abstention rule for retrieval.
-    
-    If query explicitly targets a named symbol or identifier (e.g. quantum_teleportation_...
-    or _zk_nonce_...), system must verify that the requested symbol exists in candidate
-    evidence before declaring an answer. If missing from all top-5 candidates, system abstains.
-    """
-    tokens = re.findall(r'[a-zA-Z0-9_]{10,}', query_text)
-    symbols = [t for t in tokens if '_' in t and not re.match(r'^(?:dev|held_out)_repo_\d+$', t)]
-    if symbols:
-        for did in ranked_doc_ids[:5]:
-            dtext = doc_map.get(did, "")
-            if any(s in dtext for s in symbols):
-                return False, "symbol_grounded"
-        return True, "ungrounded_symbol_abstention"
-    return False, "no_specific_symbol_claimed"
+from benchmarks.common.retrieval_rules import evaluate_retrieval_abstention
 
 
 async def _run_hybrid_search(docs: list[dict[str, Any]], queries: list[dict[str, Any]]) -> dict[str, list[str]]:
