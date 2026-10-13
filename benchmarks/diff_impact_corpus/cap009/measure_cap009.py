@@ -10,13 +10,13 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
-import subprocess
 import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from benchmarks.common.provenance import get_git_provenance
 from verifyci.verification.diffmap import seed_entities_for_diff
 
 CORPUS_DIR = Path(__file__).resolve().parent
@@ -53,9 +53,6 @@ def validate_freeze_hashes() -> dict[str, Any]:
         raise ValueError("LABEL_SHA256 file drift")
 
     return cfg
-
-
-from benchmarks.common.provenance import get_git_provenance
 
 
 class SimpleCallGraph:

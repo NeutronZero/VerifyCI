@@ -1,9 +1,6 @@
 """Unit tests for shared benchmark helpers (provenance and retrieval rules)."""
 from __future__ import annotations
 
-from pathlib import Path
-import pytest
-
 from benchmarks.common.provenance import get_git_provenance, is_path_exempt
 from benchmarks.common.retrieval_rules import evaluate_retrieval_abstention
 

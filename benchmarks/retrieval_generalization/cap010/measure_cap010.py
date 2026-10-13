@@ -15,12 +15,12 @@ import json
 import math
 import platform
 import random
-import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+from benchmarks.common.provenance import get_git_provenance
+from benchmarks.common.retrieval_rules import evaluate_retrieval_abstention
 from verifyci.contracts.vector_store import InMemoryVectorStore, VectorRecord
 from verifyci.retrieval.dense import SearchResult
 from verifyci.retrieval.fusion import rrf_fusion
@@ -61,9 +61,6 @@ def validate_freeze_hashes() -> dict[str, Any]:
         raise ValueError("LABEL_SHA256 file drift")
 
     return cfg
-
-
-from benchmarks.common.provenance import get_git_provenance
 
 
 def _dcg(ranked_ids: list[str], rel: dict[str, int], k: int) -> float:
@@ -122,9 +119,6 @@ def bootstrap_mean_ci95(values: list[float], n_bootstrap: int = 1000, seed: int 
     low_idx = int(0.025 * n_bootstrap)
     high_idx = int(0.975 * n_bootstrap)
     return [round(means[low_idx], 4), round(means[high_idx], 4)]
-
-
-from benchmarks.common.retrieval_rules import evaluate_retrieval_abstention
 
 
 async def _run_hybrid_search(docs: list[dict[str, Any]], queries: list[dict[str, Any]]) -> dict[str, list[str]]:

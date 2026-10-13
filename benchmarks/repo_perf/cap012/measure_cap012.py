@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from benchmarks.common.provenance import get_git_provenance
 from verifyci.interface.commands.ingest import run_ingest
 from verifyci.interface.commands.verify import run_verify
 
@@ -77,9 +78,6 @@ def sha256_file(path: Path) -> str:
     if not path.is_file():
         return ""
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-from benchmarks.common.provenance import get_git_provenance
 
 
 def _synthesize_repo(repo_dir: Path, file_count: int, commit_files: int = 1) -> tuple[list[str], str]:

@@ -9,17 +9,13 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import sys
 from pathlib import Path
 from typing import Any
 
+from verifyci.secrets.redaction import assert_no_secret_leak
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent.parent
-
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from verifyci.secrets.redaction import assert_no_secret_leak
 
 
 def wilson_score_interval(successes: int, total: int, z: float = 1.959963984540054) -> tuple[float, float]:

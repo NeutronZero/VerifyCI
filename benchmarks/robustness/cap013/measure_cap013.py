@@ -9,11 +9,11 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+from benchmarks.common.provenance import get_git_provenance
 from benchmarks.robustness.cap013.generators import RobustnessFuzzer
 from benchmarks.robustness.cap013.mutations import evaluate_mutation
 from verifyci.verification.call_semantics import call_semantics_check
@@ -26,9 +26,6 @@ def sha256_file(path: Path) -> str:
     if not path.is_file():
         return ""
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-from benchmarks.common.provenance import get_git_provenance
 
 
 def run_cap013(seed: int = 42) -> dict[str, Any]:

@@ -166,6 +166,23 @@ def evaluate_mutation(mutation_def: dict[str, Any]) -> dict[str, Any]:
             else:
                 classification = "invalid_test_error"
 
+        # Sanitize paths to avoid recording local ephemeral machine directories
+        loc_str = first_line.replace("\\", "/")
+        sb_str = str(sandbox).replace("\\", "/")
+        if sb_str in loc_str:
+            sanitized_mod = loc_str.replace(sb_str, "<SANDBOX>")
+        else:
+            # Case-insensitive or 8.3 short-path fallback on Windows runner environments
+            idx = loc_str.lower().find(sb_str.lower())
+            if idx != -1:
+                sanitized_mod = loc_str[:idx] + "<SANDBOX>" + loc_str[idx + len(sb_str):]
+            elif "/verifyci/" in loc_str:
+                # Retain semantic path relative to sandbox root
+                prefix = loc_str.split("/verifyci/")[0]
+                sanitized_mod = loc_str.replace(prefix, "VERIFYCI_LOCATION:<SANDBOX>")
+            else:
+                sanitized_mod = loc_str
+
         return {
             "mutation_id": m_id,
             "target": mutation_def["target"],
@@ -177,7 +194,7 @@ def evaluate_mutation(mutation_def: dict[str, Any]) -> dict[str, Any]:
                 "patch_applied": spec["patch_desc"],
                 "sandbox_path": "<SANDBOX>",
                 "cwd": "<SANDBOX>",
-                "verified_module_path": first_line.replace("\\", "/").replace(str(sandbox).replace("\\", "/"), "<SANDBOX>"),
+                "verified_module_path": sanitized_mod,
                 "test_command": "pytest " + " ".join(spec["test_args"]),
                 "exit_status": proc.returncode,
                 "stdout_summary": stdout_summary,

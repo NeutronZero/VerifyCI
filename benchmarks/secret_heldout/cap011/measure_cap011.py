@@ -10,11 +10,11 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+from benchmarks.common.provenance import get_git_provenance
 from verifyci.secrets.engine import SecretDetector
 from verifyci.secrets.redaction import assert_no_secret_leak
 
@@ -52,9 +52,6 @@ def validate_freeze_hashes() -> dict[str, Any]:
         raise ValueError("LABEL_SHA256 file drift")
 
     return cfg
-
-
-from benchmarks.common.provenance import get_git_provenance
 
 
 def get_scanned_runtime_artifacts() -> list[Path]:
