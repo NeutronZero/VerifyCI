@@ -31,6 +31,8 @@ def adjudicate_cap009(cap_dir: Path) -> dict[str, Any]:
 
     # Provenance and frozen artifact verification
     prov = res["provenance"]
+    assert prov.get("git_commit") and prov["git_commit"] != "unknown", "CAP-009 missing valid git commit provenance"
+    assert prov.get("git_dirty") is False, "CAP-009 executed on dirty tree; clean implementation commit required"
     assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), "CAP-009 config hash drift"
     assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap009.py"), "CAP-009 harness hash drift"
     assert prov["oracle_sha256"] == sha256_file(cap_dir / "author_cap009.py"), "CAP-009 oracle hash drift"
@@ -97,6 +99,8 @@ def adjudicate_cap010(cap_dir: Path) -> dict[str, Any]:
 
     # Provenance and frozen hash verification
     prov = res["provenance"]
+    assert prov.get("git_commit") and prov["git_commit"] != "unknown", "CAP-010 missing valid git commit provenance"
+    assert prov.get("git_dirty") is False, "CAP-010 executed on dirty tree; clean implementation commit required"
     assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), "CAP-010 config hash drift"
     assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap010.py"), "CAP-010 harness hash drift"
     assert prov["oracle_sha256"] == sha256_file(cap_dir / "author_cap010.py"), "CAP-010 oracle hash drift"
@@ -208,6 +212,8 @@ def adjudicate_cap011(cap_dir: Path) -> dict[str, Any]:
     res = json.loads((cap_dir / "results.json").read_text(encoding="utf-8"))
 
     prov = res["provenance"]
+    assert prov.get("git_commit") and prov["git_commit"] != "unknown", "CAP-011 missing valid git commit provenance"
+    assert prov.get("git_dirty") is False, "CAP-011 executed on dirty tree; clean implementation commit required"
     assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), "CAP-011 config hash drift"
     assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap011.py"), "CAP-011 harness hash drift"
 

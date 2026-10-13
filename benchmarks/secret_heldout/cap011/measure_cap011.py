@@ -55,29 +55,57 @@ def validate_freeze_hashes() -> dict[str, Any]:
 
 
 def get_git_provenance() -> tuple[str, bool]:
+    import fnmatch
+
     try:
         commit = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True
         ).strip()
-    except Exception:
-        commit = "unknown"
+    except Exception as exc:
+        raise RuntimeError(f"Failed to obtain git commit provenance: {exc}") from exc
+
+    if not commit or commit == "unknown":
+        raise RuntimeError("Git commit provenance is invalid or unknown")
+
     try:
         status_lines = subprocess.check_output(
             ["git", "status", "--porcelain"], cwd=REPO_ROOT, text=True
         ).splitlines()
-        code_dirty = any(
-            not (
-                line.endswith("results.json")
-                or line.endswith("RESULTS.md")
-                or "benchmark-results" in line
-                or "evidence/" in line
-            )
-            for line in status_lines
-            if line.strip()
+    except Exception as exc:
+        raise RuntimeError(f"Failed to obtain git status for provenance: {exc}") from exc
+
+    allowed_exact = {
+        "benchmarks/diff_impact_corpus/cap009/results.json",
+        "benchmarks/diff_impact_corpus/cap009/RESULTS.md",
+        "benchmarks/retrieval_generalization/cap010/results.json",
+        "benchmarks/retrieval_generalization/cap010/RESULTS.md",
+        "benchmarks/secret_heldout/cap011/results.json",
+        "benchmarks/secret_heldout/cap011/RESULTS.md",
+        "benchmarks/repo_perf/cap012/results.json",
+        "benchmarks/repo_perf/cap012/RESULTS.md",
+        "benchmarks/robustness/cap013/results.json",
+        "benchmarks/robustness/cap013/RESULTS.md",
+        "evidence/cap-adjudication-bundle.json",
+    }
+
+    dirty = False
+    for line in status_lines:
+        line_clean = line.strip()
+        if not line_clean:
+            continue
+        rel_path = line_clean[2:].strip()
+        if " -> " in rel_path:
+            rel_path = rel_path.split(" -> ", 1)[1].strip()
+        rel_norm = rel_path.replace("\\", "/")
+
+        is_exempt = (
+            rel_norm in allowed_exact
+            or fnmatch.fnmatchcase(rel_norm, "benchmark-results-*.json")
         )
-        dirty = code_dirty
-    except Exception:
-        dirty = False
+        if not is_exempt:
+            dirty = True
+            break
+
     return commit, dirty
 
 
