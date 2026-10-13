@@ -2,11 +2,11 @@
 
 ## 1. Cryptographic Freeze Coordinates
 - **Experiment ID**: CAP-010
-- **Corpus SHA-256**: `32e792ac3e8978549bf9bde53dd18c1aa142ea867f4881601b6a0ec548d2fc20`
-- **Labels SHA-256**: `431c0909626cb728a0174ba59a0716d180421218c700ce9ef9eab3caf2f7f8e6`
+- **Corpus SHA-256**: `62161689b4478475d4ec5a43f08f19f5214c1762a9e0c6d1e9ca0b85319dce31`
+- **Labels SHA-256**: `ea461629678dff8be90069fd8b3cf6b9ebec0937b23a6efb85054effb33c1a4e`
 - **Total Queries**: 210
 - **Total Documents**: 1050 across 12 repositories
-- **Provenance Commit**: `f5ef360f4b9df6e26590e4ceb9959ac7b7b31c53` (dirty: False)
+- **Provenance Commit**: `becb9a01c30a6e3f8cfb9f5336ba6d57e9fa1806` (dirty: False)
 
 ## 2. Gates Table with Predeclared Thresholds
 

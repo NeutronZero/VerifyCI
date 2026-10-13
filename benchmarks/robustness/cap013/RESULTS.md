@@ -2,7 +2,7 @@
 
 ## 1. Cryptographic Coordinates & Environment
 - **Experiment ID**: CAP-013
-- **Provenance Commit**: `f5ef360f4b9df6e26590e4ceb9959ac7b7b31c53` (dirty: False)
+- **Provenance Commit**: `becb9a01c30a6e3f8cfb9f5336ba6d57e9fa1806` (dirty: False)
 - **Default Seed**: 42
 - **Platform**: `Windows-11-10.0.26300-SP0`
 
@@ -10,10 +10,10 @@
 
 | Gate | Predeclared Threshold | Measured Value | Classification |
 |---|---|---|---|
-| Critical Mutation Kill Rate | = 1.0000 (100%) | 1.0 | Established |
-| Incorrect PASS Rate | = 0.0000 (0%) | 0.0 | Established |
-| Oracle Disagreement Rate | = 0.0000 | 0.0 | Established |
-| False Decline Rate | <= 0.0500 | 0.0 | Established |
+| Critical Mutation Kill Rate | = 1.0000 (100%) | 1.0 | Measured-Met, Not Established |
+| Incorrect PASS Rate | = 0.0000 (0%) | 0.0 | Measured-Met, Not Established |
+| Oracle Disagreement Rate | = 0.0000 | 0.0 | Measured-Met, Not Established |
+| False Decline Rate | <= 0.0500 | 0.0 | Measured-Met, Not Established |
 
 
 ## 3. Critical-Mutation Kill Table

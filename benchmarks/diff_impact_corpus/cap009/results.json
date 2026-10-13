@@ -1,11 +1,11 @@
 {
   "experiment_id": "CAP-009",
   "provenance": {
-    "git_commit": "f5ef360f4b9df6e26590e4ceb9959ac7b7b31c53",
+    "git_commit": "becb9a01c30a6e3f8cfb9f5336ba6d57e9fa1806",
     "git_dirty": false,
-    "harness_sha256": "9423a8c238203099ad00a71fe342bdc60d166a88a13fd209418c4ad3facfb5bc",
-    "oracle_sha256": "413c4f23400295e1c5102c72b648fb9fb795d9f5df623e75df66cbbf016c4228",
-    "config_sha256": "58712fd9de36d8b8d3bab374329cf76a7f8553302cd2f7ad9e23fcdadb582437",
+    "harness_sha256": "7ab2d06fa966643e816b27a41c6a0e0736e1e5d31683e4ca358791dad715a4bc",
+    "oracle_sha256": "b4151bdf67f6d13dd57d37f05dce17b3f0f18be7abedea61979a39234c1e5825",
+    "config_sha256": "01b5e573872d5e32dfc65c0c26d8b70b62cb56ac57b56cb2c93a398ba5c295c2",
     "python_version": "3.14.4",
     "platform": "Windows-11-10.0.26300-SP0"
   },
@@ -17,7 +17,7 @@
     "empty_seed_rate": 0.0,
     "fp_impact_rate": 0.0,
     "critical_adversarial_false_passes": 0,
-    "p95_ms": 0.051
+    "p95_ms": 0.0895
   },
   "cases": [
     {
@@ -32,7 +32,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.1105
+      "latency_ms": 0.1141
     },
     {
       "case_id": "CAP009-002",
@@ -46,7 +46,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0458
+      "latency_ms": 0.0571
     },
     {
       "case_id": "CAP009-003",
@@ -60,7 +60,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0411
+      "latency_ms": 0.0508
     },
     {
       "case_id": "CAP009-004",
@@ -74,7 +74,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0372
+      "latency_ms": 0.0477
     },
     {
       "case_id": "CAP009-005",
@@ -88,7 +88,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0372
+      "latency_ms": 0.0461
     },
     {
       "case_id": "CAP009-006",
@@ -102,7 +102,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0358
+      "latency_ms": 0.0467
     },
     {
       "case_id": "CAP009-007",
@@ -116,7 +116,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0366
+      "latency_ms": 0.045
     },
     {
       "case_id": "CAP009-008",
@@ -130,7 +130,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0364
+      "latency_ms": 0.0458
     },
     {
       "case_id": "CAP009-009",
@@ -144,7 +144,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0463
+      "latency_ms": 0.0472
     },
     {
       "case_id": "CAP009-010",
@@ -158,7 +158,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.04
+      "latency_ms": 0.0467
     },
     {
       "case_id": "CAP009-011",
@@ -172,7 +172,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0355
+      "latency_ms": 0.0464
     },
     {
       "case_id": "CAP009-012",
@@ -186,7 +186,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.036
+      "latency_ms": 0.0462
     },
     {
       "case_id": "CAP009-013",
@@ -200,7 +200,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0362
+      "latency_ms": 0.0461
     },
     {
       "case_id": "CAP009-014",
@@ -214,7 +214,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0358
+      "latency_ms": 0.0467
     },
     {
       "case_id": "CAP009-015",
@@ -228,7 +228,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0352
+      "latency_ms": 0.054
     },
     {
       "case_id": "CAP009-016",
@@ -242,7 +242,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.035
+      "latency_ms": 0.0467
     },
     {
       "case_id": "CAP009-017",
@@ -256,7 +256,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.035
+      "latency_ms": 0.0473
     },
     {
       "case_id": "CAP009-018",
@@ -270,7 +270,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0352
+      "latency_ms": 0.0463
     },
     {
       "case_id": "CAP009-019",
@@ -284,7 +284,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0353
+      "latency_ms": 0.0462
     },
     {
       "case_id": "CAP009-020",
@@ -298,7 +298,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0352
+      "latency_ms": 0.047
     },
     {
       "case_id": "CAP009-021",
@@ -312,7 +312,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0356
+      "latency_ms": 0.0565
     },
     {
       "case_id": "CAP009-022",
@@ -326,7 +326,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0346
+      "latency_ms": 0.0474
     },
     {
       "case_id": "CAP009-023",
@@ -340,7 +340,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0347
+      "latency_ms": 0.0465
     },
     {
       "case_id": "CAP009-024",
@@ -354,7 +354,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0352
+      "latency_ms": 0.0465
     },
     {
       "case_id": "CAP009-025",
@@ -368,7 +368,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0346
+      "latency_ms": 0.0507
     },
     {
       "case_id": "CAP009-026",
@@ -382,7 +382,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0408
+      "latency_ms": 0.0514
     },
     {
       "case_id": "CAP009-027",
@@ -396,7 +396,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0366
+      "latency_ms": 0.0494
     },
     {
       "case_id": "CAP009-028",
@@ -410,7 +410,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0363
+      "latency_ms": 0.0489
     },
     {
       "case_id": "CAP009-029",
@@ -424,7 +424,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0368
+      "latency_ms": 0.0482
     },
     {
       "case_id": "CAP009-030",
@@ -438,7 +438,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0381
+      "latency_ms": 0.0497
     },
     {
       "case_id": "CAP009-031",
@@ -452,7 +452,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0368
+      "latency_ms": 0.0487
     },
     {
       "case_id": "CAP009-032",
@@ -466,7 +466,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0371
+      "latency_ms": 0.0489
     },
     {
       "case_id": "CAP009-033",
@@ -480,7 +480,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0366
+      "latency_ms": 0.0584
     },
     {
       "case_id": "CAP009-034",
@@ -494,7 +494,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0366
+      "latency_ms": 0.0434
     },
     {
       "case_id": "CAP009-035",
@@ -508,7 +508,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0362
+      "latency_ms": 0.0437
     },
     {
       "case_id": "CAP009-036",
@@ -522,7 +522,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0361
+      "latency_ms": 0.0435
     },
     {
       "case_id": "CAP009-037",
@@ -536,7 +536,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0364
+      "latency_ms": 0.0428
     },
     {
       "case_id": "CAP009-038",
@@ -550,7 +550,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0362
+      "latency_ms": 0.0436
     },
     {
       "case_id": "CAP009-039",
@@ -564,7 +564,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0363
+      "latency_ms": 0.0425
     },
     {
       "case_id": "CAP009-040",
@@ -578,7 +578,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0359
+      "latency_ms": 0.0427
     },
     {
       "case_id": "CAP009-041",
@@ -592,7 +592,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.036
+      "latency_ms": 0.0434
     },
     {
       "case_id": "CAP009-042",
@@ -606,7 +606,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0362
+      "latency_ms": 0.05
     },
     {
       "case_id": "CAP009-043",
@@ -620,7 +620,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0362
+      "latency_ms": 0.0468
     },
     {
       "case_id": "CAP009-044",
@@ -634,7 +634,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0362
+      "latency_ms": 0.0431
     },
     {
       "case_id": "CAP009-045",
@@ -648,7 +648,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0365
+      "latency_ms": 0.0431
     },
     {
       "case_id": "CAP009-046",
@@ -662,7 +662,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0363
+      "latency_ms": 0.0434
     },
     {
       "case_id": "CAP009-047",
@@ -676,7 +676,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0361
+      "latency_ms": 0.0431
     },
     {
       "case_id": "CAP009-048",
@@ -690,7 +690,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0358
+      "latency_ms": 0.0476
     },
     {
       "case_id": "CAP009-049",
@@ -704,7 +704,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.036
+      "latency_ms": 0.0428
     },
     {
       "case_id": "CAP009-050",
@@ -718,7 +718,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0359
+      "latency_ms": 0.0432
     },
     {
       "case_id": "CAP009-051",
@@ -732,7 +732,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0492
+      "latency_ms": 0.0599
     },
     {
       "case_id": "CAP009-052",
@@ -746,7 +746,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0458
+      "latency_ms": 0.0574
     },
     {
       "case_id": "CAP009-053",
@@ -760,7 +760,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0451
+      "latency_ms": 0.0526
     },
     {
       "case_id": "CAP009-054",
@@ -774,7 +774,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0439
+      "latency_ms": 0.0529
     },
     {
       "case_id": "CAP009-055",
@@ -788,7 +788,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0458
+      "latency_ms": 0.0521
     },
     {
       "case_id": "CAP009-056",
@@ -802,7 +802,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0453
+      "latency_ms": 0.0525
     },
     {
       "case_id": "CAP009-057",
@@ -816,7 +816,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0448
+      "latency_ms": 0.0524
     },
     {
       "case_id": "CAP009-058",
@@ -830,7 +830,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0446
+      "latency_ms": 0.0528
     },
     {
       "case_id": "CAP009-059",
@@ -844,7 +844,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0444
+      "latency_ms": 0.0641
     },
     {
       "case_id": "CAP009-060",
@@ -858,7 +858,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0451
+      "latency_ms": 0.0529
     },
     {
       "case_id": "CAP009-061",
@@ -872,7 +872,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0452
+      "latency_ms": 0.0538
     },
     {
       "case_id": "CAP009-062",
@@ -886,7 +886,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0468
+      "latency_ms": 0.0525
     },
     {
       "case_id": "CAP009-063",
@@ -900,7 +900,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0452
+      "latency_ms": 0.0521
     },
     {
       "case_id": "CAP009-064",
@@ -914,7 +914,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.045
+      "latency_ms": 0.0525
     },
     {
       "case_id": "CAP009-065",
@@ -928,7 +928,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0449
+      "latency_ms": 0.0522
     },
     {
       "case_id": "CAP009-066",
@@ -942,7 +942,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0441
+      "latency_ms": 0.052
     },
     {
       "case_id": "CAP009-067",
@@ -956,7 +956,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0442
+      "latency_ms": 0.0799
     },
     {
       "case_id": "CAP009-068",
@@ -970,7 +970,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0449
+      "latency_ms": 0.0864
     },
     {
       "case_id": "CAP009-069",
@@ -984,7 +984,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0447
+      "latency_ms": 0.0758
     },
     {
       "case_id": "CAP009-070",
@@ -998,7 +998,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0451
+      "latency_ms": 0.0763
     },
     {
       "case_id": "CAP009-071",
@@ -1012,7 +1012,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0447
+      "latency_ms": 0.076
     },
     {
       "case_id": "CAP009-072",
@@ -1026,7 +1026,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.045
+      "latency_ms": 0.0779
     },
     {
       "case_id": "CAP009-073",
@@ -1040,7 +1040,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0453
+      "latency_ms": 0.0803
     },
     {
       "case_id": "CAP009-074",
@@ -1054,7 +1054,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0453
+      "latency_ms": 0.0838
     },
     {
       "case_id": "CAP009-075",
@@ -1068,7 +1068,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0446
+      "latency_ms": 0.076
     },
     {
       "case_id": "CAP009-076",
@@ -1082,7 +1082,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0458
+      "latency_ms": 0.0876
     },
     {
       "case_id": "CAP009-077",
@@ -1096,7 +1096,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0411
+      "latency_ms": 0.0933
     },
     {
       "case_id": "CAP009-078",
@@ -1110,7 +1110,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0406
+      "latency_ms": 0.0963
     },
     {
       "case_id": "CAP009-079",
@@ -1124,7 +1124,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0395
+      "latency_ms": 0.0837
     },
     {
       "case_id": "CAP009-080",
@@ -1138,7 +1138,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0411
+      "latency_ms": 0.0766
     },
     {
       "case_id": "CAP009-081",
@@ -1152,7 +1152,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.04
+      "latency_ms": 0.0787
     },
     {
       "case_id": "CAP009-082",
@@ -1166,7 +1166,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0399
+      "latency_ms": 0.0917
     },
     {
       "case_id": "CAP009-083",
@@ -1180,7 +1180,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0391
+      "latency_ms": 0.0831
     },
     {
       "case_id": "CAP009-084",
@@ -1194,7 +1194,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0393
+      "latency_ms": 0.0605
     },
     {
       "case_id": "CAP009-085",
@@ -1208,7 +1208,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.042
+      "latency_ms": 0.0776
     },
     {
       "case_id": "CAP009-086",
@@ -1222,7 +1222,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0424
+      "latency_ms": 0.0741
     },
     {
       "case_id": "CAP009-087",
@@ -1236,7 +1236,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0479
+      "latency_ms": 0.0763
     },
     {
       "case_id": "CAP009-088",
@@ -1250,7 +1250,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0433
+      "latency_ms": 0.0764
     },
     {
       "case_id": "CAP009-089",
@@ -1264,7 +1264,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0434
+      "latency_ms": 0.0796
     },
     {
       "case_id": "CAP009-090",
@@ -1278,7 +1278,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0446
+      "latency_ms": 0.0824
     },
     {
       "case_id": "CAP009-091",
@@ -1292,7 +1292,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0434
+      "latency_ms": 0.0757
     },
     {
       "case_id": "CAP009-092",
@@ -1306,7 +1306,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0428
+      "latency_ms": 0.0766
     },
     {
       "case_id": "CAP009-093",
@@ -1320,7 +1320,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0438
+      "latency_ms": 0.0809
     },
     {
       "case_id": "CAP009-094",
@@ -1334,7 +1334,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0443
+      "latency_ms": 0.0777
     },
     {
       "case_id": "CAP009-095",
@@ -1348,7 +1348,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0426
+      "latency_ms": 0.0759
     },
     {
       "case_id": "CAP009-096",
@@ -1362,7 +1362,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0432
+      "latency_ms": 0.0773
     },
     {
       "case_id": "CAP009-097",
@@ -1376,7 +1376,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0428
+      "latency_ms": 0.0759
     },
     {
       "case_id": "CAP009-098",
@@ -1390,7 +1390,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0426
+      "latency_ms": 0.0753
     },
     {
       "case_id": "CAP009-099",
@@ -1404,7 +1404,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0422
+      "latency_ms": 0.0754
     },
     {
       "case_id": "CAP009-100",
@@ -1418,7 +1418,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0414
+      "latency_ms": 0.0771
     },
     {
       "case_id": "CAP009-101",
@@ -1432,7 +1432,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0378
+      "latency_ms": 0.0724
     },
     {
       "case_id": "CAP009-102",
@@ -1446,7 +1446,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0367
+      "latency_ms": 0.0709
     },
     {
       "case_id": "CAP009-103",
@@ -1460,7 +1460,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0366
+      "latency_ms": 0.0699
     },
     {
       "case_id": "CAP009-104",
@@ -1474,7 +1474,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0373
+      "latency_ms": 0.0705
     },
     {
       "case_id": "CAP009-105",
@@ -1488,7 +1488,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0362
+      "latency_ms": 0.0694
     },
     {
       "case_id": "CAP009-106",
@@ -1502,7 +1502,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0363
+      "latency_ms": 0.0688
     },
     {
       "case_id": "CAP009-107",
@@ -1516,7 +1516,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0359
+      "latency_ms": 0.0682
     },
     {
       "case_id": "CAP009-108",
@@ -1530,7 +1530,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0358
+      "latency_ms": 0.0706
     },
     {
       "case_id": "CAP009-109",
@@ -1544,7 +1544,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0363
+      "latency_ms": 0.0701
     },
     {
       "case_id": "CAP009-110",
@@ -1558,7 +1558,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0364
+      "latency_ms": 0.0698
     },
     {
       "case_id": "CAP009-111",
@@ -1572,7 +1572,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0368
+      "latency_ms": 0.0692
     },
     {
       "case_id": "CAP009-112",
@@ -1586,7 +1586,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0364
+      "latency_ms": 0.07
     },
     {
       "case_id": "CAP009-113",
@@ -1600,7 +1600,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0364
+      "latency_ms": 0.0696
     },
     {
       "case_id": "CAP009-114",
@@ -1614,7 +1614,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0355
+      "latency_ms": 0.069
     },
     {
       "case_id": "CAP009-115",
@@ -1628,7 +1628,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0358
+      "latency_ms": 0.0789
     },
     {
       "case_id": "CAP009-116",
@@ -1642,7 +1642,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0363
+      "latency_ms": 0.0699
     },
     {
       "case_id": "CAP009-117",
@@ -1656,7 +1656,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0365
+      "latency_ms": 0.0705
     },
     {
       "case_id": "CAP009-118",
@@ -1670,7 +1670,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0357
+      "latency_ms": 0.0702
     },
     {
       "case_id": "CAP009-119",
@@ -1684,7 +1684,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0365
+      "latency_ms": 0.0685
     },
     {
       "case_id": "CAP009-120",
@@ -1698,7 +1698,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0378
+      "latency_ms": 0.0716
     },
     {
       "case_id": "CAP009-121",
@@ -1712,7 +1712,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0388
+      "latency_ms": 0.0679
     },
     {
       "case_id": "CAP009-122",
@@ -1726,7 +1726,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0362
+      "latency_ms": 0.0682
     },
     {
       "case_id": "CAP009-123",
@@ -1740,7 +1740,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.036
+      "latency_ms": 0.0698
     },
     {
       "case_id": "CAP009-124",
@@ -1754,7 +1754,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0365
+      "latency_ms": 0.0716
     },
     {
       "case_id": "CAP009-125",
@@ -1768,7 +1768,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0356
+      "latency_ms": 0.068
     },
     {
       "case_id": "CAP009-126",
@@ -1782,7 +1782,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0386
+      "latency_ms": 0.0733
     },
     {
       "case_id": "CAP009-127",
@@ -1796,7 +1796,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0367
+      "latency_ms": 0.071
     },
     {
       "case_id": "CAP009-128",
@@ -1810,7 +1810,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0358
+      "latency_ms": 0.0699
     },
     {
       "case_id": "CAP009-129",
@@ -1824,7 +1824,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0348
+      "latency_ms": 0.068
     },
     {
       "case_id": "CAP009-130",
@@ -1838,7 +1838,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0369
+      "latency_ms": 0.0722
     },
     {
       "case_id": "CAP009-131",
@@ -1852,7 +1852,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0353
+      "latency_ms": 0.0693
     },
     {
       "case_id": "CAP009-132",
@@ -1866,7 +1866,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.035
+      "latency_ms": 0.0707
     },
     {
       "case_id": "CAP009-133",
@@ -1880,7 +1880,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0359
+      "latency_ms": 0.0685
     },
     {
       "case_id": "CAP009-134",
@@ -1894,7 +1894,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0346
+      "latency_ms": 0.0707
     },
     {
       "case_id": "CAP009-135",
@@ -1908,7 +1908,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0401
+      "latency_ms": 0.0726
     },
     {
       "case_id": "CAP009-136",
@@ -1922,7 +1922,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0396
+      "latency_ms": 0.0711
     },
     {
       "case_id": "CAP009-137",
@@ -1936,7 +1936,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0385
+      "latency_ms": 0.0697
     },
     {
       "case_id": "CAP009-138",
@@ -1950,7 +1950,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0387
+      "latency_ms": 0.0684
     },
     {
       "case_id": "CAP009-139",
@@ -1964,7 +1964,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0395
+      "latency_ms": 0.0687
     },
     {
       "case_id": "CAP009-140",
@@ -1978,7 +1978,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0392
+      "latency_ms": 0.0682
     },
     {
       "case_id": "CAP009-141",
@@ -1992,7 +1992,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0391
+      "latency_ms": 0.0697
     },
     {
       "case_id": "CAP009-142",
@@ -2006,7 +2006,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0391
+      "latency_ms": 0.0697
     },
     {
       "case_id": "CAP009-143",
@@ -2020,7 +2020,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0389
+      "latency_ms": 0.0686
     },
     {
       "case_id": "CAP009-144",
@@ -2034,7 +2034,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0384
+      "latency_ms": 0.0668
     },
     {
       "case_id": "CAP009-145",
@@ -2048,7 +2048,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0392
+      "latency_ms": 0.0697
     },
     {
       "case_id": "CAP009-146",
@@ -2062,7 +2062,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0385
+      "latency_ms": 0.069
     },
     {
       "case_id": "CAP009-147",
@@ -2076,7 +2076,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0389
+      "latency_ms": 0.0763
     },
     {
       "case_id": "CAP009-148",
@@ -2090,7 +2090,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0389
+      "latency_ms": 0.0732
     },
     {
       "case_id": "CAP009-149",
@@ -2104,7 +2104,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0397
+      "latency_ms": 0.0687
     },
     {
       "case_id": "CAP009-150",
@@ -2118,7 +2118,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0396
+      "latency_ms": 0.0687
     },
     {
       "case_id": "CAP009-151",
@@ -2132,7 +2132,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0645
+      "latency_ms": 0.0697
     },
     {
       "case_id": "CAP009-152",
@@ -2146,7 +2146,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0407
+      "latency_ms": 0.072
     },
     {
       "case_id": "CAP009-153",
@@ -2160,7 +2160,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.039
+      "latency_ms": 0.0686
     },
     {
       "case_id": "CAP009-154",
@@ -2174,7 +2174,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0391
+      "latency_ms": 0.0722
     },
     {
       "case_id": "CAP009-155",
@@ -2188,7 +2188,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.039
+      "latency_ms": 0.0714
     },
     {
       "case_id": "CAP009-156",
@@ -2202,7 +2202,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0432
+      "latency_ms": 0.0705
     },
     {
       "case_id": "CAP009-157",
@@ -2216,7 +2216,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.039
+      "latency_ms": 0.0699
     },
     {
       "case_id": "CAP009-158",
@@ -2230,7 +2230,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0391
+      "latency_ms": 0.0742
     },
     {
       "case_id": "CAP009-159",
@@ -2244,7 +2244,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0392
+      "latency_ms": 0.0746
     },
     {
       "case_id": "CAP009-160",
@@ -2258,7 +2258,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0393
+      "latency_ms": 0.0741
     },
     {
       "case_id": "CAP009-161",
@@ -2272,7 +2272,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0397
+      "latency_ms": 0.0696
     },
     {
       "case_id": "CAP009-162",
@@ -2286,7 +2286,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0394
+      "latency_ms": 0.0703
     },
     {
       "case_id": "CAP009-163",
@@ -2300,7 +2300,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0386
+      "latency_ms": 0.0749
     },
     {
       "case_id": "CAP009-164",
@@ -2314,7 +2314,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0382
+      "latency_ms": 0.0724
     },
     {
       "case_id": "CAP009-165",
@@ -2328,7 +2328,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0389
+      "latency_ms": 0.0739
     },
     {
       "case_id": "CAP009-166",
@@ -2342,7 +2342,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0392
+      "latency_ms": 0.0764
     },
     {
       "case_id": "CAP009-167",
@@ -2356,7 +2356,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0388
+      "latency_ms": 0.0705
     },
     {
       "case_id": "CAP009-168",
@@ -2370,7 +2370,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.038
+      "latency_ms": 0.0689
     },
     {
       "case_id": "CAP009-169",
@@ -2384,7 +2384,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0387
+      "latency_ms": 0.0726
     },
     {
       "case_id": "CAP009-170",
@@ -2398,7 +2398,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0389
+      "latency_ms": 0.0808
     },
     {
       "case_id": "CAP009-171",
@@ -2412,7 +2412,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0393
+      "latency_ms": 0.0744
     },
     {
       "case_id": "CAP009-172",
@@ -2426,7 +2426,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0397
+      "latency_ms": 0.0742
     },
     {
       "case_id": "CAP009-173",
@@ -2440,7 +2440,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0388
+      "latency_ms": 0.072
     },
     {
       "case_id": "CAP009-174",
@@ -2454,7 +2454,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0398
+      "latency_ms": 0.0718
     },
     {
       "case_id": "CAP009-175",
@@ -2468,7 +2468,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0384
+      "latency_ms": 0.0723
     },
     {
       "case_id": "CAP009-176",
@@ -2482,7 +2482,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0407
+      "latency_ms": 0.0726
     },
     {
       "case_id": "CAP009-177",
@@ -2496,7 +2496,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0385
+      "latency_ms": 0.0688
     },
     {
       "case_id": "CAP009-178",
@@ -2510,7 +2510,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0378
+      "latency_ms": 0.0697
     },
     {
       "case_id": "CAP009-179",
@@ -2524,7 +2524,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0388
+      "latency_ms": 0.0763
     },
     {
       "case_id": "CAP009-180",
@@ -2538,7 +2538,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0384
+      "latency_ms": 0.0685
     },
     {
       "case_id": "CAP009-181",
@@ -2552,7 +2552,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0376
+      "latency_ms": 0.0714
     },
     {
       "case_id": "CAP009-182",
@@ -2566,7 +2566,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0391
+      "latency_ms": 0.0706
     },
     {
       "case_id": "CAP009-183",
@@ -2580,7 +2580,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0399
+      "latency_ms": 0.0711
     },
     {
       "case_id": "CAP009-184",
@@ -2594,7 +2594,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0389
+      "latency_ms": 0.0732
     },
     {
       "case_id": "CAP009-185",
@@ -2608,7 +2608,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0392
+      "latency_ms": 0.0682
     },
     {
       "case_id": "CAP009-186",
@@ -2622,7 +2622,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0399
+      "latency_ms": 0.0701
     },
     {
       "case_id": "CAP009-187",
@@ -2636,7 +2636,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0392
+      "latency_ms": 0.0712
     },
     {
       "case_id": "CAP009-188",
@@ -2650,7 +2650,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0388
+      "latency_ms": 0.0708
     },
     {
       "case_id": "CAP009-189",
@@ -2664,7 +2664,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0389
+      "latency_ms": 0.075
     },
     {
       "case_id": "CAP009-190",
@@ -2678,7 +2678,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0388
+      "latency_ms": 0.0744
     },
     {
       "case_id": "CAP009-191",
@@ -2692,7 +2692,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0386
+      "latency_ms": 0.0701
     },
     {
       "case_id": "CAP009-192",
@@ -2706,7 +2706,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0396
+      "latency_ms": 0.0693
     },
     {
       "case_id": "CAP009-193",
@@ -2720,7 +2720,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0379
+      "latency_ms": 0.0733
     },
     {
       "case_id": "CAP009-194",
@@ -2734,7 +2734,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0381
+      "latency_ms": 0.0713
     },
     {
       "case_id": "CAP009-195",
@@ -2748,7 +2748,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0429
+      "latency_ms": 0.0696
     },
     {
       "case_id": "CAP009-196",
@@ -2762,7 +2762,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0389
+      "latency_ms": 0.0697
     },
     {
       "case_id": "CAP009-197",
@@ -2776,7 +2776,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0385
+      "latency_ms": 0.0687
     },
     {
       "case_id": "CAP009-198",
@@ -2790,7 +2790,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0395
+      "latency_ms": 0.0702
     },
     {
       "case_id": "CAP009-199",
@@ -2804,7 +2804,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0385
+      "latency_ms": 0.0707
     },
     {
       "case_id": "CAP009-200",
@@ -2818,7 +2818,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0387
+      "latency_ms": 0.0722
     },
     {
       "case_id": "CAP009-201",
@@ -2832,7 +2832,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0498
+      "latency_ms": 0.1024
     },
     {
       "case_id": "CAP009-202",
@@ -2846,7 +2846,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0494
+      "latency_ms": 0.0905
     },
     {
       "case_id": "CAP009-203",
@@ -2860,7 +2860,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0473
+      "latency_ms": 0.0914
     },
     {
       "case_id": "CAP009-204",
@@ -2874,7 +2874,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0482
+      "latency_ms": 0.0888
     },
     {
       "case_id": "CAP009-205",
@@ -2888,7 +2888,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0479
+      "latency_ms": 0.0883
     },
     {
       "case_id": "CAP009-206",
@@ -2902,7 +2902,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0491
+      "latency_ms": 0.0855
     },
     {
       "case_id": "CAP009-207",
@@ -2916,7 +2916,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0512
+      "latency_ms": 0.0905
     },
     {
       "case_id": "CAP009-208",
@@ -2930,7 +2930,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0506
+      "latency_ms": 0.0895
     },
     {
       "case_id": "CAP009-209",
@@ -2944,7 +2944,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.051
+      "latency_ms": 0.0863
     },
     {
       "case_id": "CAP009-210",
@@ -2958,7 +2958,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.053
+      "latency_ms": 0.0906
     },
     {
       "case_id": "CAP009-211",
@@ -2972,7 +2972,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0509
+      "latency_ms": 0.0883
     },
     {
       "case_id": "CAP009-212",
@@ -2986,7 +2986,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0521
+      "latency_ms": 0.0886
     },
     {
       "case_id": "CAP009-213",
@@ -3000,7 +3000,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0515
+      "latency_ms": 0.0906
     },
     {
       "case_id": "CAP009-214",
@@ -3014,7 +3014,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0504
+      "latency_ms": 0.0887
     },
     {
       "case_id": "CAP009-215",
@@ -3028,7 +3028,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0512
+      "latency_ms": 0.0885
     },
     {
       "case_id": "CAP009-216",
@@ -3042,7 +3042,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0496
+      "latency_ms": 0.0882
     },
     {
       "case_id": "CAP009-217",
@@ -3056,7 +3056,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0501
+      "latency_ms": 0.0882
     },
     {
       "case_id": "CAP009-218",
@@ -3070,7 +3070,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0519
+      "latency_ms": 0.09
     },
     {
       "case_id": "CAP009-219",
@@ -3084,7 +3084,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0505
+      "latency_ms": 0.0868
     },
     {
       "case_id": "CAP009-220",
@@ -3098,7 +3098,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0509
+      "latency_ms": 0.0883
     },
     {
       "case_id": "CAP009-221",
@@ -3112,7 +3112,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0518
+      "latency_ms": 0.0868
     },
     {
       "case_id": "CAP009-222",
@@ -3126,7 +3126,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0515
+      "latency_ms": 0.0878
     },
     {
       "case_id": "CAP009-223",
@@ -3140,7 +3140,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0521
+      "latency_ms": 0.0801
     },
     {
       "case_id": "CAP009-224",
@@ -3154,7 +3154,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0485
+      "latency_ms": 0.0856
     },
     {
       "case_id": "CAP009-225",
@@ -3168,7 +3168,7 @@
       "impact_fn": 0,
       "false_pass": false,
       "empty_seed": false,
-      "latency_ms": 0.0495
+      "latency_ms": 0.0845
     }
   ]
 }
