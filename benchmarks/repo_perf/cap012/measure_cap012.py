@@ -201,16 +201,16 @@ def _measure_tier(file_count: int, commit_files: int = 1, repetitions: int = 5, 
                 # Pipeline latency under test covers baseline ingest + verify
                 elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-                # 3. Subsequent revision to measure incremental storage growth and cache activity
+                # Repeat verification on baseline to exercise and measure graph snapshot cache hits
+                res_repeat = run_verify(diff, db_path=db_path)
+                assert "status" in res_repeat
+
+                # 3. Subsequent revision to measure incremental storage growth per revision
                 sec_file = tmp_path / "src" / "module_1.py"
                 if sec_file.exists():
                     sec_file.write_text(sec_file.read_text(encoding="utf-8") + "\ndef helper_rev2(): pass\n", encoding="utf-8")
                     run_ingest(str(tmp_path))
                 rev2_db_size = Path(db_path).stat().st_size if Path(db_path).exists() else base_db_size
-
-                # Repeat verify to exercise and measure graph cache hit activity
-                res_repeat = run_verify(diff, db_path=db_path)
-                assert "status" in res_repeat
 
                 stop_monitor = True
                 monitor_thread.join(timeout=1.0)
