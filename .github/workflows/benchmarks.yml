@@ -1,7 +1,14 @@
 name: benchmarks
 
 on:
+  push:
+    branches: [main, "benchmarks/*"]
   workflow_dispatch:
+    inputs:
+      pinned_env:
+        description: "Enforce hard hardware pinned timing gate (1=true, 0=false)"
+        required: false
+        default: "0"
 
 permissions:
   contents: read
@@ -9,6 +16,8 @@ permissions:
 jobs:
   run-benchmarks:
     runs-on: ${{ matrix.os }}
+    env:
+      VERIFYCI_PINNED_BENCHMARK_ENV: ${{ github.event.inputs.pinned_env || '0' }}
     strategy:
       fail-fast: false
       matrix:

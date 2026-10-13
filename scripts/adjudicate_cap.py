@@ -115,12 +115,36 @@ def adjudicate_cap010(cap_dir: Path) -> dict[str, Any]:
     res_qids = {q["qid"] for q in queries}
     assert res_qids == expected_qids, "CAP-010 query ID mismatch between results and frozen labels"
 
-    answer_queries = [q for q in queries if q["category"] != "no_relevant_result"]
-    no_answer_queries = [q for q in queries if q["category"] == "no_relevant_result"]
+    # Recompute ranking metrics directly from raw rankings against frozen labels
+    recomputed_r5: list[float] = []
+    recomputed_ndcg10: list[float] = []
 
-    # Canonical recomputations
-    r5 = sum(q["recall_at_5"] for q in answer_queries) / len(answer_queries)
-    ndcg10 = sum(q["ndcg_at_10"] for q in answer_queries) / len(answer_queries)
+    for q in answer_queries:
+        qid = q["qid"]
+        ranked_ids = q.get("ranked_doc_ids", [])
+        rel = labels_by_qid[qid].get("relevance", {})
+        
+        # Recall@5: fraction of relevant documents (grade >= 2) retrieved in top 5
+        wanted = {did for did, g in rel.items() if g >= 2}
+        if wanted:
+            rec = len(set(ranked_ids[:5]) & wanted) / len(wanted)
+        else:
+            rec = 0.0
+        recomputed_r5.append(rec)
+
+        # nDCG@10
+        def _dcg_score(ids: list[str], rel_map: dict[str, int], k: int) -> float:
+            import math
+            return sum(((2 ** rel_map[d] - 1) / math.log2(i + 2) for i, d in enumerate(ids[:k]) if d in rel_map), 0.0)
+
+        ideal = sorted(rel.keys(), key=lambda d: -rel[d])
+        idcg = _dcg_score(ideal, rel, 10)
+        dcg = _dcg_score(ranked_ids, rel, 10)
+        ndcg = (dcg / idcg) if idcg > 0.0 else 0.0
+        recomputed_ndcg10.append(ndcg)
+
+    r5 = sum(recomputed_r5) / max(1, len(recomputed_r5))
+    ndcg10 = sum(recomputed_ndcg10) / max(1, len(recomputed_ndcg10))
     correct_abs = sum(1 for q in no_answer_queries if q["abstention_correct"]) / len(no_answer_queries)
     false_rel = sum(1 for q in no_answer_queries if q["false_relevant"]) / len(no_answer_queries)
 
@@ -215,6 +239,8 @@ def adjudicate_cap012(cap_dir: Path) -> dict[str, Any]:
     prov = res["provenance"]
     assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), "CAP-012 config hash drift"
     assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap012.py"), "CAP-012 harness hash drift"
+    assert prov.get("git_commit") and prov["git_commit"] != "unknown", "CAP-012 missing valid git commit provenance"
+    assert prov.get("git_dirty") is False, "CAP-012 executed on dirty tree; clean implementation commit required"
     assert cfg["experiment_id"] == "CAP-012"
 
     tiers = res["metrics"]["tiers"]
@@ -226,6 +252,9 @@ def adjudicate_cap012(cap_dir: Path) -> dict[str, Any]:
         assert tier_name in cfg["budgets"], f"CAP-012 missing budget for {tier_name}"
         t_data = tiers[tier_name]
         b_data = cfg["budgets"][tier_name]
+
+        assert "p50_ms" in t_data and "p95_ms" in t_data and "p99_ms" in t_data, f"CAP-012 tier {tier_name} missing latency fields"
+        assert "peak_rss_mb" in t_data and "storage_growth_per_rev" in t_data and "cache_hit_rate" in t_data, f"CAP-012 tier {tier_name} missing envelope fields"
 
         p95_ok = t_data["p95_ms"] <= b_data["p95_ms_max"]
         mem_ok = t_data["peak_rss_mb"] <= b_data["peak_rss_mb_max"]
@@ -240,6 +269,8 @@ def adjudicate_cap012(cap_dir: Path) -> dict[str, Any]:
             "peak_rss_mb": t_data["peak_rss_mb"],
             "peak_rss_mb_max": b_data["peak_rss_mb_max"],
             "peak_rss_met": mem_ok,
+            "cache_hit_rate": t_data["cache_hit_rate"],
+            "storage_growth_per_rev": t_data["storage_growth_per_rev"],
         }
 
     if not all_budgets_met:
@@ -261,16 +292,27 @@ def adjudicate_cap013(cap_dir: Path) -> dict[str, Any]:
     prov = res["provenance"]
     assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), "CAP-013 config hash drift"
     assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap013.py"), "CAP-013 harness hash drift"
+    assert prov.get("git_commit") and prov["git_commit"] != "unknown", "CAP-013 missing valid git commit provenance"
+    assert prov.get("git_dirty") is False, "CAP-013 executed on dirty tree; clean implementation commit required"
 
     mutations = res["mutations"]
     declared_crit = cfg["critical_mutations"]
     crit_set = set(declared_crit)
 
-    # Enforce all declared critical mutations are present in results
+    # Enforce all declared critical mutations are present in results and verify isolated sandbox execution evidence
     present_crit_ids = {m["mutation_id"] for m in mutations if m["mutation_id"] in crit_set}
     missing_crit = crit_set - present_crit_ids
     if missing_crit:
         raise ValueError(f"CAP-013 missing declared critical mutations: {missing_crit}")
+
+    for m in mutations:
+        evidence = m.get("applied_evidence", {})
+        assert evidence.get("target_file"), f"CAP-013 mutation {m['mutation_id']} missing target_file evidence"
+        assert evidence.get("patch_applied"), f"CAP-013 mutation {m['mutation_id']} missing patch_applied evidence"
+        assert evidence.get("sandbox_path"), f"CAP-013 mutation {m['mutation_id']} missing sandbox_path evidence"
+        assert evidence.get("cwd") and evidence["cwd"] == evidence["sandbox_path"], f"CAP-013 mutation {m['mutation_id']} did not execute with cwd in isolated sandbox"
+        assert evidence.get("verified_module_path") and "verifyci" in evidence["verified_module_path"].lower(), f"CAP-013 mutation {m['mutation_id']} failed verified module path check"
+        assert "exit_status" in evidence, f"CAP-013 mutation {m['mutation_id']} missing exit status"
 
     crit_rows = [m for m in mutations if m["mutation_id"] in crit_set and m["classification"] != "equivalent"]
     killed = sum(1 for m in crit_rows if m["classification"] == "killed")

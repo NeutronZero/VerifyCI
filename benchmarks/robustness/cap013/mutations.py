@@ -101,8 +101,10 @@ def evaluate_mutation(mutation_def: dict[str, Any]) -> dict[str, Any]:
 
     with tempfile.TemporaryDirectory() as tmp_str:
         sandbox = Path(tmp_str)
-        # 1. Copy production verifyci source tree into isolated sandbox
+        # 1. Copy production verifyci source tree, test suite, and configuration into isolated sandbox
         shutil.copytree(REPO_ROOT / "verifyci", sandbox / "verifyci")
+        shutil.copytree(REPO_ROOT / "tests", sandbox / "tests")
+        shutil.copy(REPO_ROOT / "pyproject.toml", sandbox / "pyproject.toml")
 
         # 2. Apply the declared production source mutation
         target_file = sandbox / spec["rel_path"]
@@ -113,37 +115,45 @@ def evaluate_mutation(mutation_def: dict[str, Any]) -> dict[str, Any]:
         mutated_content = orig_content.replace(spec["search"], spec["replace"], 1)
         target_file.write_text(mutated_content, encoding="utf-8")
 
-        # 3. Execute relevant regression tests against mutated production source
-        # Force sys.path[0] to point to sandbox so mutated modules are imported
+        # 3. Execute relevant regression tests against mutated production source entirely within sandbox
         runner_script = sandbox / "_run_test.py"
-        repo_abs = str(REPO_ROOT).lower()
         runner_code = (
-            "import sys, os, importlib.util, pytest\n"
-            f"sandbox_dir = r'{sandbox}'\n"
-            f"sys.path = [p for p in sys.path if os.path.abspath(p).lower() != r'{repo_abs}']\n"
-            "sys.path.insert(0, sandbox_dir)\n"
-            "pkg_init = os.path.join(sandbox_dir, 'verifyci', '__init__.py')\n"
-            "pkg_spec = importlib.util.spec_from_file_location('verifyci', pkg_init, submodule_search_locations=[os.path.join(sandbox_dir, 'verifyci')])\n"
-            "mod = importlib.util.module_from_spec(pkg_spec)\n"
-            "sys.modules['verifyci'] = mod\n"
-            "pkg_spec.loader.exec_module(mod)\n"
-            f"sys.exit(pytest.main({spec['test_args']!r}))\n"
+            "import sys, os, pytest, verifyci\n"
+            "from pathlib import Path\n"
+            "sb = Path(__file__).resolve().parent\n"
+            "v_path = Path(verifyci.__file__).resolve()\n"
+            "print(f'VERIFYCI_LOCATION:{v_path}')\n"
+            "if not str(v_path).startswith(str(sb)):\n"
+            "    print(f'ERROR: verifyci loaded outside sandbox: {v_path}', file=sys.stderr)\n"
+            "    sys.exit(99)\n"
+            f"args = {spec['test_args']!r}\n"
+            "exit_code = pytest.main(args)\n"
+            "sys.exit(int(exit_code))\n"
         )
         runner_script.write_text(runner_code, encoding="utf-8")
 
         proc = subprocess.run(
             [sys.executable, str(runner_script)],
-            cwd=REPO_ROOT,
+            cwd=str(sandbox),
             capture_output=True,
             text=True,
         )
 
-        # 4. Classify outcome
-        if m_id == "EQUIV-01_WHITESPACE_REORDER":
-            classification = "equivalent"
+        # 4. Classify outcome based on observed test execution and exit status
+        # Behavioral classification:
+        # - If mutation declared equivalent and passes suite (exit 0), observed behavioral equivalence confirmed.
+        # - If non-equivalent mutation fails suite (exit != 0), killed by regression suite.
+        # - If non-equivalent mutation passes suite (exit 0), survived.
+        if m_id.startswith("EQUIV-"):
+            classification = "equivalent" if proc.returncode == 0 else "killed"
         else:
-            # Critical mutation killed if regression tests fail (exit code != 0)
             classification = "killed" if proc.returncode != 0 else "survived"
+
+        first_line = ""
+        for line in (proc.stdout or "").splitlines():
+            if line.startswith("VERIFYCI_LOCATION:"):
+                first_line = line
+                break
 
         return {
             "mutation_id": m_id,
@@ -155,9 +165,13 @@ def evaluate_mutation(mutation_def: dict[str, Any]) -> dict[str, Any]:
                 "target_file": spec["rel_path"],
                 "patch_applied": spec["patch_desc"],
                 "sandbox_path": str(sandbox),
+                "cwd": str(sandbox),
+                "verified_module_path": first_line,
                 "test_command": "pytest " + " ".join(spec["test_args"]),
                 "exit_status": proc.returncode,
                 "stdout_summary": (proc.stdout or "").strip().splitlines()[-1] if proc.stdout else "",
+                "stderr_summary": (proc.stderr or "").strip().splitlines()[-1] if proc.stderr else "",
             },
             "classification": classification,
         }
+
