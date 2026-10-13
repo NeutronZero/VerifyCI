@@ -3,3 +3,5 @@
 *.jsonl text eol=lf
 *.py text eol=lf
 *.md text eol=lf
+*SHA256 text eol=lf
+

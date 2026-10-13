@@ -13,8 +13,8 @@
     "mixed_language": 25,
     "adversarial_critical": 25
   },
-  "corpus_sha256": "f588414156bd2eedbedbf94f5b7451cb1fa1939b05710a270cd72c7de74b7580",
-  "label_sha256": "6e6d2e5e3f74bf2e7e2a664782ca62eccbb1efd9f0be51f5ec4e9922e24aa774",
+  "corpus_sha256": "a9f76b89c9f114590c04d7d2e2ee3714504d13ad7d9ff075df505d9d81048ea6",
+  "label_sha256": "5081fa37d3bfff1a67562900b2c54560dde688de60708feb77d883ab3b281d99",
   "status": "CORPUS_FROZEN",
   "freeze_rule": "Gold labels independently authored without production diffmap dependencies.",
   "gates": {

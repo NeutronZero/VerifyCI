@@ -8,7 +8,6 @@ Results report per-mutation evidence (target, diff, outcome, classification: kil
 """
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
@@ -66,7 +65,7 @@ PRODUCTION_MUTATION_MAP: dict[str, dict[str, Any]] = {
     "MUT-05_RELAXED_FAIL_CLOSED_CHECK": {
         "rel_path": "verifyci/interface/ingress.py",
         "search": "max_chars: int = MAX_DIFF_CHARS",
-        "replace": "max_chars: int = 100_000_000  # mutated: relax ingress limit",
+        "replace": "max_chars: int = 100_000_000",
         "test_args": [
             "tests/interface/test_ingress.py",
             "-k",
@@ -139,21 +138,33 @@ def evaluate_mutation(mutation_def: dict[str, Any]) -> dict[str, Any]:
             text=True,
         )
 
-        # 4. Classify outcome based on observed test execution and exit status
-        # Behavioral classification:
-        # - If mutation declared equivalent and passes suite (exit 0), observed behavioral equivalence confirmed.
-        # - If non-equivalent mutation fails suite (exit != 0), killed by regression suite.
-        # - If non-equivalent mutation passes suite (exit 0), survived.
-        if m_id.startswith("EQUIV-"):
-            classification = "equivalent" if proc.returncode == 0 else "killed"
-        else:
-            classification = "killed" if proc.returncode != 0 else "survived"
-
         first_line = ""
         for line in (proc.stdout or "").splitlines():
             if line.startswith("VERIFYCI_LOCATION:"):
                 first_line = line
                 break
+
+        stdout_summary = ""
+        for line in reversed((proc.stdout or "").splitlines()):
+            if "failed" in line or "passed" in line or "error" in line:
+                stdout_summary = line.strip()
+                break
+
+        # 4. Classify outcome based on observed test execution and exit status
+        # Behavioral classification:
+        # - EQUIV: passes suite (exit 0) -> equivalent, fails suite -> killed.
+        # - Critical mutation: exit code 1 with test failure -> killed.
+        # - Critical mutation: exit code 0 -> survived.
+        # - Any test/collection error (exit code 2 or error reported) -> invalid_test_error (never killed).
+        if m_id.startswith("EQUIV-"):
+            classification = "equivalent" if proc.returncode == 0 else "killed"
+        else:
+            if proc.returncode == 1 and "failed" in stdout_summary.lower() and "error" not in stdout_summary.lower():
+                classification = "killed"
+            elif proc.returncode == 0:
+                classification = "survived"
+            else:
+                classification = "invalid_test_error"
 
         return {
             "mutation_id": m_id,
@@ -169,7 +180,7 @@ def evaluate_mutation(mutation_def: dict[str, Any]) -> dict[str, Any]:
                 "verified_module_path": first_line,
                 "test_command": "pytest " + " ".join(spec["test_args"]),
                 "exit_status": proc.returncode,
-                "stdout_summary": (proc.stdout or "").strip().splitlines()[-1] if proc.stdout else "",
+                "stdout_summary": stdout_summary,
                 "stderr_summary": (proc.stderr or "").strip().splitlines()[-1] if proc.stderr else "",
             },
             "classification": classification,

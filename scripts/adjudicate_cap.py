@@ -107,50 +107,79 @@ def adjudicate_cap010(cap_dir: Path) -> dict[str, Any]:
     assert l_hash == cfg["label_sha256"], f"CAP-010 labels.jsonl drift: {l_hash} != {cfg['label_sha256']}"
 
     # Verify query IDs match the frozen query set exactly
+    cases_raw = [json.loads(line) for line in (cap_dir / "cases.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
     labels_raw = [json.loads(line) for line in (cap_dir / "labels.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
-    expected_qids = {lbl["qid"] for lbl in labels_raw}
+    doc_map = {c["id"]: c["text"] for c in cases_raw if c.get("kind") == "doc"}
+    query_cases_by_qid = {c["qid"]: c for c in cases_raw if c.get("kind") == "query"}
+    labels_by_qid = {lbl["qid"]: lbl for lbl in labels_raw}
 
+    expected_qids = set(labels_by_qid.keys())
     queries = res["queries"]
     assert len(queries) == cfg["query_count"], "CAP-010 query count mismatch"
     res_qids = {q["qid"] for q in queries}
     assert res_qids == expected_qids, "CAP-010 query ID mismatch between results and frozen labels"
 
-    labels_by_qid = {lbl["qid"]: lbl for lbl in labels_raw}
-    answer_queries = [q for q in queries if q["category"] != "no_relevant_result"]
-    no_answer_queries = [q for q in queries if q["category"] == "no_relevant_result"]
+    import re
 
-    # Recompute ranking metrics directly from raw rankings against frozen labels
+    def _eval_abstention(query_text: str, ranked_ids: list[str], docs: dict[str, str]) -> tuple[bool, str]:
+        tokens = re.findall(r"[a-zA-Z0-9_]{10,}", query_text)
+        symbols = [t for t in tokens if "_" in t and not re.match(r"^(?:dev|held_out)_repo_\d+$", t)]
+        if symbols:
+            for did in ranked_ids[:5]:
+                dtext = docs.get(did, "")
+                if any(s in dtext for s in symbols):
+                    return False, "symbol_grounded"
+            return True, "ungrounded_symbol_abstention"
+        return False, "no_specific_symbol_claimed"
+
     recomputed_r5: list[float] = []
     recomputed_ndcg10: list[float] = []
+    no_answer_correct_abs = 0
+    no_answer_false_rel = 0
+    no_answer_count = 0
 
-    for q in answer_queries:
+    for q in queries:
         qid = q["qid"]
+        lbl = labels_by_qid[qid]
+        q_case = query_cases_by_qid[qid]
+
+        assert q["category"] == lbl["category"] == q_case["category"], f"Category mismatch for {qid}"
+        assert q.get("is_held_out") == lbl.get("is_held_out") == q_case.get("is_held_out"), f"Held-out status mismatch for {qid}"
+
         ranked_ids = q.get("ranked_doc_ids", [])
-        rel = labels_by_qid[qid].get("relevance", {})
-        
-        # Recall@5: fraction of relevant documents (grade >= 2) retrieved in top 5
-        wanted = {did for did, g in rel.items() if g >= 2}
-        if wanted:
-            rec = len(set(ranked_ids[:5]) & wanted) / len(wanted)
+        is_no_answer = lbl.get("is_no_answer", False)
+        rel = lbl.get("relevance", {})
+
+        if is_no_answer:
+            no_answer_count += 1
+            abstained, _ = _eval_abstention(q_case["text"], ranked_ids, doc_map)
+            has_false_claim = any(did in rel and rel[did] >= 2 for did in ranked_ids[:5])
+            if abstained and not has_false_claim:
+                no_answer_correct_abs += 1
+            if (not abstained) or has_false_claim:
+                no_answer_false_rel += 1
         else:
-            rec = 0.0
-        recomputed_r5.append(rec)
+            wanted = {did for did, g in rel.items() if g >= 2}
+            if wanted:
+                rec = len(set(ranked_ids[:5]) & wanted) / len(wanted)
+            else:
+                rec = 0.0
+            recomputed_r5.append(rec)
 
-        # nDCG@10
-        def _dcg_score(ids: list[str], rel_map: dict[str, int], k: int) -> float:
-            import math
-            return sum(((2 ** rel_map[d] - 1) / math.log2(i + 2) for i, d in enumerate(ids[:k]) if d in rel_map), 0.0)
+            def _dcg_score(ids: list[str], rel_map: dict[str, int], k: int) -> float:
+                import math
+                return sum(((2 ** rel_map[d] - 1) / math.log2(i + 2) for i, d in enumerate(ids[:k]) if d in rel_map), 0.0)
 
-        ideal = sorted(rel.keys(), key=lambda d: -rel[d])
-        idcg = _dcg_score(ideal, rel, 10)
-        dcg = _dcg_score(ranked_ids, rel, 10)
-        ndcg = (dcg / idcg) if idcg > 0.0 else 0.0
-        recomputed_ndcg10.append(ndcg)
+            ideal = sorted(rel.keys(), key=lambda d: -rel[d])
+            idcg = _dcg_score(ideal, rel, 10)
+            dcg = _dcg_score(ranked_ids, rel, 10)
+            ndcg = (dcg / idcg) if idcg > 0.0 else 0.0
+            recomputed_ndcg10.append(ndcg)
 
     r5 = sum(recomputed_r5) / max(1, len(recomputed_r5))
     ndcg10 = sum(recomputed_ndcg10) / max(1, len(recomputed_ndcg10))
-    correct_abs = sum(1 for q in no_answer_queries if q["abstention_correct"]) / len(no_answer_queries)
-    false_rel = sum(1 for q in no_answer_queries if q["false_relevant"]) / len(no_answer_queries)
+    correct_abs = no_answer_correct_abs / max(1, no_answer_count)
+    false_rel = no_answer_false_rel / max(1, no_answer_count)
 
     gates_met = (
         r5 >= cfg["gates"]["recall_at_5_min"]
@@ -315,8 +344,22 @@ def adjudicate_cap013(cap_dir: Path) -> dict[str, Any]:
         assert evidence.get("patch_applied"), f"CAP-013 mutation {m['mutation_id']} missing patch_applied evidence"
         assert evidence.get("sandbox_path"), f"CAP-013 mutation {m['mutation_id']} missing sandbox_path evidence"
         assert evidence.get("cwd") and evidence["cwd"] == evidence["sandbox_path"], f"CAP-013 mutation {m['mutation_id']} did not execute with cwd in isolated sandbox"
-        assert evidence.get("verified_module_path") and "verifyci" in evidence["verified_module_path"].lower(), f"CAP-013 mutation {m['mutation_id']} failed verified module path check"
         assert "exit_status" in evidence, f"CAP-013 mutation {m['mutation_id']} missing exit status"
+
+        sb_norm = str(Path(evidence["sandbox_path"]).resolve()).lower()
+        v_path_raw = evidence.get("verified_module_path", "").replace("VERIFYCI_LOCATION:", "").strip()
+        v_path_norm = str(Path(v_path_raw).resolve()).lower() if v_path_raw else ""
+        assert v_path_norm.startswith(sb_norm), f"CAP-013 mutation {m['mutation_id']} module {v_path_norm} was not loaded from sandbox {sb_norm}"
+
+        m_id = m["mutation_id"]
+        if m_id in crit_set:
+            assert m["classification"] == "killed", f"Critical mutation {m_id} not classified as killed"
+            assert evidence["exit_status"] == 1, f"Critical mutation {m_id} exit status {evidence['exit_status']} != 1 (assertion failure required)"
+            assert "failed" in evidence.get("stdout_summary", "").lower(), f"Critical mutation {m_id} did not fail test assertions"
+            assert "error" not in evidence.get("stdout_summary", "").lower(), f"Critical mutation {m_id} had test/collection error: {evidence.get('stdout_summary')}"
+        elif m_id == "EQUIV-01_WHITESPACE_REORDER":
+            assert m["classification"] == "equivalent", f"Equivalent control {m_id} not classified as equivalent"
+            assert evidence["exit_status"] == 0, f"Equivalent control {m_id} failed regression test"
 
     crit_rows = [m for m in mutations if m["mutation_id"] in crit_set and m["classification"] != "equivalent"]
     killed = sum(1 for m in crit_rows if m["classification"] == "killed")

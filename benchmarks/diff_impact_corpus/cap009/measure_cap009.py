@@ -267,11 +267,11 @@ def main() -> int:
     # Generate RESULTS.md
     gates_table = f"""| Gate | Predeclared Threshold | Measured Value | Classification |
 |---|---|---|---|
-| Critical Adversarial False Passes | = 0 | {metrics_res['critical_adversarial_false_passes']} | Established |
-| Representative Seed Precision | >= 0.95 | {metrics_res['seed_precision']} | Established |
-| Representative Seed Recall | >= 0.95 | {metrics_res['seed_recall']} | Established |
-| Representative Impact Precision | >= 0.95 | {metrics_res['impact_precision']} | Established |
-| Representative Impact Recall | >= 0.95 | {metrics_res['impact_recall']} | Established |
+| Critical Adversarial False Passes | = 0 | {metrics_res['critical_adversarial_false_passes']} | Measured-Met, Not Established |
+| Representative Seed Precision | >= 0.95 | {metrics_res['seed_precision']} | Measured-Met, Not Established |
+| Representative Seed Recall | >= 0.95 | {metrics_res['seed_recall']} | Measured-Met, Not Established |
+| Representative Impact Precision | >= 0.95 | {metrics_res['impact_precision']} | Measured-Met, Not Established |
+| Representative Impact Recall | >= 0.95 | {metrics_res['impact_recall']} | Measured-Met, Not Established |
 | Latency p95 | <= 50.0 ms | {metrics_res['p95_ms']} ms | Measured-Met, Not Established |
 """
 

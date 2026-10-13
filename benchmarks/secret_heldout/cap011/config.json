@@ -13,8 +13,8 @@
     "negatives_placeholders": 10,
     "negatives_test_fixtures": 10
   },
-  "corpus_sha256": "72865e81db5bbd975ec8cb1710940b5203347ca39f12334a26c7cc339bd0c57f",
-  "label_sha256": "9e3bbc98a9ca549f981db3f25d280663c42d2c855e556e29ae6569da2d8572b7",
+  "corpus_sha256": "8dcb519d55df0a1828a70d0c857606be40f81551239dbe8d34cdf808b01dbe52",
+  "label_sha256": "5dbdf268508b62f071c65942bbb262ba969a695a99e4c08471ad35d9d49b0307",
   "status": "CORPUS_FROZEN",
   "freeze_rule": "Held-out synthetic credentials sealed; CAP-002B corpus left untouched.",
   "gates": {

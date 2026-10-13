@@ -253,14 +253,14 @@ def write_frozen_corpus() -> None:
     cases_text = "\n".join(json.dumps(c, sort_keys=True) for c in cases) + "\n"
     labels_text = "\n".join(json.dumps(lbl, sort_keys=True) for lbl in labels) + "\n"
 
-    cases_file.write_text(cases_text, encoding="utf-8")
-    labels_file.write_text(labels_text, encoding="utf-8")
+    cases_file.write_bytes(cases_text.encode("utf-8"))
+    labels_file.write_bytes(labels_text.encode("utf-8"))
 
     c_hash = hashlib.sha256(cases_file.read_bytes()).hexdigest()
     l_hash = hashlib.sha256(labels_file.read_bytes()).hexdigest()
 
-    (CORPUS_DIR / "CORPUS_SHA256").write_text(c_hash + "\n", encoding="utf-8")
-    (CORPUS_DIR / "LABEL_SHA256").write_text(l_hash + "\n", encoding="utf-8")
+    (CORPUS_DIR / "CORPUS_SHA256").write_bytes((c_hash + "\n").encode("utf-8"))
+    (CORPUS_DIR / "LABEL_SHA256").write_bytes((l_hash + "\n").encode("utf-8"))
 
     config = {
         "experiment_id": "CAP-011",

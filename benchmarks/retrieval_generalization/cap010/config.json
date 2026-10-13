@@ -28,8 +28,8 @@
     "multi_hop": 35,
     "no_relevant_result": 35
   },
-  "corpus_sha256": "32e792ac3e8978549bf9bde53dd18c1aa142ea867f4881601b6a0ec548d2fc20",
-  "label_sha256": "431c0909626cb728a0174ba59a0716d180421218c700ce9ef9eab3caf2f7f8e6",
+  "corpus_sha256": "62161689b4478475d4ec5a43f08f19f5214c1762a9e0c6d1e9ca0b85319dce31",
+  "label_sha256": "ea461629678dff8be90069fd8b3cf6b9ebec0937b23a6efb85054effb33c1a4e",
   "status": "CORPUS_FROZEN",
   "freeze_rule": "Relevance judgments frozen clean-room; no-answer queries excluded from nDCG calculation.",
   "gates": {

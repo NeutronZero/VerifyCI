@@ -173,10 +173,10 @@ def main() -> int:
     # Generate RESULTS.md
     gates_table = f"""| Gate | Predeclared Threshold | Measured Value | Classification |
 |---|---|---|---|
-| Critical Mutation Kill Rate | = 1.0000 (100%) | {metrics_res['mutation_kill_rate']} | Established |
-| Incorrect PASS Rate | = 0.0000 (0%) | {metrics_res['incorrect_pass_rate']} | Established |
-| Oracle Disagreement Rate | = 0.0000 | {metrics_res['oracle_disagreement_rate']} | Established |
-| False Decline Rate | <= 0.0500 | {metrics_res['false_decline_rate']} | Established |
+| Critical Mutation Kill Rate | = 1.0000 (100%) | {metrics_res['mutation_kill_rate']} | Measured-Met, Not Established |
+| Incorrect PASS Rate | = 0.0000 (0%) | {metrics_res['incorrect_pass_rate']} | Measured-Met, Not Established |
+| Oracle Disagreement Rate | = 0.0000 | {metrics_res['oracle_disagreement_rate']} | Measured-Met, Not Established |
+| False Decline Rate | <= 0.0500 | {metrics_res['false_decline_rate']} | Measured-Met, Not Established |
 """
 
     kill_table_rows = []

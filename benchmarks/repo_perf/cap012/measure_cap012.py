@@ -137,6 +137,31 @@ def _synthesize_repo(repo_dir: Path, file_count: int, commit_files: int = 1) -> 
     return files_created, diff
 
 
+class RssMonitor:
+    def __init__(self) -> None:
+        self._stop_event = threading.Event()
+        self.peak_mb = _get_process_rss_mb()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            curr = _get_process_rss_mb()
+            if curr > self.peak_mb:
+                self.peak_mb = curr
+            time.sleep(0.002)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> float:
+        self._stop_event.set()
+        self._thread.join(timeout=1.0)
+        curr = _get_process_rss_mb()
+        if curr > self.peak_mb:
+            self.peak_mb = curr
+        return self.peak_mb
+
+
 def _measure_tier(file_count: int, commit_files: int = 1, repetitions: int = 5, warmup_runs: int = 1) -> dict[str, Any]:
     latencies: list[float] = []
     peak_rss_values: list[float] = []
@@ -174,18 +199,8 @@ def _measure_tier(file_count: int, commit_files: int = 1, repetitions: int = 5, 
                 _, diff = _synthesize_repo(tmp_path, file_count, commit_files=commit_files)
 
                 # Continuous background peak memory monitor throughout the run
-                stop_monitor = False
-                observed_peak = [_get_process_rss_mb()]
-
-                def _monitor_rss():
-                    while not stop_monitor:
-                        curr = _get_process_rss_mb()
-                        if curr > observed_peak[0]:
-                            observed_peak[0] = curr
-                        time.sleep(0.002)
-
-                monitor_thread = threading.Thread(target=_monitor_rss, daemon=True)
-                monitor_thread.start()
+                monitor = RssMonitor()
+                monitor.start()
 
                 t0 = time.perf_counter()
 
@@ -212,11 +227,7 @@ def _measure_tier(file_count: int, commit_files: int = 1, repetitions: int = 5, 
                     run_ingest(str(tmp_path))
                 rev2_db_size = Path(db_path).stat().st_size if Path(db_path).exists() else base_db_size
 
-                stop_monitor = True
-                monitor_thread.join(timeout=1.0)
-
-                # Capture final peak RSS for this repetition
-                run_peak_mb = max(observed_peak[0], _get_process_rss_mb())
+                run_peak_mb = monitor.stop()
 
                 latencies.append(elapsed_ms)
                 peak_rss_values.append(run_peak_mb)
@@ -258,7 +269,30 @@ def run_cap012(smoke_tier_only: bool = False) -> dict[str, Any]:
         fcount = tier_defs[tier]["file_count"]
         cfiles = tier_defs[tier].get("commit_files", 1)
         reps = 1 if smoke_tier_only else cfg.get("repetition_count", 5)
-        tier_results[tier] = _measure_tier(file_count=fcount, commit_files=cfiles, repetitions=reps)
+
+        # Isolated tier subprocess execution ensures peak memory high-water marks never leak across tiers
+        cmd = [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--tier-worker",
+            tier,
+            str(fcount),
+            str(cfiles),
+            str(reps),
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(f"Tier {tier} subprocess failed (code {proc.returncode}):\n{proc.stderr}\n{proc.stdout}")
+
+        tier_json_str = ""
+        for line in proc.stdout.splitlines():
+            if line.startswith("TIER_RESULT_JSON:"):
+                tier_json_str = line.split("TIER_RESULT_JSON:", 1)[1].strip()
+                break
+        if not tier_json_str:
+            raise RuntimeError(f"Tier {tier} subprocess produced no JSON output:\n{proc.stdout}")
+
+        tier_results[tier] = json.loads(tier_json_str)
 
     # Fill default / estimated envelope for tiers not executed during smoke run
     for tier in tier_defs:
@@ -340,7 +374,7 @@ def main() -> int:
 {tier_table}
 
 ## 3. Evidence Classification
-- **Functional Completion & Schema**: Established
+- **Functional Completion & Schema**: Measured-Met, Not Established
 - **Small Tier Timing**: Measured-Met, Not Established (gated only under `VERIFYCI_PINNED_BENCHMARK_ENV`)
 - **Medium Tier Timing**: Measured-Met, Not Established
 - **Large Tier Timing**: Measured-Met, Not Established
@@ -356,4 +390,13 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if "--tier-worker" in sys.argv:
+        idx = sys.argv.index("--tier-worker")
+        t_name = sys.argv[idx + 1]
+        fc = int(sys.argv[idx + 2])
+        cf = int(sys.argv[idx + 3])
+        rp = int(sys.argv[idx + 4])
+        res = _measure_tier(file_count=fc, commit_files=cf, repetitions=rp)
+        print(f"TIER_RESULT_JSON:{json.dumps(res)}")
+        sys.exit(0)
     sys.exit(main())
