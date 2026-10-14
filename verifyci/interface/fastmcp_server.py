@@ -35,6 +35,7 @@ def create_inner_server(graph=None, store=None, node_map: dict | None = None,
     builds on this; ``verifyci.interface.mcp_server.create_mcp_server`` is a
     deprecated facade delegating here.
     """
+    # Deferred (function-local) import: mcp_server <-> fastmcp_server delegate to each other; top-level imports would cycle.
     from verifyci.interface.mcp_server import MCPServer, MCPServerHandlers
 
     handlers = MCPServerHandlers(

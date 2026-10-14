@@ -437,6 +437,7 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
     import warnings
     warnings.warn("use verifyci.interface.fastmcp_server.create_fastmcp_server",
                   DeprecationWarning, stacklevel=2)
+    # Deferred (function-local) import: mcp_server <-> fastmcp_server delegate to each other; top-level imports would cycle.
     from verifyci.interface.fastmcp_server import create_inner_server
     return create_inner_server(graph=graph, store=store, node_map=node_map,
                                dense_provider=dense_provider, ledger=ledger,
