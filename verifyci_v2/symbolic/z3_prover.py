@@ -484,6 +484,63 @@ class Z3SymbolicProver:
                     )
                 )
 
+        if not findings and func_base.h_body != func_head.h_body:
+            unsupported_types = (
+                ast.For,
+                ast.AsyncFor,
+                ast.While,
+                ast.Try,
+                ast.Yield,
+                ast.YieldFrom,
+                ast.AsyncFunctionDef,
+                ast.ListComp,
+                ast.DictComp,
+                ast.SetComp,
+                ast.GeneratorExp,
+                ast.Await,
+            )
+            found_construct = None
+            for n in ast.walk(base_fn_node):
+                if isinstance(n, unsupported_types):
+                    found_construct = type(n).__name__
+                    break
+            if not found_construct:
+                for n in ast.walk(head_fn_node):
+                    if isinstance(n, unsupported_types):
+                        found_construct = type(n).__name__
+                        break
+
+            if found_construct:
+                elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+                witness = CounterexampleWitness(
+                    checker_id="VC2-SYMBOLIC-UNSUPPORTED-CONSTRUCT",
+                    smt_status="UNKNOWN",
+                    input_assignments={},
+                    base_return_state="",
+                    head_return_state="",
+                    proof_time_ms=round(elapsed_ms, 3),
+                )
+                fid = blake3_hex(
+                    f"UNSUPPORTED:{file_path}:{func_head.qualified_name}:{found_construct}",
+                    domain="verifyci.v2.finding",
+                )[:16]
+                findings.append(
+                    VerificationFinding(
+                        finding_id=fid,
+                        rule_id="VC2-SYMBOLIC-UNSUPPORTED-CONSTRUCT",
+                        severity="MEDIUM",
+                        verdict="INCONCLUSIVE",
+                        file_path=file_path,
+                        start_line=func_head.start_line,
+                        end_line=func_head.end_line,
+                        message=(
+                            f"Function '{fn_short}' contains unsupported AST construct '{found_construct}' "
+                            f"outside linear integer SMT fragment; verification is inconclusive."
+                        ),
+                        witness=witness,
+                    )
+                )
+
         return tuple(findings)
 
     def prove_equivalence(

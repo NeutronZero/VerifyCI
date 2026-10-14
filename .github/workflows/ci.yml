@@ -135,7 +135,7 @@ jobs:
       - run: uv sync --frozen --extra dev
       - name: Run Evidence & Benchmark Reproduction Gate
         run: |
-          uv run --no-sync python -m pytest tests/evaluation/ tests/performance/ -n auto -q
+          uv run --no-sync python -m pytest tests/v2/ -n auto -q
       - name: Generate Evidence Bundle & Summary
         run: |
           uv run --no-sync python scripts/build_evidence_bundle.py

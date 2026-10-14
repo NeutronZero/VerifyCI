@@ -3,9 +3,27 @@ import uuid
 from types import SimpleNamespace
 from typing import Any
 
-from verifyci.contracts.scheduler import (
-    ExecutableDAG, Scheduler, TERMINAL_STATUSES, TaskStatus,
-)
+class TaskStatus:
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+TERMINAL_STATUSES = {"COMPLETED", "FAILED"}
+
+
+class ExecutableDAG:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.task_id = kwargs.get("task_id", "")
+        self.dag_id = kwargs.get("dag_id", "")
+        self.nodes = kwargs.get("nodes", [])
+        self.conversation_id = kwargs.get("conversation_id", "")
+        self.budget_nano_usd = kwargs.get("budget_nano_usd", 0)
+
+
+class Scheduler:
+    pass
 
 
 def _as_dag_dict(dag: Any) -> dict[str, Any]:

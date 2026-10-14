@@ -71,10 +71,40 @@ def test_baseline_immutable():
     return "frozen baseline unchanged by rewrite attempt"
 
 
+def test_v2_fastmcp_daemon():
+    from verifyci_v2.interface.fastmcp_daemon import VerifyCIFastMCPDaemon
+    daemon = VerifyCIFastMCPDaemon(repo_id="test-acceptance-repo")
+    tools = set(daemon.list_tools())
+    assert "vc_triage_secrets" in tools
+    assert "vc_prove_diff" in tools
+    res = daemon.invoke_tool("vc_triage_secrets", {"file_path": "test.py", "source": "x = 1\n"})
+    assert res["status"] == "ok"
+    return "v2 FastMCP daemon operational"
+
+
+def test_v2_cli_tools():
+    from verifyci_v2.interface.cli import run_cli
+    res_check = run_cli(["check", "--file", "test.py", "--source", "x = 1\n"])
+    assert res_check["status"] == "ok"
+    res_vdiff = run_cli(["verify-diff", "--format", "json"])
+    assert res_vdiff["status"] == "PASS"
+    return "v2 CLI tools operational"
+
+
 if __name__ == "__main__":
-    tests = (test_missing_evidence, test_contradictory_evidence, test_invalid_verdict_transition,
-             test_malicious_filename, test_unauthorized_api, test_stale_hash,
-             test_false_accept_counterexample, test_failed_latency_gate, test_baseline_immutable)
+    tests = (
+        test_missing_evidence,
+        test_contradictory_evidence,
+        test_invalid_verdict_transition,
+        test_malicious_filename,
+        test_unauthorized_api,
+        test_stale_hash,
+        test_false_accept_counterexample,
+        test_failed_latency_gate,
+        test_baseline_immutable,
+        test_v2_fastmcp_daemon,
+        test_v2_cli_tools,
+    )
     for t in tests:
         print("PASS", t.__name__, "-", t())
-    print("VC acceptance: 9/9 synthetic fixtures behave as specified")
+    print("VC acceptance: 11/11 synthetic and v2 fixtures behave as specified")

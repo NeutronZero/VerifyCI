@@ -306,6 +306,40 @@ def _lower_stmt_list(
                 )
             )
 
+        elif isinstance(stmt, (ast.While, ast.For, ast.AsyncFor)):
+            loop_kind = type(stmt).__name__
+            cond_str = ast.unparse(stmt.test) if hasattr(stmt, "test") else ast.unparse(stmt.iter)
+            instructions.append(
+                USSAInstruction(
+                    inst_id=ctx.next_inst_id(),
+                    opcode=f"LOOP_{loop_kind.upper()}",
+                    target_var=None,
+                    operands=(cond_str,),
+                    source_line=stmt.lineno,
+                )
+            )
+            current_block_id = _lower_stmt_list(stmt.body, ctx, current_block_id)
+            if stmt.orelse:
+                current_block_id = _lower_stmt_list(stmt.orelse, ctx, current_block_id)
+
+        elif isinstance(stmt, ast.Try):
+            instructions.append(
+                USSAInstruction(
+                    inst_id=ctx.next_inst_id(),
+                    opcode="TRY_BLOCK",
+                    target_var=None,
+                    operands=(),
+                    source_line=stmt.lineno,
+                )
+            )
+            current_block_id = _lower_stmt_list(stmt.body, ctx, current_block_id)
+            for handler in stmt.handlers:
+                current_block_id = _lower_stmt_list(handler.body, ctx, current_block_id)
+            if stmt.orelse:
+                current_block_id = _lower_stmt_list(stmt.orelse, ctx, current_block_id)
+            if stmt.finalbody:
+                current_block_id = _lower_stmt_list(stmt.finalbody, ctx, current_block_id)
+
         elif isinstance(stmt, ast.If):
             cond_str, cond_vars = _expr_to_ssa_operands(stmt.test, ctx)
             instructions.append(

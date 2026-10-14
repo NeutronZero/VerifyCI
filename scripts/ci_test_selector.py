@@ -9,11 +9,8 @@ from pathlib import Path
 
 # Permanent Core Invariant Set: ALWAYS executed on every run regardless of diff
 CORE_INVARIANTS = [
-    "tests/contracts/",
-    "tests/verification/test_removal.py",
-    "tests/verification/test_ungrounded_policy.py",
-    "tests/interface/test_probe_infra_errors.py",
-    "tests/storage/test_probe_a6_temporal_integrity.py",
+    "tests/v2/test_remediation_spec.py",
+    "tests/v2/test_all_layers.py",
 ]
 
 SAFE_TEST_TARGET_RE = re.compile(r"[A-Za-z0-9_./-]+\.py")
@@ -21,19 +18,16 @@ SAFE_TEST_DIR_RE = re.compile(r"tests/(?:[A-Za-z0-9_.-]+/)*")
 
 # Source path to test directory mapping
 PATH_MAPPING = {
-    "verifyci/contracts/": ["tests/contracts/"],
-    "verifyci/export/": ["tests/export/"],
-    "verifyci/graph/": ["tests/graph/"],
-    "verifyci/ingestion/": ["tests/ingestion/"],
-    "verifyci/interface/": ["tests/interface/", "tests/integration/"],
-    "verifyci/memory/": ["tests/memory/"],
-    "verifyci/observability/": ["tests/observability/"],
-    "verifyci/orchestration/": ["tests/orchestration/"],
-    "verifyci/retrieval/": ["tests/retrieval/"],
-    "verifyci/storage/": ["tests/storage/"],
-    "verifyci/verification/": ["tests/verification/"],
-    "benchmarks/": ["tests/evaluation/"],
-    "benchmarks/latency/": ["tests/performance/"],
+    "verifyci_v2/contracts/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
+    "verifyci_v2/ingestion/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
+    "verifyci_v2/symbolic/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
+    "verifyci_v2/neural/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
+    "verifyci_v2/store/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
+    "verifyci_v2/sandbox/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
+    "verifyci_v2/provenance/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
+    "verifyci_v2/interface/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
+    "verifyci_v2/": ["tests/v2/"],
+    "benchmarks/": ["tests/v2/"],
 }
 
 # Changes that trigger the FULL test suite

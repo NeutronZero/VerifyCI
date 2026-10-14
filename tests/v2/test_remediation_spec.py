@@ -396,3 +396,150 @@ def test_p1_retrieval_reports_scan_mode_and_memory_bytes() -> None:
     index_no_exact.upsert_document("uid2", "mod.fn2", "def fn2(): pass")
     stats_no_exact = index_no_exact.search("fn2", top_k=1)
     assert stats_no_exact.exact_float_bytes == 0
+
+
+def test_r2_1_spec_compiler_uses_real_z3_and_never_fabricates_sat(monkeypatch: pytest.MonkeyPatch) -> None:
+    from verifyci_v2.neural import spec_compiler
+    compiler = spec_compiler.IntentToSMTCompiler()
+
+    # Case A: Monkeypatch _z3_mod = None -> verify_function_against_intent must not emit smt_status == "SAT"
+    monkeypatch.setattr(spec_compiler, "_z3_mod", None)
+    findings_no_z3 = compiler.verify_function_against_intent(
+        file_path="src/calc.py",
+        source="def sub(a: int, b: int) -> int:\n    return a - b\n",
+        intent_text="never drops below zero",
+    )
+    for f in findings_no_z3:
+        assert f.witness is not None
+        assert f.witness.smt_status != "SAT"
+
+    monkeypatch.undo()
+
+    # Case B: Path-guarded function proves UNSAT (zero findings)
+    guarded_src = (
+        "def compute_discount(total: int, discount: int) -> int:\n"
+        "    if discount <= total:\n"
+        "        return total - discount\n"
+        "    return 0\n"
+    )
+    findings_guarded = compiler.verify_function_against_intent(
+        file_path="src/calc.py",
+        source=guarded_src,
+        intent_text="never drops below zero",
+    )
+    # Full path encoding proves all paths UNSAT
+    assert len(findings_guarded) == 0
+
+    # Case C: Unguarded subtraction produces a real Z3 SAT counterexample verified concretely
+    unguarded_src = (
+        "def compute_discount(total: int, discount: int) -> int:\n"
+        "    return total - discount\n"
+    )
+    findings_unguarded = compiler.verify_function_against_intent(
+        file_path="src/calc.py",
+        source=unguarded_src,
+        intent_text="never drops below zero",
+    )
+    assert len(findings_unguarded) == 1
+    finding = findings_unguarded[0]
+    assert finding.verdict == "FAIL"
+    assert finding.witness is not None
+    assert finding.witness.smt_status == "SAT"
+    assert finding.witness.input_assignments
+    # Validate concrete violation
+    total_val = finding.witness.input_assignments["total"]
+    discount_val = finding.witness.input_assignments["discount"]
+    assert total_val - discount_val < 0
+
+
+def test_r2_2_adjudicator_distinguishes_smoke_from_frozen_corpus_and_calibrates_validly(tmp_path: Path) -> None:
+    from verifyci_v2.interface.cap_adjudicator import V2CapabilityAdjudicator
+    adjudicator = V2CapabilityAdjudicator()
+
+    # Smoke suite evaluation
+    smoke_res = adjudicator.run_self_test_smoke_suite()
+    assert smoke_res["all_passed"] is True
+    cap010_card = next(sc for sc in smoke_res["scorecards"] if sc["cap_id"] == "cap010")
+    assert cap010_card["passed"] is True
+
+    # adjudicate_all alias
+    alias_res = adjudicator.adjudicate_all()
+    assert alias_res["all_passed"] is True
+
+    # Corpus adjudication on actual benchmarks/ directory
+    corpus_res = adjudicator.adjudicate_corpus()
+    assert corpus_res["corpora_evaluated"] > 0
+    assert corpus_res["all_verified"] is True
+
+    # Tampered corpus SHA256 must fail closed
+    fake_cap = tmp_path / "fake_cap"
+    fake_cap.mkdir()
+    (fake_cap / "cases.jsonl").write_text('{"id": 1}\n', encoding="utf-8")
+    (fake_cap / "labels.jsonl").write_text('{"id": 1, "expected": "PASS"}\n', encoding="utf-8")
+    (fake_cap / "CORPUS_SHA256").write_text("corrupted_sha256_hash\n", encoding="utf-8")
+    (fake_cap / "LABEL_SHA256").write_text("corrupted_label_hash\n", encoding="utf-8")
+
+    fake_root = tmp_path / "benchmarks"
+    fake_root.mkdir()
+    fake_secret = fake_root / "secret_corpus" / "cap002b"
+    fake_secret.mkdir(parents=True)
+    (fake_secret / "cases.jsonl").write_text('{"id": 1}\n', encoding="utf-8")
+    (fake_secret / "labels.jsonl").write_text('{"id": 1}\n', encoding="utf-8")
+    (fake_secret / "CORPUS_SHA256").write_text("drifted_hash\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="CORPUS_SHA256 drift"):
+        adjudicator.adjudicate_corpus(benchmark_dir=fake_root)
+
+
+def test_r2_3_scripts_and_skill_acceptance_run_without_legacy_v1_module_error() -> None:
+    from scripts.ci_test_selector import select_tests, validate_test_targets
+    from benchmarks.latency.fixture import env, extractor, graph_store, intent_align, provider, workload  # noqa: F401
+
+    # Invariant selection must produce existing v2 paths
+    selected = select_tests(["verifyci_v2/symbolic/z3_prover.py"])
+    valid = validate_test_targets(selected)
+    assert any("tests/v2" in t for t in valid)
+
+    # FastMCP and CLI integration
+    from verifyci_v2.interface.cli import run_cli
+    res_vdiff = run_cli(["verify-diff", "--format", "json"])
+    assert res_vdiff["status"] == "PASS"
+
+
+def test_r2_4_unsupported_ast_diff_emits_inconclusive_never_silent_pass() -> None:
+    from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
+    from verifyci_v2.symbolic.z3_prover import Z3SymbolicProver
+
+    base_src = (
+        "def loop_calc(x: int) -> int:\n"
+        "    while x < 10:\n"
+        "        x += 1\n"
+        "    return x\n"
+    )
+    head_src = (
+        "def loop_calc(x: int) -> int:\n"
+        "    while x < 20:\n"
+        "        x += 1\n"
+        "    return x\n"
+    )
+
+    fb = lower_file_to_ussa("src/loop.py", base_src)[0]
+    fh = lower_file_to_ussa("src/loop.py", head_src)[0]
+
+    prover = Z3SymbolicProver()
+    findings = prover.prove_function_diff(
+        file_path="src/loop.py",
+        base_source=base_src,
+        head_source=head_src,
+        func_base=fb,
+        func_head=fh,
+    )
+
+    # Must return INCONCLUSIVE / UNKNOWN finding, never silent ()
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.verdict == "INCONCLUSIVE"
+    assert f.rule_id == "VC2-SYMBOLIC-UNSUPPORTED-CONSTRUCT"
+    assert f.witness is not None
+    assert f.witness.smt_status == "UNKNOWN"
+    assert "While" in f.message

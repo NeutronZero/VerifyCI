@@ -218,6 +218,20 @@ class EgglogEquivalenceEngine:
                 applied_rewrites=(),
                 verdict="INCONCLUSIVE",
             )
+        has_unsupported = any(
+            inst.opcode.startswith(("LOOP_", "TRY_"))
+            for f in (func_base, func_head)
+            for b in f.basic_blocks
+            for inst in b.instructions
+        )
+        if has_unsupported:
+            return EquivalenceSaturationResult(
+                is_equivalent=False,
+                base_eclass_digest=func_base.h_body,
+                head_eclass_digest=func_head.h_body,
+                applied_rewrites=(),
+                verdict="INCONCLUSIVE",
+            )
         base_dig, base_rw = saturate_function_egraph(func_base)
         head_dig, head_rw = saturate_function_egraph(func_head)
         all_rw = tuple(sorted(set(base_rw) | set(head_rw)))
