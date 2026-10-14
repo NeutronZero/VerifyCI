@@ -539,7 +539,7 @@ def test_r2_4_unsupported_ast_diff_emits_inconclusive_never_silent_pass() -> Non
     assert len(findings) == 1
     f = findings[0]
     assert f.verdict == "INCONCLUSIVE"
-    assert f.rule_id == "VC2-SYMBOLIC-UNSUPPORTED-CONSTRUCT"
+    assert f.rule_id == "VC2-Z3-UNSUPPORTED-AST"
     assert f.witness is not None
     assert f.witness.smt_status == "UNKNOWN"
     assert "While" in f.message

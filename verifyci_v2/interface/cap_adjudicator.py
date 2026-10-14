@@ -58,6 +58,7 @@ class V2CapabilityAdjudicator:
         all_passed = all(sc.passed for sc in scorecards)
         return {
             "schema_version": "verifyci.v2.adjudication",
+            "evaluation_mode": "self_test_smoke",
             "all_passed": all_passed,
             "total_capabilities": len(scorecards),
             "passed_count": sum(1 for sc in scorecards if sc.passed),
@@ -68,16 +69,22 @@ class V2CapabilityAdjudicator:
         """Backward-compatible alias for run_self_test_smoke_suite."""
         return self.run_self_test_smoke_suite()
 
-    def adjudicate_corpus(self, benchmark_dir: str | Path | None = None) -> dict[str, Any]:
+    def adjudicate_corpus(
+        self,
+        benchmark_dir: str | Path | None = None,
+        *,
+        benchmarks_root: str | Path | None = None,
+    ) -> dict[str, Any]:
         """
         Loads frozen benchmark corpora, validates SHA-256 digests against CORPUS_SHA256 and
         LABEL_SHA256 manifests, and confirms integrity before scoring.
         Fails closed on hash drift.
         """
-        if benchmark_dir is None:
+        target_dir = benchmark_dir or benchmarks_root
+        if target_dir is None:
             base_dir = Path(__file__).resolve().parent.parent.parent / "benchmarks"
         else:
-            base_dir = Path(benchmark_dir)
+            base_dir = Path(target_dir)
 
         if not base_dir.is_dir():
             raise FileNotFoundError(f"Benchmark directory not found: {base_dir}")

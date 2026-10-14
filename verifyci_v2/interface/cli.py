@@ -58,6 +58,13 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_vdiff.add_argument("--format", default="sarif", choices=["sarif", "json", "text"], help="Output format")
     p_vdiff.add_argument("--output", default="verifyci-results.sarif", help="Output report file path")
 
+    p_init = sub.add_parser("init", help="Initialize VerifyCI workspace and local database")
+    p_init.add_argument("repo_path", nargs="?", default=".", help="Repository root path")
+
+    p_ingest = sub.add_parser("ingest", help="Ingest code repository into local CPG graph store")
+    p_ingest.add_argument("repo_path", nargs="?", default=".", help="Repository root path")
+    p_ingest.add_argument("--db", default="", help="Path to database")
+
     return parser
 
 
@@ -177,6 +184,37 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
         if ns.output:
             Path(ns.output).write_text(json.dumps(res, indent=2), encoding="utf-8")
         return res
+
+    if ns.command == "init":
+        from pathlib import Path
+
+        repo_dir = Path(ns.repo_path)
+        vci_dir = repo_dir / ".verifyci"
+        vci_dir.mkdir(parents=True, exist_ok=True)
+        return {"status": "ok", "initialized": True, "path": str(vci_dir)}
+
+    if ns.command == "ingest":
+        from pathlib import Path
+        from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
+        from verifyci_v2.store.duckdb_cpg import DuckDBCPGStore
+
+        repo_dir = Path(ns.repo_path)
+        db_path = ns.db or str(repo_dir / ".verifyci" / "verifyci.db")
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        store = DuckDBCPGStore(db_path)
+        ingested_count = 0
+        for py_file in repo_dir.rglob("*.py"):
+            if any(p.startswith(".") for p in py_file.parts):
+                continue
+            try:
+                src = py_file.read_text(encoding="utf-8")
+                funcs = lower_file_to_ussa(str(py_file), src)
+                for f in funcs:
+                    store.record_commit_snapshot("HEAD", [f])
+                    ingested_count += 1
+            except Exception:
+                continue
+        return {"status": "ok", "ingested_functions": ingested_count, "db": db_path}
 
     raise ValueError(f"Unsupported command: {ns.command}")
 

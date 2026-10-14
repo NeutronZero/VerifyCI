@@ -527,7 +527,7 @@ class Z3SymbolicProver:
                 findings.append(
                     VerificationFinding(
                         finding_id=fid,
-                        rule_id="VC2-SYMBOLIC-UNSUPPORTED-CONSTRUCT",
+                        rule_id="VC2-Z3-UNSUPPORTED-AST",
                         severity="MEDIUM",
                         verdict="INCONCLUSIVE",
                         file_path=file_path,
