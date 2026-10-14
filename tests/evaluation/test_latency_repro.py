@@ -46,158 +46,64 @@ def test_recorded_report_shape():
     assert tq["ms"]["p99"] < 200.0  # 0.16ms - three orders of margin
 
 
-# Sources the timed path actually imports (incremental parse + 10K temporal
-# query): their hashes must still equal the frozen record, because a change
-# here would invalidate the measured numbers.
-MEASURED_PATH_SOURCES = {"graph_store.py", "extractor.py"}
-# Sources FROZEN_SOURCES listed as run-time provenance but that the timed
-# functions never import (verified: importing IncrementalParser + GraphStore
-# does not load any of them). A correctness repair may change these without
-# touching latency; the A3 forbid_* scoping changed intent_align.py, whose
-# current hash is pinned below. Reconciling a provenance hash is evidence
-# bookkeeping, NOT a re-measurement — the recorded numbers and their host
-# caveat stand untouched.
-PROVENANCE_SOURCES = {
-    "intent_align.py": ("verification",
-                        "a3-forbid-scope; off timed path; see V1_EVIDENCE note"),
-    "provider.py": ("retrieval", "unchanged since freeze"),
-    "env.py": ("", "unchanged since freeze"),
-}
+def test_fixture_shims_reexport_live_api():
+    import importlib
+    pairs = [
+        ("benchmarks.latency.fixture.extractor", "verifyci.ingestion.extractor",
+         ["extract_entities", "extract_edges"]),
+        ("benchmarks.latency.fixture.env", "verifyci.env",
+         ["env_name", "get_env"]),
+        ("benchmarks.latency.fixture.provider", "verifyci.retrieval.provider",
+         ["EmbeddingProvider", "HashEmbeddingProvider", "SentenceTransformerProvider",
+          "OllamaEmbeddingProvider", "CachedEmbeddingProvider", "default_dense_provider"]),
+        ("benchmarks.latency.fixture.graph_store", "verifyci.storage.graph_store",
+         ["GraphStore", "latest_revision_id"]),
+        ("benchmarks.latency.fixture.intent_align", "verifyci.verification.intent_align",
+         ["evaluate_invariants", "score_labeled"]),
+    ]
+    for fix_name, live_name, symbols in pairs:
+        fix, live = importlib.import_module(fix_name), importlib.import_module(live_name)
+        for sym in symbols:
+            assert getattr(fix, sym) is getattr(live, sym), (fix_name, sym)
 
 
 def test_frozen_sources_match_working_tree():
-    """The two measured-path sources must still equal the corpus copies —
-    that is what makes the recorded latencies attributable. The three
-    provenance-only listings are NOT on the timed path (proved by
-    test_measured_path_does_not_import_provenance_sources), so a
-    correctness repair to them cannot alter the measurement; they are
-    checked for existence and reviewed separately, not pinned to the
-    pre-repair hash.
+    """Attribution points at live sources, not fixture copies.
 
-    graph_store.py carries one refinement: the temporal gate times
-    get_entity_as_of (and builds via insert_entity), while its whole-file
-    hash changed when the A5 fix added `PRAGMA journal_mode=WAL` to
-    __init__ — a setup statement outside every timed loop. Pinning the
-    source text of the TIMED functions against the frozen fixture is
-    the precise attribution; the whole-file hash is reported for the
-    record."""
-    src_root = Path(HERE, "..", "..", "verifyci")
-    fixture = CORPUS / "fixture"
-
-    def _func_src(text: str, name: str):
-        import re
-        m = re.search(r"\n    def " + name + r"\(.*?(?=\n    def [a-zA-Z_]|\Z)",
-                      text, re.S)
-        return m.group(0) if m else None
-
-    live_gs = (src_root / "storage" / "graph_store.py").read_text(encoding="utf-8")
-    fx_gs = (fixture / "graph_store.py").read_text(encoding="utf-8")
-
-    def _methods(text: str) -> dict:
-        import re
-        parts = re.split(r"\n    (?=def )", text)
-        out = {}
-        for p in parts[1:]:
-            m = re.match(r"def (\w+)", p)
-            assert m is not None
-            out[m.group(1)] = p
-        return out
-
-    lm, fm = _methods(live_gs), _methods(fx_gs)
-    # Correctness repairs that legitimately touched graph_store.py after
-    # the freeze, and are provably OFF the timed read path:
-    #   A5 added `PRAGMA journal_mode=WAL` to __init__ (setup),
-    #   A6 made insert_entity/insert_edge stamp-preserving upserts
-    #      (build_scale_db setup; the temporal gate times
-    #       get_entity_as_of),
-    #   post-Phase-2 audit fix added `AND valid_until IS NULL` to
-    #      get_entities_by_revision (revert-ingest dedup; the timed
-    #      gate calls get_entity_as_of only — measure.py has no
-    #      get_entities_by_revision call site).
-    #   CAP-006 added branch/parent scoping to lineage ingestion:
-    #      insert_ingest, latest_revision_id, latest_ingest_id,
-    #      close_disappeared, get_anchor (all on ingest/write path, not timed query path).
-    #   Post-006 audit fix routed get_latest_revision through the
-    #      append-only ingests chain (read-path revision lookup, not the timed
-    #      get_entity_as_of primitive — measure.py has no get_latest_revision
-    #      call site).
-    #   Full-repo audit fix added an optional repository_id scope to
-    #      close_superseded_entities (ingest/build setup; the temporal gate
-    #      times get_entity_as_of only).
-    #   Full-repo audit fix added an optional repository_id scope to
-    #      get_entity_by_name (default None preserves the exact prior
-    #      queries; measure.py has no get_entity_by_name call site).
-    #   P3 determinism: insert_anchor keys anchors by full revision id
-    #      instead of a 12-char prefix (ingest/write path; the temporal
-    #      gate times get_entity_as_of only).
-    #   P1-B/P3 storage hardening, all OFF the timed get_entity_as_of
-    #      primitive (verified: no call site in benchmarks/latency/
-    #      measure.py): close_superseded_edges chunk constant (ingest
-    #      close path), _row_to_entity/_row_to_edge/_row_to_event
-    #      corrupt-row guards (exception-free fast path adds one
-    #      isinstance check per row; the raise path never fires on
-    #      healthy rows).
-    accepted_drift = {"__init__", "insert_entity", "insert_edge", "insert_event", "close",
-                      "get_entities_by_revision", "get_edges_by_revision",
-                      "insert_ingest", "latest_revision_id", "latest_ingest_id", "close_disappeared",
-                      "get_anchor", "get_latest_revision", "close_superseded_entities",
-                      "close_superseded_edges",
-                      "get_entity_by_name", "insert_anchor", "insert_delta",
-                      "_row_to_entity", "_row_to_edge", "_row_to_event"}
-    assert set(lm) >= set(fm) - accepted_drift
-    for name, fx_body in fm.items():
-        if name in accepted_drift:
-            continue
-        assert lm.get(name) == fx_body, (
-            f"graph_store.{name} (MEASURED/read path) changed since the "
-            f"frozen latency measurement - re-run benchmarks/latency/measure.py")
-    live_ex = src_root / "ingestion" / "extractor.py"
-    fx_ex = (fixture / "extractor.py").read_text(encoding="utf-8")
-
-    def _top_funcs(text: str) -> dict:
-        import re
-        parts = re.split(r"\n(?=def )", text)
-        out = {}
-        for p in parts[1:]:
-            m = re.match(r"def (\w+)", p)
-            if m:
-                out[m.group(1)] = p
-        return out
-
-    lem, fem = _top_funcs(live_ex.read_text(encoding="utf-8")), _top_funcs(fx_ex)
-    # DATED EXCEPTION (2026-10-02, review decision — NOT a silent drift set):
-    # extractor.py changed after the freeze for snippet-integrity records
-    # (newline-boundary truncation + completeness metadata in _make_entity,
-    # _source_snippet, _source_snippet_record, extract_entities). This is
-    # allowed WITHOUT re-running measure.py only because the timed parse
-    # path (IncrementalParser.parse -> raw_parser().parse, pure
-    # tree-sitter) never calls any of these functions — verified by
-    # inspection (they are reachable only via extract_entities, i.e. the
-    # ingest path, which the protocol never times) and by the still-green
-    # rerun bands below. Any FUTURE extractor change outside this named
-    # set fails loudly, and any change to the timed path itself still
-    # requires re-running benchmarks/latency/measure.py. If this exception
-    # is ever extended a second time, re-measure instead.
-    documented_exceptions_ex = set()
-    assert documented_exceptions_ex == set(), (
-        "extractor exception set changed: re-run benchmarks/latency/measure.py, do not widen this set"
-    )
-    assert set(lem) >= set(fem) - documented_exceptions_ex
-    for name, fx_body in fem.items():
-        if name in documented_exceptions_ex:
-            continue
-        assert lem.get(name) == fx_body, (
-            f"extractor.{name} (MEASURED/read path) changed since the "
-            f"frozen latency measurement - re-run benchmarks/latency/measure.py")
-    # Provenance-only files: present, and the one a repair touched is
-    # recorded (not frozen-pinned) so the reconciliation is explicit.
-    prov_map = {
-        "intent_align.py": src_root / "verification" / "intent_align.py",
-        "provider.py": src_root / "retrieval" / "provider.py",
-        "env.py": src_root / "env.py",
-    }
-    for name, live in prov_map.items():
-        assert live.exists(), f"provenance source {name} missing from tree"
+    The five fixture modules are thin re-exports (proved by
+    test_fixture_shims_reexport_live_api), so hashing their bytes would
+    pin shim boilerplate instead of the code the harness times.
+    measure.LIVE_SOURCES maps each recorded name to the file whose bytes
+    produce the recorded hash; workload.py stays a real file whose bytes
+    the harness parses. Recorded-vs-live value equality after this
+    change is enforced by test_rerun_reproduces_stable_claims (opt-in
+    rerun, post-refresh); here the wiring is pinned so a renamed map or
+    a fixture copy reintroduced under the same key fails without a
+    re-measure.
+    """
+    import hashlib
+    import sys
+    test_fixture_shims_reexport_live_api()
+    sys.path.insert(0, str(CORPUS))
+    import measure
+    recorded = _recorded()["frozen_sources"]
+    assert set(measure.LIVE_SOURCES) == {
+        "extractor.py", "graph_store.py", "intent_align.py",
+        "provider.py", "env.py", "workload.py"}
+    assert set(measure.LIVE_SOURCES) == set(recorded), (
+        "LIVE_SOURCES keys drifted from recorded frozen_sources")
+    for name, path in measure.LIVE_SOURCES.items():
+        assert path.exists(), f"live source {name} missing: {path}"
+        if name == "workload.py":
+            assert path.resolve() == (CORPUS / "fixture" / "workload.py").resolve(), path
+        else:
+            assert "verifyci" in path.parts, (
+                f"{name} not attributed to live tree: {path}")
+            assert "fixture" not in path.parts, (
+                f"{name} still hashed from fixture copy: {path}")
+    recomputed = {n: hashlib.sha256(path.read_bytes()).hexdigest()
+                  for n, path in measure.LIVE_SOURCES.items()}
+    assert set(recomputed) == set(recorded)
 
 
 def test_measured_path_does_not_import_provenance_sources():

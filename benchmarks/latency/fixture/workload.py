@@ -37,12 +37,12 @@ def _as_dag_dict(dag: Any) -> dict[str, Any]:
     return {"task_id": "", "nodes": [], "conversation_id": "", "budget_nano_usd": None}
 
 
-def _topo_order(nodes: list[dict]) -> list[dict]:
-    by_id = {n.get("step_id"): n for n in nodes}
-    visited: dict[str, str] = {}
-    order: list[dict] = []
+def _topo_order(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_id: dict[Any, dict[str, Any]] = {n.get("step_id"): n for n in nodes}
+    visited: dict[Any, str] = {}
+    order: list[dict[str, Any]] = []
 
-    def visit(n: dict) -> None:
+    def visit(n: dict[str, Any]) -> None:
         sid = n.get("step_id")
         state = visited.get(sid, "")
         if state == "done":
@@ -62,16 +62,16 @@ def _topo_order(nodes: list[dict]) -> list[dict]:
     return order
 
 
-def _levels(nodes: list[dict]) -> list[list[dict]]:
+def _levels(nodes: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     """Topological levels: nodes in one level are independent and may run
     concurrently. Raises ValueError on cycles."""
     ordered = _topo_order(nodes)
-    depth: dict[str, int] = {}
+    depth: dict[Any, int] = {}
     by_id = {n.get("step_id"): n for n in ordered}
     for n in ordered:
         deps = [d for d in (n.get("depends_on", []) or []) if d in by_id]
         depth[n.get("step_id")] = (max((depth[d] for d in deps), default=-1) + 1)
-    buckets: dict[int, list[dict]] = {}
+    buckets: dict[int, list[dict[str, Any]]] = {}
     for n in ordered:
         buckets.setdefault(depth[n.get("step_id")], []).append(n)
     return [buckets[k] for k in sorted(buckets)]
@@ -412,7 +412,7 @@ class AsyncDAGScheduler(Scheduler):
             task["persist_error"] = f"{type(e).__name__}: {e}"
             traceback.print_exc()
 
-    def _emit(self, type: str, task_id: str, conversation_id: str, payload: dict) -> None:
+    def _emit(self, event_type: str, task_id: str, conversation_id: str, payload: dict) -> None:
         # Append to the task's own ledger; mirror into the shared
         # ledger when one was provided. The mirror receives the same
         # Event objects (never re-created), so ids and hashes match for
@@ -425,7 +425,7 @@ class AsyncDAGScheduler(Scheduler):
                 return
         try:
             event = ledger.append(
-                type=type, payload={"task_id": task_id, **payload},
+                type=event_type, payload={"task_id": task_id, **payload},
                 provenance={"source": "scheduler"},
                 task_id=task_id, conversation_id=conversation_id,
             )

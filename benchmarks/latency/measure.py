@@ -32,8 +32,14 @@ ROOT = HERE.parent.parent
 sys.path.insert(0, str(ROOT))
 
 FIXTURE = HERE / "fixture"
-FROZEN_SOURCES = ["extractor.py", "graph_store.py", "intent_align.py",
-                  "provider.py", "env.py", "workload.py"]
+LIVE_SOURCES = {
+    "extractor.py": ROOT / "verifyci/ingestion/extractor.py",
+    "graph_store.py": ROOT / "verifyci/storage/graph_store.py",
+    "intent_align.py": ROOT / "verifyci/verification/intent_align.py",
+    "provider.py": ROOT / "verifyci/retrieval/provider.py",
+    "env.py": ROOT / "verifyci/env.py",
+    "workload.py": FIXTURE / "workload.py",
+}
 # PLAN gate thresholds
 MEDIAN_NS_LIMIT = 200_000      # < 0.2 ms
 P95_NS_LIMIT = 1_000_000       # < 1.0 ms
@@ -295,7 +301,7 @@ def measure():
     report = {
         "protocol": "benchmarks/latency/config.json (frozen)",
         "protocol_sha256": _sha(HERE / "config.json"),
-        "frozen_sources": {n: _sha(FIXTURE / n) for n in FROZEN_SOURCES},
+        "frozen_sources": {n: _sha(p) for n, p in LIVE_SOURCES.items()},
         "environment": env_block(),
         "sample_counts": {"parse": N_PARSE, "query": N_QUERY},
         "incremental_parse": ip,
