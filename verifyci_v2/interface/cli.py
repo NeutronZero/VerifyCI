@@ -135,5 +135,9 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
 
 
 def main(argv: Sequence[str] | None = None) -> str:
-    res = run_cli(argv or [])
-    return canonical_jcs_str(res)
+    import sys
+    args = sys.argv[1:] if argv is None else list(argv)
+    res = run_cli(args)
+    out = canonical_jcs_str(res)
+    print(out)
+    return 0
