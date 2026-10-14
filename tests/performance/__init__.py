@@ -1,1 +1,0 @@
-# Performance regression test suite
