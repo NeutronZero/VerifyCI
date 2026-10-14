@@ -75,11 +75,11 @@ def test_frozen_sources_match_working_tree():
     pin shim boilerplate instead of the code the harness times.
     measure.LIVE_SOURCES maps each recorded name to the file whose bytes
     produce the recorded hash; workload.py stays a real file whose bytes
-    the harness parses. Recorded-vs-live value equality after this
-    change is enforced by test_rerun_reproduces_stable_claims (opt-in
-    rerun, post-refresh); here the wiring is pinned so a renamed map or
-    a fixture copy reintroduced under the same key fails without a
-    re-measure.
+    the harness parses. The recorded hash *values* are asserted equal to
+    the live working-tree bytes below, so the default gate (no rerun)
+    catches attribution drift; key parity alone would pass with stale
+    values. A renamed map or a fixture copy reintroduced under the same
+    key fails without a re-measure.
     """
     import hashlib
     import sys
@@ -103,7 +103,9 @@ def test_frozen_sources_match_working_tree():
                 f"{name} still hashed from fixture copy: {path}")
     recomputed = {n: hashlib.sha256(path.read_bytes()).hexdigest()
                   for n, path in measure.LIVE_SOURCES.items()}
-    assert set(recomputed) == set(recorded)
+    assert recomputed == recorded, (
+        "recorded frozen_sources do not equal live working-tree bytes - "
+        "re-run benchmarks/latency/measure.py, do not edit the record")
 
 
 def test_measured_path_does_not_import_provenance_sources():
