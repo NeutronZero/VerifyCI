@@ -169,6 +169,9 @@ class CachedEmbeddingProvider(EmbeddingProvider):
             return
         import json as _json
         import os as _os
+        parent = _os.path.dirname(self.cache_path)
+        if parent:
+            _os.makedirs(parent, exist_ok=True)
         tmp = self.cache_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             _json.dump(self._mem, fh)

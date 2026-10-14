@@ -8,7 +8,6 @@ storage/vuln_cache.db
 storage/embedding_cache_*.json
 .verifyci/embedding_cache_*.json
 benchmarks/beir/embedding_cache_*.json
-!benchmarks/beir/embedding_cache_nomic_embed_text.json
 benchmarks/beir/__pycache__/
 .ruff_cache/
 .coverage

@@ -112,6 +112,25 @@ def test_rrf_single_path_matches_legacy_private_rrf():
         assert eh.rrf_fusion(dense, sparse, [], k) == eh._rrf(dense, sparse, k)
 
 
+def test_make_provider_rebuilds_silently_on_cache_miss(tmp_path):
+    from benchmarks.beir.eval_harness import make_provider
+    missing = tmp_path / "no_cache_here"
+    provider = make_provider("hash", missing)
+    assert provider is not None
+
+
+def test_cached_provider_cache_miss_with_missing_dir_rebuilds_silently(tmp_path):
+    # Missing cache file AND missing parent dir must rebuild silently
+    # (offline hash base: no network), not raise on save.
+    import asyncio
+
+    from verifyci.retrieval.provider import CachedEmbeddingProvider, HashEmbeddingProvider
+    cache_path = str(tmp_path / "no_dir_yet" / "embedding_cache_hash.json")
+    provider = CachedEmbeddingProvider(HashEmbeddingProvider(), cache_path)
+    vectors = asyncio.run(provider.embed(["hello world"]))
+    assert len(vectors) == 1 and len(vectors[0]) == 256
+
+
 def test_results_file_wellformed_if_present():
     p = HERE / "results.json"
     if not p.exists():
