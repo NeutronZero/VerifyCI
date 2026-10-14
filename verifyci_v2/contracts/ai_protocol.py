@@ -1,0 +1,124 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Protocol, Sequence
+
+
+@dataclass(frozen=True, slots=True)
+class BooleanJudgment:
+    """Calibrated System 1 boolean judgment (Noul equivalent)."""
+
+    verdict: bool
+    probability: float
+    rationale_tag: str
+
+
+@dataclass(frozen=True, slots=True)
+class CategoricalChoice:
+    """Calibrated probability distribution over predeclared categorical options."""
+
+    selected: str
+    distribution: dict[str, float]
+    confidence: float
+
+
+@dataclass(frozen=True, slots=True)
+class OrdinalScore:
+    """Calibrated ordinal severity or relevance score."""
+
+    level: str
+    normalized_score: float
+    confidence: float
+
+
+@dataclass(frozen=True, slots=True)
+class ConformalProfile:
+    """Empirical Split Conformal Prediction profile calibrated on held-out corpora."""
+
+    model_id: str
+    weights_or_endpoint_hash: str
+    alpha: float
+    sample_size: int
+    q_hat: float
+
+
+@dataclass(frozen=True, slots=True)
+class CalibratedDecision:
+    """Result of applying the Split Conformal Prediction gate to a System 1 judgment."""
+
+    prediction_set: tuple[str, ...]
+    top_choice: str
+    raw_probability: float
+    abstained: bool
+    escalate_to_smt: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ModelAttestationRecord:
+    """Cryptographic attestation of the BYO-AI provider, weights, and conformal profile."""
+
+    provider_name: str
+    model_id: str
+    weights_or_endpoint_hash: str
+    prompt_template_hash: str
+    conformal_profile_hash: str | None
+
+
+class EmbeddingProviderProtocol(Protocol):
+    """Protocol for static CPU Model2Vec or user-supplied embedding providers."""
+
+    @property
+    def model_id(self) -> str: ...
+
+    @property
+    def dimension(self) -> int: ...
+
+    def embed_batch(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]: ...
+
+
+class DiscriminativeJudgeProtocol(Protocol):
+    """Protocol for fast System 1 discriminative classifiers and rerankers."""
+
+    @property
+    def provider_name(self) -> str: ...
+
+    @property
+    def model_id(self) -> str: ...
+
+    def attestation(self, conformal_hash: str | None = None) -> ModelAttestationRecord: ...
+
+    def judge_boolean(self, state: dict[str, Any], question: str) -> BooleanJudgment: ...
+
+    def judge_choice(
+        self,
+        state: dict[str, Any],
+        question: str,
+        options: Sequence[str],
+    ) -> CategoricalChoice: ...
+
+    def judge_score(
+        self,
+        state: dict[str, Any],
+        question: str,
+        levels: Sequence[str],
+    ) -> OrdinalScore: ...
+
+
+class GenerativeSynthesizerProtocol(Protocol):
+    """Protocol for System 2 CEGIS patch synthesis and intent-to-SMT compilation."""
+
+    @property
+    def provider_name(self) -> str: ...
+
+    @property
+    def model_id(self) -> str: ...
+
+    def synthesize_patch(
+        self,
+        *,
+        file_path: str,
+        original_source: str,
+        rule_id: str,
+        counterexample_assignments: dict[str, Any],
+        attempt: int = 1,
+    ) -> str: ...

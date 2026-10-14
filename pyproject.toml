@@ -46,6 +46,7 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0", "pytest-xdist>=
 [project.scripts]
 verifyci = "verifyci.interface.cli:app"
 aci = "verifyci.interface.cli:app"  # legacy alias; same app, both on PATH
+vc2 = "verifyci_v2.interface.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/NeutronZero/VerifyCI"
