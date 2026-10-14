@@ -42,6 +42,8 @@ class ConformalProfile:
     sample_size: int
     q_hat: float
     is_calibrated: bool = True
+    tau_safe: float = 1.0
+    defect_sample_size: int = 0
 
 
 @dataclass(frozen=True, slots=True)

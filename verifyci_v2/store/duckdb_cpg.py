@@ -155,7 +155,8 @@ class DuckDBCPGStore:
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS cpg_edges (
-                edge_uid TEXT PRIMARY KEY,
+                edge_key TEXT PRIMARY KEY,
+                edge_uid TEXT NOT NULL,
                 src_node_uid TEXT NOT NULL,
                 dst_node_uid TEXT NOT NULL,
                 edge_kind TEXT NOT NULL,
@@ -169,8 +170,8 @@ class DuckDBCPGStore:
             """
             CREATE TABLE IF NOT EXISTS commit_edge_map (
                 commit_sha TEXT NOT NULL,
-                edge_uid TEXT NOT NULL,
-                PRIMARY KEY (commit_sha, edge_uid)
+                edge_key TEXT NOT NULL,
+                PRIMARY KEY (commit_sha, edge_key)
             )
             """
         )
@@ -195,6 +196,10 @@ class DuckDBCPGStore:
             """,
             (commit_sha, parent_sha, rsl_entry_hash, ts),
         )
+
+        # Replacement semantics: clear stale commit mappings if re-recording the same commit
+        cur.execute("DELETE FROM commit_node_map WHERE commit_sha = ?", (commit_sha,))
+        cur.execute("DELETE FROM commit_edge_map WHERE commit_sha = ?", (commit_sha,))
 
         for fn in functions:
             payload = _compress_ussa(fn)
@@ -224,23 +229,23 @@ class DuckDBCPGStore:
                 (commit_sha, fn.node_uid),
             )
             for edge in (*fn.cfg_edges, *fn.dfg_edges):
-                self._upsert_edge(cur, edge)
+                edge_key = self._upsert_edge(cur, edge)
                 cur.execute(
                     """
-                    INSERT OR REPLACE INTO commit_edge_map (commit_sha, edge_uid)
+                    INSERT OR REPLACE INTO commit_edge_map (commit_sha, edge_key)
                     VALUES (?, ?)
                     """,
-                    (commit_sha, edge.edge_uid),
+                    (commit_sha, edge_key),
                 )
 
         for edge in edges:
-            self._upsert_edge(cur, edge)
+            edge_key = self._upsert_edge(cur, edge)
             cur.execute(
                 """
-                INSERT OR REPLACE INTO commit_edge_map (commit_sha, edge_uid)
+                INSERT OR REPLACE INTO commit_edge_map (commit_sha, edge_key)
                 VALUES (?, ?)
                 """,
-                (commit_sha, edge.edge_uid),
+                (commit_sha, edge_key),
             )
 
         self._conn.commit()
@@ -253,7 +258,7 @@ class DuckDBCPGStore:
             """
             SELECT e.edge_uid, e.src_node_uid, e.dst_node_uid, e.edge_kind, e.predicate_label, e.static_weight, e.coverage_hit_freq
             FROM cpg_edges e
-            INNER JOIN commit_edge_map cem ON e.edge_uid = cem.edge_uid
+            INNER JOIN commit_edge_map cem ON e.edge_key = cem.edge_key
             WHERE cem.commit_sha = ?
             ORDER BY e.edge_uid ASC
             """,
@@ -273,14 +278,16 @@ class DuckDBCPGStore:
             for r in rows
         )
 
-    def _upsert_edge(self, cur: sqlite3.Cursor, edge: CPGEdge) -> None:
+    def _upsert_edge(self, cur: sqlite3.Cursor, edge: CPGEdge) -> str:
+        edge_key = f"{edge.edge_uid}::{edge.static_weight}::{edge.coverage_hit_freq}::{edge.predicate_label}"
         cur.execute(
             """
             INSERT OR REPLACE INTO cpg_edges
-            (edge_uid, src_node_uid, dst_node_uid, edge_kind, predicate_label, static_weight, coverage_hit_freq)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (edge_key, edge_uid, src_node_uid, dst_node_uid, edge_kind, predicate_label, static_weight, coverage_hit_freq)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                edge_key,
                 edge.edge_uid,
                 edge.src_node_uid,
                 edge.dst_node_uid,
@@ -290,6 +297,7 @@ class DuckDBCPGStore:
                 edge.coverage_hit_freq,
             ),
         )
+        return edge_key
 
     def get_functions_as_of(self, commit_sha: str) -> tuple[FunctionUSSA, ...]:
         """Retrieves the exact set of FunctionUSSA nodes active at `commit_sha` (`cap006`)."""

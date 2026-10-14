@@ -122,9 +122,11 @@ class _DiffSemanticExtractor(ast.NodeVisitor):
         self.param_list = list(parameters)
         self.calls: list[tuple[str, tuple[str, ...], list[ast.AST], int]] = []
         self.returns: list[tuple[str, list[ast.AST], int]] = []
+        self.return_asts: list[tuple[ast.AST, list[ast.AST], int]] = []
         self.guards: list[tuple[str, ast.AST, str, str, int]] = []  # (cond_str, cond_ast, then_ret, else_ret, line)
         self.shadowed_params: list[tuple[str, str, int]] = []
         self.env_aliases: dict[str, str] = {p: p for p in parameters}
+        self.env_ast_aliases: dict[str, ast.AST] = {}
         self.current_guards: list[ast.AST] = []
 
     def _resolve_expr(self, node: ast.AST) -> str:
@@ -147,6 +149,7 @@ class _DiffSemanticExtractor(ast.NodeVisitor):
                 if tgt.id in self.parameters and tgt.id not in val_str:
                     self.shadowed_params.append((tgt.id, val_str, node.lineno))
                 self.env_aliases[tgt.id] = val_str
+                self.env_ast_aliases[tgt.id] = node.value
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
@@ -172,9 +175,32 @@ class _DiffSemanticExtractor(ast.NodeVisitor):
             self.visit(stmt)
         self.current_guards.pop()
 
+    def _resolve_ast(self, node: ast.AST) -> ast.AST:
+        if isinstance(node, ast.Name):
+            if node.id in self.env_ast_aliases:
+                return self._resolve_ast(self.env_ast_aliases[node.id])
+            return node
+        if isinstance(node, ast.BinOp):
+            return ast.BinOp(
+                left=self._resolve_ast(node.left),
+                op=node.op,
+                right=self._resolve_ast(node.right),
+            )
+        if isinstance(node, ast.UnaryOp):
+            return ast.UnaryOp(op=node.op, operand=self._resolve_ast(node.operand))
+        if isinstance(node, ast.Compare):
+            return ast.Compare(
+                left=self._resolve_ast(node.left),
+                ops=node.ops,
+                comparators=[self._resolve_ast(c) for c in node.comparators],
+            )
+        return node
+
     def visit_Return(self, node: ast.Return) -> None:
         if node.value is not None:
+            resolved_val_ast = self._resolve_ast(node.value)
             self.returns.append((self._resolve_expr(node.value), list(self.current_guards), node.lineno))
+            self.return_asts.append((resolved_val_ast, list(self.current_guards), node.lineno))
         self.generic_visit(node)
 
 
@@ -620,6 +646,35 @@ class Z3SymbolicProver:
                 return False, "UNKNOWN"
             s.reset()
             s.set("timeout", self.timeout_ms)
+
+        # Check return expressions equivalence under path guards
+        if not ext_b.return_asts and not ext_c.return_asts:
+            return True, "UNSAT"
+
+        if len(ext_b.return_asts) != len(ext_c.return_asts):
+            return False, "UNKNOWN"
+
+        for (ret_b_ast, guards_b, _), (ret_c_ast, guards_c, _) in zip(ext_b.return_asts, ext_c.return_asts):
+            if ast.unparse(ret_b_ast) == ast.unparse(ret_c_ast):
+                continue
+            zb_ret = _ast_expr_to_z3(ret_b_ast, z3_vars)
+            zc_ret = _ast_expr_to_z3(ret_c_ast, z3_vars)
+            if zb_ret is None or zc_ret is None:
+                return False, "UNKNOWN"
+
+            s.reset()
+            s.set("timeout", self.timeout_ms)
+            for g in guards_b + guards_c:
+                zg = _ast_expr_to_z3(g, z3_vars)
+                if zg is not None:
+                    s.add(zg)
+
+            s.add(zb_ret != zc_ret)
+            st = s.check()
+            if st == _z3_mod.sat:
+                return False, "SAT"
+            if st == _z3_mod.unknown:
+                return False, "UNKNOWN"
 
         # Everything verified unsat
         return True, "UNSAT"

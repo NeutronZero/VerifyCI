@@ -83,6 +83,7 @@ class WasmCheckerSandbox:
             return digest
 
         # Compile WAT / WASM using wasmtime
+        # Compile WAT / WASM using wasmtime
         if _wasmtime_mod is not None:
             cfg = _wasmtime_mod.Config()
             cfg.consume_fuel = True
@@ -90,6 +91,11 @@ class WasmCheckerSandbox:
             module = _wasmtime_mod.Module(engine, plugin_source_or_wasm)
             self._plugins[plugin_id] = (digest, (engine, module))
         else:
+            if self.config.require_wasm_isolation:
+                raise RuntimeError(
+                    f"Cannot register WASM plugin '{plugin_id}': wasmtime runtime is unavailable "
+                    "and require_wasm_isolation=True."
+                )
             self._plugins[plugin_id] = (digest, None)
 
         return digest
@@ -134,9 +140,23 @@ class WasmCheckerSandbox:
             exports = instance.exports(store)
             run_func = exports.get("run") or exports.get("check")
 
+            findings_list: list[VerificationFinding] = []
             if run_func:
                 try:
-                    run_func(store)
+                    ret = run_func(store)
+                    if isinstance(ret, int) and ret > 0:
+                        findings_list.append(
+                            VerificationFinding(
+                                finding_id=blake3_hex(f"{plugin_id}:{digest}:{ret}", domain="verifyci.v2.finding")[:16],
+                                rule_id=f"WASM-{plugin_id.upper()}",
+                                severity="HIGH",
+                                verdict="FAIL",
+                                file_path="wasm_module",
+                                start_line=1,
+                                end_line=1,
+                                message=f"WASM checker plugin '{plugin_id}' reported {ret} violation(s).",
+                            )
+                        )
                 except Exception as exc:
                     exc_str = str(exc).lower()
                     if "fuel" in exc_str or "all fuel consumed" in exc_str:
@@ -151,8 +171,14 @@ class WasmCheckerSandbox:
                 plugin_digest=digest,
                 fuel_consumed=consumed,
                 fuel_limit=self.config.max_instruction_fuel,
-                findings=(),
+                findings=tuple(findings_list),
                 is_wasm_sandboxed=True,
+            )
+
+        if self.config.require_wasm_isolation:
+            raise RuntimeError(
+                f"WASM plugin '{plugin_id}' cannot execute: wasmtime runtime is unavailable "
+                "and require_wasm_isolation=True."
             )
 
         return WasmPluginExecutionReport(

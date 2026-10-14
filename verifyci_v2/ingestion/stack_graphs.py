@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ast
 import re
-from typing import Iterable
+from typing import Any, Iterable
 
 from verifyci_v2.contracts.canonical import blake3_hex, xxh3_64_hex
 from verifyci_v2.contracts.ssa_ir import (
@@ -230,6 +230,7 @@ class StackGraphStitcher:
         self._qname_to_file: dict[str, str] = {}
         self._callers_of: dict[str, set[str]] = {}
         self._callees_of: dict[str, set[str]] = {}
+        self._unresolved_references: list[dict[str, Any]] = []
 
     def upsert_file(self, file_path: str, source: str, language: str = "python") -> bool:
         """Updates a file's stack graph only if its XXH3 digest changed. Returns True if recomputed."""
@@ -253,6 +254,7 @@ class StackGraphStitcher:
         self._qname_to_file.clear()
         self._callers_of.clear()
         self._callees_of.clear()
+        self._unresolved_references.clear()
 
         for f_path, fsg in self._file_graphs.items():
             for node in fsg.nodes:
@@ -271,9 +273,21 @@ class StackGraphStitcher:
                         from_module=mod_prefix,
                         import_map=import_map,
                     )
-                    for target_qname in resolved:
-                        self._callees_of.setdefault(caller_qname, set()).add(target_qname)
-                        self._callers_of.setdefault(target_qname, set()).add(caller_qname)
+                    if resolved:
+                        for target_qname in resolved:
+                            self._callees_of.setdefault(caller_qname, set()).add(target_qname)
+                            self._callers_of.setdefault(target_qname, set()).add(caller_qname)
+                    else:
+                        self._unresolved_references.append({
+                            "caller_qname": caller_qname,
+                            "symbol": node.symbol,
+                            "file_path": f_path,
+                            "line": node.line,
+                        })
+
+    def get_unresolved_references(self) -> tuple[dict[str, Any], ...]:
+        """Returns all unresolved PUSH_SYMBOL references across all loaded file stack graphs."""
+        return tuple(self._unresolved_references)
 
     def resolve_symbol(
         self,

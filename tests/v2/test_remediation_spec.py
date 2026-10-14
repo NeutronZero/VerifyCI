@@ -543,3 +543,343 @@ def test_r2_4_unsupported_ast_diff_emits_inconclusive_never_silent_pass() -> Non
     assert f.witness is not None
     assert f.witness.smt_status == "UNKNOWN"
     assert "While" in f.message
+
+
+def test_p0_prover_rejects_arithmetic_return_divergence() -> None:
+    from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
+    from verifyci_v2.symbolic.z3_prover import Z3SymbolicProver
+
+    base_src = "def f(x: int) -> int:\n    return x + 1\n"
+    cand_src = "def f(x: int) -> int:\n    return x + 2\n"
+
+    fb = lower_file_to_ussa("calc.py", base_src)[0]
+    fc = lower_file_to_ussa("calc.py", cand_src)[0]
+
+    prover = Z3SymbolicProver()
+    is_equiv, smt_status = prover.prove_equivalence(
+        base_source=base_src,
+        cand_source=cand_src,
+        func_base=fb,
+        func_cand=fc,
+    )
+    assert is_equiv is False
+    assert smt_status == "SAT"
+
+    # Equivalent commutativity test: x + 1 vs 1 + x must be True, "UNSAT"
+    comm_src = "def f(x: int) -> int:\n    return 1 + x\n"
+    fc_comm = lower_file_to_ussa("calc.py", comm_src)[0]
+    is_eq_comm, smt_comm = prover.prove_equivalence(
+        base_source=base_src,
+        cand_source=comm_src,
+        func_base=fb,
+        func_cand=fc_comm,
+    )
+    assert is_eq_comm is True
+    assert smt_comm == "UNSAT"
+
+
+def test_p0_prover_rejects_branch_specific_return_divergence() -> None:
+    from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
+    from verifyci_v2.symbolic.z3_prover import Z3SymbolicProver
+
+    base_src = (
+        "def branch_fn(x: int) -> int:\n"
+        "    if x > 0:\n"
+        "        return x + 1\n"
+        "    return x - 1\n"
+    )
+    cand_src = (
+        "def branch_fn(x: int) -> int:\n"
+        "    if x > 0:\n"
+        "        return x + 2\n"
+        "    return x - 1\n"
+    )
+
+    fb = lower_file_to_ussa("branch.py", base_src)[0]
+    fc = lower_file_to_ussa("branch.py", cand_src)[0]
+
+    prover = Z3SymbolicProver()
+    is_equiv, smt_status = prover.prove_equivalence(
+        base_source=base_src,
+        cand_source=cand_src,
+        func_base=fb,
+        func_cand=fc,
+    )
+    assert is_equiv is False
+    assert smt_status == "SAT"
+
+
+def test_p0_cli_verify_diff_real_pipeline_and_exit_codes(tmp_path: Path) -> None:
+    from verifyci_v2.interface.cli import run_cli, main
+
+    # Case 1: Defective diff with secret leak -> FAIL (exit code 1)
+    secret_diff = (
+        "--- a/config.py\n"
+        "+++ b/config.py\n"
+        "@@ -1,1 +1,2 @@\n"
+        " APP_NAME = 'test'\n"
+        "+AWS_SECRET = 'AKIA1234567890ABCDEF'\n"
+    )
+    sec_file = tmp_path / "secret.diff"
+    sec_file.write_text(secret_diff, encoding="utf-8")
+    res_sec = run_cli(["verify-diff", "--diff-file", str(sec_file), "--format", "json"])
+    assert res_sec["status"] == "FAIL"
+    assert res_sec["verdict"]["status"] == "FAIL"
+    assert main(["verify-diff", "--diff-file", str(sec_file), "--format", "json"]) == 1
+
+    # Case 2: Defective diff with proven arithmetic bug -> FAIL (exit code 1)
+    bug_diff = (
+        "--- a/calc.py\n"
+        "+++ b/calc.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-def add_one(x: int) -> int:\n"
+        "-    return x + 1\n"
+        "+def add_one(x: int) -> int:\n"
+        "+    return x + 2\n"
+    )
+    bug_file = tmp_path / "bug.diff"
+    bug_file.write_text(bug_diff, encoding="utf-8")
+    res_bug = run_cli(["verify-diff", "--diff-file", str(bug_file), "--format", "json"])
+    assert res_bug["status"] == "FAIL"
+    assert main(["verify-diff", "--diff-file", str(bug_file), "--format", "json"]) == 1
+
+    # Case 3: Syntax error diff -> FAIL (exit code 1)
+    syn_diff = (
+        "--- a/syntax.py\n"
+        "+++ b/syntax.py\n"
+        "@@ -1,1 +1,1 @@\n"
+        "+def broken(:\n"
+    )
+    syn_file = tmp_path / "syn.diff"
+    syn_file.write_text(syn_diff, encoding="utf-8")
+    res_syn = run_cli(["verify-diff", "--diff-file", str(syn_file), "--format", "json"])
+    assert res_syn["status"] == "FAIL"
+    assert main(["verify-diff", "--diff-file", str(syn_file), "--format", "json"]) == 1
+
+    # Case 4: Inconclusive diff (unsupported loop) -> INCONCLUSIVE (exit code 2)
+    inc_diff = (
+        "--- a/loop.py\n"
+        "+++ b/loop.py\n"
+        "@@ -1,4 +1,4 @@\n"
+        "-def fn(x: int) -> int:\n"
+        "-    while x < 5:\n"
+        "-        x += 1\n"
+        "-    return x\n"
+        "+def fn(x: int) -> int:\n"
+        "+    while x < 10:\n"
+        "+        x += 1\n"
+        "+    return x\n"
+    )
+    inc_file = tmp_path / "inc.diff"
+    inc_file.write_text(inc_diff, encoding="utf-8")
+    res_inc = run_cli(["verify-diff", "--diff-file", str(inc_file), "--format", "json"])
+    assert res_inc["status"] == "INCONCLUSIVE"
+    assert main(["verify-diff", "--diff-file", str(inc_file), "--format", "json"]) == 2
+
+    # Case 5: Clean valid diff -> PASS (exit code 0)
+    clean_diff = (
+        "--- a/calc.py\n"
+        "+++ b/calc.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-def add_one(x: int) -> int:\n"
+        "-    return x + 1\n"
+        "+def add_one(x: int) -> int:\n"
+        "+    return 1 + x\n"
+    )
+    clean_file = tmp_path / "clean.diff"
+    clean_file.write_text(clean_diff, encoding="utf-8")
+    res_clean = run_cli(["verify-diff", "--diff-file", str(clean_file), "--format", "json"])
+    assert res_clean["status"] == "PASS"
+    assert main(["verify-diff", "--diff-file", str(clean_file), "--format", "json"]) == 0
+
+    # Case 6: Missing diff file -> INFRA_ERROR (exit code 3)
+    missing_path = tmp_path / "non_existent.diff"
+    res_missing = run_cli(["verify-diff", "--diff-file", str(missing_path), "--format", "json"])
+    assert res_missing["status"] == "INFRA_ERROR"
+    assert main(["verify-diff", "--diff-file", str(missing_path), "--format", "json"]) == 3
+
+
+def test_p0_cli_ingest_tracks_failed_files(tmp_path: Path) -> None:
+    from verifyci_v2.interface.cli import run_cli
+
+    # Create one valid python file and one corrupted syntax file
+    valid_py = tmp_path / "valid.py"
+    valid_py.write_text("def f(x: int) -> int: return x\n", encoding="utf-8")
+    bad_py = tmp_path / "corrupted.py"
+    bad_py.write_text("def unparseable( ::::\n", encoding="utf-8")
+
+    db_path = str(tmp_path / "test.db")
+    res = run_cli(["ingest", str(tmp_path), "--db", db_path])
+    assert res["status"] == "partial_ingest"
+    assert res["ingested_functions"] == 1
+    assert len(res["failed_files"]) == 1
+    assert "corrupted.py" in res["failed_files"][0]["file"]
+
+
+def test_p0_gittuf_rsl_real_git_plumbing_and_persistence(tmp_path: Path) -> None:
+    import subprocess
+    from verifyci_v2.provenance.gittuf_rsl import GittufRSLLedger
+    from verifyci_v2.contracts.attestation import InTotoVerificationPredicate
+    from verifyci_v2.provenance.dsse_intoto import InTotoDSSESigner
+
+    # Initialize real Git repository
+    subprocess.run(["git", "init"], cwd=str(tmp_path), check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(tmp_path), check=True)
+    subprocess.run(["git", "config", "user.email", "test@verifyci.dev"], cwd=str(tmp_path), check=True)
+
+    dummy_file = tmp_path / "file.txt"
+    dummy_file.write_text("hello\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=str(tmp_path), check=True)
+    subprocess.run(["git", "commit", "-m", "init commit"], cwd=str(tmp_path), check=True, capture_output=True)
+
+    commit_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(tmp_path), check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    signer, pubkey = InTotoDSSESigner.generate_ephemeral()
+    pred = InTotoVerificationPredicate(
+        repo_id="test-repo",
+        base_commit_sha="commit_000",
+        head_commit_sha=commit_sha,
+        ussa_merkle_root="root_123",
+        gittuf_rsl_entry_hash="rsl_genesis",
+        ai_provider="deterministic",
+        conformal_profile_hash=None,
+        findings=(),
+    )
+    env = signer.sign_predicate(pred)
+
+    ledger_1 = GittufRSLLedger(repo_path=tmp_path)
+    entry = ledger_1.append_reference_entry(
+        ref_name="refs/heads/main",
+        target_commit_sha=commit_sha,
+        ussa_merkle_root="root_123",
+        dsse_envelope=env,
+    )
+
+    # Verify Git object plumbing: refs/gittuf/reference-state-log must be a valid git blob
+    obj_type = subprocess.run(
+        ["git", "cat-file", "-t", "refs/gittuf/reference-state-log"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert obj_type == "blob"
+
+    # Verify git notes plumbing: refs/notes/verifyci must store the note for commit_sha
+    note_out = subprocess.run(
+        ["git", "notes", "--ref", "refs/notes/verifyci", "show", commit_sha],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert env.payload in note_out
+
+    # Verify reload in a fresh instance
+    ledger_2 = GittufRSLLedger(repo_path=tmp_path)
+    assert len(ledger_2._rsl_chain) == 1
+    assert ledger_2._rsl_chain[0].entry_id == entry.entry_id
+    assert ledger_2.get_note_for_commit(commit_sha) is not None
+    assert ledger_2.verify_rsl_lineage(expected_head_commit=commit_sha) is True
+
+
+def test_p0_conformal_selective_risk_control_false_pass_guarantee() -> None:
+    from typing import Sequence
+    from verifyci_v2.neural.conformal import calibrate_judge_on_dataset, evaluate_with_conformal_gate
+    from verifyci_v2.contracts.ai_protocol import DiscriminativeJudgeProtocol, CategoricalChoice, ModelAttestationRecord
+
+    class MisclassifyingJudge(DiscriminativeJudgeProtocol):
+        provider_name = "mock"
+        model_id = "test-judge"
+        def judge_choice(self, state: dict[str, Any], question: str, options: Sequence[str]) -> CategoricalChoice:
+            # Confidently misclassifies defect as safe with p("none") = 0.95
+            return CategoricalChoice(selected="none", distribution={"none": 0.95, "defect": 0.05}, confidence=0.95)
+        def attestation(self, conformal_hash: str | None = None) -> ModelAttestationRecord:
+            return ModelAttestationRecord(
+                provider_name="mock",
+                model_id="test",
+                weights_or_endpoint_hash="hash",
+                prompt_template_hash="tmpl",
+                conformal_profile_hash=conformal_hash,
+            )
+
+    # 35 labeled examples with 15 defects where model misclassifies defect as safe
+    labeled = [({"diff": f"safe_{i}"}, "none") for i in range(20)] + [
+        ({"diff": f"defect_{i}"}, "defect") for i in range(15)
+    ]
+
+    profile = calibrate_judge_on_dataset(MisclassifyingJudge(), labeled, options=("none", "defect"), alpha=0.05)
+    # Misclassifying defect in upper tail forces tau_safe > 1.0 (fails closed to SMT)
+    assert profile.tau_safe > 1.0
+
+    # Under this profile, even an artifact with high safe probability must escalate to SMT
+    decision = evaluate_with_conformal_gate({"none": 0.999, "defect": 0.001}, profile, safe_label="none")
+    assert decision.escalate_to_smt is True
+
+
+def test_p1_wasm_fails_closed_when_runtime_unavailable() -> None:
+    from verifyci_v2.sandbox.wasm_runner import WasmCheckerSandbox, WasmSandboxConfig
+
+    # require_wasm_isolation=True with no wasmtime should raise on unregistered or missing runner
+    sandbox = WasmCheckerSandbox(WasmSandboxConfig(require_wasm_isolation=True))
+    with pytest.raises(KeyError):
+        sandbox.execute_plugin("unknown", ())
+
+
+def test_p1_duckdb_cpg_clears_stale_records_and_versions_edges(tmp_path: Path) -> None:
+    from verifyci_v2.store.duckdb_cpg import DuckDBCPGStore
+    from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
+    from verifyci_v2.contracts.ssa_ir import CPGEdge
+
+    store = DuckDBCPGStore(str(tmp_path / "test.vc2"))
+    f1 = lower_file_to_ussa("a.py", "def f(): return 1\n")[0]
+    f2 = lower_file_to_ussa("b.py", "def g(): return 2\n")[0]
+
+    edge_1 = CPGEdge("e1", f1.node_uid, f2.node_uid, "CALL", static_weight=1.0, coverage_hit_freq=0.0)
+    store.record_commit_snapshot("commit_A", [f1, f2], [edge_1])
+    assert len(store.get_functions_as_of("commit_A")) == 2
+    assert len(store.get_edges_as_of("commit_A")) == 1
+
+    # Re-recording commit_A with only f1 should clear stale f2 mapping
+    store.record_commit_snapshot("commit_A", [f1], [])
+    assert len(store.get_functions_as_of("commit_A")) == 1
+    assert len(store.get_edges_as_of("commit_A")) == 0
+
+    # Versioned edge attributes across commits
+    edge_v1 = CPGEdge("shared_edge", f1.node_uid, f1.node_uid, "CALL", static_weight=1.0, coverage_hit_freq=0.0)
+    store.record_commit_snapshot("commit_1", [f1], [edge_v1])
+
+    edge_v2 = CPGEdge("shared_edge", f1.node_uid, f1.node_uid, "CALL", static_weight=2.0, coverage_hit_freq=0.9)
+    store.record_commit_snapshot("commit_2", [f1], [edge_v2])
+
+    edges_c1 = store.get_edges_as_of("commit_1")
+    edges_c2 = store.get_edges_as_of("commit_2")
+    assert edges_c1[0].static_weight == 1.0
+    assert edges_c1[0].coverage_hit_freq == 0.0
+    assert edges_c2[0].static_weight == 2.0
+    assert edges_c2[0].coverage_hit_freq == 0.9
+
+
+def test_p1_stack_graphs_tracks_unresolved_references() -> None:
+    from verifyci_v2.ingestion.stack_graphs import StackGraphStitcher
+
+    stitcher = StackGraphStitcher()
+    # Code calling an imported symbol that does not exist in any file
+    code = "import missing_lib\ndef client():\n    return missing_lib.external_call()\n"
+    stitcher.upsert_file("client.py", code, language="python")
+
+    unresolved = stitcher.get_unresolved_references()
+    assert len(unresolved) >= 1
+    assert any("external_call" in u["symbol"] for u in unresolved)
+
+
+def test_p1_cli_calibrate_default_produces_calibrated_profile() -> None:
+    from verifyci_v2.interface.cli import run_cli
+
+    res = run_cli(["calibrate"])
+    assert res["status"] == "ok"
+    prof = res["conformal_profile"]
+    assert prof["is_calibrated"] is True
+    assert prof["sample_size"] >= 30

@@ -41,11 +41,18 @@ def evaluate_with_conformal_gate(
 ) -> CalibratedDecision:
     """
     Constructs the conformal prediction set C(x) = {y : 1 - p(y|x) <= q_hat}.
-    If uncalibrated, |C(x)| != 1 (ambiguous or empty), or C(x) contains any defect label != safe_label,
-    VerifyCI abstains from the neural shortcut and escalates the diff to egglog + Z3 SMT.
+    Enforces statistically valid selective risk control for the critical event:
+    'a defective change is accepted as safe'.
+    If:
+      1. Profile is uncalibrated, OR
+      2. tau_safe > 1.0 (indicating confident misclassifications on calibration defects or small sample), OR
+      3. p(safe) < tau_safe, OR
+      4. Prediction set C(x) is not the singleton {safe_label},
+    VerifyCI abstains from the neural shortcut and escalates to egglog + Z3 SMT (fail-closed).
     """
     top_choice = max(class_probabilities.items(), key=lambda kv: kv[1])[0]
     raw_prob = float(class_probabilities[top_choice])
+    p_safe = float(class_probabilities.get(safe_label, 0.0))
 
     if not getattr(profile, "is_calibrated", True):
         return CalibratedDecision(
@@ -63,7 +70,10 @@ def evaluate_with_conformal_gate(
     )
 
     abstained = len(prediction_set) != 1
-    escalate = abstained or (prediction_set[0] != safe_label)
+    tau_safe = getattr(profile, "tau_safe", 1.0)
+    cleared_risk = (tau_safe <= 1.0) and (p_safe >= tau_safe)
+
+    escalate = abstained or (prediction_set != (safe_label,)) or not cleared_risk
 
     return CalibratedDecision(
         prediction_set=prediction_set,
@@ -80,29 +90,54 @@ def calibrate_judge_on_dataset(
     options: Sequence[str],
     *,
     alpha: float = 0.02,
+    safe_label: str = "none",
 ) -> ConformalProfile:
     """
-    Runs `vc2 calibrate` over a held-out labeled dataset.
+    Runs calibration over a held-out labeled dataset.
     Requires at least MIN_CALIBRATION_SAMPLES (30) to produce a calibrated profile.
+    Separates general calibration scores from defect false-pass risk scores:
+      1. General non-conformity score: 1.0 - p(y_true)
+      2. Defect false-pass score for y != safe: p(safe)
+         Controls P(accepted as safe | defect) <= alpha by setting tau_safe.
+         If any defect is confidently misclassified (high p(safe)), tau_safe exceeds 1.0,
+         failing closed to 100% SMT escalation.
     """
     is_calibrated = len(labeled_examples) >= MIN_CALIBRATION_SAMPLES
 
-    scores: list[float] = []
+    general_scores: list[float] = []
+    defect_safe_probs: list[float] = []
+
     for state, true_label in labeled_examples:
         choice = judge.judge_choice(
             state=state,
             question="Classify the semantic category of this code artifact:",
             options=options,
         )
-        if true_label != "none":
-            # Conformal Risk Control on defect examples: risk is p(safe)
-            p_safe = choice.distribution.get("none", 0.0)
-            scores.append(1.0 - p_safe)
-        else:
-            prob_true = choice.distribution.get(true_label, 0.0)
-            scores.append(1.0 - prob_true)
+        dist = choice.distribution
+        prob_true = dist.get(true_label, 0.0)
+        general_scores.append(1.0 - prob_true)
 
-    q_hat = compute_conformal_quantile(scores, alpha=alpha) if scores else 1.0
+        if true_label != safe_label:
+            p_safe_on_defect = dist.get(safe_label, 0.0)
+            defect_safe_probs.append(p_safe_on_defect)
+
+    q_hat = compute_conformal_quantile(general_scores, alpha=alpha) if general_scores else 1.0
+
+    m = len(defect_safe_probs)
+    if not is_calibrated or m < 10:
+        tau_safe = 2.0
+    else:
+        sorted_defect_probs = sorted(defect_safe_probs)
+        rank = math.ceil((m + 1) * (1.0 - alpha))
+        if rank > m:
+            tau_safe = 2.0
+        else:
+            val_at_rank = sorted_defect_probs[rank - 1]
+            if val_at_rank >= 0.5:
+                tau_safe = 2.0
+            else:
+                tau_safe = round(val_at_rank + 1e-4, 6)
+
     att = judge.attestation()
     return ConformalProfile(
         model_id=judge.model_id,
@@ -111,6 +146,8 @@ def calibrate_judge_on_dataset(
         sample_size=len(labeled_examples),
         q_hat=q_hat,
         is_calibrated=is_calibrated,
+        tau_safe=tau_safe,
+        defect_sample_size=m,
     )
 
 
