@@ -109,7 +109,7 @@ def test_cap012_cache_context_manager_restoration():
 
 def test_cap012_hardware_pinned_timing_gate():
     """P1-4: Hard pass/fail timing budget gate enforced ONLY on pinned benchmark runner."""
-    if not os.environ.get("VERIFYCI_PINNED_BENCHMARK_ENV"):
+    if os.environ.get("VERIFYCI_PINNED_BENCHMARK_ENV") != "1":
         pytest.skip(
             "Skipping hard latency budget gating: VERIFYCI_PINNED_BENCHMARK_ENV is not set. "
             "Timing envelope reported without fail-closed gate on unpinned host."

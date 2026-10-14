@@ -17,3 +17,4 @@ opencode.json
 benchmark-results*.json
 dist/
 *.egg-info/
+freebuff-chat-*.md

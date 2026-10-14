@@ -56,9 +56,9 @@ def test_h1a_reproduces_frozen_baseline():
     assert fatal == []
     safe = "".join(c if c.isalnum() else "_" for c in h.CONFIG["model"])
     cache_path = HERE / f"embedding_cache_{safe}.json"
-    if not cache_path.exists():
+    if not cache_path.exists() or cache_path.read_bytes().startswith(b"version https://git-lfs"):
         import pytest
-        pytest.skip(f"Offline embedding cache {cache_path.name} not found")
+        pytest.skip(f"Offline embedding cache {cache_path.name} not found or unresolved LFS pointer")
     provider = h.make_provider("ollama", HERE)
     rankings = asyncio.run(h.build_rankings(corpus, queries, provider))
     metrics = h.score(rankings, queries)
