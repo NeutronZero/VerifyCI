@@ -1,3 +1,10 @@
+"""Deprecated compatibility facade over verifyci.interface.fastmcp_server.
+
+New code should use ``verifyci.interface.fastmcp_server.create_fastmcp_server``.
+This module preserves the legacy import path, ``__all__`` names, and the
+``create_mcp_server`` signature; all factory calls emit a ``DeprecationWarning``
+and delegate to the canonical ``create_inner_server`` implementation.
+"""
 import asyncio
 import time as _time
 from typing import Any
@@ -427,21 +434,11 @@ def create_mcp_server(graph=None, store=None, node_map: dict | None = None,
                       dense_provider: Any = None, ledger: Any = None,
                       entities: list | None = None,
                       rw_store: Any = None) -> MCPServer:
-    handlers = MCPServerHandlers(
-        graph=graph,
-        store=store,
-        node_map=node_map,
-        dense_provider=dense_provider,
-        ledger=ledger,
-        entities=entities,
-        rw_store=rw_store,
-    )
-    server = MCPServer()
-    server.register_tool("code.search", handlers.code_search, "Hybrid BM25 + graph retrieval with RRF + rerank")
-    server.register_tool("code.definition", handlers.code_definition, "Symbol lookup")
-    server.register_tool("graph.query", handlers.graph_query, "Bitemporal graph lookup with asOf")
-    server.register_tool("verify.diff", handlers.verify_diff, "Semi-formal + blast radius verification")
-    server.register_tool("task.run", handlers.task_run, "Planner → Compiler → Scheduler")
-    server.register_tool("task.status", handlers.task_status, "Scheduler-backed DAG execution status")
-    return server
+    import warnings
+    warnings.warn("use verifyci.interface.fastmcp_server.create_fastmcp_server",
+                  DeprecationWarning, stacklevel=2)
+    from verifyci.interface.fastmcp_server import create_inner_server
+    return create_inner_server(graph=graph, store=store, node_map=node_map,
+                               dense_provider=dense_provider, ledger=ledger,
+                               entities=entities, rw_store=rw_store)
 

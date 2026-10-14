@@ -3,8 +3,12 @@
 Stdio is a framed byte stream; any decoration on stdout corrupts every
 client read. These tests pin the surface without launching a server
 (serving is verified manually against a real client handshake).
+
+NOTE: verifyci imports stay function-level in this file. The test runner's
+system interpreter carries C:\\Projects\\verifyci on sys.path; a top-level
+import would bind that stale checkout at collection time instead of the
+worktree under test.
 """
-from verifyci.interface.fastmcp_server import create_fastmcp_server
 
 
 async def _tools(mcp):
@@ -13,6 +17,7 @@ async def _tools(mcp):
 
 def test_fastmcp_exposes_six_v1_tools(tmp_path):
     import asyncio
+    from verifyci.interface.fastmcp_server import create_fastmcp_server
 
     mcp = create_fastmcp_server(str(tmp_path / "missing.db"))
     assert asyncio.run(_tools(mcp)) == [
@@ -109,3 +114,30 @@ def test_mcp_task_run_records_ledger_and_head():
     assert out["ledger_head"] == ledger.head_hash()
     assert out["ledger_head"] is not None
     assert len(ledger.get_events()) >= 2
+
+
+def test_mcp_server_facade_preserves_signature():
+    import inspect
+    import verifyci.interface.mcp_server as legacy
+    assert "create_mcp_server" in legacy.__all__
+    sig = inspect.signature(legacy.create_mcp_server)
+    assert {"graph", "store", "node_map", "ledger", "entities"} <= set(sig.parameters)
+
+
+def test_mcp_server_facade_emits_deprecation_and_delegates():
+    import warnings
+    from verifyci.interface.mcp_server import create_mcp_server
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        server = create_mcp_server(graph=None, store=None, node_map={}, entities=[])
+    assert any(issubclass(w.category, DeprecationWarning)
+               and "verifyci.interface.fastmcp_server.create_fastmcp_server" in str(w.message)
+               for w in caught), [str(w.message) for w in caught]
+    assert sorted(server.list_tools()) == [
+        "code.definition",
+        "code.search",
+        "graph.query",
+        "task.run",
+        "task.status",
+        "verify.diff",
+    ]

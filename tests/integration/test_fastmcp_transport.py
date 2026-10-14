@@ -4,16 +4,13 @@ The passthrough wrappers delegate to the inner MCP server; the load-bearing
 gate behavior lives there (and in run_verify/run_task). These tests pin the
 transport-owned logic: oversize diffs/tasks rejected before any gate runs,
 and serve() keeping stdio framing clean.
+
+NOTE: verifyci imports stay function-level in this file (see
+tests/integration/test_fastmcp.py for why: collection-time top-level imports
+bind a stale checkout present on this runner's sys.path).
 """
 
 import asyncio
-
-from verifyci.interface.fastmcp_server import (
-    MAX_DIFF_CHARS,
-    MAX_TASK_DIFF_CHARS,
-    create_fastmcp_server,
-    serve,
-)
 
 
 def _call(mcp, name, args):
@@ -21,6 +18,10 @@ def _call(mcp, name, args):
 
 
 def test_verify_diff_cap_rejects_before_gate(tmp_path):
+    from verifyci.interface.fastmcp_server import (
+        MAX_DIFF_CHARS,
+        create_fastmcp_server,
+    )
     mcp = create_fastmcp_server(str(tmp_path / "missing.db"))
     out = _call(mcp, "verify_diff", {"diff": "x" * (MAX_DIFF_CHARS + 1)})
     assert out["status"] == "FAILED"
@@ -28,6 +29,10 @@ def test_verify_diff_cap_rejects_before_gate(tmp_path):
 
 
 def test_task_run_caps_reject_before_gate(tmp_path):
+    from verifyci.interface.fastmcp_server import (
+        MAX_TASK_DIFF_CHARS,
+        create_fastmcp_server,
+    )
     mcp = create_fastmcp_server(str(tmp_path / "missing.db"))
     big_diff = _call(
         mcp, "task_run", {"task": "t", "diff": "x" * (MAX_TASK_DIFF_CHARS + 1)}
@@ -45,12 +50,14 @@ def test_task_run_caps_reject_before_gate(tmp_path):
 
 
 def test_task_status_passthrough_on_empty_graph(tmp_path):
+    from verifyci.interface.fastmcp_server import create_fastmcp_server
     mcp = create_fastmcp_server(str(tmp_path / "missing.db"))
     out = _call(mcp, "task_status", {"task_id": "no-such-task"})
     assert isinstance(out, dict)
 
 
 def test_passthrough_wrappers_fail_honest_on_empty_graph(tmp_path):
+    from verifyci.interface.fastmcp_server import create_fastmcp_server
     # No store/graph loaded: wrappers delegate and return error dicts,
     # never raise through the transport.
     mcp = create_fastmcp_server(str(tmp_path / "missing.db"))
@@ -67,6 +74,7 @@ def test_passthrough_wrappers_fail_honest_on_empty_graph(tmp_path):
 
 def test_serve_stdio_and_http_wiring(tmp_path, monkeypatch):
     import fastmcp
+    from verifyci.interface.fastmcp_server import serve
 
     calls = []
 

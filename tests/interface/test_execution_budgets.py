@@ -3,22 +3,20 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import pytest
 from fastapi import HTTPException
 
-from verifyci.contracts.verification_ir import VerificationPolicy
-from verifyci.interface.commands.verify import run_verify
-from verifyci.interface.http import HTTPBackpressure
-from verifyci.interface.ingress import (
-    IngressValidationError,
-    validate_diff_complexity,
-    validate_diff_ingress,
-)
-from verifyci.interface.limits import (
-    MAX_CHANGED_FILES,
-    MAX_CHANGED_LINES,
-    ExecutionBudget,
-)
+# NOTE: verifyci imports stay function-level in this file. The test runner's
+# system interpreter carries C:\Projects\verifyci on sys.path; top-level
+# imports would bind that stale checkout at collection time and poison
+# sys.modules for every other gate file in the same pytest process.
 
 
 def test_diff_complexity_file_cap():
+    from verifyci.interface.commands.verify import run_verify
+    from verifyci.interface.ingress import (
+        IngressValidationError,
+        validate_diff_complexity,
+        validate_diff_ingress,
+    )
+    from verifyci.interface.limits import MAX_CHANGED_FILES
     # Diff touching 201 files exceeds MAX_CHANGED_FILES (200)
     files = [f"file_{i}.py" for i in range(MAX_CHANGED_FILES + 1)]
     diff_parts = []
@@ -43,6 +41,13 @@ def test_diff_complexity_file_cap():
 
 
 def test_diff_complexity_line_cap():
+    from verifyci.interface.commands.verify import run_verify
+    from verifyci.interface.ingress import (
+        IngressValidationError,
+        validate_diff_complexity,
+        validate_diff_ingress,
+    )
+    from verifyci.interface.limits import MAX_CHANGED_LINES
     # Diff with 1 file but >10,000 modified lines
     header = "diff --git a/big.py b/big.py\n--- a/big.py\n+++ b/big.py\n@@ -1,10005 +1,10005 @@\n"
     lines = ["+line\n"] * (MAX_CHANGED_LINES + 5)
@@ -63,6 +68,8 @@ def test_diff_complexity_line_cap():
 
 
 def test_execution_budget_deadline_expired_fail_closed():
+    from verifyci.interface.commands.verify import run_verify
+    from verifyci.interface.limits import ExecutionBudget
     # An already-expired budget deadline causes immediate INFRA_ERROR
     expired_budget = ExecutionBudget(deadline_monotonic=time.monotonic() - 1.0)
     diff = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,1 +1,1 @@\n-a\n+b\n"
@@ -73,6 +80,7 @@ def test_execution_budget_deadline_expired_fail_closed():
 
 
 def test_http_backpressure_queue_rejection_429():
+    from verifyci.interface.http import HTTPBackpressure
     bp = HTTPBackpressure(max_workers=2, max_queue=2)
     # Total capacity = 2 + 2 = 4
     bp.active_and_queued = 4
@@ -84,6 +92,7 @@ def test_http_backpressure_queue_rejection_429():
 
 
 def test_run_verify_envelope_and_signature(tmp_path):
+    from verifyci.interface.commands.verify import run_verify
     from verifyci.storage.graph_store import GraphStore
     db = str(tmp_path / "valid.db")
     GraphStore(db).close()
@@ -114,6 +123,8 @@ def test_run_verify_envelope_and_signature(tmp_path):
 
 
 def test_run_verify_advisory_policy_produces_advisory_warn(tmp_path):
+    from verifyci.contracts.verification_ir import VerificationPolicy
+    from verifyci.interface.commands.verify import run_verify
     from verifyci.storage.graph_store import GraphStore
     db = str(tmp_path / "valid.db")
     GraphStore(db).close()
@@ -136,6 +147,7 @@ def test_run_verify_advisory_policy_produces_advisory_warn(tmp_path):
 
 
 def test_signing_failure_is_fail_closed_infra_error(tmp_path, monkeypatch):
+    from verifyci.interface.commands.verify import run_verify
     from verifyci.storage.graph_store import GraphStore
     db = str(tmp_path / "valid.db")
     GraphStore(db).close()
@@ -157,6 +169,8 @@ def test_signing_failure_is_fail_closed_infra_error(tmp_path, monkeypatch):
 
 
 def test_require_signed_envelope_policy_rejects_unsigned_result(tmp_path):
+    from verifyci.contracts.verification_ir import VerificationPolicy
+    from verifyci.interface.commands.verify import run_verify
     from verifyci.storage.graph_store import GraphStore
     db = str(tmp_path / "valid.db")
     GraphStore(db).close()
@@ -184,6 +198,7 @@ def test_require_signed_envelope_policy_rejects_unsigned_result(tmp_path):
 def test_envelope_sign_exception_fails_closed_infra_error(tmp_path, monkeypatch):
     """Specifically test that an exception raised inside envelope.sign() fails closed as INFRA_ERROR."""
     from verifyci.contracts.verification_ir import VerificationEnvelope
+    from verifyci.interface.commands.verify import run_verify
     from verifyci.storage.graph_store import GraphStore
 
     db = str(tmp_path / "valid.db")
@@ -212,6 +227,8 @@ def test_envelope_sign_exception_fails_closed_infra_error(tmp_path, monkeypatch)
 
 def test_require_signed_envelope_trust_verification_lifecycle(tmp_path):
     """Test require_signed_envelope rejects untrusted signers and accepts authorized trust store signers."""
+    from verifyci.contracts.verification_ir import VerificationPolicy
+    from verifyci.interface.commands.verify import run_verify
     from verifyci.storage.graph_store import GraphStore
 
     db = str(tmp_path / "valid.db")
@@ -257,6 +274,7 @@ def test_source_commit_id_distinction_from_revision_id(tmp_path):
     """Test that source_commit_id is resolved from authoritative ingest records and never substituted with revision_id."""
     import time
     from verifyci.contracts.revision import Revision
+    from verifyci.interface.commands.verify import run_verify
     from verifyci.storage.graph_store import GraphStore
 
     db = str(tmp_path / "lineage.db")
@@ -338,6 +356,7 @@ def test_multi_seed_traversal_budget_accumulation():
         TraversalBudgetExceededError,
         traverse,
     )
+    from verifyci.interface.limits import ExecutionBudget
 
     g = rx.PyDiGraph()
     n0 = g.add_node({"revision_entity_id": "seed0"})
