@@ -34,6 +34,8 @@ dependencies = [
     "fastapi>=0.141",
     "aiohttp>=3.14",
     "opentelemetry-api>=1.42",
+    "z3-solver>=5.1.0.0",
+    "wasmtime>=49.0.0",
 ]
 
 [project.optional-dependencies]
@@ -62,7 +64,7 @@ packages = ["verifyci_v2"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
-testpaths = ["tests/v2"]
+testpaths = ["tests"]
 junit_family = "xunit2"
 markers = [
     "invariant: Critical fail-closed safety invariants and contracts (always executed)",

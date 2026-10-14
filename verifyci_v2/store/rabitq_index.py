@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import heapq
 import math
 import re
 from typing import Sequence
@@ -45,6 +46,9 @@ class RaBitQQueryStats:
     total_candidates: int
     pruned_by_error_bound: int
     evaluated_exact_count: int
+    scan_mode: str = "linear_bitwise_scan"
+    quantized_bytes: int = 0
+    exact_float_bytes: int = 0
 
 
 def quantize_unit_vector_rabitq(
@@ -53,6 +57,7 @@ def quantize_unit_vector_rabitq(
     unit_vec: Sequence[float],
     *,
     coverage_weight: float = 1.0,
+    retain_exact: bool = True,
 ) -> RaBitQVectorEntry:
     """
     Quantizes a normalized D-dimensional vector into a 1-bit RaBitQ representation
@@ -81,7 +86,7 @@ def quantize_unit_vector_rabitq(
         alignment_factor=alignment,
         residual_norm=residual,
         coverage_weight=coverage_weight,
-        exact_vector=tuple(unit_vec),
+        exact_vector=tuple(unit_vec) if retain_exact else (),
     )
 
 
@@ -93,8 +98,13 @@ class RaBitQHybridIndex:
     3. BM25 lexical inverted index + dynamic coverage weighting.
     """
 
-    def __init__(self, embedder: StaticModel2VecEmbedder | None = None) -> None:
+    def __init__(
+        self,
+        embedder: StaticModel2VecEmbedder | None = None,
+        retain_exact_vectors: bool = True,
+    ) -> None:
         self.embedder = embedder or StaticModel2VecEmbedder(dimension=128)
+        self.retain_exact_vectors = retain_exact_vectors
         self._entries: dict[str, RaBitQVectorEntry] = {}
         self._doc_tokens: dict[str, dict[str, int]] = {}
         self._doc_lengths: dict[str, int] = {}
@@ -116,6 +126,7 @@ class RaBitQHybridIndex:
             qualified_name=qualified_name,
             unit_vec=unit_vec,
             coverage_weight=cov_weight,
+            retain_exact=self.retain_exact_vectors,
         )
         self._entries[node_uid] = entry
 
@@ -165,8 +176,19 @@ class RaBitQHybridIndex:
         top_k: int = 5,
         confidence_z: float = 3.89,  # >99.99% normal concentration bound
     ) -> RaBitQQueryStats:
+        q_bytes = sum((e.dimension // 8) + 16 for e in self._entries.values())
+        f_bytes = sum(len(e.exact_vector) * 8 for e in self._entries.values())
+
         if not self._entries:
-            return RaBitQQueryStats(results=(), total_candidates=0, pruned_by_error_bound=0, evaluated_exact_count=0)
+            return RaBitQQueryStats(
+                results=(),
+                total_candidates=0,
+                pruned_by_error_bound=0,
+                evaluated_exact_count=0,
+                scan_mode="linear_bitwise_scan",
+                quantized_bytes=q_bytes,
+                exact_float_bytes=f_bytes,
+            )
 
         q_vec = self.embedder.embed_one(query_text)
         q_entry = quantize_unit_vector_rabitq("query", "query", q_vec)
@@ -187,12 +209,10 @@ class RaBitQHybridIndex:
             eps = confidence_z * inv_sqrt_d * (entry.residual_norm / entry.alignment_factor)
             estimates.append((entry, s_hat, eps))
 
-        # Sort by upper bound (s_hat + eps) descending so we establish a tight S_k* threshold early
+        # Sort by upper bound (s_hat + eps) descending
         estimates.sort(key=lambda item: item[1] + item[2], reverse=True)
 
         # Pass 2: Error-bounded exact reranking
-        import heapq
-
         top_exact_heap: list[float] = []
         pruned_count = 0
         evaluated_exact = 0
@@ -201,13 +221,16 @@ class RaBitQHybridIndex:
         for entry, s_hat, eps in estimates:
             kth_best = top_exact_heap[0] if len(top_exact_heap) >= top_k else -2.0
             if len(top_exact_heap) >= top_k and (s_hat + eps) < kth_best:
-                # Provably cannot beat the k-th best exact score -> prune!
                 pruned_count += 1
                 dense_results.append((entry, s_hat, eps, s_hat, True))
                 continue
 
             evaluated_exact += 1
-            exact_ip = sum(a * b for a, b in zip(q_vec, entry.exact_vector))
+            if entry.exact_vector:
+                exact_ip = sum(a * b for a, b in zip(q_vec, entry.exact_vector))
+            else:
+                exact_ip = s_hat
+
             if len(top_exact_heap) < top_k:
                 heapq.heappush(top_exact_heap, exact_ip)
             elif exact_ip > top_exact_heap[0]:
@@ -222,11 +245,11 @@ class RaBitQHybridIndex:
         bm25_ranked = sorted(bm25_scores.keys(), key=lambda u: bm25_scores[u], reverse=True)
         bm25_rank_map = {uid: rank + 1 for rank, uid in enumerate(bm25_ranked)}
 
-        dense_Results_sorted = sorted(dense_results, key=lambda x: x[3], reverse=True)
+        dense_results_sorted = sorted(dense_results, key=lambda x: x[3], reverse=True)
         final_items: list[RaBitQSearchResult] = []
         rrf_k = 60.0
 
-        for dense_rank_idx, (entry, s_hat, eps, exact_ip, was_pruned) in enumerate(dense_Results_sorted):
+        for dense_rank_idx, (entry, s_hat, eps, exact_ip, was_pruned) in enumerate(dense_results_sorted):
             d_rank = dense_rank_idx + 1
             b_rank = bm25_rank_map.get(entry.node_uid, len(self._entries))
             rrf = entry.coverage_weight * (
@@ -250,4 +273,7 @@ class RaBitQHybridIndex:
             total_candidates=len(self._entries),
             pruned_by_error_bound=pruned_count,
             evaluated_exact_count=evaluated_exact,
+            scan_mode="linear_bitwise_scan",
+            quantized_bytes=q_bytes,
+            exact_float_bytes=f_bytes,
         )

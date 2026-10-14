@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+import json
+from pathlib import Path
+import subprocess
 import time
 
-from verifyci_v2.contracts.attestation import DSSEEnvelope, RSLReferenceEntry
-from verifyci_v2.contracts.canonical import canonical_digest
+from verifyci_v2.contracts.attestation import DSSEEnvelope, DSSESignature, RSLReferenceEntry
+from verifyci_v2.contracts.canonical import canonical_digest, canonical_jcs_str
 
 
 class RSLTamperDetectedError(RuntimeError):
@@ -14,13 +18,63 @@ class GittufRSLLedger:
     """
     Layer 7 Forge-Independent Provenance Ledger (`verifyci_v2/provenance/gittuf_rsl.py`).
     Maintains a hash-chained Reference State Log (`refs/gittuf/reference-state-log`) and
-    `refs/notes/verifyci` map to defend against silent branch/tag rollbacks, force-pushes,
-    and replay attacks across stateless CI runners.
+    notes map persisted to Git objects/refs to defend against branch/tag rollbacks,
+    force-pushes, and replay attacks across stateless CI runners.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, repo_path: str | Path | None = None) -> None:
+        self.repo_path = Path(repo_path) if repo_path else None
         self._rsl_chain: list[RSLReferenceEntry] = []
         self._git_notes_by_commit: dict[str, DSSEEnvelope] = {}
+
+        if self.repo_path:
+            self._load_from_repo()
+
+    def _get_git_storage_paths(self) -> tuple[Path, Path]:
+        assert self.repo_path is not None
+        git_dir = self.repo_path / ".git"
+        if not git_dir.exists():
+            git_dir = self.repo_path
+        storage_dir = git_dir / "refs" / "gittuf"
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        rsl_file = storage_dir / "reference-state-log"
+        notes_file = git_dir / "refs" / "notes" / "verifyci"
+        notes_file.parent.mkdir(parents=True, exist_ok=True)
+        return rsl_file, notes_file
+
+    def _load_from_repo(self) -> None:
+        assert self.repo_path is not None
+        rsl_file, notes_file = self._get_git_storage_paths()
+        if rsl_file.exists():
+            for line in rsl_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line:
+                    data = json.loads(line)
+                    self._rsl_chain.append(
+                        RSLReferenceEntry(
+                            entry_id=data["entry_id"],
+                            parent_entry_id=data["parent_entry_id"],
+                            ref_name=data["ref_name"],
+                            target_commit_sha=data["target_commit_sha"],
+                            ussa_merkle_root=data["ussa_merkle_root"],
+                            dsse_envelope_digest=data["dsse_envelope_digest"],
+                            timestamp_epoch=data["timestamp_epoch"],
+                        )
+                    )
+
+        if notes_file.exists():
+            for line in notes_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line:
+                    data = json.loads(line)
+                    target_sha = data["target_commit_sha"]
+                    raw_env = data["envelope"]
+                    sigs = tuple(DSSESignature(**s) for s in raw_env.get("signatures", ()))
+                    self._git_notes_by_commit[target_sha] = DSSEEnvelope(
+                        payloadType=raw_env["payloadType"],
+                        payload=raw_env["payload"],
+                        signatures=sigs,
+                    )
 
     @property
     def latest_entry(self) -> RSLReferenceEntry | None:
@@ -59,6 +113,30 @@ class GittufRSLLedger:
         )
         self._rsl_chain.append(entry)
         self._git_notes_by_commit[target_commit_sha] = dsse_envelope
+
+        if self.repo_path:
+            rsl_file, notes_file = self._get_git_storage_paths()
+            with open(rsl_file, "a", encoding="utf-8") as f:
+                f.write(canonical_jcs_str(asdict(entry)) + "\n")
+
+            note_record = {
+                "target_commit_sha": target_commit_sha,
+                "envelope": asdict(dsse_envelope),
+            }
+            with open(notes_file, "a", encoding="utf-8") as f:
+                f.write(canonical_jcs_str(note_record) + "\n")
+
+            # Update git ref if git repository exists
+            try:
+                subprocess.run(
+                    ["git", "update-ref", "refs/gittuf/reference-state-log", entry_id[:40]],
+                    cwd=str(self.repo_path),
+                    capture_output=True,
+                    check=False,
+                )
+            except Exception:
+                pass
+
         return entry
 
     def verify_rsl_lineage(self, expected_head_commit: str | None = None) -> bool:

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import re
 from typing import Iterable, Sequence
 
-from verifyci_v2.contracts.attestation import VerificationFinding
+from verifyci_v2.contracts.attestation import VerdictKind, VerificationFinding
 from verifyci_v2.contracts.canonical import blake3_hex
 from verifyci_v2.contracts.ssa_ir import FunctionUSSA
 
@@ -34,6 +34,19 @@ class EquivalenceSaturationResult:
     base_eclass_digest: str
     head_eclass_digest: str
     applied_rewrites: tuple[str, ...]
+    verdict: VerdictKind = "HEURISTIC_EQUIVALENT_CANDIDATE"
+
+
+def _has_floating_point(func: FunctionUSSA) -> bool:
+    if "float" in func.return_annotation.lower() or "float" in func.canonical_signature.lower():
+        return True
+    float_pattern = re.compile(r"(?:\b\d+\.\d+|\b\d+\.|\.\d+)\b|\bfloat\b")
+    for block in func.basic_blocks:
+        for inst in block.instructions:
+            for op in inst.operands:
+                if float_pattern.search(op):
+                    return True
+    return False
 
 
 def _canonicalize_sexpr(expr: str, rewrites_log: list[str]) -> str:
@@ -169,7 +182,7 @@ def saturate_function_egraph(func: FunctionUSSA) -> tuple[str, tuple[str, ...]]:
             if inst.opcode in ("ASSIGN", "BINOP") and inst.target_var:
                 env_subst[inst.target_var] = saturated_expr
             elif inst.opcode in ("RETURN", "RAISE", "CALL", "STORE_ATTR", "BRANCH"):
-                canonical_effects.append(f"{inst.opcode}:{saturated_expr}")
+                canonical_effects.append(f"{block.block_id}:{inst.opcode}:{saturated_expr}")
 
     eclass_signature = "|".join(canonical_effects)
     digest = blake3_hex(eclass_signature, domain="verifyci.v2.egglog.eclass")
@@ -179,7 +192,7 @@ def saturate_function_egraph(func: FunctionUSSA) -> tuple[str, tuple[str, ...]]:
 class EgglogEquivalenceEngine:
     """
     Layer 5 Stage 1 Symbolic Engine (`verifyci_v2/symbolic/egglog_engine.py`):
-    1. Equality saturation equivalence prover (`PROVEN_EQUIVALENT` in <1ms).
+    1. Equality saturation equivalence heuristic candidate detector (<1ms).
     2. Declarative Datalog reachability for Unsafe Deletion (`cap003a`).
     3. Declarative Datalog lock-order & unguarded async shared-state race detection (`cap008`).
     """
@@ -189,21 +202,32 @@ class EgglogEquivalenceEngine:
         func_base: FunctionUSSA,
         func_head: FunctionUSSA,
     ) -> EquivalenceSaturationResult:
+        if _has_floating_point(func_base) or _has_floating_point(func_head):
+            return EquivalenceSaturationResult(
+                is_equivalent=False,
+                base_eclass_digest=func_base.h_body or blake3_hex("base_float"),
+                head_eclass_digest=func_head.h_body or blake3_hex("head_float"),
+                applied_rewrites=(),
+                verdict="INCONCLUSIVE",
+            )
         if func_base.parameters != func_head.parameters:
             return EquivalenceSaturationResult(
                 is_equivalent=False,
                 base_eclass_digest=func_base.h_body,
                 head_eclass_digest=func_head.h_body,
                 applied_rewrites=(),
+                verdict="INCONCLUSIVE",
             )
         base_dig, base_rw = saturate_function_egraph(func_base)
         head_dig, head_rw = saturate_function_egraph(func_head)
         all_rw = tuple(sorted(set(base_rw) | set(head_rw)))
+        is_eq = (base_dig == head_dig)
         return EquivalenceSaturationResult(
-            is_equivalent=(base_dig == head_dig),
+            is_equivalent=is_eq,
             base_eclass_digest=base_dig,
             head_eclass_digest=head_dig,
             applied_rewrites=all_rw,
+            verdict="HEURISTIC_EQUIVALENT_CANDIDATE" if is_eq else "INCONCLUSIVE",
         )
 
     def datalog_unsafe_deletions(

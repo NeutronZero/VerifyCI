@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 import json
 import sqlite3
 import time
-from typing import Iterable, Sequence
+from typing import Iterable, Literal, Sequence
 import zlib
 
 from verifyci_v2.contracts.canonical import canonical_jcs_bytes
@@ -93,9 +92,24 @@ class DuckDBCPGStore:
     Uses DuckDB when installed, with a bit-for-bit compatible relational SQLite backend.
     """
 
-    def __init__(self, db_path: str = ":memory:") -> None:
+    def __init__(
+        self,
+        db_path: str = ":memory:",
+        backend: Literal["auto", "duckdb", "sqlite"] = "auto",
+    ) -> None:
         self.db_path = db_path
-        self._use_duckdb = _duckdb_mod is not None and db_path.endswith(".vc2")
+        if backend == "duckdb":
+            if _duckdb_mod is None:
+                raise RuntimeError("duckdb is requested but duckdb package is not installed")
+            self._use_duckdb = True
+            self.active_backend = "duckdb"
+        elif backend == "sqlite":
+            self._use_duckdb = False
+            self.active_backend = "sqlite"
+        else:
+            self._use_duckdb = _duckdb_mod is not None and db_path.endswith(".vc2")
+            self.active_backend = "duckdb" if self._use_duckdb else "sqlite"
+
         if self._use_duckdb:
             self._conn = _duckdb_mod.connect(db_path)
         else:
@@ -151,6 +165,15 @@ class DuckDBCPGStore:
             )
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS commit_edge_map (
+                commit_sha TEXT NOT NULL,
+                edge_uid TEXT NOT NULL,
+                PRIMARY KEY (commit_sha, edge_uid)
+            )
+            """
+        )
         self._conn.commit()
 
     def record_commit_snapshot(
@@ -202,12 +225,53 @@ class DuckDBCPGStore:
             )
             for edge in (*fn.cfg_edges, *fn.dfg_edges):
                 self._upsert_edge(cur, edge)
+                cur.execute(
+                    """
+                    INSERT OR REPLACE INTO commit_edge_map (commit_sha, edge_uid)
+                    VALUES (?, ?)
+                    """,
+                    (commit_sha, edge.edge_uid),
+                )
 
         for edge in edges:
             self._upsert_edge(cur, edge)
+            cur.execute(
+                """
+                INSERT OR REPLACE INTO commit_edge_map (commit_sha, edge_uid)
+                VALUES (?, ?)
+                """,
+                (commit_sha, edge.edge_uid),
+            )
 
         self._conn.commit()
         return len(functions)
+
+    def get_edges_as_of(self, commit_sha: str) -> tuple[CPGEdge, ...]:
+        """Retrieves the exact set of CPGEdge items active at `commit_sha` via commit_edge_map."""
+        cur = self._conn.cursor()
+        cur.execute(
+            """
+            SELECT e.edge_uid, e.src_node_uid, e.dst_node_uid, e.edge_kind, e.predicate_label, e.static_weight, e.coverage_hit_freq
+            FROM cpg_edges e
+            INNER JOIN commit_edge_map cem ON e.edge_uid = cem.edge_uid
+            WHERE cem.commit_sha = ?
+            ORDER BY e.edge_uid ASC
+            """,
+            (commit_sha,),
+        )
+        rows = cur.fetchall()
+        return tuple(
+            CPGEdge(
+                edge_uid=r[0],
+                src_node_uid=r[1],
+                dst_node_uid=r[2],
+                edge_kind=r[3],
+                predicate_label=r[4],
+                static_weight=float(r[5]),
+                coverage_hit_freq=float(r[6]),
+            )
+            for r in rows
+        )
 
     def _upsert_edge(self, cur: sqlite3.Cursor, edge: CPGEdge) -> None:
         cur.execute(

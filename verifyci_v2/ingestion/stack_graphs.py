@@ -38,6 +38,17 @@ def _module_prefix_from_path(file_path: str) -> str:
     return cleaned.replace("/", ".")
 
 
+def _strip_comments_and_strings(src: str) -> str:
+    def repl(m: re.Match[str]) -> str:
+        return "\n" * m.group(0).count("\n")
+    src = re.sub(r"/\*.*?\*/", repl, src, flags=re.DOTALL)
+    src = re.sub(r"//[^\n]*", "", src)
+    src = re.sub(r'"(?:\\.|[^"\\])*"', '""', src)
+    src = re.sub(r"'(?:\\.|[^'\\])*'", "''", src)
+    src = re.sub(r"`(?:\\.|[^`\\])*`", repl, src, flags=re.DOTALL)
+    return src
+
+
 def build_file_stack_graph(file_path: str, source: str, language: str = "python") -> FileStackGraph:
     """Computes a per-file scope graph with PUSH_SYMBOL and POP_SYMBOL nodes in isolation."""
     file_xxh3 = xxh3_64_hex(source)
@@ -139,16 +150,17 @@ def build_file_stack_graph(file_path: str, source: str, language: str = "python"
                             edges.append(StackGraphEdge(src_id=pop_id, dst_id=push_id, precedence=1))
     else:
         # Polyglot extraction for TypeScript/JS and C/C++
+        clean_source = _strip_comments_and_strings(source)
         if language in ("typescript", "javascript"):
-            for match in _TS_IMPORT_RE.finditer(source):
+            for match in _TS_IMPORT_RE.finditer(clean_source):
                 mod = match.group("mod").lstrip("./").replace("/", ".")
                 for raw_sym in match.group("syms").split(","):
                     sym = raw_sym.strip()
                     if sym:
                         imports.append((sym, f"{mod}.{sym}"))
-            func_matches = list(_TS_FUNC_RE.finditer(source))
+            func_matches = list(_TS_FUNC_RE.finditer(clean_source))
         else:
-            func_matches = list(_C_FUNC_RE.finditer(source))
+            func_matches = list(_C_FUNC_RE.finditer(clean_source))
 
         for idx, match in enumerate(func_matches):
             sym = match.group("name")
@@ -276,14 +288,15 @@ class StackGraphStitcher:
         if local_candidate in self._qname_to_file:
             return (local_candidate,)
 
-        # 2. Direct or module-qualified import alias
         if raw_symbol in import_map:
             imported_target = import_map[raw_symbol]
             if imported_target in self._qname_to_file:
                 return (imported_target,)
-            tail = imported_target.split(".")[-1]
-            if tail in self._symbol_to_qnames:
-                return tuple(sorted(self._symbol_to_qnames[tail]))
+            # Check if imported_target matches any known qualified name exactly
+            matching = [qn for qn in self._qname_to_file if qn == imported_target or qn.endswith(f".{imported_target}")]
+            if len(matching) == 1:
+                return (matching[0],)
+            return tuple(sorted(matching))
 
         if "." in raw_symbol:
             prefix, attr = raw_symbol.split(".", 1)
@@ -291,13 +304,8 @@ class StackGraphStitcher:
                 candidate = f"{import_map[prefix]}.{attr}"
                 if candidate in self._qname_to_file:
                     return (candidate,)
-            if attr in self._symbol_to_qnames:
-                return tuple(sorted(self._symbol_to_qnames[attr]))
 
-        # 3. Fallback to unique short symbol across stitched scope graphs
-        if raw_symbol in self._symbol_to_qnames:
-            return tuple(sorted(self._symbol_to_qnames[raw_symbol]))
-
+        # Soundness: Never blindly link short symbols globally across unrelated files
         return ()
 
     def register_bridge_edge(self, caller_qname: str, callee_qname: str) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 from typing import Any, Sequence
+import warnings
 
 from verifyci_v2.contracts.ai_protocol import (
     BooleanJudgment,
@@ -12,13 +13,13 @@ from verifyci_v2.contracts.ai_protocol import (
 
 
 class GrammarMaskError(ValueError):
-    """Raised when a model output violates the predeclared llguidance CFG/JSON schema."""
+    """Raised when a model output violates the predeclared JSON schema."""
 
 
-class LLGuidanceSchemaMask:
+class SchemaConstrainedValidator:
     """
-    Enforces schema-locked structured decoding and converts raw token logprobs or logits
-    into calibrated probability distributions with zero syntax retry loops.
+    Enforces post-hoc schema-locked structured validation and converts raw token logprobs or logits
+    into calibrated probability distributions. Note: this runs post-hoc validation, not token-level CFG masking.
     """
 
     @staticmethod
@@ -45,7 +46,8 @@ class LLGuidanceSchemaMask:
         return BooleanJudgment(
             verdict=bool(data["verdict"]),
             probability=round(prob, 6),
-            rationale_tag=str(data.get("rationale_tag", "constrained_cfg")),
+            rationale_tag=str(data.get("rationale_tag", "schema_validated")),
+            validation_mode="post_hoc_schema",
         )
 
     @staticmethod
@@ -56,7 +58,7 @@ class LLGuidanceSchemaMask:
         if not options:
             raise GrammarMaskError("CategoricalChoice requires at least one option")
         filtered_logits = {opt: float(option_logits.get(opt, -10.0)) for opt in options}
-        dist = LLGuidanceSchemaMask.softmax_from_logits(filtered_logits)
+        dist = SchemaConstrainedValidator.softmax_from_logits(filtered_logits)
         best_opt = max(dist.items(), key=lambda kv: kv[1])[0]
         return CategoricalChoice(
             selected=best_opt,
@@ -71,7 +73,7 @@ class LLGuidanceSchemaMask:
     ) -> OrdinalScore:
         if not levels:
             raise GrammarMaskError("OrdinalScore requires at least one level")
-        choice = LLGuidanceSchemaMask.build_constrained_choice(levels, level_logits)
+        choice = SchemaConstrainedValidator.build_constrained_choice(levels, level_logits)
         idx = list(levels).index(choice.selected)
         norm_score = idx / max(1, len(levels) - 1)
         return OrdinalScore(
@@ -79,3 +81,13 @@ class LLGuidanceSchemaMask:
             normalized_score=round(norm_score, 6),
             confidence=choice.confidence,
         )
+
+
+class LLGuidanceSchemaMask(SchemaConstrainedValidator):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        warnings.warn(
+            "LLGuidanceSchemaMask is deprecated, use SchemaConstrainedValidator instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)

@@ -3,9 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-SMTStatus = Literal["SAT", "UNSAT", "UNKNOWN"]
+SMTStatus = Literal["SAT", "UNSAT", "UNKNOWN", "SOLVER_UNAVAILABLE", "UNVERIFIED_HEURISTIC"]
 SeverityLevel = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
-VerdictKind = Literal["PASS", "WARN", "FAIL", "PROVEN_EQUIVALENT", "UNGROUNDED"]
+VerdictKind = Literal[
+    "PASS",
+    "WARN",
+    "FAIL",
+    "PROVEN_EQUIVALENT",
+    "HEURISTIC_EQUIVALENT_CANDIDATE",
+    "UNGROUNDED",
+    "INCONCLUSIVE",
+]
 
 
 @dataclass(frozen=True, slots=True)

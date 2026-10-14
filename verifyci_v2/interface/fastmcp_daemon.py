@@ -78,7 +78,7 @@ class VerifyCIFastMCPDaemon:
         self.prover = Z3SymbolicProver()
         self.secret_engine = TaintTrackedSecretEngine()
         self.cegis = CEGISAutoRepairEngine(prover=self.prover)
-        self.signer = InTotoDSSESigner()
+        self.signer, self.signer_pubkey = InTotoDSSESigner.generate_ephemeral()
         self.rsl = GittufRSLLedger()
         self.rate_limiter = TokenBucketRateLimiter(
             capacity=self.budget.rate_limit_capacity,

@@ -15,6 +15,8 @@ class IncrementalIngestionPlan:
     functions_to_verify_locally: tuple[str, ...]
     transitive_callers_to_reverify: tuple[str, ...]
     skipped_transitive_callers: tuple[str, ...]
+    type_and_taint_callers_to_reverify: tuple[str, ...] = ()
+    semantic_value_callers_to_reverify: tuple[str, ...] = ()
 
 
 class SalsaIncrementalEngine:
@@ -145,18 +147,23 @@ class SalsaIncrementalEngine:
 
         self._file_to_qnames[file_path] = new_qnames
 
-        propagated_callers = self.stitcher.transitive_blast_radius(interface_changed_seeds)
+        type_and_taint_callers = self.stitcher.transitive_blast_radius(interface_changed_seeds)
+        semantic_seeds = sorted(set(interface_changed_seeds) | set(cutoff_saved_seeds))
+        semantic_value_callers = self.stitcher.transitive_blast_radius(semantic_seeds)
+
         potentially_affected_by_cutoff = set(
             self.stitcher.transitive_blast_radius(cutoff_saved_seeds)
         )
         skipped_callers = tuple(
-            sorted(potentially_affected_by_cutoff - set(propagated_callers) - set(local_verify))
+            sorted(potentially_affected_by_cutoff - set(type_and_taint_callers) - set(local_verify))
         )
 
         return IncrementalIngestionPlan(
             file_path=file_path,
             evaluations=tuple(evaluations),
             functions_to_verify_locally=tuple(sorted(local_verify)),
-            transitive_callers_to_reverify=propagated_callers,
+            transitive_callers_to_reverify=type_and_taint_callers,
             skipped_transitive_callers=skipped_callers,
+            type_and_taint_callers_to_reverify=type_and_taint_callers,
+            semantic_value_callers_to_reverify=semantic_value_callers,
         )

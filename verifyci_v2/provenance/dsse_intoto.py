@@ -2,8 +2,17 @@ from __future__ import annotations
 
 import base64
 from dataclasses import asdict
-import hmac
 from typing import Any, Sequence
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    PublicFormat,
+)
 
 from verifyci_v2.contracts.attestation import (
     DSSEEnvelope,
@@ -12,7 +21,6 @@ from verifyci_v2.contracts.attestation import (
     VerificationFinding,
 )
 from verifyci_v2.contracts.canonical import (
-    blake3_bytes,
     blake3_hex,
     canonical_jcs_bytes,
 )
@@ -33,14 +41,29 @@ def dsse_pae(payload_type: str, payload_bytes: bytes) -> bytes:
 class InTotoDSSESigner:
     """
     Layer 7 Cryptographic Attestation Signer (`verifyci_v2/provenance/dsse_intoto.py`).
-    Serializes `InTotoVerificationPredicate` via RFC 8785 JCS and signs the DSSE v1.0 PAE.
+    Uses Ed25519 asymmetric cryptography to sign the DSSE v1.0 PAE encoding.
+    Requires an explicit Ed25519PrivateKey (no hardcoded secret defaults).
     """
 
-    def __init__(self, signing_key: str | bytes = "verifyci-v2-default-ed25519-seed") -> None:
-        self._key_bytes = (
-            signing_key.encode("utf-8") if isinstance(signing_key, str) else bytes(signing_key)
+    def __init__(self, signing_key: Ed25519PrivateKey | None = None) -> None:
+        if signing_key is None or not isinstance(signing_key, Ed25519PrivateKey):
+            raise TypeError("InTotoDSSESigner requires an explicit cryptography Ed25519PrivateKey instance")
+        self._private_key = signing_key
+        pub_bytes = self._private_key.public_key().public_bytes(
+            encoding=Encoding.Raw,
+            format=PublicFormat.Raw,
         )
-        self.keyid = blake3_hex(self._key_bytes, domain="verifyci.v2.dsse.keyid")[:16]
+        self.keyid = blake3_hex(pub_bytes, domain="verifyci.v2.dsse.keyid")[:16]
+
+    @classmethod
+    def generate_ephemeral(cls) -> tuple[InTotoDSSESigner, Ed25519PublicKey]:
+        """Generates an ephemeral Ed25519 keypair for stateless CI attestation signing."""
+        priv = Ed25519PrivateKey.generate()
+        return cls(signing_key=priv), priv.public_key()
+
+    @property
+    def public_key(self) -> Ed25519PublicKey:
+        return self._private_key.public_key()
 
     def sign_predicate(self, predicate: InTotoVerificationPredicate) -> DSSEEnvelope:
         statement = {
@@ -59,11 +82,7 @@ class InTotoDSSESigner:
         }
         raw_payload = canonical_jcs_bytes(statement)
         pae_bytes = dsse_pae(INTOTO_PAYLOAD_TYPE, raw_payload)
-        sig_bytes = hmac.new(
-            blake3_bytes(self._key_bytes, domain="verifyci.v2.dsse.key"),
-            pae_bytes,
-            digestmod="sha256",
-        ).digest()
+        sig_bytes = self._private_key.sign(pae_bytes)
 
         return DSSEEnvelope(
             payloadType=INTOTO_PAYLOAD_TYPE,
@@ -76,22 +95,22 @@ class InTotoDSSESigner:
             ),
         )
 
-    def verify_envelope(self, envelope: DSSEEnvelope) -> bool:
+    def verify_envelope(
+        self,
+        envelope: DSSEEnvelope,
+        public_key: Ed25519PublicKey | None = None,
+    ) -> bool:
+        verifying_key = public_key or self.public_key
         try:
             raw_payload = base64.b64decode(envelope.payload.encode("ascii"), validate=True)
-        except Exception:
+            pae_bytes = dsse_pae(envelope.payloadType, raw_payload)
+            for s in envelope.signatures:
+                sig_bytes = base64.b64decode(s.sig.encode("ascii"), validate=True)
+                verifying_key.verify(sig_bytes, pae_bytes)
+                return True
+        except (InvalidSignature, Exception):
             return False
-        pae_bytes = dsse_pae(envelope.payloadType, raw_payload)
-        expected_sig = hmac.new(
-            blake3_bytes(self._key_bytes, domain="verifyci.v2.dsse.key"),
-            pae_bytes,
-            digestmod="sha256",
-        ).digest()
-        expected_b64 = base64.b64encode(expected_sig).decode("ascii")
-        return any(
-            s.keyid == self.keyid and hmac.compare_digest(s.sig, expected_b64)
-            for s in envelope.signatures
-        )
+        return False
 
 
 def export_sarif_v2(

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, Sequence
+from typing import Any, Literal, Protocol, Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -11,6 +11,7 @@ class BooleanJudgment:
     verdict: bool
     probability: float
     rationale_tag: str
+    validation_mode: Literal["post_hoc_schema", "token_cfg_mask"] = "post_hoc_schema"
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +41,7 @@ class ConformalProfile:
     alpha: float
     sample_size: int
     q_hat: float
+    is_calibrated: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +64,7 @@ class ModelAttestationRecord:
     weights_or_endpoint_hash: str
     prompt_template_hash: str
     conformal_profile_hash: str | None
+    validation_mode: Literal["post_hoc_schema", "token_cfg_mask"] = "post_hoc_schema"
 
 
 class EmbeddingProviderProtocol(Protocol):

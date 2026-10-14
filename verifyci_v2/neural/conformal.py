@@ -10,6 +10,8 @@ from verifyci_v2.contracts.ai_protocol import (
 )
 from verifyci_v2.contracts.canonical import canonical_digest
 
+MIN_CALIBRATION_SAMPLES: int = 30
+
 
 def compute_conformal_quantile(
     non_conformity_scores: Sequence[float],
@@ -39,16 +41,26 @@ def evaluate_with_conformal_gate(
 ) -> CalibratedDecision:
     """
     Constructs the conformal prediction set C(x) = {y : 1 - p(y|x) <= q_hat}.
-    If |C(x)| != 1 (ambiguous or empty) or C(x) contains any defect label != safe_label,
+    If uncalibrated, |C(x)| != 1 (ambiguous or empty), or C(x) contains any defect label != safe_label,
     VerifyCI abstains from the neural shortcut and escalates the diff to egglog + Z3 SMT.
     """
+    top_choice = max(class_probabilities.items(), key=lambda kv: kv[1])[0]
+    raw_prob = float(class_probabilities[top_choice])
+
+    if not getattr(profile, "is_calibrated", True):
+        return CalibratedDecision(
+            prediction_set=tuple(sorted(class_probabilities.keys())),
+            top_choice=top_choice,
+            raw_probability=round(raw_prob, 6),
+            abstained=True,
+            escalate_to_smt=True,
+        )
+
     prediction_set = tuple(
         label
         for label, prob in sorted(class_probabilities.items())
         if (1.0 - float(prob)) <= profile.q_hat + 1e-9
     )
-    top_choice = max(class_probabilities.items(), key=lambda kv: kv[1])[0]
-    raw_prob = float(class_probabilities[top_choice])
 
     abstained = len(prediction_set) != 1
     escalate = abstained or (prediction_set[0] != safe_label)
@@ -70,9 +82,11 @@ def calibrate_judge_on_dataset(
     alpha: float = 0.02,
 ) -> ConformalProfile:
     """
-    Runs `vc2 calibrate` over a held-out labeled dataset (e.g. `cap002_heldout`, `cap011`)
-    to compute the model's empirical non-conformity quantile q_hat.
+    Runs `vc2 calibrate` over a held-out labeled dataset.
+    Requires at least MIN_CALIBRATION_SAMPLES (30) to produce a calibrated profile.
     """
+    is_calibrated = len(labeled_examples) >= MIN_CALIBRATION_SAMPLES
+
     scores: list[float] = []
     for state, true_label in labeled_examples:
         choice = judge.judge_choice(
@@ -80,10 +94,15 @@ def calibrate_judge_on_dataset(
             question="Classify the semantic category of this code artifact:",
             options=options,
         )
-        prob_true = choice.distribution.get(true_label, 0.0)
-        scores.append(1.0 - prob_true)
+        if true_label != "none":
+            # Conformal Risk Control on defect examples: risk is p(safe)
+            p_safe = choice.distribution.get("none", 0.0)
+            scores.append(1.0 - p_safe)
+        else:
+            prob_true = choice.distribution.get(true_label, 0.0)
+            scores.append(1.0 - prob_true)
 
-    q_hat = compute_conformal_quantile(scores, alpha=alpha)
+    q_hat = compute_conformal_quantile(scores, alpha=alpha) if scores else 1.0
     att = judge.attestation()
     return ConformalProfile(
         model_id=judge.model_id,
@@ -91,6 +110,7 @@ def calibrate_judge_on_dataset(
         alpha=alpha,
         sample_size=len(labeled_examples),
         q_hat=q_hat,
+        is_calibrated=is_calibrated,
     )
 
 

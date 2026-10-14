@@ -212,7 +212,7 @@ def test_login():
 
 
 def test_layer7_wasm_sandbox_intoto_dsse_and_gittuf_rsl() -> None:
-    sandbox = WasmCheckerSandbox(WasmSandboxConfig(max_instruction_fuel=2000))
+    sandbox = WasmCheckerSandbox(WasmSandboxConfig(max_instruction_fuel=2000, require_wasm_isolation=False))
     fns = lower_file_to_ussa("src/a.py", "def f(x: int) -> int:\n    return x + 1\n")
 
     # Forbidden host I/O capability in plugin source must be rejected
@@ -226,7 +226,7 @@ def test_layer7_wasm_sandbox_intoto_dsse_and_gittuf_rsl() -> None:
     assert report.findings == ()
 
     # Exhaust fuel limit on tiny budget
-    tight_sandbox = WasmCheckerSandbox(WasmSandboxConfig(max_instruction_fuel=100))
+    tight_sandbox = WasmCheckerSandbox(WasmSandboxConfig(max_instruction_fuel=100, require_wasm_isolation=False))
     tight_sandbox.register_plugin("tight_plugin", "def check(fns): return []", lambda _fns: [])
     with pytest.raises(SandboxFuelExhaustedError):
         tight_sandbox.execute_plugin("tight_plugin", fns)

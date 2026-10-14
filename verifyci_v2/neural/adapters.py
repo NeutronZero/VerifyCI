@@ -10,14 +10,14 @@ from verifyci_v2.contracts.ai_protocol import (
     OrdinalScore,
 )
 from verifyci_v2.contracts.canonical import blake3_hex, canonical_jcs_str
-from verifyci_v2.neural.grammar_mask import LLGuidanceSchemaMask
+from verifyci_v2.neural.grammar_mask import SchemaConstrainedValidator
 from verifyci_v2.symbolic.secrets_taint import redact_secrets
 
 
 class DeterministicJudgeAdapter:
     """
     Default zero-key, 100% offline System 1 Judge (`provider = "deterministic"`).
-    Uses AST/DFG structural features and lexical signals constrained via LLGuidanceSchemaMask.
+    Uses AST/DFG structural features and lexical signals constrained via SchemaConstrainedValidator.
     """
 
     def __init__(self, model_id: str = "vc2-deterministic-ast-judge-v2") -> None:
@@ -38,6 +38,7 @@ class DeterministicJudgeAdapter:
             weights_or_endpoint_hash=blake3_hex(self._model_id, domain="verifyci.v2.weights"),
             prompt_template_hash=blake3_hex("vc2.prompt.v2.0", domain="verifyci.v2.prompt"),
             conformal_profile_hash=conformal_hash,
+            validation_mode="post_hoc_schema",
         )
 
     def judge_boolean(self, state: dict[str, Any], question: str) -> BooleanJudgment:
@@ -50,7 +51,7 @@ class DeterministicJudgeAdapter:
         else:
             verdict = not has_risk
             prob = 0.94 if not has_risk else 0.15
-        return LLGuidanceSchemaMask.parse_constrained_boolean(
+        return SchemaConstrainedValidator.parse_constrained_boolean(
             {"verdict": verdict, "probability": prob, "rationale_tag": "deterministic_ast_heuristic"}
         )
 
@@ -74,7 +75,7 @@ class DeterministicJudgeAdapter:
             elif opt_l == "none" and not any(k in safe_text for k in ("error", "swap", "invert")):
                 logits[opt] += 3.5
 
-        return LLGuidanceSchemaMask.build_constrained_choice(options, logits)
+        return SchemaConstrainedValidator.build_constrained_choice(options, logits)
 
     def judge_score(
         self,
@@ -88,7 +89,7 @@ class DeterministicJudgeAdapter:
             logits[levels[-1]] = 3.5
         else:
             logits[levels[0]] = 3.0
-        return LLGuidanceSchemaMask.build_constrained_score(levels, logits)
+        return SchemaConstrainedValidator.build_constrained_score(levels, logits)
 
 
 class LocalONNXJudgeAdapter(DeterministicJudgeAdapter):
