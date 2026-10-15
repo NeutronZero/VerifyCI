@@ -24,8 +24,8 @@
   },
   "not_scored_reason": null,
   "provenance": {
-    "git_commit": "7daf03c68f2261799a988ca37cef625bfe0df5c9",
-    "git_dirty": true,
+    "git_commit": "e187943c273ebd3c5f6798a4852d0685241c95f3",
+    "git_dirty": false,
     "python_version": "3.14.7",
     "platform": "Windows-11",
     "corpus_sha256": "05c842c80a48364c21a5cb59ea977969a17fde44a8d248ed6865f8a40988b090",

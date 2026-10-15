@@ -16,7 +16,7 @@
   },
   "not_scored_reason": "corpus expects a multi-process worker-protocol ledger replay; v2 exposes only the static datalog_concurrency_invariants rule",
   "provenance": {
-    "git_commit": "7bf4774014bd1248c970eee4923e6db8d5b4207c",
+    "git_commit": "e187943c273ebd3c5f6798a4852d0685241c95f3",
     "git_dirty": true,
     "python_version": "3.14.7",
     "platform": "Windows-11",

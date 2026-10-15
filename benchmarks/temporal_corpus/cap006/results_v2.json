@@ -1,0 +1,27 @@
+{
+  "experiment_id": "CAP006",
+  "engine": "verifyci_v2",
+  "status": "not_measurable",
+  "metrics": {
+    "metric_name": "not_measurable",
+    "metric_value": null,
+    "target_threshold": 0.0,
+    "threshold_basis": "none",
+    "false_accept_count": 0
+  },
+  "counts": {
+    "cases": 0,
+    "scored": 0,
+    "detail": {}
+  },
+  "not_scored_reason": "corpus expects exact canonical graph digests per commit; v2 DuckDB CPG digest is not yet byte-compatible with the frozen oracle",
+  "provenance": {
+    "git_commit": "e187943c273ebd3c5f6798a4852d0685241c95f3",
+    "git_dirty": true,
+    "python_version": "3.14.7",
+    "platform": "Windows-11",
+    "corpus_sha256": "d89ae5f9d641a209ef525f64dd6f0b060e3f8db8be1891944efdba3877298b1a",
+    "label_sha256": "5bfa328a9f5f1f96cec1c3a1e674ee22358999dd9f69857603c95d34121a003c"
+  },
+  "v1_results_preserved": "64aac66060e7f787bb0ab8f759d7f2b1af408f8b32c886e30c499e7382ac147b"
+}

@@ -1,0 +1,27 @@
+{
+  "experiment_id": "CAP013",
+  "engine": "verifyci_v2",
+  "status": "not_measurable",
+  "metrics": {
+    "metric_name": "not_measurable",
+    "metric_value": null,
+    "target_threshold": 0.0,
+    "threshold_basis": "none",
+    "false_accept_count": 0
+  },
+  "counts": {
+    "cases": 0,
+    "scored": 0,
+    "detail": {}
+  },
+  "not_scored_reason": "mutation invariance is exercised only by the self-test smoke fixture; robustness has no frozen invariance labels v2 can be scored against",
+  "provenance": {
+    "git_commit": "e187943c273ebd3c5f6798a4852d0685241c95f3",
+    "git_dirty": true,
+    "python_version": "3.14.7",
+    "platform": "Windows-11",
+    "corpus_sha256": "",
+    "label_sha256": ""
+  },
+  "v1_results_preserved": "1f33d9ae06279d4028cd9317125d6429f13537735bb3e57672a6b346b5124205"
+}

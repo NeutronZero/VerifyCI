@@ -1,0 +1,27 @@
+{
+  "experiment_id": "CAP005",
+  "engine": "verifyci_v2",
+  "status": "not_measurable",
+  "metrics": {
+    "metric_name": "not_measurable",
+    "metric_value": null,
+    "target_threshold": 0.0,
+    "threshold_basis": "none",
+    "false_accept_count": 0
+  },
+  "counts": {
+    "cases": 0,
+    "scored": 0,
+    "detail": {}
+  },
+  "not_scored_reason": "CEGIS auto-repair is exercised only by the self-test smoke fixture; patch_real has no frozen ground-truth labels v2 can be scored against",
+  "provenance": {
+    "git_commit": "e187943c273ebd3c5f6798a4852d0685241c95f3",
+    "git_dirty": true,
+    "python_version": "3.14.7",
+    "platform": "Windows-11",
+    "corpus_sha256": "ca475b33a385e8d1478afedf00d2eeeefdc8ae0f72c9e5527f20fc1fe814e17c",
+    "label_sha256": "01eb093946dc53c29fc8c40bfb2c12419a5fb43bf513474f2b8c30da236c02cf"
+  },
+  "v1_results_preserved": "f1584d805b25e5464c5617dbb1c3ca3a6983aff84aed57b934dd2b179e9b3f45"
+}
