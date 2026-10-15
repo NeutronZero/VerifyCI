@@ -8,7 +8,7 @@
 
 ## Verdict
 
-The v2 engine **implements the verification core faithfully** (Z3 SMT proving, U-SSA, DuckDB CPG, RaBitQ index, WASM sandbox, DSSE provenance, four provider adapters, conformal gate, CEGIS loop, msgspec contracts, Salsa early cutoff) and **does not implement five of the six named technologies** the spec is built around: `egglog`, `llguidance`, `tree-sitter-stack-graphs`, real `Model2Vec`, and a `watchfiles`-driven hot daemon. Two (msgspec, DSSE-via-securesystemslib) were genuinely swapped in this session. Measured capability scores (6/7 pass, fail-closed) are unchanged, so the gaps are mostly breadth/spec-discipline, not correctness — but they are not cosmetic: several spec claims read as capabilities that do not exist.
+The v2 engine **implements the verification core faithfully** (Z3 SMT proving, U-SSA, DuckDB CPG, RaBitQ index, WASM sandbox, DSSE provenance, four provider adapters, conformal gate, CEGIS loop, msgspec contracts, Salsa early cutoff) **now implements two more of the spec-named technologies this round** (`tree_sitter` polyglot extraction, `watchfiles` hot-reload entrypoint). Still aspirational: `egglog`, `llguidance`, real `Model2Vec` weights, `gittuf` binary RSL. Two (msgspec, DSSE-via-securesystemslib) were genuinely swapped in this session. Measured capability scores (6/7 pass, fail-closed) are unchanged, so the gaps are mostly breadth/spec-discipline, not correctness — but they are not cosmetic: several spec claims read as capabilities that do not exist.
 
 ---
 
@@ -60,7 +60,7 @@ The v2 engine **implements the verification core faithfully** (Z3 SMT proving, U
 
 ### C. Interface / daemon specifics
 
-- `fastmcp_daemon.py` **does not import `watchfiles`** and has no background filesystem watcher; the spec's `<20ms` hot-reload claim is unverified.
+- `fastmcp_daemon.py` **now exposes `start_hot_reload`** backed by `watchfiles` (caller-driven, not auto-started on boot).
 - CLI subcommands don't match spec's `vc2 check/prove/fix` naming exactly? — they do: `check`, `prove`, `fix`, `calibrate`, `anchor`, `verify-diff`, `ingest`, `init`, `adjudicate`, `mcp`. OK, matches.
 - `secrets/redaction.py` referenced in §3.6D but no such module exists in `verifyci_v2/` (grep tree: `secrets_taint.py`, `dangerous_calls.py` only). `cegis_repair.py` must redact inline or not at all.
 - `secrets/*` v1 migration matrix row promises DFG + conformal mock triage. `tests/v2` has conformal judge. Untested path for mock triage against a frozen corpus.
