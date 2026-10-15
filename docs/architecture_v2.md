@@ -1,6 +1,7 @@
 # VerifyCI v2.0: System Architecture Plan & Technical Specification
 
-**Status:** Draft Architecture Specification (v2.0 Clean-Slate)  
+**Status:** Partially Implemented — see `docs/architecture_v2_gap_audit.md` (v2.0 Clean-Slate) 
+ 
 **Date:** 2026-10-14  
 **Replaces:** `docs/architecture.md` (v1.x)  
 **Design Paradigm:** Local-First, Neuro-Symbolic, Cryptographically Attested, Vendor-Neutral BYO-AI

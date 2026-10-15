@@ -1,14 +1,15 @@
 # VerifyCI v2 — Architecture Spec vs Implementation Audit
 
-**Date:** 2026-10-15
+**Date:** 2026-10-15 (refreshed)
 **Scope:** `docs/architecture_v2.md` (329 lines) vs `verifyci_v2/`, `tests/v2/`.
-**Method:** Inspected every section's concrete technology/contract/SQL command mentioned in the spec and checked for its import, symbol, or string in the implementation.
+**Method:** inspected every section's concrete technology/contract/SQL command mentioned in the spec and checked for its import, symbol, or string in the implementation.
+**Grounding:** 112 tests green, ruff clean, 6/7 measured capability scores passing.
 
 ---
 
 ## Verdict
 
-The v2 engine **implements the verification core faithfully** (Z3 SMT proving, U-SSA, DuckDB CPG, RaBitQ index, WASM sandbox, DSSE provenance, four provider adapters, conformal gate, CEGIS loop, msgspec contracts, Salsa early cutoff) **now implements two more of the spec-named technologies this round** (`tree_sitter` polyglot extraction, `watchfiles` hot-reload entrypoint). Still aspirational: `egglog`, `llguidance`, real `Model2Vec` weights, `gittuf` binary RSL. Two (msgspec, DSSE-via-securesystemslib) were genuinely swapped in this session. Measured capability scores (6/7 pass, fail-closed) are unchanged, so the gaps are mostly breadth/spec-discipline, not correctness — but they are not cosmetic: several spec claims read as capabilities that do not exist.
+The v2 engine implements the verification core faithfully (Z3 SMT proving, U-SSA, DuckDB CPG, RaBitQ index, WASM sandbox, DSSE provenance, four provider adapters, conformal gate, CEGIS loop, msgspec contracts, Salsa early cutoff) and several spec-named technologies now genuinely imported and used (`tree_sitter` polyglot extraction, `watchfiles` hot reload, `securesystemslib` DSSE PAE, `msgspec`). Still aspirational: `egglog`, `llguidance`, the `Model2Vec` library (deliberate: BLAKE3-derived offline embedder), and a `gittuf` binary RSL (hand-rolled hash chain). `kw_only=True` on contracts is not applied. Redaction module exists under `verifyci_v2/secrets/` (spec-compat shim) and `verifyci_v2/symbolic/`. Measured capability scores (6/7 pass, fail-closed) are unchanged; breadth/spec-discipline issues remain, and several spec claims are still overstated.
 
 ---
 
@@ -16,89 +17,91 @@ The v2 engine **implements the verification core faithfully** (Z3 SMT proving, U
 
 | spec section | claim | evidence |
 |---|---|---|
-| §1.1 Zero-key baseline | core gates offline, no external API keys | git `z3-solver`, `duckdb`, `wasmtime` are the only required heavy deps; adapters default to `deterministic` |
-| §1.4 Single store | DuckDB + Arrow store `.vc2` | `verifyci_v2/store/duckdb_cpg.py` (`DuckDBCPGStore`) |
-| §3.3 Salsa cutoff | H_body/H_interface early cutoff, BLAKE3 + zstd/JCS | `ingestion/salsa_cutoff.py`; `contracts/canonical.py` |
-| §3.4A CPG schema | commits/function_nodes/edges | matches + extra normalized tables (`cpg_blocks`, `cpg_instructions`, `cpg_taint_summaries`, `source_snapshots`) |
-| §3.4B RaBitQ quantization | binary string + corrective factor + popcount/SIMD | `store/rabitq_index.py` |
-| §3.5 Stage 2 Z3 prover | call/return swap, guard inversion, shadow assign, UNSAT/SAT, witness extraction | `symbolic/z3_prover.py` (`prove_function_diff`, `prove_equivalence`, `_USSA*`) |
-| §3.5 Stage 3 taint secrets | multi-pass decode, entropy, taint-to-sink | `symbolic/secrets_taint.py` (+ `dangerous_calls.py`) |
-| §3.6A adapters | 4 providers: deterministic, local-onnx, ollama, openai-compatible | `neural/adapters.py` (four classes, matching protocols) |
-| §3.6C conformal gate | Split conformal quantile, abstain-if-not-singleton | `neural/conformal.py` (`compute_conformal_quantile`, `evaluate_with_conformal_gate`) |
-| §3.6D CEGIS loop | candidate patch → U-SSA → Z3 re-verify → emit only on UNSAT | `neural/cegis_repair.py` |
-| §3.7 Wasmtime sandbox | wasmtime, fuel limits, zero host capabilities | `sandbox/wasm_runner.py` |
-| §3.7 DSSE provenance | Ed25519 + RFC 8785 JCS + DSSE envelope + RSL | `provenance/dsse_intoto.py` (PAE now via securesystemslib), `gittuf_rsl.py` |
-| §4 contracts | msgspec.Struct, frozen, msgspec JCS, BLAKE3 | `contracts/*.py` — all 45 classes now msgspec (swapped this round) |
-| §5 failure modes | timeout 2000ms, redaction, fuel 10M, fuel exhausted | `z3_prover` timeout, `secrets/redaction`? (see gaps) |
-| §6 migration matrix | Upgrade clauses for contracts/storage/secrets/interfaces/provenance | all target modules exist and are wired |
+| §1.1 Zero-key baseline | core gates offline | `z3-solver`, `duckdb`, `wasmtime` only heavy deps; adapters default `deterministic` |
+| §1.4 Single store `.vc2` DuckDB+Arrow | | `verifyci_v2/store/duckdb_cpg.py` |
+| §3.3 Salsa cutoff (BLAKE3 + zstd/JCS) | | `ingestion/salsa_cutoff.py`, `contracts/canonical.py` |
+| §3.4A CPG schema + source snapshots | | extra normalized tables `cpg_blocks`, `cpg_instructions`, `cpg_taint_summaries`, `source_snapshots` |
+| §3.4B RaBitQ quantization | | `store/rabitq_index.py` |
+| §3.5 Stage 2 Z3 prover | | `symbolic/z3_prover.py` |
+| §3.5 Stage 3 taint + dangerous calls | | `symbolic/secrets_taint.py`, `dangerous_calls.py` |
+| §3.6A (four adapters) | | `neural/adapters.py` |
+| §3.6C conformal gate | | `neural/conformal.py` |
+| §3.6D CEGIS + redaction | | `neural/cegis_repair.py` uses `verifyci_v2/secrets/redaction.py` |
+| §3.7 Wasm + DSSE | | `sandbox/wasm_runner.py`, `provenance/dsse_intoto.py` (PAE via securesystemslib) |
+| §3.2 Polyglot | | `ingestion/stack_graphs.py` (TS + AST), `ingestion/ts_symbols.py`, `ingestion/polyglot_bridge.py`, wired in `salsa_cutoff.ingest_file` |
+| §3.1 FastMCP hot reload | | `interface/fastmcp_daemon.py` `start_hot_reload` (watchfiles, no-op if unavailable) |
+| §4 contracts | | `contracts/*.py` all `@msgspec.struct(frozen=True)` |
+| §5 failure modes | | Z3 timeout, fuel caps, redaction |
+| §6 migration matrix | | all targets exist and wired |
 
 ---
 
-## 2. Not implemented / aspirational (spec claim vs reality)
+## 2. Not implemented / aspirational
 
-### A. Six named technologies, only 3 used before this session, 2 more now
+### A. Named technologies
 
-| spec technology | §ref | used? | status |
+| technology | § | used? | status |
 |---|---|---|---|
-| `msgspec` | §1.4, §4 | **now yes** | 45 classes swapped this session |
-| `z3` | §3.5c | yes | real |
-| `duckdb` | §3.4 | yes | real |
-| `wasmtime` | §3.7 | yes | real |
-| `securesystemslib` DSSE (spec names `in-toto`) | §1.5, §3.7 | **yes (PAE)** | real (this session) |
-| `egglog` | §1.2, §1.5, §3.5a, §5 | **no** | aspirational — `egglog_engine.py` is hand-rolled equality saturation, no `import egglog` |
-| `llguidance` | §1.2, §3.6b | **no** | aspirational — `grammar_mask.py` is post-hoc schema validation + softmax; no `import llguidance` |
-| `tree-sitter-stack-graphs` | §3.2a | **no** | aspirational — no `tree_sitter` import anywhere; `stack_graphs.py` is hand-stitched |
-| `Model2Vec` library | §3.4b | **no** | hand-rolled BLAKE3-derived `StaticModel2VecEmbedder`; library not imported. Deliberate: no weights file needed (offline invariant) |
-| `watchfiles` | §3.1 | **no** | aspirational — daemon has no hot filesystem watcher import |
+| msgspec | §1.4,§4 | yes | swapped |
+| z3 | §3.5c | yes | real |
+| duckdb | §3.4 | yes | real |
+| wasmtime | §3.7 | yes | real |
+| securesystemslib DSSE PAE | §1.5,§3.7 | yes | swapped |
+| tree_sitter (core) | §3.2a | yes | real (C/C++/JS/TS/Go/Rust; Python via ast) |
+| watchfiles | §3.1 | yes | `start_hot_reload` |
+| egglog | §1.2,§1.5,§3.5a,§5 | no | hand-rolled equality saturation |
+| llguidance | §1.2,§3.6b | no | post-hoc schema validation |
+| Model2Vec library | §3.4b | no | BLAKE3-derived offline embedder (deliberate) |
+| gittuf binary RSL | §3.7 | partial | hand-rolled hash chain |
 
 ### B. Capability gaps
 
-- **cap006 (temporal replay)** — §3.4 says `AS OF` commit join runs 10× faster with 100% determinism. `duckdb_cpg.py` has `commit_node_map` and ingest-time snapshots, but no measured `AS OF` query path verified against an oracle; cap006 is `not_measurable` in the harness.
-- **cap008 (concurrency)** — §3.5a second clause promises lock-order inversion detection. No multi-process replay harness exists; `not_measurable`.
-- **cap010 (lexical retrieval)** — §2/§3.4 promise BM25 + RaBitQ RRF. Engine has `hybrid_rrf_score` and a text entry point (added this session in `interface/retrieval.py`), but BM25 is folded into the RaBitQ helper, not a standalone library; cap010 scores 5 gates met at `recall@5=0.834` (pass).
-- **cap005/007/012/013** — only self-test smoke in v2; v1 had frozen `patch_real` / `robustness` corpora whose harnesses import a now-deleted package (`81b5a70`). Not a spec-vs-code gap; it's a test-grounding gap.
+- **cap006** (temporal replay) — not_measurable (no digest parity).
+- **cap008** (concurrency multi-process) — not_measurable.
+- **cap010** (lexical retrieval) — 5/5 gates, `recall@5=0.834` (pass).
+- **cap005/007/012/013** — only self-test smoke; need frozen labels.
+- **cap002_heldout** — 0.7 vs 0.8235 bar, 0 false accepts. Three disagreements: N-C1 unparseable fragment; N-C4 extra statement; N-W4 removed dangerous call not detected.
 
 ### C. Interface / daemon specifics
 
-- `fastmcp_daemon.py` **now exposes `start_hot_reload`** backed by `watchfiles` (caller-driven, not auto-started on boot).
-- CLI subcommands don't match spec's `vc2 check/prove/fix` naming exactly? — they do: `check`, `prove`, `fix`, `calibrate`, `anchor`, `verify-diff`, `ingest`, `init`, `adjudicate`, `mcp`. OK, matches.
-- `secrets/redaction.py` referenced in §3.6D but no such module exists in `verifyci_v2/` (grep tree: `secrets_taint.py`, `dangerous_calls.py` only). `cegis_repair.py` must redact inline or not at all.
-- `secrets/*` v1 migration matrix row promises DFG + conformal mock triage. `tests/v2` has conformal judge. Untested path for mock triage against a frozen corpus.
+- Hot reload is caller-driven (not auto-started on boot).
+- CLI subcommands match spec names.
+- `secrets/redaction.py` resolves (compat shim → symbolic/redaction.py).
+- DFG + conformal mock triage untested vs frozen corpus.
 
-### D. Contract schema mismatch (§4)
+### D. Contract schema
 
-- Spec shows `kw_only=True` on every struct. Implementation classes in `contracts/*.py` were converted to msgspec via `@msgspec.struct(frozen=True)` **without `kw_only=True`**. Construction in tests uses positional defaults; spec contract is stricter. Not a functional breakage, but spec/impl drift.
-- Spec shows `schema_version: Literal["verifyci.v2.0"]`. Implementation? Need verify `InTotoVerificationPredicate` schema_version default exists. (Existence confirmed in read-only earlier; value unverified.)
+- `kw_only=True` not applied (positional construction used in tests).
+- `InTotoVerificationPredicate.schema_version` default unverified.
 
 ---
 
-## 3. Summary table — spec coverage
+## 3. Summary table
 
-| § | Section | Compliant? |
+| § | section | compliant? |
 |---|---|---|
-| 1 | 5 invariants | 2 of 5 fully (zero-key, single store); 1 mostly (neuro-symbolic — conformal yes, llguidance/egglog absent); 1 partial (Salsa yes); 1 partial (provenance: DSSE yes, gittuf hand-rolled) |
-| 2 | Topology ASCII | most boxes exist; `watchfiles`, L6 gittuf real presence ≠ box wording |
-| 3.1 | FastMCP daemon | daemon exists; watcher absent |
-| 3.2 | Polyglot front-end | **Not implemented as specified**: no tree-sitter-stack-graphs, no polyglot bridge verification at ingest (`polyglot_bridge.py` exists but CLI ingest doesn't call it) |
-| 3.3 | Salsa cutoff | implemented (early cutoff present) |
-| 3.4 | DuckDB store + RaBitQ | schema present + extra; RaBitQ present; Model2Vec not library-based |
-| 3.5 | Two-stage symbolic | Z3 + hand-rolled egglog; cap003a now wired (this round); cap008 unmeasured |
-| 3.6 | BYO-AI | 4 adapters + conformal + CEGIS present; llguidance absent; spec mentions OpenAI-compatible, we have it |
-| 3.7 | Wasm + provenance | Wasm real; DSSE real (this round via securesystemslib); gittuf hand-rolled hash chain |
-| 4 | Contracts | msgspec ✓; `kw_only=True` not applied |
-| 5 | Failure modes | 4/5 mitigations present; `secrets/redaction.py` referenced but not found as named module |
-| 6 | Migration matrix | targets exist; treated all rows as done, but some depend on §2 polyglot / cap008 |
+| 1 | five invariants | 2 fully, 3 partial (neuro-symbolic, Salsa, provenance) |
+| 2 | topology | most boxes; gittuf ≠ binary |
+| 3.1 | daemon | hot reload now via watchfiles |
+| 3.2 | polyglot | partially: TS extraction + bridge resolver run during ingest |
+| 3.3 | Salsa | implemented |
+| 3.4 | DuckDB + RaBitQ | schema present; RaBitQ present; Model2Vec not library |
+| 3.5 | symbolic (Z3 + egglog) | Z3 real, egglog hand-rolled |
+| 3.6 | BYO-AI | 4 adapters + conformal + CEGIS; llguidance absent |
+| 3.7 | Wasm + provenance | Wasm real; DSSE real; gittuf hand-rolled |
+| 4 | contracts | msgspec ✓; `kw_only=True` missing |
+| 5 | failure modes | present incl. redaction |
+| 6 | migration matrix | targets exist, constrained by cap gaps |
 
 ---
 
 ## 4. Recommendation
 
-1. **Do not** advertise the spec's named technologies as shipped in the README/release notes while `egglog`, `llguidance`, `tree-sitter-stack-graphs`, and `watchfiles` remain absent. Mark them "aspirational" in the doc (the doc's own "Status: Draft" supports this).
-2. **Apply `kw_only=True`** to §4 contracts (low-risk, alignment-only edit) — or edit the spec to drop `kw_only`.
-3. **Either delete or implement** `secrets/redaction.py` naming: add the module so the §3.6D citation resolves.
-4. **Either implement `watchfiles` hot reload** in the FastMCP daemon or remove the `<20ms` hot-reload claim.
-5. **Decision on polyglot**: decide whether `stack_graphs.py` is a research-only hand-stitched stub or a real feature; if stub, document, since the spec's §3.2 is the product's headline claim and is currently unwired to ingest.
+1. Do not advertise `egglog`, `llguidance`, `Model2Vec` as shipped. `tree_sitter` and `watchfiles` are now genuinely used.
+2. Apply `kw_only=True` to §4 contracts (or remove from spec).
+3. `secrets/redaction.py` naming now resolves.
+4. Hot reload available; decide auto-start in `vc2 mcp`.
+5. Polyglot: §3.2 partly implemented via TS extraction; document remaining hand-stitching.
+6. Disposition cap gaps with new frozen corpora; address cap002_heldout's 3 disagreements (N-C1 parse-robustness, N-C4 benign extra statement, N-W4 removed-dangerous-call detection).
 
----
-
-This report does not claim the v2 engine is broken — measured capability scores are 6/7 pass, fail-closed, 112 tests green, ruff clean. It states that the **spec document over-promises** relative to the implementation, and enumerates where. Recommended: update `architecture_v2.md` Status header from "Draft" to "Partially Implemented — see gap audit" once each row is dispositioned.
+This report does not claim the engine is broken — 6/7 measured scores pass, 112 tests green, ruff clean. The spec over-promises; enumerate disposition before publishing. Recommended: update `architecture_v2.md` Status header from Draft to “Partially Implemented — see gap audit.”
