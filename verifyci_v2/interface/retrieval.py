@@ -27,7 +27,7 @@ def normalize_for_index(text: str) -> str:
     return text.lower().translate(_NON_WORD)
 
 
-class RankedDocument(msgspec.Struct, frozen=True):
+class RankedDocument(msgspec.Struct, frozen=True, kw_only=True):
     doc_id: str
     hybrid_score: float
     exact_score: float
@@ -35,7 +35,7 @@ class RankedDocument(msgspec.Struct, frozen=True):
     rank: int
 
 
-class TextRetriever(msgspec.Struct, frozen=True):
+class TextRetriever(msgspec.Struct, frozen=True, kw_only=True):
     """Hybrid BM25 + vector retrieval over plain text documents."""
 
     index: RaBitQHybridIndex

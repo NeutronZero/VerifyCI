@@ -37,7 +37,7 @@ _NEGATED_COMP = {
 }
 
 
-class EquivalenceSaturationResult(msgspec.Struct, frozen=True):
+class EquivalenceSaturationResult(msgspec.Struct, frozen=True, kw_only=True):
     is_equivalent: bool
     base_eclass_digest: str
     head_eclass_digest: str

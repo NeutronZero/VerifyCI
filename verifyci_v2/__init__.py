@@ -18,7 +18,7 @@ from verifyci_v2.neural.adapters import (
 AIProviderKind = Literal["deterministic", "local-onnx", "ollama", "openai-compatible"]
 
 
-class VerifyCIConfig(msgspec.Struct, frozen=True):
+class VerifyCIConfig(msgspec.Struct, frozen=True, kw_only=True):
     """Unified configuration loaded from `.verifyci/config.toml` and `VERIFYCI_*` env vars."""
 
     repo_id: str = "default-repo"

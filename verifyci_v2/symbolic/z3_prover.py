@@ -462,7 +462,7 @@ def _ussa_sexpr_to_z3(
         return None
 
 
-class _USSACallRecord(msgspec.Struct, frozen=True):
+class _USSACallRecord(msgspec.Struct, frozen=True, kw_only=True):
     callee: str
     norm_args: tuple[str, ...]
     z3_args: tuple[Any, ...]
@@ -470,14 +470,14 @@ class _USSACallRecord(msgspec.Struct, frozen=True):
     source_line: int
 
 
-class _USSAReturnRecord(msgspec.Struct, frozen=True):
+class _USSAReturnRecord(msgspec.Struct, frozen=True, kw_only=True):
     norm_expr: str
     z3_expr: Any
     path_guards_z3: tuple[Any, ...]
     source_line: int
 
 
-class _USSAGuardRecord(msgspec.Struct, frozen=True):
+class _USSAGuardRecord(msgspec.Struct, frozen=True, kw_only=True):
     norm_cond: str
     z3_cond: Any
     then_summary: str
@@ -486,7 +486,7 @@ class _USSAGuardRecord(msgspec.Struct, frozen=True):
     source_line: int
 
 
-class _USSAShadowRecord(msgspec.Struct, frozen=True):
+class _USSAShadowRecord(msgspec.Struct, frozen=True, kw_only=True):
     param_name: str
     norm_val: str
     z3_val: Any

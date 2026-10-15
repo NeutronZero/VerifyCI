@@ -13,7 +13,7 @@ CutoffStatus = Literal[
 ]
 
 
-class StackGraphNode(msgspec.Struct, frozen=True):
+class StackGraphNode(msgspec.Struct, frozen=True, kw_only=True):
     node_id: str
     file_path: str
     kind: ScopeNodeKind
@@ -23,13 +23,13 @@ class StackGraphNode(msgspec.Struct, frozen=True):
     is_exported: bool = False
 
 
-class StackGraphEdge(msgspec.Struct, frozen=True):
+class StackGraphEdge(msgspec.Struct, frozen=True, kw_only=True):
     src_id: str
     dst_id: str
     precedence: int = 0
 
 
-class FileStackGraph(msgspec.Struct, frozen=True):
+class FileStackGraph(msgspec.Struct, frozen=True, kw_only=True):
     file_path: str
     language: str
     file_xxh3: str
@@ -40,12 +40,12 @@ class FileStackGraph(msgspec.Struct, frozen=True):
     imports: tuple[tuple[str, str], ...] = ()  # (local_alias, target_module_or_symbol)
 
 
-class PhiNode(msgspec.Struct, frozen=True):
+class PhiNode(msgspec.Struct, frozen=True, kw_only=True):
     target_var: str
     incoming_branches: tuple[tuple[str, str], ...]  # ((block_id, ssa_var), ...)
 
 
-class USSAInstruction(msgspec.Struct, frozen=True):
+class USSAInstruction(msgspec.Struct, frozen=True, kw_only=True):
     inst_id: str
     opcode: str  # 'ASSIGN' | 'BINOP' | 'CALL' | 'RETURN' | 'RAISE' | 'BRANCH'
     target_var: str | None
@@ -54,14 +54,14 @@ class USSAInstruction(msgspec.Struct, frozen=True):
     source_line: int = 0
 
 
-class USSABasicBlock(msgspec.Struct, frozen=True):
+class USSABasicBlock(msgspec.Struct, frozen=True, kw_only=True):
     block_id: str
     phi_nodes: tuple[PhiNode, ...]
     instructions: tuple[USSAInstruction, ...]
     terminator_condition: str | None = None
 
 
-class CPGEdge(msgspec.Struct, frozen=True):
+class CPGEdge(msgspec.Struct, frozen=True, kw_only=True):
     edge_uid: str
     src_node_uid: str
     dst_node_uid: str
@@ -71,7 +71,7 @@ class CPGEdge(msgspec.Struct, frozen=True):
     coverage_hit_freq: float = 0.0
 
 
-class TaintSummary(msgspec.Struct, frozen=True):
+class TaintSummary(msgspec.Struct, frozen=True, kw_only=True):
     param_to_return: tuple[str, ...]
     param_to_sinks: tuple[tuple[str, str], ...]  # ((param_name, sink_symbol), ...)
     mutated_globals: tuple[str, ...]
@@ -79,7 +79,7 @@ class TaintSummary(msgspec.Struct, frozen=True):
     is_pure: bool
 
 
-class FunctionUSSA(msgspec.Struct, frozen=True):
+class FunctionUSSA(msgspec.Struct, frozen=True, kw_only=True):
     node_uid: str
     repo_id: str
     qualified_name: str
@@ -99,7 +99,7 @@ class FunctionUSSA(msgspec.Struct, frozen=True):
     h_interface: str = ""
 
 
-class CutoffEvaluation(msgspec.Struct, frozen=True):
+class CutoffEvaluation(msgspec.Struct, frozen=True, kw_only=True):
     qualified_name: str
     file_path: str
     status: CutoffStatus

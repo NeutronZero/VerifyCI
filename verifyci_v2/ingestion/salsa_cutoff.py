@@ -8,7 +8,7 @@ from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
 from verifyci_v2.ingestion.stack_graphs import StackGraphStitcher
 
 
-class IncrementalIngestionPlan(msgspec.Struct, frozen=True):
+class IncrementalIngestionPlan(msgspec.Struct, frozen=True, kw_only=True):
     file_path: str
     evaluations: tuple[CutoffEvaluation, ...]
     functions_to_verify_locally: tuple[str, ...]

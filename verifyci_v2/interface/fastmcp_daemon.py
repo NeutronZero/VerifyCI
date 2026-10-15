@@ -27,7 +27,7 @@ class IngressLimitExceededError(RuntimeError):
     """Raised when a tool call exceeds rate limits, payload bounds, or CPU wall-clock budgets."""
 
 
-class IngressBudgetConfig(msgspec.Struct, frozen=True):
+class IngressBudgetConfig(msgspec.Struct, frozen=True, kw_only=True):
     max_payload_bytes: int = 2 * 1024 * 1024  # 2 MiB max payload
     rate_limit_capacity: float = 50.0  # Burst capacity (requests)
     rate_limit_refill_per_sec: float = 25.0  # Token refill rate
