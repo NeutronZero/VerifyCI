@@ -9,7 +9,7 @@ same placeholder numbering.
 from __future__ import annotations
 
 import re
-from msgspec import Struct, field as msgfield
+from msgspec import Struct
 
 
 class RedactionResult(Struct, frozen=True):

@@ -58,7 +58,7 @@ class CEGISAutoRepairEngine:
         if func_base is None:
             return finding
 
-        candidate_src = head_source
+        candidate_src = redact_secrets(head_source).redacted_text
         for attempt in range(1, self.max_rounds + 1):
             proposed_src = self.synthesizer.synthesize_patch(
                 file_path=file_path,

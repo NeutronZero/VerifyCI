@@ -1,5 +1,3 @@
-import tree_sitter
-
 
 def _language_module(name: str):
     mapping = {
@@ -116,8 +114,6 @@ def extract_defs_and_calls(language: str, source: str):
         return None
     defs = []  # (name, line, is_export, node)
     # map from id(node) to def name
-    node_to_def = {}
-
     def is_export_node(node):
         # parent is export_statement or has export modifier
         p = node.parent
