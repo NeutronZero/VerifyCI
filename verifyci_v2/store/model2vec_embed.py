@@ -8,6 +8,13 @@ from typing import Sequence
 from verifyci_v2.contracts.canonical import blake3_bytes
 from verifyci_v2.contracts.ssa_ir import FunctionUSSA
 
+try:
+    import model2vec as _model2vec_lib  # type: ignore[import-not-found]
+    _HAS_MODEL2VEC_LIBRARY = True
+except Exception:  # pragma: no cover
+    _model2vec_lib = None
+    _HAS_MODEL2VEC_LIBRARY = False
+
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[^\s\w]")
 
 
