@@ -57,7 +57,7 @@ def build_neighborhood_header(
     )
 
 
-class StaticModel2VecEmbedder:
+class OfflineBLAKE3Model2VecEmbedder:
     """
     Zero-GPU, 100% deterministic CPU static token embedding engine modeled after Model2Vec.
     Computes subword-aware static token vectors weighted by inverse-frequency Zipf decay
@@ -125,8 +125,6 @@ class StaticModel2VecEmbedder:
         return tuple(self.embed_one(t) for t in texts)
 
 
-Model2VecStaticEmbedder = StaticModel2VecEmbedder
-
 try:
     from verifyci_v2.store.model2vec_library_embedder import Model2VecLibraryEmbedder
 except Exception:
@@ -138,3 +136,34 @@ def make_default_model2vec_embedder(dimension: int = 128):
         except Exception:
             pass
     return StaticModel2VecEmbedder(dimension=dimension)
+
+_MODEL2VEC_LOCAL_AVAILABLE = False
+try:
+    if _HAS_MODEL2VEC_LIBRARY and _model2vec_lib is not None:
+        _model2vec_lib.StaticModel.from_pretrained("minishlab/potion-base-8M", local_files_only=True)
+        _MODEL2VEC_LOCAL_AVAILABLE = True
+except Exception:
+    _MODEL2VEC_LOCAL_AVAILABLE = False
+
+class StaticModel2VecEmbedder:
+    def __init__(self, dimension=128, model_id='model2vec-vc2-128d'):
+        if _HAS_MODEL2VEC_LIBRARY and _MODEL2VEC_LOCAL_AVAILABLE:
+            from verifyci_v2.store.model2vec_library_embedder import Model2VecLibraryEmbedder
+            self._impl = Model2VecLibraryEmbedder(dimension=dimension)
+        else:
+            self._impl = OfflineBLAKE3Model2VecEmbedder(dimension=dimension, model_id=model_id)
+
+    @property
+    def dimension(self):
+        if hasattr(self._impl, "dimension"):
+            return self._impl.dimension
+        return len(self._impl.embed_one(""))
+
+    def embed_one(self, text):
+        return self._impl.embed_one(text)
+
+    def embed_batch(self, texts):
+        return self._impl.embed_batch(texts)
+
+
+Model2VecStaticEmbedder = StaticModel2VecEmbedder
