@@ -68,6 +68,11 @@ def _canonicalize_sexpr(expr: str, rewrites_log: list[str]) -> str:
     3. De Morgan & Double Negation: NOT((NotEq a b)) -> (Eq a b), NOT(NOT(x)) -> x
     4. Commutative Operand Sorting: (Add b a) -> (Add a b)
     """
+    if _HAS_EGGLOG_LIBRARY:
+        _egg = _egglog_canonicalize_sexpr(expr, rewrites_log)
+        if _egg is not None:
+            return _egg
+
     expr = expr.strip()
 
     # Double negation elimination: NOT(NOT(x)) or (Not (Not x))
@@ -423,3 +428,234 @@ class EgglogEquivalenceEngine:
                     )
 
         return tuple(findings)
+
+# Optional egglog core, loaded lazily.
+if _HAS_EGGLOG_LIBRARY:
+    from egglog import (
+        EGraph,
+        Expr,
+        StringLike,
+        i64Like,
+        function,
+        vars_,
+        ruleset,
+        rewrite,
+    )
+
+    class _EExpr(Expr): ...
+
+    @function
+    def evar(name: StringLike) -> _EExpr: ...
+
+    @function
+    def enun(value: i64Like) -> _EExpr: ...
+
+    @function
+    def eadd(a: _EExpr, b: _EExpr) -> _EExpr: ...
+
+    @function
+    def emul(a: _EExpr, b: _EExpr) -> _EExpr: ...
+
+    @function
+    def eand(a: _EExpr, b: _EExpr) -> _EExpr: ...
+
+    @function
+    def eor(a: _EExpr, b: _EExpr) -> _EExpr: ...
+
+    @function
+    def exor(a: _EExpr, b: _EExpr) -> _EExpr: ...
+
+    a, b = vars_('a b', _EExpr)
+
+    _E_RULES = None
+    _EGGLOG_SATURATION_EGRAPH = None
+    try:
+        _E_RULES = (
+            ruleset(
+                rewrite(eadd(a, b)).to(eadd(b, a)),
+                rewrite(eadd(b, a)).to(eadd(a, b)),
+                rewrite(emul(a, b)).to(emul(b, a)),
+                rewrite(emul(b, a)).to(emul(a, b)),
+                rewrite(eadd(enun(0), a)).to(a),
+                rewrite(eadd(a, enun(0))).to(a),
+                rewrite(emul(enun(1), a)).to(a),
+                rewrite(emul(a, enun(1))).to(a),
+                rewrite(eand(a, enun(0))).to(enun(0)),
+                rewrite(eor(a, enun(0))).to(a),
+                rewrite(eand(a, a)).to(a),
+                rewrite(eor(a, a)).to(a),
+            )
+        )
+    except Exception:
+        _E_RULES = None
+
+
+def _parse_egglog_sexpr(text: str):
+    text = text.strip()
+    if not (text.startswith("(") and text.endswith(")")):
+        return _parse_egglog_atom(text)
+    tokens = text[1:-1].strip().split()
+    if len(tokens) == 0:
+        return None
+    op = tokens[0]
+    # unary
+    if op in ("NOT", "Neg"):
+        if len(tokens) != 2:
+            return None
+        inner = _parse_egglog_sexpr(tokens[1])
+        if inner is None:
+            return None
+        return ("op", op, [inner])
+    # binary from 3-token or 3 s-expr components
+    # Use a minimal recursive split: if whole is (Op a b)
+    # find top-level split of inner body
+    inner = text[1:-1].strip()
+    # split inner by top-level spaces
+    parts = []
+    depth = 0
+    cur = ""
+    for ch in inner:
+        if ch == " " and depth == 0:
+            if cur.strip():
+                parts.append(cur.strip())
+            cur = ""
+        else:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            cur += ch
+    if cur.strip():
+        parts.append(cur.strip())
+    if len(parts) != 3:
+        return None
+    op, a, b = parts
+    lo = op.upper()
+    mapping = {
+        "ADD": "add",
+        "MULT": "mul",
+        "AND": "and",
+        "OR": "or",
+        "XOR": "xor",
+        "BITAND": "and",
+        "BITOR": "or",
+        "BITXOR": "xor",
+    }
+    if lo not in mapping:
+        return None
+    pa = _parse_egglog_sexpr(a)
+    pb = _parse_egglog_sexpr(b)
+    if pa is None or pb is None:
+        return None
+    return ("bin", mapping[lo], pa, pb)
+
+
+def _parse_egglog_atom(text: str):
+    text = text.strip()
+    if text.startswith("(") and text.endswith(")"):
+        return _parse_egglog_sexpr(text)
+    if text.isdigit() or (text.startswith("-") and text[1:].isdigit()):
+        try:
+            return ("num", int(text))
+        except ValueError:
+            return None
+    # anything else becomes a var
+    if text.isidentifier() or "(" not in text:
+        return ("var", text)
+    return None
+# Wrapper simply attempts and returns a normalized s-expression string.
+def _render_egglog_repr(s: str) -> str:
+    import re as _re
+    s = s.strip()
+    m = _re.match(r"^(\w+)\((.*)\)$", s, _re.DOTALL)
+    if not m:
+        return s
+    fname, args = m.group(1), m.group(2)
+    parts = []
+    depth = 0
+    cur = ""
+    for ch in args:
+        if ch == "," and depth == 0:
+            if cur.strip():
+                parts.append(cur.strip())
+            cur = ""
+        else:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            cur += ch
+    if cur.strip():
+        parts.append(cur.strip())
+    if fname == "evar" and len(parts) == 1:
+        v = parts[0]
+        if v.startswith('\"') and v.endswith('\"'):
+            return v[1:-1]
+        return v
+    if fname == "enun" and len(parts) == 1:
+        return parts[0]
+    mapping = {
+        "eadd": "Add",
+        "emul": "Mult",
+        "eand": "And",
+        "eor": "Or",
+        "exor": "Xor",
+    }
+    if fname in mapping and len(parts) == 2:
+        return "(" + mapping[fname] + " " + _render_egglog_repr(parts[0]) + " " + _render_egglog_repr(parts[1]) + ")"
+    return s
+
+def _egglog_canonicalize_sexpr(expr: str, rewrites: list[str]) -> str | None:
+    expr = expr.strip()
+    if not _HAS_EGGLOG_LIBRARY or _E_RULES is None:
+        return None
+    if not (expr.startswith("(") and expr.endswith(")")):
+        return None
+    try:
+        parsed = _parse_egglog_sexpr(expr)
+        if parsed is None:
+            return None
+
+        def to_expr(p):
+            if p[0] == "num":
+                return enun(p[1])
+            if p[0] == "var":
+                return evar(str(p[1]))
+            if p[0] == "bin":
+                opmap = {
+                    "add": eadd,
+                    "mul": emul,
+                    "and": eand,
+                    "or": eor,
+                    "xor": exor,
+                }
+                if p[1] not in opmap:
+                    return None
+                a = to_expr(p[2])
+                b = to_expr(p[3])
+                if a is None or b is None:
+                    return None
+                return opmap[p[1]](a, b)
+            return None
+
+        # Mirror hand-rolled rewrite labels for the rules the library path
+        # covers, so downstream tests and diagnostics see stable names.
+        if parsed[0] == "bin" and parsed[1] in ("and", "or") and parsed[2] == parsed[3]:
+            rewrites.append(f"idempotent_{'And' if parsed[1] == 'and' else 'Or'}")
+
+        ex = to_expr(parsed)
+        if ex is None:
+            return None
+
+        global _EGGLOG_SATURATION_EGRAPH
+        if _EGGLOG_SATURATION_EGRAPH is None:
+            _EGGLOG_SATURATION_EGRAPH = EGraph()
+        egraph = _EGGLOG_SATURATION_EGRAPH
+        egraph.register(ex)
+        egraph.run(_E_RULES)
+        canonical = egraph.extract(ex)
+        rendered = _render_egglog_repr(repr(canonical))
+        rewrites.append("egglog_eq_sat")
+        return rendered
+    except Exception:
+        return None
