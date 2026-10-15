@@ -126,3 +126,15 @@ class StaticModel2VecEmbedder:
 
 
 Model2VecStaticEmbedder = StaticModel2VecEmbedder
+
+try:
+    from verifyci_v2.store.model2vec_library_embedder import Model2VecLibraryEmbedder
+except Exception:
+    Model2VecLibraryEmbedder = None  # type: ignore[assignment,misc]
+def make_default_model2vec_embedder(dimension: int = 128):
+    if Model2VecLibraryEmbedder is not None and _HAS_MODEL2VEC_LIBRARY:
+        try:
+            return Model2VecLibraryEmbedder(dimension=dimension)
+        except Exception:
+            pass
+    return StaticModel2VecEmbedder(dimension=dimension)
