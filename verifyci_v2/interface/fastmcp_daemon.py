@@ -76,7 +76,21 @@ class VerifyCIFastMCPDaemon:
         self.budget = budget or IngressBudgetConfig()
         self.engine = SalsaIncrementalEngine(repo_id=repo_id)
         self.cpg_store = DuckDBCPGStore()
+        # Warm up DuckDB cold-start (extensions) so the first ingest tool call
+        # stays within the per-query wall-clock budget (spec sec. 3.4).
+        try:
+            self.cpg_store.record_commit_snapshot("__warmup__", (), ())
+        except Exception:
+            pass
         self.rabitq_index = RaBitQHybridIndex(cpg_store=self.cpg_store)
+        # Warm up tree-sitter parsers (spec sec. 3.2).
+        try:
+            from verifyci_v2.ingestion.ts_symbols import get_parser
+
+            for _lang in ("c", "cpp", "javascript", "typescript", "go", "rust"):
+                get_parser(_lang)
+        except Exception:
+            pass
         self.prover = Z3SymbolicProver()
         self.secret_engine = TaintTrackedSecretEngine()
         self.cegis = CEGISAutoRepairEngine(prover=self.prover)
@@ -362,3 +376,36 @@ class VerifyCIFastMCPDaemon:
                         updated += 1
         await asyncio.sleep(0)
         return updated
+
+    def start_hot_reload(self, root, on_change=None):
+        """Best-effort background filesystem watcher (watchfiles) per spec sec. 3.1.
+        No-op when watchfiles is unavailable."""
+        try:
+            from watchfiles import awatch
+        except Exception:
+            return None
+        if getattr(self, "_watch_thread", None) is not None:
+            return self._watch_thread
+        import threading
+
+        def _runner():
+            import asyncio
+
+            async def _loop():
+                async for _changes in awatch(root):
+                    if callable(on_change):
+                        try:
+                            on_change()
+                        except Exception:
+                            pass
+
+            try:
+                asyncio.run(_loop())
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_runner, name="vc2-hot-reload", daemon=True)
+        t.start()
+        self._watch_thread = t
+        return t
+

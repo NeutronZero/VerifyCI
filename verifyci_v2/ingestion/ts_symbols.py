@@ -24,16 +24,24 @@ def _language_module(name: str):
         return None
 
 
+_PARSER_CACHE: dict = {}
+
+
 def get_parser(language: str):
+    if language in _PARSER_CACHE:
+        return _PARSER_CACHE[language]
     lang_capsule = _language_module(language)
     if lang_capsule is None:
-        return None
-    try:
-        from tree_sitter import Language, Parser
-        lang = Language(lang_capsule)
-        return Parser(lang)
-    except Exception:
-        return None
+        result = None
+    else:
+        try:
+            from tree_sitter import Language, Parser
+            lang = Language(lang_capsule)
+            result = Parser(lang)
+        except Exception:
+            result = None
+    _PARSER_CACHE[language] = result
+    return result
 
 
 def _node_text(node) -> str:

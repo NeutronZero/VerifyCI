@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+try:
+    from verifyci_v2.ingestion.ts_symbols import extract_defs_and_calls as _ts_extract
+except Exception:  # pragma: no cover
+    _ts_extract = None
+
 import ast
 import re
 from typing import Any, Iterable
@@ -157,69 +162,121 @@ def build_file_stack_graph(
                                 )
                             )
     else:
-        # Polyglot extraction for TypeScript/JS and C/C++
+        # Polyglot extraction. Prefer tree-sitter CST parsing when available
+        # (spec Sec. 3.2); fall back to the legacy regex extractors otherwise
+        # so behaviour is preserved on inputs the parser cannot handle.
         clean_source = _strip_comments_and_strings(source)
-        if language in ("typescript", "javascript"):
-            for match in _TS_IMPORT_RE.finditer(clean_source):
-                mod = match.group("mod").lstrip("./").replace("/", ".")
-                for raw_sym in match.group("syms").split(","):
-                    sym = raw_sym.strip()
-                    if sym:
-                        imports.append((sym, f"{mod}.{sym}"))
-            func_matches = list(_TS_FUNC_RE.finditer(clean_source))
-        else:
-            func_matches = list(_C_FUNC_RE.finditer(clean_source))
-
-        for idx, match in enumerate(func_matches):
-            sym = match.group("name")
-            if sym in _CONTROL_KEYWORDS:
-                continue
-            qname = f"{mod_prefix}.{sym}"
-            line = source.count("\n", 0, match.start()) + 1
-            is_exp = True if language == "c" else bool(match.groupdict().get("export"))
-            pop_id = f"{file_path}::POP::{qname}"
-            nodes.append(
-                StackGraphNode(
-                    node_id=pop_id,
-                    file_path=file_path,
-                    kind="POP_SYMBOL",
-                    symbol=sym,
-                    qualified_name=qname,
-                    line=line,
-                    is_exported=is_exp,
-                )
-            )
-            edges.append(StackGraphEdge(src_id=root_id, dst_id=pop_id, precedence=1))
-            defined.append(qname)
-
-            body_start = match.end()
-            body_end = (
-                func_matches[idx + 1].start()
-                if idx + 1 < len(func_matches)
-                else len(source)
-            )
-            body_slice = source[body_start:body_end]
-            for call_match in _GENERIC_CALL_RE.finditer(body_slice):
-                callee = call_match.group("callee")
-                if callee in _CONTROL_KEYWORDS or callee == sym:
-                    continue
-                referenced.add(callee)
-                call_line = line + body_slice.count("\n", 0, call_match.start())
-                push_id = f"{file_path}::PUSH::{qname}::{callee}::{call_line}"
+        _ts_defs = None
+        if _ts_extract is not None:
+            try:
+                _ts_defs, _ts_calls = _ts_extract(language, source)
+            except Exception:
+                _ts_defs = None
+        if _ts_defs is not None and len(_ts_defs) >= 0:
+            if language in ("typescript", "javascript"):
+                for match in _TS_IMPORT_RE.finditer(clean_source):
+                    mod = match.group("mod").lstrip("./").replace("/", ".")
+                    for raw_sym in match.group("syms").split(","):
+                        sym = raw_sym.strip()
+                        if sym:
+                            imports.append((sym, f"{mod}.{sym}"))
+            for sym, line, is_exp in _ts_defs:
+                qname = f"{mod_prefix}.{sym}"
+                pop_id = f"{file_path}::POP::{qname}"
                 nodes.append(
                     StackGraphNode(
-                        node_id=push_id,
+                        node_id=pop_id,
                         file_path=file_path,
-                        kind="PUSH_SYMBOL",
-                        symbol=callee,
+                        kind="POP_SYMBOL",
+                        symbol=sym,
                         qualified_name=qname,
-                        line=call_line,
-                        is_exported=False,
+                        line=line,
+                        is_exported=is_exp,
                     )
                 )
-                edges.append(
-                    StackGraphEdge(src_id=pop_id, dst_id=push_id, precedence=1)
+                edges.append(StackGraphEdge(src_id=root_id, dst_id=pop_id, precedence=1))
+                defined.append(qname)
+                for callee, call_line in _ts_calls.get(sym, []):
+                    if callee in _CONTROL_KEYWORDS or callee == sym:
+                        continue
+                    referenced.add(callee)
+                    push_id = f"{file_path}::PUSH::{qname}::{callee}::{call_line}"
+                    nodes.append(
+                        StackGraphNode(
+                            node_id=push_id,
+                            file_path=file_path,
+                            kind="PUSH_SYMBOL",
+                            symbol=callee,
+                            qualified_name=qname,
+                            line=call_line,
+                            is_exported=False,
+                        )
+                    )
+                    edges.append(
+                        StackGraphEdge(src_id=pop_id, dst_id=push_id, precedence=1)
+                    )
+        else:
+            if language in ("typescript", "javascript"):
+                for match in _TS_IMPORT_RE.finditer(clean_source):
+                    mod = match.group("mod").lstrip("./").replace("/", ".")
+                    for raw_sym in match.group("syms").split(","):
+                        sym = raw_sym.strip()
+                        if sym:
+                            imports.append((sym, f"{mod}.{sym}"))
+                func_matches = list(_TS_FUNC_RE.finditer(clean_source))
+            else:
+                func_matches = list(_C_FUNC_RE.finditer(clean_source))
+
+            for idx, match in enumerate(func_matches):
+                sym = match.group("name")
+                if sym in _CONTROL_KEYWORDS:
+                    continue
+                qname = f"{mod_prefix}.{sym}"
+                line = source.count("\n", 0, match.start()) + 1
+                is_exp = True if language == "c" else bool(match.groupdict().get("export"))
+                pop_id = f"{file_path}::POP::{qname}"
+                nodes.append(
+                    StackGraphNode(
+                        node_id=pop_id,
+                        file_path=file_path,
+                        kind="POP_SYMBOL",
+                        symbol=sym,
+                        qualified_name=qname,
+                        line=line,
+                        is_exported=is_exp,
+                    )
                 )
+                edges.append(StackGraphEdge(src_id=root_id, dst_id=pop_id, precedence=1))
+                defined.append(qname)
+
+                body_start = match.end()
+                body_end = (
+                    func_matches[idx + 1].start()
+                    if idx + 1 < len(func_matches)
+                    else len(source)
+                )
+                body_slice = source[body_start:body_end]
+                for call_match in _GENERIC_CALL_RE.finditer(body_slice):
+                    callee = call_match.group("callee")
+                    if callee in _CONTROL_KEYWORDS or callee == sym:
+                        continue
+                    referenced.add(callee)
+                    call_line = line + body_slice.count("\n", 0, call_match.start())
+                    push_id = f"{file_path}::PUSH::{qname}::{callee}::{call_line}"
+                    nodes.append(
+                        StackGraphNode(
+                            node_id=push_id,
+                            file_path=file_path,
+                            kind="PUSH_SYMBOL",
+                            symbol=callee,
+                            qualified_name=qname,
+                            line=call_line,
+                            is_exported=False,
+                        )
+                    )
+                    edges.append(
+                        StackGraphEdge(src_id=pop_id, dst_id=push_id, precedence=1)
+                    )
 
     return FileStackGraph(
         file_path=file_path,
