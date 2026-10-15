@@ -14,8 +14,8 @@ from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
 from verifyci_v2.neural.conformal import evaluate_with_conformal_gate
 
 _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("AWS_ACCESS_KEY", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
-    ("GITHUB_PAT", re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,255}\b")),
+    ("AWS_ACCESS_KEY", re.compile(r"\b(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}\b")),
+    ("GITHUB_PAT", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9_]{20,255}|github_pat_[A-Za-z0-9_]{82})\b")),
     ("SLACK_TOKEN", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,120}\b")),
     ("STRIPE_LIVE_KEY", re.compile(r"\bsk_live_[0-9a-zA-Z]{16,99}\b")),
     ("OPENAI_API_KEY", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,120}\b")),
@@ -56,7 +56,7 @@ def multi_pass_decode(raw_value: str, max_passes: int = 3) -> tuple[str, ...]:
             try:
                 decoded_bytes = binascii.unhexlify(curr)
                 decoded_str = decoded_bytes.decode("utf-8")
-                if decoded_str.isprintable():
+                if decoded_str.isprintable() or all(c.isprintable() or c in "\r\n\t" for c in decoded_str):
                     next_val = decoded_str
             except (binascii.Error, UnicodeDecodeError):
                 pass
@@ -65,7 +65,7 @@ def multi_pass_decode(raw_value: str, max_passes: int = 3) -> tuple[str, ...]:
             try:
                 decoded_bytes = base64.b64decode(curr, validate=True)
                 decoded_str = decoded_bytes.decode("utf-8")
-                if decoded_str.isprintable():
+                if decoded_str.isprintable() or all(c.isprintable() or c in "\r\n\t" for c in decoded_str):
                     next_val = decoded_str
             except (binascii.Error, ValueError, UnicodeDecodeError):
                 pass

@@ -182,24 +182,26 @@ class GittufRSLLedger:
                             )
 
                         # Check if target_commit_sha exists in git object database
-                        cat_proc = subprocess.run(
-                            ["git", "cat-file", "-e", f"{target_commit_sha}^{{commit}}"],
-                            cwd=str(self.repo_path),
-                            capture_output=True,
-                            check=False,
-                        )
-                        if cat_proc.returncode == 0:
-                            env_json = canonical_jcs_str(asdict(dsse_envelope))
-                            note_proc = subprocess.run(
-                                ["git", "notes", "--ref", "refs/notes/verifyci", "add", "-f", "-m", env_json, target_commit_sha],
+                        if not target_commit_sha.startswith("-"):
+                            cat_proc = subprocess.run(
+                                ["git", "cat-file", "-e", f"{target_commit_sha}^{{commit}}"],
                                 cwd=str(self.repo_path),
                                 capture_output=True,
                                 check=False,
                             )
-                            if note_proc.returncode != 0:
-                                raise RuntimeError(
-                                    f"Failed to record Git note for {target_commit_sha}: {note_proc.stderr.decode('utf-8')}"
+                            if cat_proc.returncode == 0:
+                                env_json = canonical_jcs_str(asdict(dsse_envelope))
+                                note_proc = subprocess.run(
+                                    ["git", "notes", "--ref", "refs/notes/verifyci", "add", "-f", "-F", "-", "--", target_commit_sha],
+                                    input=env_json.encode("utf-8"),
+                                    cwd=str(self.repo_path),
+                                    capture_output=True,
+                                    check=False,
                                 )
+                                if note_proc.returncode != 0:
+                                    raise RuntimeError(
+                                        f"Failed to record Git note for {target_commit_sha}: {note_proc.stderr.decode('utf-8')}"
+                                    )
                 except RuntimeError:
                     raise
                 except Exception:
@@ -234,7 +236,11 @@ class GittufRSLLedger:
                 raise RSLTamperDetectedError(f"RSL entry digest tampered: {entry.entry_id}")
             prev_id = entry.entry_id
 
-        if expected_head_commit is not None and self._rsl_chain:
+        if expected_head_commit is not None:
+            if not self._rsl_chain:
+                raise RSLTamperDetectedError(
+                    f"RSL ledger is empty: cannot verify expected head commit {expected_head_commit}"
+                )
             if self._rsl_chain[-1].target_commit_sha != expected_head_commit:
                 raise RSLTamperDetectedError(
                     f"Rollback/force-push attack detected: RSL head is "

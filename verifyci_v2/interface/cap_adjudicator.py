@@ -134,13 +134,23 @@ class V2CapabilityAdjudicator:
             else:
                 l_actual = ""
 
-            c_expected = c_sha_file.read_text(encoding="utf-8").strip() if c_sha_file.exists() else ""
-            l_expected = l_sha_file.read_text(encoding="utf-8").strip() if l_sha_file.exists() else ""
+            if cases_file.exists():
+                if not c_sha_file.exists():
+                    raise ValueError(f"{cap_id} missing CORPUS_SHA256 manifest file")
+                c_expected = c_sha_file.read_text(encoding="utf-8").strip()
+                if c_actual != c_expected:
+                    raise ValueError(f"{cap_id} CORPUS_SHA256 drift: actual={c_actual} != expected={c_expected}")
 
-            if c_expected and c_actual != c_expected:
-                raise ValueError(f"{cap_id} CORPUS_SHA256 drift: actual={c_actual} != expected={c_expected}")
-            if l_expected and l_actual != l_expected:
-                raise ValueError(f"{cap_id} LABEL_SHA256 drift: actual={l_actual} != expected={l_expected}")
+            if labels_file.exists():
+                if not l_sha_file.exists():
+                    raise ValueError(f"{cap_id} missing LABEL_SHA256 manifest file")
+                l_expected = l_sha_file.read_text(encoding="utf-8").strip()
+                if l_actual != l_expected:
+                    raise ValueError(f"{cap_id} LABEL_SHA256 drift: actual={l_actual} != expected={l_expected}")
+            else:
+                l_expected = l_sha_file.read_text(encoding="utf-8").strip() if l_sha_file.exists() else ""
+                if l_expected and l_actual != l_expected:
+                    raise ValueError(f"{cap_id} LABEL_SHA256 drift: actual={l_actual} != expected={l_expected}")
 
             cases = (
                 [json.loads(line) for line in cases_file.read_text(encoding="utf-8").splitlines() if line.strip()]

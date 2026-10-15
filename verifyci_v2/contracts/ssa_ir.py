@@ -119,3 +119,6 @@ class CutoffEvaluation:
     current_h_interface: str
     requires_local_verification: bool
     propagate_to_callers: bool
+
+
+USSAFunction = FunctionUSSA

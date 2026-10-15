@@ -54,7 +54,7 @@ def evaluate_with_conformal_gate(
     raw_prob = float(class_probabilities[top_choice])
     p_safe = float(class_probabilities.get(safe_label, 0.0))
 
-    if not getattr(profile, "is_calibrated", True):
+    if profile is None or not getattr(profile, "is_calibrated", False):
         return CalibratedDecision(
             prediction_set=tuple(sorted(class_probabilities.keys())),
             top_choice=top_choice,

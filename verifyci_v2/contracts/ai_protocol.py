@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol, Sequence
 
 
+GrammarValidationMode = Literal["post_hoc_schema", "token_cfg_mask"]
+
+
 @dataclass(frozen=True, slots=True)
 class BooleanJudgment:
     """Calibrated System 1 boolean judgment (Noul equivalent)."""
@@ -11,7 +14,7 @@ class BooleanJudgment:
     verdict: bool
     probability: float
     rationale_tag: str
-    validation_mode: Literal["post_hoc_schema", "token_cfg_mask"] = "post_hoc_schema"
+    validation_mode: GrammarValidationMode = "post_hoc_schema"
 
 
 @dataclass(frozen=True, slots=True)

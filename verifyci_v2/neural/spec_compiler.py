@@ -386,7 +386,18 @@ class IntentToSMTCompiler:
         try:
             mod = ast.Module(body=[fn_node], type_ignores=[])
             code = compile(mod, filename="<ast>", mode="exec")
-            env: dict[str, Any] = {}
+            safe_builtins = {
+                "range": range,
+                "len": len,
+                "abs": abs,
+                "min": min,
+                "max": max,
+                "bool": bool,
+                "int": int,
+                "float": float,
+                "tuple": tuple,
+            }
+            env: dict[str, Any] = {"__builtins__": safe_builtins}
             exec(code, env, env)
             fn = env.get(fn_node.name)
             if not callable(fn):

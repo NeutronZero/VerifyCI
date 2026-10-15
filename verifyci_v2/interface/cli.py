@@ -394,17 +394,20 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
         store = DuckDBCPGStore(db_path)
         ingested_count = 0
         failed_files: list[dict[str, str]] = []
+        all_funcs = []
         for py_file in repo_dir.rglob("*.py"):
             if any(p.startswith(".") for p in py_file.parts):
                 continue
             try:
                 src = py_file.read_text(encoding="utf-8")
                 funcs = lower_file_to_ussa(str(py_file), src)
-                for f in funcs:
-                    store.record_commit_snapshot("HEAD", [f])
-                    ingested_count += 1
+                all_funcs.extend(funcs)
+                ingested_count += len(funcs)
             except Exception as exc:
                 failed_files.append({"file": str(py_file), "error": str(exc)})
+
+        if all_funcs:
+            store.record_commit_snapshot("HEAD", all_funcs)
 
         status = "ok" if not failed_files else "partial_ingest"
         return {

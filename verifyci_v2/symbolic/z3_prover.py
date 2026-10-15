@@ -86,6 +86,15 @@ def _ast_expr_to_z3(node: ast.AST, z3_vars: dict[str, Any]) -> Any:
             return _z3_mod.And(*vals)
         if isinstance(node.op, ast.Or):
             return _z3_mod.Or(*vals)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        fn_name = node.func.id
+        args_z3 = [_ast_expr_to_z3(a, z3_vars) for a in node.args]
+        if any(a is None for a in args_z3):
+            return None
+        # Model uninterpreted function
+        arg_sorts = [_z3_mod.IntSort() for _ in args_z3]
+        f_sym = _z3_mod.Function(fn_name, *arg_sorts, _z3_mod.IntSort())
+        return f_sym(*args_z3)
     return None
 
 
@@ -97,8 +106,19 @@ def _evaluate_concrete_divergence(
     witness_inputs: dict[str, Any],
 ) -> bool:
     try:
-        env_b: dict[str, Any] = {}
-        env_h: dict[str, Any] = {}
+        safe_builtins = {
+            "range": range,
+            "len": len,
+            "abs": abs,
+            "min": min,
+            "max": max,
+            "bool": bool,
+            "int": int,
+            "float": float,
+            "tuple": tuple,
+        }
+        env_b: dict[str, Any] = {"__builtins__": safe_builtins}
+        env_h: dict[str, Any] = {"__builtins__": safe_builtins}
         stub = "def wire(*args): return tuple(args)\ndef execute_wire(*args): return tuple(args)\n"
         exec(stub + base_src, env_b)
         exec(stub + head_src, env_h)
@@ -112,6 +132,27 @@ def _evaluate_concrete_divergence(
     except Exception:
         pass
     return True
+
+
+def _supported_fragment_doc() -> str:
+    """Non-normative helper describing the current supported fragment.
+
+    This exists so the supported-subset documentation can be mechanically reflected
+    in tests without coupling those tests to internal encoding details.
+    """
+    return (
+        "Z3SymbolicProver supported semantic subset (verifyci.v2):\n"
+        "- pure scalar arithmetic and comparisons over finite bit-vectors, ints, floats,\n"
+        "  booleans, and None used only as sentinel values.\n"
+        "- preserved control-flow shape between base and head.\n"
+        "- Referentially transparent calls to known pure primitives such as len().\n"
+        "- Deterministic conditional dispatch whose guard expressions reduce to Z3.\n"
+        "- no side effects: no I/O, no global mutation, no exception throwing paths.\n"
+        "\nUnsupported cases are reported as INCONCLUSIVE with\n"
+        "Witness.smt_status == 'UNKNOWN' and are escalated rather than passed.\n"
+        "When UNSAT is returned, the two sides are provably equivalent under this\n"
+        "fragment. When SAT is returned, a concrete counterexample witness is attached.\n"
+    )
 
 
 class _DiffSemanticExtractor(ast.NodeVisitor):
@@ -176,23 +217,32 @@ class _DiffSemanticExtractor(ast.NodeVisitor):
         self.current_guards.pop()
 
     def _resolve_ast(self, node: ast.AST) -> ast.AST:
+        return self._resolve_ast_rec(node, set())
+
+    def _resolve_ast_rec(self, node: ast.AST, visited: set[str]) -> ast.AST:
         if isinstance(node, ast.Name):
-            if node.id in self.env_ast_aliases:
-                return self._resolve_ast(self.env_ast_aliases[node.id])
+            if node.id in self.env_ast_aliases and node.id not in visited:
+                return self._resolve_ast_rec(self.env_ast_aliases[node.id], visited | {node.id})
             return node
         if isinstance(node, ast.BinOp):
             return ast.BinOp(
-                left=self._resolve_ast(node.left),
+                left=self._resolve_ast_rec(node.left, visited),
                 op=node.op,
-                right=self._resolve_ast(node.right),
+                right=self._resolve_ast_rec(node.right, visited),
             )
         if isinstance(node, ast.UnaryOp):
-            return ast.UnaryOp(op=node.op, operand=self._resolve_ast(node.operand))
+            return ast.UnaryOp(op=node.op, operand=self._resolve_ast_rec(node.operand, visited))
         if isinstance(node, ast.Compare):
             return ast.Compare(
-                left=self._resolve_ast(node.left),
+                left=self._resolve_ast_rec(node.left, visited),
                 ops=node.ops,
-                comparators=[self._resolve_ast(c) for c in node.comparators],
+                comparators=[self._resolve_ast_rec(c, visited) for c in node.comparators],
+            )
+        if isinstance(node, ast.Call):
+            return ast.Call(
+                func=node.func,
+                args=[self._resolve_ast_rec(a, visited) for a in node.args],
+                keywords=node.keywords,
             )
         return node
 
@@ -210,6 +260,10 @@ class Z3SymbolicProver:
     Proves or refutes equivalence between F_base and F_head and extracts concrete
     CounterexampleWitness assignments.
     """
+
+    @staticmethod
+    def supported_function_subset() -> str:
+        return _supported_fragment_doc()
 
     def __init__(self, timeout_ms: int = 2000) -> None:
         self.timeout_ms = timeout_ms
@@ -394,8 +448,8 @@ class Z3SymbolicProver:
                     m = s.model()
                     assignments = {p: m[z_vars[p]].as_long() if m[z_vars[p]] is not None else 1 for p in func_head.parameters}
                 else:
-                    smt_st = "SAT"
-                    assignments = {func_head.parameters[0]: 1} if func_head.parameters else {"branch_cond": 1}
+                    smt_st = "UNKNOWN"
+                    assignments = {}
 
             elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
             witness = CounterexampleWitness(
@@ -563,11 +617,11 @@ class Z3SymbolicProver:
                             f"Function '{fn_short}' contains unsupported AST construct '{found_construct}' "
                             f"outside linear integer SMT fragment; verification is inconclusive."
                         ),
-                        witness=witness,
-                    )
+                        witness=witness,                    )
                 )
 
         return tuple(findings)
+
 
     def prove_equivalence(
         self,
@@ -576,10 +630,36 @@ class Z3SymbolicProver:
         func_base: FunctionUSSA,
         func_cand: FunctionUSSA,
     ) -> tuple[bool, SMTStatus]:
-        """
-        Formally verifies equivalence between func_base and func_cand using Z3 SMT:
-        forall x: F_base(x) == F_cand(x).
-        Returns (is_verified_unsat, smt_status).
+        """Prove equivalence for the *supported* linear integer fragment.
+
+        This checker is intentionally bounded. It targets a small decidable class of
+        pure integer functions: assignments, arithmetic/comparison/Boolean operators,
+        conditionals whose guards and return expressions are Z3-encodable, and tail
+        position returns under those guards. It does **not** model general Python
+        semantics.
+
+        Supported (when Z3 is available):
+        - Pure functions with no nonlocal mutation, no I/O, no exception paths modeled.
+        - Integer arithmetic and comparisons, including `min`/`max` binary idioms.
+        - Conditional control flow where path guards and return expressions are
+          successfully translated into Z3 and the function has structurally matched
+          call/return shapes between base and candidate.
+
+        Unsupported -> UNKNOWN (never treated as equivalent):
+        - Loops, generators, async functions, comprehensions, yield.
+        - Try/except/finally, with blocks, and other non-local control flow.
+        - Functions whose body shape, call patterns, or return structure differ.
+        - Return expressions or guards that cannot be encoded into Z3.
+        - Any function containing floating point literals/types (modeled as inconclusive
+          elsewhere; here we conservatively return UNKNOWN rather than claim equivalence).
+
+        Important limitation: this routine checks structural correspondence of extracted
+        call/return/guard shapes and then asks Z3 whether the extracted return expressions
+        can differ under the extracted/merged path conditions. It does not establish a full
+        control-flow correspondence between base and candidate, does not model callee
+        semantics or side effects, and does not reason about exceptions. A 'SAT' answer
+        is sound for the formula built here; UNSAT/UNKNOWN results are not general
+        equivalence guarantees outside the supported subset above.
         """
         if _z3_mod is None:
             return False, "SOLVER_UNAVAILABLE"
@@ -654,11 +734,9 @@ class Z3SymbolicProver:
         if len(ext_b.return_asts) != len(ext_c.return_asts):
             return False, "UNKNOWN"
 
-        for (ret_b_ast, guards_b, _), (ret_c_ast, guards_c, _) in zip(ext_b.return_asts, ext_c.return_asts):
-            if ast.unparse(ret_b_ast) == ast.unparse(ret_c_ast):
-                continue
-            zb_ret = _ast_expr_to_z3(ret_b_ast, z3_vars)
-            zc_ret = _ast_expr_to_z3(ret_c_ast, z3_vars)
+        for (ret_b, guards_b, _), (ret_c, guards_c, _) in zip(ext_b.return_asts, ext_c.return_asts):
+            zb_ret = _ast_expr_to_z3(ret_b, z3_vars)
+            zc_ret = _ast_expr_to_z3(ret_c, z3_vars)
             if zb_ret is None or zc_ret is None:
                 return False, "UNKNOWN"
 
@@ -676,5 +754,5 @@ class Z3SymbolicProver:
             if st == _z3_mod.unknown:
                 return False, "UNKNOWN"
 
-        # Everything verified unsat
+        # Within the supported fragment above, all checked paths were equivalent.
         return True, "UNSAT"

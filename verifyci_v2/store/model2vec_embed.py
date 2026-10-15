@@ -114,3 +114,6 @@ class StaticModel2VecEmbedder:
 
     def embed_batch(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
         return tuple(self.embed_one(t) for t in texts)
+
+
+Model2VecStaticEmbedder = StaticModel2VecEmbedder

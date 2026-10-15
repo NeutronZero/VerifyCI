@@ -277,3 +277,6 @@ class RaBitQHybridIndex:
             quantized_bytes=q_bytes,
             exact_float_bytes=f_bytes,
         )
+
+
+RetrievalStats = RaBitQQueryStats

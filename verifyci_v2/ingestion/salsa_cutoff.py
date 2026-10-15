@@ -57,8 +57,8 @@ class SalsaIncrementalEngine:
                 propagate_to_callers=True,
             )
 
-        # Case 1: H_body(f) == H_body(f') -> Whitespace/comment-only edit (O(1) cache hit)
-        if prev.h_body == new_func.h_body:
+        # Case 1: H_body(f) == H_body(f') AND H_interface(f) == H_interface(f') -> Whitespace/comment-only edit (O(1) cache hit)
+        if prev.h_body == new_func.h_body and prev.h_interface == new_func.h_interface:
             return CutoffEvaluation(
                 qualified_name=new_func.qualified_name,
                 file_path=new_func.file_path,
@@ -109,10 +109,6 @@ class SalsaIncrementalEngine:
         Incrementally updates StackGraphs, lowers functions to U-SSA, links polyglot bridges,
         and computes the exact set of functions requiring local vs. transitive re-verification.
         """
-        self.stitcher.upsert_file(file_path, source, language=language)
-        self.bridge_resolver.scan_file(file_path, source, language=language)
-        self.bridge_resolver.resolve_bridges(self.stitcher)
-
         lowered_funcs = lower_file_to_ussa(
             file_path,
             source,
@@ -120,16 +116,24 @@ class SalsaIncrementalEngine:
             repo_id=self.repo_id,
         )
 
+        new_qnames = {fn.qualified_name for fn in lowered_funcs}
+        old_qnames = self._file_to_qnames.get(file_path, set())
+        removed_qnames = sorted(old_qnames - new_qnames)
+
+        # Pre-compute transitive callers of removed functions before re-indexing
+        pre_removed_callers = self.stitcher.transitive_blast_radius(removed_qnames) if removed_qnames else ()
+
+        self.stitcher.upsert_file(file_path, source, language=language)
+        self.bridge_resolver.scan_file(file_path, source, language=language)
+        self.bridge_resolver.resolve_bridges(self.stitcher)
+
         evaluations: list[CutoffEvaluation] = []
         local_verify: list[str] = []
         interface_changed_seeds: list[str] = []
         cutoff_saved_seeds: list[str] = []
 
-        new_qnames = {fn.qualified_name for fn in lowered_funcs}
-        old_qnames = self._file_to_qnames.get(file_path, set())
-
         # Any deleted function in the file triggers caller propagation
-        for removed_qname in sorted(old_qnames - new_qnames):
+        for removed_qname in removed_qnames:
             interface_changed_seeds.append(removed_qname)
             self._ussa_by_qname.pop(removed_qname, None)
 
@@ -147,9 +151,9 @@ class SalsaIncrementalEngine:
 
         self._file_to_qnames[file_path] = new_qnames
 
-        type_and_taint_callers = self.stitcher.transitive_blast_radius(interface_changed_seeds)
+        type_and_taint_callers = tuple(sorted(set(self.stitcher.transitive_blast_radius(interface_changed_seeds)) | set(pre_removed_callers)))
         semantic_seeds = sorted(set(interface_changed_seeds) | set(cutoff_saved_seeds))
-        semantic_value_callers = self.stitcher.transitive_blast_radius(semantic_seeds)
+        semantic_value_callers = tuple(sorted(set(self.stitcher.transitive_blast_radius(semantic_seeds)) | set(pre_removed_callers)))
 
         potentially_affected_by_cutoff = set(
             self.stitcher.transitive_blast_radius(cutoff_saved_seeds)
@@ -167,3 +171,7 @@ class SalsaIncrementalEngine:
             type_and_taint_callers_to_reverify=type_and_taint_callers,
             semantic_value_callers_to_reverify=semantic_value_callers,
         )
+
+
+SalsaCutoffEngine = SalsaIncrementalEngine
+SalsaCutoffPlan = IncrementalIngestionPlan

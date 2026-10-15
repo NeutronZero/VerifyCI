@@ -450,6 +450,7 @@ def compute_ussa_digests(func_ussa: FunctionUSSA) -> tuple[str, str]:
                     "opcode": inst.opcode,
                     "target": inst.target_var,
                     "operands": list(inst.operands),
+                    "callee_symbol": inst.callee_symbol,
                 }
                 for inst in b.instructions
             ],

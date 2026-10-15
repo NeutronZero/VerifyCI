@@ -187,7 +187,7 @@ class WasmCheckerSandbox:
             fuel_consumed=0,
             fuel_limit=self.config.max_instruction_fuel,
             findings=(),
-            is_wasm_sandboxed=True,
+            is_wasm_sandboxed=False,
         )
 
 
@@ -225,3 +225,6 @@ class UnconfinedPythonCheckerRunner:
             findings=tuple(findings),
             is_wasm_sandboxed=False,
         )
+
+
+SandboxPluginReport = WasmPluginExecutionReport

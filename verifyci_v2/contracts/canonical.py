@@ -59,23 +59,37 @@ def _format_jcs_float(value: float) -> str:
         raise CanonicalSerializationError("RFC 8785 forbids NaN and Infinity in canonical JSON")
     if value == 0.0:
         return "0"
-    abs_val = abs(value)
-    if 1e-6 <= abs_val < 1e21:
-        formatted = repr(value)
-        if "e" not in formatted and "E" not in formatted:
-            if formatted.endswith(".0"):
-                return formatted[:-2]
-            return formatted
-    # Exponential notation normalized per ES6 / RFC 8785
-    formatted = repr(value).lower()
-    if "e" in formatted:
-        mantissa, exp_str = formatted.split("e", 1)
-        if mantissa.endswith(".0"):
-            mantissa = mantissa[:-2]
-        exp_val = int(exp_str)
-        sign = "+" if exp_val >= 0 else "-"
-        return f"{mantissa}e{sign}{abs(exp_val)}"
-    return formatted
+    abs_v = abs(value)
+    if abs_v < 1e21 and value.is_integer():
+        return str(int(value))
+    rep = repr(value)
+    if "e" in rep or "E" in rep:
+        parts = rep.lower().split("e")
+        mantissa = parts[0]
+        exp = int(parts[1])
+        sign = "-" if value < 0 else ""
+        mantissa = mantissa.lstrip("-")
+        if -6 <= exp < 0:
+            digits = mantissa.replace(".", "")
+            zeros = "0" * (-exp - 1)
+            return f"{sign}0.{zeros}{digits}"
+        elif 0 <= exp < 21:
+            digits = mantissa.replace(".", "")
+            dot_idx = mantissa.find(".")
+            if dot_idx == -1:
+                dot_idx = len(mantissa)
+            shift = dot_idx + exp
+            if shift >= len(digits):
+                return sign + digits + "0" * (shift - len(digits))
+            else:
+                return f"{sign}{digits[:shift]}.{digits[shift:]}"
+        else:
+            m = parts[0]
+            if m.endswith(".0"):
+                m = m[:-2]
+            exp_sign = "+" if exp >= 0 else "-"
+            return f"{m}e{exp_sign}{abs(exp)}"
+    return rep
 
 
 def _to_jcs_str(obj: Any) -> str:

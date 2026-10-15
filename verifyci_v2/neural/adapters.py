@@ -61,7 +61,8 @@ class DeterministicJudgeAdapter:
         question: str,
         options: Sequence[str],
     ) -> CategoricalChoice:
-        safe_text = redact_secrets(canonical_jcs_str(state)).lower()
+        raw_text = canonical_jcs_str(state).lower()
+        safe_text = redact_secrets(raw_text).lower()
         logits: dict[str, float] = {opt: 0.0 for opt in options}
 
         for opt in options:
@@ -70,7 +71,7 @@ class DeterministicJudgeAdapter:
                 logits[opt] += 4.0
             if "mock" in opt_l and ("test" in safe_text or "fixture" in safe_text):
                 logits[opt] += 4.5
-            elif "credential" in opt_l and "akia" in safe_text:
+            elif "credential" in opt_l and ("akia" in raw_text or "<redacted_secret" in safe_text):
                 logits[opt] += 4.5
             elif opt_l == "none" and not any(k in safe_text for k in ("error", "swap", "invert")):
                 logits[opt] += 3.5
