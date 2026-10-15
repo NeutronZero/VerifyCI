@@ -5,6 +5,13 @@ import msgspec
 import re
 from typing import Iterable, Sequence
 
+try:
+    import egglog as _egglog_lib  # type: ignore[import-not-found]
+    _HAS_EGGLOG_LIBRARY = True
+except Exception:  # pragma: no cover
+    _egglog_lib = None
+    _HAS_EGGLOG_LIBRARY = False
+
 from verifyci_v2.contracts.attestation import VerdictKind, VerificationFinding
 from verifyci_v2.contracts.canonical import blake3_hex
 from verifyci_v2.contracts.ssa_ir import FunctionUSSA
@@ -30,7 +37,7 @@ _NEGATED_COMP = {
 }
 
 
-class EquivalenceSaturationResult(msgspec.Struct, frozen=True):
+class EquivalenceSaturationResult(msgspec.Struct, frozen=True, kw_only=True):
     is_equivalent: bool
     base_eclass_digest: str
     head_eclass_digest: str

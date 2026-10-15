@@ -7,7 +7,7 @@ from typing import Any, Literal, Protocol, Sequence
 GrammarValidationMode = Literal["post_hoc_schema", "token_cfg_mask"]
 
 
-class BooleanJudgment(msgspec.Struct, frozen=True):
+class BooleanJudgment(msgspec.Struct, frozen=True, kw_only=True):
     """Calibrated System 1 boolean judgment (Noul equivalent)."""
 
     verdict: bool
@@ -16,7 +16,7 @@ class BooleanJudgment(msgspec.Struct, frozen=True):
     validation_mode: GrammarValidationMode = "post_hoc_schema"
 
 
-class CategoricalChoice(msgspec.Struct, frozen=True):
+class CategoricalChoice(msgspec.Struct, frozen=True, kw_only=True):
     """Calibrated probability distribution over predeclared categorical options."""
 
     selected: str
@@ -24,7 +24,7 @@ class CategoricalChoice(msgspec.Struct, frozen=True):
     confidence: float
 
 
-class OrdinalScore(msgspec.Struct, frozen=True):
+class OrdinalScore(msgspec.Struct, frozen=True, kw_only=True):
     """Calibrated ordinal severity or relevance score."""
 
     level: str
@@ -32,7 +32,7 @@ class OrdinalScore(msgspec.Struct, frozen=True):
     confidence: float
 
 
-class ConformalProfile(msgspec.Struct, frozen=True):
+class ConformalProfile(msgspec.Struct, frozen=True, kw_only=True):
     """Empirical Split Conformal Prediction profile calibrated on held-out corpora."""
 
     model_id: str
@@ -45,7 +45,7 @@ class ConformalProfile(msgspec.Struct, frozen=True):
     defect_sample_size: int = 0
 
 
-class CalibratedDecision(msgspec.Struct, frozen=True):
+class CalibratedDecision(msgspec.Struct, frozen=True, kw_only=True):
     """Result of applying the Split Conformal Prediction gate to a System 1 judgment."""
 
     prediction_set: tuple[str, ...]
@@ -55,7 +55,7 @@ class CalibratedDecision(msgspec.Struct, frozen=True):
     escalate_to_smt: bool
 
 
-class ModelAttestationRecord(msgspec.Struct, frozen=True):
+class ModelAttestationRecord(msgspec.Struct, frozen=True, kw_only=True):
     """Cryptographic attestation of the BYO-AI provider, weights, and conformal profile."""
 
     provider_name: str

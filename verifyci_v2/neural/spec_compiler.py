@@ -111,7 +111,7 @@ def _ast_to_z3_val(node: ast.AST, z3_vars: dict[str, Any], z3_mod: Any) -> Any:
     return None
 
 
-class CompiledSMTPostcondition(msgspec.Struct, frozen=True):
+class CompiledSMTPostcondition(msgspec.Struct, frozen=True, kw_only=True):
     """Formal postcondition compiled from natural-language commit/PR intent or invariant rules."""
 
     intent_text: str

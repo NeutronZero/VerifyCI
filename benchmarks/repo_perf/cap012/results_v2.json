@@ -1,0 +1,27 @@
+{
+  "experiment_id": "CAP012",
+  "engine": "verifyci_v2",
+  "status": "not_measurable",
+  "metrics": {
+    "metric_name": "not_measurable",
+    "metric_value": null,
+    "target_threshold": 0.0,
+    "threshold_basis": "none",
+    "false_accept_count": 0
+  },
+  "counts": {
+    "cases": 0,
+    "scored": 0,
+    "detail": {}
+  },
+  "not_scored_reason": "incremental speedup is exercised only by the self-test smoke fixture; repo_perf has no frozen latency baseline v2 can be scored against",
+  "provenance": {
+    "git_commit": "e187943c273ebd3c5f6798a4852d0685241c95f3",
+    "git_dirty": true,
+    "python_version": "3.14.7",
+    "platform": "Windows-11",
+    "corpus_sha256": "",
+    "label_sha256": ""
+  },
+  "v1_results_preserved": "5def551f7af8496b1e97428b8ddc14d9d5a80b5fa6ea8132364686595a8a3498"
+}

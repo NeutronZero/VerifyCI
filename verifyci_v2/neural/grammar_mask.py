@@ -11,6 +11,13 @@ from verifyci_v2.contracts.ai_protocol import (
     OrdinalScore,
 )
 
+try:
+    import llguidance as _llguidance  # type: ignore[import-not-found]
+    _HAS_LLGUIDANCE_LIBRARY = True
+except Exception:  # pragma: no cover
+    _llguidance = None
+    _HAS_LLGUIDANCE_LIBRARY = False
+
 
 class GrammarMaskError(ValueError):
     """Raised when a model output violates the predeclared JSON schema."""
@@ -99,3 +106,16 @@ class LLGuidanceSchemaMask(SchemaConstrainedValidator):
             stacklevel=2,
         )
         super().__init__(*args, **kwargs)
+
+def has_llguidance() -> bool:
+    return bool(_HAS_LLGUIDANCE_LIBRARY)
+
+
+def constrained_json_grammar(schema: dict) -> str | None:
+    if not _HAS_LLGUIDANCE_LIBRARY or _llguidance is None:
+        return None
+    try:
+        compiler = _llguidance.JsonCompiler()
+        return str(compiler.compile(__import__('json').dumps(schema), check=True))
+    except Exception:
+        return None

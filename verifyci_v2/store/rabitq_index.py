@@ -11,7 +11,7 @@ from verifyci_v2.store.model2vec_embed import StaticModel2VecEmbedder
 _WORD_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
-class RaBitQVectorEntry(msgspec.Struct, frozen=True):
+class RaBitQVectorEntry(msgspec.Struct, frozen=True, kw_only=True):
     """
     Stores a 1-bit quantized representation of a D-dimensional unit vector v in {-1/sqrt(D), +1/sqrt(D)}^D
     packed into a Python arbitrary-precision int bitset, along with the exact alignment factor <v, v_bar>
@@ -28,7 +28,7 @@ class RaBitQVectorEntry(msgspec.Struct, frozen=True):
     exact_vector: tuple[float, ...]
 
 
-class RaBitQSearchResult(msgspec.Struct, frozen=True):
+class RaBitQSearchResult(msgspec.Struct, frozen=True, kw_only=True):
     node_uid: str
     qualified_name: str
     estimated_ip: float
@@ -38,7 +38,7 @@ class RaBitQSearchResult(msgspec.Struct, frozen=True):
     was_pruned_from_rerank: bool
 
 
-class RaBitQQueryStats(msgspec.Struct, frozen=True):
+class RaBitQQueryStats(msgspec.Struct, frozen=True, kw_only=True):
     results: tuple[RaBitQSearchResult, ...]
     total_candidates: int
     pruned_by_error_bound: int

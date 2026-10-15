@@ -21,14 +21,14 @@ class SandboxCapabilityViolationError(PermissionError):
     """Raised when a checker plugin attempts forbidden host filesystem, socket, or subprocess I/O, or passes unconfined Python."""
 
 
-class WasmSandboxConfig(msgspec.Struct, frozen=True):
+class WasmSandboxConfig(msgspec.Struct, frozen=True, kw_only=True):
     max_instruction_fuel: int = 10_000_000
     allow_filesystem: bool = False
     allow_network: bool = False
     require_wasm_isolation: bool = True
 
 
-class WasmPluginExecutionReport(msgspec.Struct, frozen=True):
+class WasmPluginExecutionReport(msgspec.Struct, frozen=True, kw_only=True):
     plugin_id: str
     plugin_digest: str
     fuel_consumed: int

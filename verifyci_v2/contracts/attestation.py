@@ -18,7 +18,7 @@ VerdictKind = Literal[
 ]
 
 
-class CounterexampleWitness(msgspec.Struct, frozen=True):
+class CounterexampleWitness(msgspec.Struct, frozen=True, kw_only=True):
     """Concrete input assignment extracted from Z3 proving a semantic divergence or defect."""
 
     checker_id: str
@@ -29,7 +29,7 @@ class CounterexampleWitness(msgspec.Struct, frozen=True):
     proof_time_ms: float
 
 
-class CandidateFix(msgspec.Struct, frozen=True):
+class CandidateFix(msgspec.Struct, frozen=True, kw_only=True):
     """Machine-applicable source repair verified in-memory by egglog and Z3."""
 
     file_path: str
@@ -40,7 +40,7 @@ class CandidateFix(msgspec.Struct, frozen=True):
     z3_verified_unsat: bool
 
 
-class VerificationFinding(msgspec.Struct, frozen=True):
+class VerificationFinding(msgspec.Struct, frozen=True, kw_only=True):
     """Canonical verification finding emitted by Layer 5 symbolic and taint engines."""
 
     finding_id: str
@@ -55,7 +55,7 @@ class VerificationFinding(msgspec.Struct, frozen=True):
     fixes: tuple[CandidateFix, ...] = ()
 
 
-class InTotoVerificationPredicate(msgspec.Struct, frozen=True):
+class InTotoVerificationPredicate(msgspec.Struct, frozen=True, kw_only=True):
     """RFC 8785 canonical in-toto v1.0 predicate payload."""
 
     repo_id: str
@@ -69,14 +69,14 @@ class InTotoVerificationPredicate(msgspec.Struct, frozen=True):
     schema_version: str = "verifyci.v2.0"
 
 
-class DSSESignature(msgspec.Struct, frozen=True):
+class DSSESignature(msgspec.Struct, frozen=True, kw_only=True):
     """Dead Simple Signing Envelope (DSSE) cryptographic signature entry."""
 
     keyid: str
     sig: str
 
 
-class DSSEEnvelope(msgspec.Struct, frozen=True):
+class DSSEEnvelope(msgspec.Struct, frozen=True, kw_only=True):
     """Standard DSSE v1.0 envelope wrapping an RFC 8785 canonical in-toto statement."""
 
     payloadType: str
@@ -84,7 +84,7 @@ class DSSEEnvelope(msgspec.Struct, frozen=True):
     signatures: tuple[DSSESignature, ...]
 
 
-class RSLReferenceEntry(msgspec.Struct, frozen=True):
+class RSLReferenceEntry(msgspec.Struct, frozen=True, kw_only=True):
     """Tamper-evident hash-chained Reference State Log (RSL) entry for git ref state."""
 
     entry_id: str

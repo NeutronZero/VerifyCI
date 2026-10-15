@@ -31,7 +31,7 @@ _HUNK_RE = re.compile(r"^@@+ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@+")
 _SNIPPETLESS_TYPES = frozenset({"PARAMETER", "MODULE", "IMPORT", "FILE"})
 
 
-class RemovedLine(msgspec.Struct, frozen=True):
+class RemovedLine(msgspec.Struct, frozen=True, kw_only=True):
     """A removed line with its resolved old-side line number.
 
     The line number must account for preceding context lines in the hunk, so it
@@ -42,14 +42,14 @@ class RemovedLine(msgspec.Struct, frozen=True):
     content: str
 
 
-class Hunk(msgspec.Struct, frozen=True):
+class Hunk(msgspec.Struct, frozen=True, kw_only=True):
     file_path: str
     approximate: bool
     old_start: int
     removed: tuple[RemovedLine, ...]
 
 
-class RemovalProvenance(msgspec.Struct, frozen=True):
+class RemovalProvenance(msgspec.Struct, frozen=True, kw_only=True):
     verdict: str
     verified_lines: int
     fabricated_lines: int

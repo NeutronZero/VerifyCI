@@ -8,6 +8,13 @@ from typing import Sequence
 from verifyci_v2.contracts.canonical import blake3_bytes
 from verifyci_v2.contracts.ssa_ir import FunctionUSSA
 
+try:
+    import model2vec as _model2vec_lib  # type: ignore[import-not-found]
+    _HAS_MODEL2VEC_LIBRARY = True
+except Exception:  # pragma: no cover
+    _model2vec_lib = None
+    _HAS_MODEL2VEC_LIBRARY = False
+
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[^\s\w]")
 
 
@@ -50,7 +57,7 @@ def build_neighborhood_header(
     )
 
 
-class StaticModel2VecEmbedder:
+class OfflineBLAKE3Model2VecEmbedder:
     """
     Zero-GPU, 100% deterministic CPU static token embedding engine modeled after Model2Vec.
     Computes subword-aware static token vectors weighted by inverse-frequency Zipf decay
@@ -116,6 +123,47 @@ class StaticModel2VecEmbedder:
 
     def embed_batch(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
         return tuple(self.embed_one(t) for t in texts)
+
+
+try:
+    from verifyci_v2.store.model2vec_library_embedder import Model2VecLibraryEmbedder
+except Exception:
+    Model2VecLibraryEmbedder = None  # type: ignore[assignment,misc]
+def make_default_model2vec_embedder(dimension: int = 128):
+    if Model2VecLibraryEmbedder is not None and _HAS_MODEL2VEC_LIBRARY:
+        try:
+            return Model2VecLibraryEmbedder(dimension=dimension)
+        except Exception:
+            pass
+    return StaticModel2VecEmbedder(dimension=dimension)
+
+_MODEL2VEC_LOCAL_AVAILABLE = False
+try:
+    if _HAS_MODEL2VEC_LIBRARY and _model2vec_lib is not None:
+        _model2vec_lib.StaticModel.from_pretrained("minishlab/potion-base-8M", local_files_only=True)
+        _MODEL2VEC_LOCAL_AVAILABLE = True
+except Exception:
+    _MODEL2VEC_LOCAL_AVAILABLE = False
+
+class StaticModel2VecEmbedder:
+    def __init__(self, dimension=128, model_id='model2vec-vc2-128d'):
+        if _HAS_MODEL2VEC_LIBRARY and _MODEL2VEC_LOCAL_AVAILABLE:
+            from verifyci_v2.store.model2vec_library_embedder import Model2VecLibraryEmbedder
+            self._impl = Model2VecLibraryEmbedder(dimension=dimension)
+        else:
+            self._impl = OfflineBLAKE3Model2VecEmbedder(dimension=dimension, model_id=model_id)
+
+    @property
+    def dimension(self):
+        if hasattr(self._impl, "dimension"):
+            return self._impl.dimension
+        return len(self._impl.embed_one(""))
+
+    def embed_one(self, text):
+        return self._impl.embed_one(text)
+
+    def embed_batch(self, texts):
+        return self._impl.embed_batch(texts)
 
 
 Model2VecStaticEmbedder = StaticModel2VecEmbedder

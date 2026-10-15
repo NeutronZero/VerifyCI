@@ -1,0 +1,39 @@
+{
+  "experiment_id": "CAP002B",
+  "engine": "verifyci_v2",
+  "status": "passed",
+  "metrics": {
+    "metric_name": "recall",
+    "metric_value": 0.913,
+    "target_threshold": 0.8696,
+    "threshold_basis": "v1_parity",
+    "false_accept_count": 2,
+    "tp": 21.0,
+    "fp": 0.0,
+    "fn": 2.0,
+    "tn": 12.0,
+    "precision": 1.0,
+    "recall": 0.913,
+    "f1_score": 0.9545
+  },
+  "counts": {
+    "cases": 35,
+    "scored": 35,
+    "detail": {
+      "tp": 21,
+      "fp": 0,
+      "fn": 2,
+      "tn": 12
+    }
+  },
+  "not_scored_reason": null,
+  "provenance": {
+    "git_commit": "e187943c273ebd3c5f6798a4852d0685241c95f3",
+    "git_dirty": true,
+    "python_version": "3.14.7",
+    "platform": "Windows-11",
+    "corpus_sha256": "b6c7df17e334f6847453012fe3a05bae82181a31411039f7d724df1a4a0ff65c",
+    "label_sha256": ""
+  },
+  "v1_results_preserved": "66578457c64ab5066e959bb296d9d02e31bb76bc61798e95a9c9a6daa621447a"
+}
