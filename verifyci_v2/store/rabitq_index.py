@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import msgspec
 import heapq
 import math
 import re
-from typing import Sequence
+from typing import Any, Sequence
 
 from verifyci_v2.store.model2vec_embed import StaticModel2VecEmbedder
 
 _WORD_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
-@dataclass(frozen=True, slots=True)
-class RaBitQVectorEntry:
+class RaBitQVectorEntry(msgspec.Struct, frozen=True):
     """
     Stores a 1-bit quantized representation of a D-dimensional unit vector v in {-1/sqrt(D), +1/sqrt(D)}^D
     packed into a Python arbitrary-precision int bitset, along with the exact alignment factor <v, v_bar>
@@ -24,13 +23,12 @@ class RaBitQVectorEntry:
     packed_bits: int
     dimension: int
     alignment_factor: float  # <v, v_bar> in (0, 1]
-    residual_norm: float     # sqrt(max(0, 1 - <v, v_bar>^2))
+    residual_norm: float  # sqrt(max(0, 1 - <v, v_bar>^2))
     coverage_weight: float
     exact_vector: tuple[float, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class RaBitQSearchResult:
+class RaBitQSearchResult(msgspec.Struct, frozen=True):
     node_uid: str
     qualified_name: str
     estimated_ip: float
@@ -40,8 +38,7 @@ class RaBitQSearchResult:
     was_pruned_from_rerank: bool
 
 
-@dataclass(frozen=True, slots=True)
-class RaBitQQueryStats:
+class RaBitQQueryStats(msgspec.Struct, frozen=True):
     results: tuple[RaBitQSearchResult, ...]
     total_candidates: int
     pruned_by_error_bound: int
@@ -102,14 +99,19 @@ class RaBitQHybridIndex:
         self,
         embedder: StaticModel2VecEmbedder | None = None,
         retain_exact_vectors: bool = True,
+        cpg_store: Any | None = None,
     ) -> None:
         self.embedder = embedder or StaticModel2VecEmbedder(dimension=128)
         self.retain_exact_vectors = retain_exact_vectors
+        self.cpg_store = cpg_store
         self._entries: dict[str, RaBitQVectorEntry] = {}
         self._doc_tokens: dict[str, dict[str, int]] = {}
         self._doc_lengths: dict[str, int] = {}
         self._doc_freqs: dict[str, int] = {}
         self._avg_dl: float = 1.0
+        # Corpus statistics are rebuilt lazily: recomputing them on every
+        # upsert makes bulk indexing quadratic in the document count.
+        self._globals_dirty: bool = False
 
     def upsert_document(
         self,
@@ -120,6 +122,8 @@ class RaBitQHybridIndex:
         coverage_hit_freq: float = 0.0,
     ) -> RaBitQVectorEntry:
         unit_vec = self.embedder.embed_one(enriched_text)
+        if self.cpg_store is not None:
+            self.cpg_store.upsert_rabitq_embedding(node_uid, qualified_name, unit_vec)
         cov_weight = 1.0 + math.log1p(max(0.0, coverage_hit_freq))
         entry = quantize_unit_vector_rabitq(
             node_uid=node_uid,
@@ -137,7 +141,7 @@ class RaBitQHybridIndex:
             tf_map[t] = tf_map.get(t, 0) + 1
         self._doc_tokens[node_uid] = tf_map
         self._doc_lengths[node_uid] = max(1, len(tokens))
-        self._recompute_bm25_globals()
+        self._globals_dirty = True
         return entry
 
     def _recompute_bm25_globals(self) -> None:
@@ -149,8 +153,14 @@ class RaBitQHybridIndex:
                 self._doc_freqs[term] = self._doc_freqs.get(term, 0) + 1
         n_docs = len(self._doc_tokens)
         self._avg_dl = (total_len / n_docs) if n_docs > 0 else 1.0
+        self._globals_dirty = False
+
+    def _ensure_globals(self) -> None:
+        if self._globals_dirty:
+            self._recompute_bm25_globals()
 
     def _bm25_score(self, query_terms: list[str], node_uid: str) -> float:
+        self._ensure_globals()
         tf_map = self._doc_tokens.get(node_uid, {})
         if not tf_map:
             return 0.0
@@ -206,7 +216,11 @@ class RaBitQHybridIndex:
             denom = max(1e-4, q_entry.alignment_factor * entry.alignment_factor)
             s_hat = max(-1.0, min(1.0, bar_dot / denom))
             # Analytical concentration error bound epsilon(q, v)
-            eps = confidence_z * inv_sqrt_d * (entry.residual_norm / entry.alignment_factor)
+            eps = (
+                confidence_z
+                * inv_sqrt_d
+                * (entry.residual_norm / entry.alignment_factor)
+            )
             estimates.append((entry, s_hat, eps))
 
         # Sort by upper bound (s_hat + eps) descending
@@ -239,17 +253,19 @@ class RaBitQHybridIndex:
 
         # Pass 3: Fuse with BM25 lexical rankings and coverage weights via Weighted RRF
         q_terms = [w.lower() for w in _WORD_RE.findall(query_text)]
-        bm25_scores = {
-            uid: self._bm25_score(q_terms, uid) for uid in self._entries
-        }
-        bm25_ranked = sorted(bm25_scores.keys(), key=lambda u: bm25_scores[u], reverse=True)
+        bm25_scores = {uid: self._bm25_score(q_terms, uid) for uid in self._entries}
+        bm25_ranked = sorted(
+            bm25_scores.keys(), key=lambda u: bm25_scores[u], reverse=True
+        )
         bm25_rank_map = {uid: rank + 1 for rank, uid in enumerate(bm25_ranked)}
 
         dense_results_sorted = sorted(dense_results, key=lambda x: x[3], reverse=True)
         final_items: list[RaBitQSearchResult] = []
         rrf_k = 60.0
 
-        for dense_rank_idx, (entry, s_hat, eps, exact_ip, was_pruned) in enumerate(dense_results_sorted):
+        for dense_rank_idx, (entry, s_hat, eps, exact_ip, was_pruned) in enumerate(
+            dense_results_sorted
+        ):
             d_rank = dense_rank_idx + 1
             b_rank = bm25_rank_map.get(entry.node_uid, len(self._entries))
             rrf = entry.coverage_weight * (
@@ -267,7 +283,9 @@ class RaBitQHybridIndex:
                 )
             )
 
-        final_items.sort(key=lambda r: (r.hybrid_rrf_score, r.exact_score), reverse=True)
+        final_items.sort(
+            key=lambda r: (r.hybrid_rrf_score, r.exact_score), reverse=True
+        )
         return RaBitQQueryStats(
             results=tuple(final_items[:top_k]),
             total_candidates=len(self._entries),

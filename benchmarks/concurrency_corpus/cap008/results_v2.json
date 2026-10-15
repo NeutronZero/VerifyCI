@@ -1,0 +1,27 @@
+{
+  "experiment_id": "CAP008",
+  "engine": "verifyci_v2",
+  "status": "not_measurable",
+  "metrics": {
+    "metric_name": "not_measurable",
+    "metric_value": null,
+    "target_threshold": 0.0,
+    "threshold_basis": "none",
+    "false_accept_count": 0
+  },
+  "counts": {
+    "cases": 0,
+    "scored": 0,
+    "detail": {}
+  },
+  "not_scored_reason": "corpus expects a multi-process worker-protocol ledger replay; v2 exposes only the static datalog_concurrency_invariants rule",
+  "provenance": {
+    "git_commit": "7bf4774014bd1248c970eee4923e6db8d5b4207c",
+    "git_dirty": true,
+    "python_version": "3.14.7",
+    "platform": "Windows-11",
+    "corpus_sha256": "20dbf666b41a8113c170a3090abdb210d0cfa1bd9f398b6a7f73b57b7986b33f",
+    "label_sha256": "d13aaae9ac132117ee2fe9d7541ad2ef500db34950b29ec47d7bc53bfd033a1f"
+  },
+  "v1_results_preserved": "111684b0979c4af16e6f15ed31844ea4f850257fc409f91fc6ec2acc9d3b8fc3"
+}

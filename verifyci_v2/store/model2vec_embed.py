@@ -57,7 +57,9 @@ class StaticModel2VecEmbedder:
     and projects them onto the unit hypersphere R^D in <0.1ms per function.
     """
 
-    def __init__(self, dimension: int = 128, model_id: str = "model2vec-vc2-static-128d") -> None:
+    def __init__(
+        self, dimension: int = 128, model_id: str = "model2vec-vc2-static-128d"
+    ) -> None:
         if dimension <= 0 or dimension % 8 != 0:
             raise ValueError("Embedding dimension must be a positive multiple of 8")
         self._dimension = dimension

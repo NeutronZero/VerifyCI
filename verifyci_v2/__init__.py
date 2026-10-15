@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import msgspec
 import os
 import tomllib
 from typing import Literal
 
-from verifyci_v2.interface.fastmcp_daemon import IngressBudgetConfig, VerifyCIFastMCPDaemon
+from verifyci_v2.interface.fastmcp_daemon import (
+    IngressBudgetConfig,
+    VerifyCIFastMCPDaemon,
+)
 from verifyci_v2.neural.adapters import (
     DeterministicJudgeAdapter,
     LocalONNXJudgeAdapter,
@@ -15,8 +18,7 @@ from verifyci_v2.neural.adapters import (
 AIProviderKind = Literal["deterministic", "local-onnx", "ollama", "openai-compatible"]
 
 
-@dataclass(frozen=True, slots=True)
-class VerifyCIConfig:
+class VerifyCIConfig(msgspec.Struct, frozen=True):
     """Unified configuration loaded from `.verifyci/config.toml` and `VERIFYCI_*` env vars."""
 
     repo_id: str = "default-repo"
@@ -36,26 +38,44 @@ class VerifyCIConfig:
             with open(config_path, "rb") as fh:
                 raw = tomllib.load(fh)
 
-        engine_cfg = raw.get("engine", {}) if isinstance(raw.get("engine"), dict) else {}
+        engine_cfg = (
+            raw.get("engine", {}) if isinstance(raw.get("engine"), dict) else {}
+        )
         ai_cfg = raw.get("ai", {}) if isinstance(raw.get("ai"), dict) else {}
 
         provider = str(
-            os.environ.get("VERIFYCI_AI_PROVIDER", ai_cfg.get("provider", "deterministic"))
+            os.environ.get(
+                "VERIFYCI_AI_PROVIDER", ai_cfg.get("provider", "deterministic")
+            )
         )
         model = str(
-            os.environ.get("VERIFYCI_AI_MODEL", ai_cfg.get("model", "vc2-deterministic-ast-judge-v2"))
+            os.environ.get(
+                "VERIFYCI_AI_MODEL",
+                ai_cfg.get("model", "vc2-deterministic-ast-judge-v2"),
+            )
         )
         base_url = str(
-            os.environ.get("VERIFYCI_AI_BASE_URL", ai_cfg.get("base_url", "http://localhost:11434/v1"))
+            os.environ.get(
+                "VERIFYCI_AI_BASE_URL",
+                ai_cfg.get("base_url", "http://localhost:11434/v1"),
+            )
         )
         api_key = os.environ.get("VERIFYCI_AI_API_KEY")
         alpha = float(
-            os.environ.get("VERIFYCI_CONFORMAL_ALPHA", ai_cfg.get("conformal_alpha", 0.02))
+            os.environ.get(
+                "VERIFYCI_CONFORMAL_ALPHA", ai_cfg.get("conformal_alpha", 0.02)
+            )
         )
         smt_timeout = int(
-            os.environ.get("VERIFYCI_SMT_TIMEOUT_MS", engine_cfg.get("smt_timeout_ms", 2000))
+            os.environ.get(
+                "VERIFYCI_SMT_TIMEOUT_MS", engine_cfg.get("smt_timeout_ms", 2000)
+            )
         )
-        repo_id = str(os.environ.get("VERIFYCI_REPO_ID", engine_cfg.get("repo_id", "default-repo")))
+        repo_id = str(
+            os.environ.get(
+                "VERIFYCI_REPO_ID", engine_cfg.get("repo_id", "default-repo")
+            )
+        )
 
         return cls(
             repo_id=repo_id,
@@ -66,12 +86,16 @@ class VerifyCIConfig:
             ai_base_url=base_url,
             ai_api_key=api_key,
             conformal_alpha=alpha,
-            redact_secrets_before_egress=bool(ai_cfg.get("redact_secrets_before_egress", True)),
+            redact_secrets_before_egress=bool(
+                ai_cfg.get("redact_secrets_before_egress", True)
+            ),
         )
 
     def build_judge(
         self,
-    ) -> DeterministicJudgeAdapter | LocalONNXJudgeAdapter | OpenAICompatibleJudgeAdapter:
+    ) -> (
+        DeterministicJudgeAdapter | LocalONNXJudgeAdapter | OpenAICompatibleJudgeAdapter
+    ):
         if self.ai_provider == "local-onnx":
             return LocalONNXJudgeAdapter(model_id=self.ai_model)
         if self.ai_provider in ("ollama", "openai-compatible"):

@@ -1,51 +1,21 @@
-#!/usr/bin/env python3
-"""CAP-002 held-out measurement: verifier vs frozen-labeled new corpus.
+"""Measure cap002_heldout against the frozen corpus using the VerifyCI v2 engine.
 
-Reads cap002_heldout/cases.jsonl (frozen BEFORE any run), ingests the
-shared frozen base/, runs run_verify per case, writes results.json in the
-revision dir. Frozen v1 artifacts untouched. Fails closed on missing corpus.
+v1 drove this capability through `verifyci.*` modules that no longer exist;
+the original harness is preserved in git history. The measurement itself lives
+in `benchmarks/common/measure_v2.py` and is shared across capabilities so the
+per-capability scripts cannot drift apart.
+
+Exit codes: 0 pass, 1 fail, 2 not measurable against frozen ground truth.
 """
+
 from __future__ import annotations
 
-import hashlib
-import json
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-
-def main() -> None:
-    import measure as m
-
-    cases_path = HERE / "cases.jsonl"
-    if not cases_path.exists():
-        raise SystemExit("held-out corpus not frozen: run author_v2.py first")
-    new_cases = [json.loads(line) for line in
-                 cases_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    table = m.run(new_cases)
-    for t, c in zip(table, new_cases):
-        t["expected"] = c["expected_status"]
-    metrics = m.compute_metrics(table)
-    print(f"{'id':22}{'expected':14}{'status':14}rationale")
-    for t in table:
-        flag = "" if t["status"] == t["expected"] else "   <-- differs"
-        print(f"{t['id']:22}{t['expected']:14}{t['status']:14}{t['rationale'][:40]}{flag}")
-    print("\nmetrics:", json.dumps({k: (dict(v) if not isinstance(v, (str, int, float, list, type(None))) else v)
-                                   for k, v in metrics.items()}, indent=1, default=str))
-    report = {"frozen": {"cases_sha256": hashlib.sha256(
-                cases_path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()[:16]},
-              "verdicts": table,
-              "metrics": {k: (dict(v) if not isinstance(v, (str, int, float, list, type(None))) else v)
-                          for k, v in metrics.items()}}
-    out = HERE / "results.json"
-    out.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
-    print(f"\nreport -> {out}")
-
+from benchmarks.common.measure_v2 import main
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main("cap002_heldout"))

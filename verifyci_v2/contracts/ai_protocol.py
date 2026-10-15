@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import msgspec
 from typing import Any, Literal, Protocol, Sequence
 
 
 GrammarValidationMode = Literal["post_hoc_schema", "token_cfg_mask"]
 
 
-@dataclass(frozen=True, slots=True)
-class BooleanJudgment:
+class BooleanJudgment(msgspec.Struct, frozen=True):
     """Calibrated System 1 boolean judgment (Noul equivalent)."""
 
     verdict: bool
@@ -17,8 +16,7 @@ class BooleanJudgment:
     validation_mode: GrammarValidationMode = "post_hoc_schema"
 
 
-@dataclass(frozen=True, slots=True)
-class CategoricalChoice:
+class CategoricalChoice(msgspec.Struct, frozen=True):
     """Calibrated probability distribution over predeclared categorical options."""
 
     selected: str
@@ -26,8 +24,7 @@ class CategoricalChoice:
     confidence: float
 
 
-@dataclass(frozen=True, slots=True)
-class OrdinalScore:
+class OrdinalScore(msgspec.Struct, frozen=True):
     """Calibrated ordinal severity or relevance score."""
 
     level: str
@@ -35,8 +32,7 @@ class OrdinalScore:
     confidence: float
 
 
-@dataclass(frozen=True, slots=True)
-class ConformalProfile:
+class ConformalProfile(msgspec.Struct, frozen=True):
     """Empirical Split Conformal Prediction profile calibrated on held-out corpora."""
 
     model_id: str
@@ -49,8 +45,7 @@ class ConformalProfile:
     defect_sample_size: int = 0
 
 
-@dataclass(frozen=True, slots=True)
-class CalibratedDecision:
+class CalibratedDecision(msgspec.Struct, frozen=True):
     """Result of applying the Split Conformal Prediction gate to a System 1 judgment."""
 
     prediction_set: tuple[str, ...]
@@ -60,8 +55,7 @@ class CalibratedDecision:
     escalate_to_smt: bool
 
 
-@dataclass(frozen=True, slots=True)
-class ModelAttestationRecord:
+class ModelAttestationRecord(msgspec.Struct, frozen=True):
     """Cryptographic attestation of the BYO-AI provider, weights, and conformal profile."""
 
     provider_name: str
@@ -93,9 +87,13 @@ class DiscriminativeJudgeProtocol(Protocol):
     @property
     def model_id(self) -> str: ...
 
-    def attestation(self, conformal_hash: str | None = None) -> ModelAttestationRecord: ...
+    def attestation(
+        self, conformal_hash: str | None = None
+    ) -> ModelAttestationRecord: ...
 
-    def judge_boolean(self, state: dict[str, Any], question: str) -> BooleanJudgment: ...
+    def judge_boolean(
+        self, state: dict[str, Any], question: str
+    ) -> BooleanJudgment: ...
 
     def judge_choice(
         self,

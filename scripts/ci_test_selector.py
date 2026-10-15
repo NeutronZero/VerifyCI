@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Change-aware test selector with invariant fail-closed guarantee."""
+
 from __future__ import annotations
 
 import re
@@ -18,14 +19,38 @@ SAFE_TEST_DIR_RE = re.compile(r"tests/(?:[A-Za-z0-9_.-]+/)*")
 
 # Source path to test directory mapping
 PATH_MAPPING = {
-    "verifyci_v2/contracts/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
-    "verifyci_v2/ingestion/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
-    "verifyci_v2/symbolic/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
-    "verifyci_v2/neural/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
-    "verifyci_v2/store/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
-    "verifyci_v2/sandbox/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
-    "verifyci_v2/provenance/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
-    "verifyci_v2/interface/": ["tests/v2/test_all_layers.py", "tests/v2/test_remediation_spec.py"],
+    "verifyci_v2/contracts/": [
+        "tests/v2/test_all_layers.py",
+        "tests/v2/test_remediation_spec.py",
+    ],
+    "verifyci_v2/ingestion/": [
+        "tests/v2/test_all_layers.py",
+        "tests/v2/test_remediation_spec.py",
+    ],
+    "verifyci_v2/symbolic/": [
+        "tests/v2/test_all_layers.py",
+        "tests/v2/test_remediation_spec.py",
+    ],
+    "verifyci_v2/neural/": [
+        "tests/v2/test_all_layers.py",
+        "tests/v2/test_remediation_spec.py",
+    ],
+    "verifyci_v2/store/": [
+        "tests/v2/test_all_layers.py",
+        "tests/v2/test_remediation_spec.py",
+    ],
+    "verifyci_v2/sandbox/": [
+        "tests/v2/test_all_layers.py",
+        "tests/v2/test_remediation_spec.py",
+    ],
+    "verifyci_v2/provenance/": [
+        "tests/v2/test_all_layers.py",
+        "tests/v2/test_remediation_spec.py",
+    ],
+    "verifyci_v2/interface/": [
+        "tests/v2/test_all_layers.py",
+        "tests/v2/test_remediation_spec.py",
+    ],
     "verifyci_v2/": ["tests/v2/"],
     "benchmarks/": ["tests/v2/"],
 }
@@ -49,8 +74,11 @@ def get_changed_files(base_ref: str = "origin/main") -> list[str]:
     ):
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            lines = [line.strip().split()[-1].replace("\\", "/")
-                     for line in res.stdout.splitlines() if line.strip()]
+            lines = [
+                line.strip().split()[-1].replace("\\", "/")
+                for line in res.stdout.splitlines()
+                if line.strip()
+            ]
             if lines:
                 return lines
         except Exception:

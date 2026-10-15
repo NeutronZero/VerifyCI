@@ -41,6 +41,7 @@ def _module_prefix_from_path(file_path: str) -> str:
 def _strip_comments_and_strings(src: str) -> str:
     def repl(m: re.Match[str]) -> str:
         return "\n" * m.group(0).count("\n")
+
     src = re.sub(r"/\*.*?\*/", repl, src, flags=re.DOTALL)
     src = re.sub(r"//[^\n]*", "", src)
     src = re.sub(r'"(?:\\.|[^"\\])*"', '""', src)
@@ -49,7 +50,9 @@ def _strip_comments_and_strings(src: str) -> str:
     return src
 
 
-def build_file_stack_graph(file_path: str, source: str, language: str = "python") -> FileStackGraph:
+def build_file_stack_graph(
+    file_path: str, source: str, language: str = "python"
+) -> FileStackGraph:
     """Computes a per-file scope graph with PUSH_SYMBOL and POP_SYMBOL nodes in isolation."""
     file_xxh3 = xxh3_64_hex(source)
     mod_prefix = _module_prefix_from_path(file_path)
@@ -82,7 +85,8 @@ def build_file_stack_graph(file_path: str, source: str, language: str = "python"
                             explicit_exports = {
                                 elt.value
                                 for elt in stmt.value.elts
-                                if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+                                if isinstance(elt, ast.Constant)
+                                and isinstance(elt.value, str)
                             }
 
         for node in ast.walk(tree):
@@ -118,7 +122,9 @@ def build_file_stack_graph(file_path: str, source: str, language: str = "python"
                         is_exported=is_exp,
                     )
                 )
-                edges.append(StackGraphEdge(src_id=root_id, dst_id=pop_id, precedence=1))
+                edges.append(
+                    StackGraphEdge(src_id=root_id, dst_id=pop_id, precedence=1)
+                )
                 defined.append(qname)
 
                 for child in ast.walk(stmt):
@@ -133,9 +139,7 @@ def build_file_stack_graph(file_path: str, source: str, language: str = "python"
                                 callee_name = child.func.attr
                         if callee_name:
                             referenced.add(callee_name)
-                            push_id = (
-                                f"{file_path}::PUSH::{qname}::{callee_name}::{getattr(child, 'lineno', stmt.lineno)}"
-                            )
+                            push_id = f"{file_path}::PUSH::{qname}::{callee_name}::{getattr(child, 'lineno', stmt.lineno)}"
                             nodes.append(
                                 StackGraphNode(
                                     node_id=push_id,
@@ -147,7 +151,11 @@ def build_file_stack_graph(file_path: str, source: str, language: str = "python"
                                     is_exported=False,
                                 )
                             )
-                            edges.append(StackGraphEdge(src_id=pop_id, dst_id=push_id, precedence=1))
+                            edges.append(
+                                StackGraphEdge(
+                                    src_id=pop_id, dst_id=push_id, precedence=1
+                                )
+                            )
     else:
         # Polyglot extraction for TypeScript/JS and C/C++
         clean_source = _strip_comments_and_strings(source)
@@ -186,7 +194,9 @@ def build_file_stack_graph(file_path: str, source: str, language: str = "python"
 
             body_start = match.end()
             body_end = (
-                func_matches[idx + 1].start() if idx + 1 < len(func_matches) else len(source)
+                func_matches[idx + 1].start()
+                if idx + 1 < len(func_matches)
+                else len(source)
             )
             body_slice = source[body_start:body_end]
             for call_match in _GENERIC_CALL_RE.finditer(body_slice):
@@ -207,7 +217,9 @@ def build_file_stack_graph(file_path: str, source: str, language: str = "python"
                         is_exported=False,
                     )
                 )
-                edges.append(StackGraphEdge(src_id=pop_id, dst_id=push_id, precedence=1))
+                edges.append(
+                    StackGraphEdge(src_id=pop_id, dst_id=push_id, precedence=1)
+                )
 
     return FileStackGraph(
         file_path=file_path,
@@ -232,7 +244,9 @@ class StackGraphStitcher:
         self._callees_of: dict[str, set[str]] = {}
         self._unresolved_references: list[dict[str, Any]] = []
 
-    def upsert_file(self, file_path: str, source: str, language: str = "python") -> bool:
+    def upsert_file(
+        self, file_path: str, source: str, language: str = "python"
+    ) -> bool:
         """Updates a file's stack graph only if its XXH3 digest changed. Returns True if recomputed."""
         new_xxh3 = xxh3_64_hex(source)
         existing = self._file_graphs.get(file_path)
@@ -259,7 +273,9 @@ class StackGraphStitcher:
         for f_path, fsg in self._file_graphs.items():
             for node in fsg.nodes:
                 if node.kind == "POP_SYMBOL":
-                    self._symbol_to_qnames.setdefault(node.symbol, set()).add(node.qualified_name)
+                    self._symbol_to_qnames.setdefault(node.symbol, set()).add(
+                        node.qualified_name
+                    )
                     self._qname_to_file[node.qualified_name] = f_path
 
         for f_path, fsg in self._file_graphs.items():
@@ -275,15 +291,21 @@ class StackGraphStitcher:
                     )
                     if resolved:
                         for target_qname in resolved:
-                            self._callees_of.setdefault(caller_qname, set()).add(target_qname)
-                            self._callers_of.setdefault(target_qname, set()).add(caller_qname)
+                            self._callees_of.setdefault(caller_qname, set()).add(
+                                target_qname
+                            )
+                            self._callers_of.setdefault(target_qname, set()).add(
+                                caller_qname
+                            )
                     else:
-                        self._unresolved_references.append({
-                            "caller_qname": caller_qname,
-                            "symbol": node.symbol,
-                            "file_path": f_path,
-                            "line": node.line,
-                        })
+                        self._unresolved_references.append(
+                            {
+                                "caller_qname": caller_qname,
+                                "symbol": node.symbol,
+                                "file_path": f_path,
+                                "line": node.line,
+                            }
+                        )
 
     def get_unresolved_references(self) -> tuple[dict[str, Any], ...]:
         """Returns all unresolved PUSH_SYMBOL references across all loaded file stack graphs."""
@@ -307,7 +329,11 @@ class StackGraphStitcher:
             if imported_target in self._qname_to_file:
                 return (imported_target,)
             # Check if imported_target matches any known qualified name exactly
-            matching = [qn for qn in self._qname_to_file if qn == imported_target or qn.endswith(f".{imported_target}")]
+            matching = [
+                qn
+                for qn in self._qname_to_file
+                if qn == imported_target or qn.endswith(f".{imported_target}")
+            ]
             if len(matching) == 1:
                 return (matching[0],)
             return tuple(sorted(matching))

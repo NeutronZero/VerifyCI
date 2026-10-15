@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+import msgspec
 import json
 from pathlib import Path
 import subprocess
 import time
 
-from verifyci_v2.contracts.attestation import DSSEEnvelope, DSSESignature, RSLReferenceEntry
+from verifyci_v2.contracts.attestation import (
+    DSSEEnvelope,
+    DSSESignature,
+    RSLReferenceEntry,
+)
 from verifyci_v2.contracts.canonical import canonical_digest, canonical_jcs_str
 
 
@@ -41,11 +45,15 @@ class GittufRSLLedger:
     def _load_from_repo(self) -> None:
         assert self.repo_path is not None
         rsl_file, notes_file = self._get_storage_paths()
-        
+
         # Load RSL entries from persistent journal or git ref
         rsl_lines: list[str] = []
         if rsl_file.exists():
-            rsl_lines = [line_str.strip() for line_str in rsl_file.read_text(encoding="utf-8").splitlines() if line_str.strip()]
+            rsl_lines = [
+                line_str.strip()
+                for line_str in rsl_file.read_text(encoding="utf-8").splitlines()
+                if line_str.strip()
+            ]
         elif (self.repo_path / ".git").exists():
             # Try reading directly from git blob ref
             try:
@@ -57,7 +65,11 @@ class GittufRSLLedger:
                     check=False,
                 )
                 if proc.returncode == 0 and proc.stdout.strip():
-                    rsl_lines = [line_str.strip() for line_str in proc.stdout.splitlines() if line_str.strip()]
+                    rsl_lines = [
+                        line_str.strip()
+                        for line_str in proc.stdout.splitlines()
+                        if line_str.strip()
+                    ]
             except Exception:
                 pass
 
@@ -65,7 +77,11 @@ class GittufRSLLedger:
         legacy_rsl = self.repo_path / ".git" / "refs" / "gittuf" / "reference-state-log"
         if not rsl_lines and legacy_rsl.exists():
             try:
-                rsl_lines = [line_str.strip() for line_str in legacy_rsl.read_text(encoding="utf-8").splitlines() if line_str.strip()]
+                rsl_lines = [
+                    line_str.strip()
+                    for line_str in legacy_rsl.read_text(encoding="utf-8").splitlines()
+                    if line_str.strip()
+                ]
             except Exception:
                 pass
 
@@ -86,12 +102,22 @@ class GittufRSLLedger:
         # Load notes from journal
         notes_lines: list[str] = []
         if notes_file.exists():
-            notes_lines = [line_str.strip() for line_str in notes_file.read_text(encoding="utf-8").splitlines() if line_str.strip()]
+            notes_lines = [
+                line_str.strip()
+                for line_str in notes_file.read_text(encoding="utf-8").splitlines()
+                if line_str.strip()
+            ]
         else:
             legacy_notes = self.repo_path / ".git" / "refs" / "notes" / "verifyci"
             if legacy_notes.exists():
                 try:
-                    notes_lines = [line_str.strip() for line_str in legacy_notes.read_text(encoding="utf-8").splitlines() if line_str.strip()]
+                    notes_lines = [
+                        line_str.strip()
+                        for line_str in legacy_notes.read_text(
+                            encoding="utf-8"
+                        ).splitlines()
+                        if line_str.strip()
+                    ]
                 except Exception:
                     pass
 
@@ -147,11 +173,11 @@ class GittufRSLLedger:
         if self.repo_path:
             rsl_file, notes_file = self._get_storage_paths()
             with open(rsl_file, "a", encoding="utf-8") as f:
-                f.write(canonical_jcs_str(asdict(entry)) + "\n")
+                f.write(canonical_jcs_str(msgspec.to_builtins(entry)) + "\n")
 
             note_record = {
                 "target_commit_sha": target_commit_sha,
-                "envelope": asdict(dsse_envelope),
+                "envelope": msgspec.to_builtins(dsse_envelope),
             }
             with open(notes_file, "a", encoding="utf-8") as f:
                 f.write(canonical_jcs_str(note_record) + "\n")
@@ -171,7 +197,12 @@ class GittufRSLLedger:
                     if blob_proc.returncode == 0:
                         blob_sha = blob_proc.stdout.decode("ascii").strip()
                         update_proc = subprocess.run(
-                            ["git", "update-ref", "refs/gittuf/reference-state-log", blob_sha],
+                            [
+                                "git",
+                                "update-ref",
+                                "refs/gittuf/reference-state-log",
+                                blob_sha,
+                            ],
                             cwd=str(self.repo_path),
                             capture_output=True,
                             check=False,
@@ -184,15 +215,31 @@ class GittufRSLLedger:
                         # Check if target_commit_sha exists in git object database
                         if not target_commit_sha.startswith("-"):
                             cat_proc = subprocess.run(
-                                ["git", "cat-file", "-e", f"{target_commit_sha}^{{commit}}"],
+                                [
+                                    "git",
+                                    "cat-file",
+                                    "-e",
+                                    f"{target_commit_sha}^{{commit}}",
+                                ],
                                 cwd=str(self.repo_path),
                                 capture_output=True,
                                 check=False,
                             )
                             if cat_proc.returncode == 0:
-                                env_json = canonical_jcs_str(asdict(dsse_envelope))
+                                env_json = canonical_jcs_str(msgspec.to_builtins(dsse_envelope))
                                 note_proc = subprocess.run(
-                                    ["git", "notes", "--ref", "refs/notes/verifyci", "add", "-f", "-F", "-", "--", target_commit_sha],
+                                    [
+                                        "git",
+                                        "notes",
+                                        "--ref",
+                                        "refs/notes/verifyci",
+                                        "add",
+                                        "-f",
+                                        "-F",
+                                        "-",
+                                        "--",
+                                        target_commit_sha,
+                                    ],
                                     input=env_json.encode("utf-8"),
                                     cwd=str(self.repo_path),
                                     capture_output=True,
@@ -233,7 +280,9 @@ class GittufRSLLedger:
                 domain="verifyci.v2.gittuf.rsl",
             )
             if recomputed != entry.entry_id:
-                raise RSLTamperDetectedError(f"RSL entry digest tampered: {entry.entry_id}")
+                raise RSLTamperDetectedError(
+                    f"RSL entry digest tampered: {entry.entry_id}"
+                )
             prev_id = entry.entry_id
 
         if expected_head_commit is not None:

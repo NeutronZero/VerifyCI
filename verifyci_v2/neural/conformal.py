@@ -121,7 +121,11 @@ def calibrate_judge_on_dataset(
             p_safe_on_defect = dist.get(safe_label, 0.0)
             defect_safe_probs.append(p_safe_on_defect)
 
-    q_hat = compute_conformal_quantile(general_scores, alpha=alpha) if general_scores else 1.0
+    q_hat = (
+        compute_conformal_quantile(general_scores, alpha=alpha)
+        if general_scores
+        else 1.0
+    )
 
     m = len(defect_safe_probs)
     if not is_calibrated or m < 10:

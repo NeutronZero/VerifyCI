@@ -55,7 +55,9 @@ def test_layer4_duckdb_temporal_as_of_and_rabitq_pruning() -> None:
         fn_src = f"def helper_{i}(x: int) -> int:\n    return x + {i}\n"
         fn_ussa = lower_file_to_ussa(f"src/mod_{i}.py", fn_src)[0]
         hdr = build_neighborhood_header(fn_ussa, callers=[f"caller_{i}"], callees=[])
-        index.upsert_document(fn_ussa.node_uid, fn_ussa.qualified_name, hdr, coverage_hit_freq=float(i))
+        index.upsert_document(
+            fn_ussa.node_uid, fn_ussa.qualified_name, hdr, coverage_hit_freq=float(i)
+        )
 
     stats = index.search("def helper_39 caller_39", top_k=3, confidence_z=0.5)
     assert len(stats.results) == 3
@@ -144,7 +146,10 @@ def transfer(sender: int, receiver: int) -> int:
     assert finding.rule_id == "VC2-CAP004-CALL-SWAP"
     assert finding.witness is not None
     assert finding.witness.smt_status == "SAT"
-    assert finding.witness.input_assignments["sender"] != finding.witness.input_assignments["receiver"]
+    assert (
+        finding.witness.input_assignments["sender"]
+        != finding.witness.input_assignments["receiver"]
+    )
 
     # Synthesize and Z3-verify auto-repair via CEGIS!
     repaired = cegis.repair_finding(
@@ -212,12 +217,16 @@ def test_login():
 
 
 def test_layer7_wasm_sandbox_intoto_dsse_and_gittuf_rsl() -> None:
-    sandbox = WasmCheckerSandbox(WasmSandboxConfig(max_instruction_fuel=2000, require_wasm_isolation=False))
+    sandbox = WasmCheckerSandbox(
+        WasmSandboxConfig(max_instruction_fuel=2000, require_wasm_isolation=False)
+    )
     fns = lower_file_to_ussa("src/a.py", "def f(x: int) -> int:\n    return x + 1\n")
 
     # Forbidden host I/O capability in plugin source must be rejected
     with pytest.raises(SandboxCapabilityViolationError):
-        sandbox.register_plugin("evil_plugin", "import os; os.system('rm -rf /')", lambda _fns: [])
+        sandbox.register_plugin(
+            "evil_plugin", "import os; os.system('rm -rf /')", lambda _fns: []
+        )
 
     # Valid read-only checker plugin
     sandbox.register_plugin("noop_plugin", "def check(fns): return []", lambda _fns: [])
@@ -226,8 +235,12 @@ def test_layer7_wasm_sandbox_intoto_dsse_and_gittuf_rsl() -> None:
     assert report.findings == ()
 
     # Exhaust fuel limit on tiny budget
-    tight_sandbox = WasmCheckerSandbox(WasmSandboxConfig(max_instruction_fuel=100, require_wasm_isolation=False))
-    tight_sandbox.register_plugin("tight_plugin", "def check(fns): return []", lambda _fns: [])
+    tight_sandbox = WasmCheckerSandbox(
+        WasmSandboxConfig(max_instruction_fuel=100, require_wasm_isolation=False)
+    )
+    tight_sandbox.register_plugin(
+        "tight_plugin", "def check(fns): return []", lambda _fns: []
+    )
     with pytest.raises(SandboxFuelExhaustedError):
         tight_sandbox.execute_plugin("tight_plugin", fns)
 
@@ -250,9 +263,16 @@ def test_layer7_wasm_sandbox_intoto_dsse_and_gittuf_rsl() -> None:
 
     # Test gittuf Reference State Log hash chain & rollback detection
     daemon = VerifyCIFastMCPDaemon(repo_id="rsl-repo")
-    anchor_1 = daemon.invoke_tool("vc_anchor_attestation", {"head_commit_sha": "commit_111"})
-    anchor_2 = daemon.invoke_tool("vc_anchor_attestation", {"head_commit_sha": "commit_222"})
-    assert anchor_2["data"]["rsl_entry"]["parent_entry_id"] == anchor_1["data"]["rsl_entry"]["entry_id"]
+    anchor_1 = daemon.invoke_tool(
+        "vc_anchor_attestation", {"head_commit_sha": "commit_111"}
+    )
+    anchor_2 = daemon.invoke_tool(
+        "vc_anchor_attestation", {"head_commit_sha": "commit_222"}
+    )
+    assert (
+        anchor_2["data"]["rsl_entry"]["parent_entry_id"]
+        == anchor_1["data"]["rsl_entry"]["entry_id"]
+    )
     assert daemon.rsl.verify_rsl_lineage(expected_head_commit="commit_222") is True
 
     with pytest.raises(RSLTamperDetectedError):
@@ -311,3 +331,58 @@ def apply_discount(total: int, discount: int) -> int:
     assert adj_resp["all_passed"] is True
     assert adj_resp["total_capabilities"] == 15
     assert adj_resp["passed_count"] == 15
+
+
+def test_extended_dfg_taint_and_euf_and_egglog_rules() -> None:
+    from verifyci_v2.symbolic.egglog_engine import _canonicalize_sexpr
+    from verifyci_v2.symbolic.secrets_taint import TaintTrackedSecretEngine
+    from verifyci_v2.symbolic.z3_prover import _evaluate_concrete_divergence
+
+    # 1. Transitive DFG taint propagation through dict interpolation to sink
+    engine = TaintTrackedSecretEngine()
+    code_dict = """
+def post_token():
+    secret_tok = "tok_live_1234567890abcdef"
+    payload = {"Authorization": secret_tok}
+    requests.post("https://api.stripe.com", json=payload)
+"""
+    findings = engine.scan_python_source("src/net.py", code_dict)
+    assert len(findings) == 1
+    assert findings[0].severity == "CRITICAL"
+    assert "flows into active I/O sink" in findings[0].message
+
+    # 2. Transitive DFG taint propagation through f-strings
+    code_fstr = """
+def log_token():
+    raw_key = "tok_live_1234567890abcdef"
+    msg = f"Bearer {raw_key}"
+    logger.info(msg)
+"""
+    fstr_findings = engine.scan_python_source("src/logger.py", code_fstr)
+    assert len(fstr_findings) == 1
+    assert fstr_findings[0].severity == "CRITICAL"
+
+    # 3. Z3 EUF symbolic divergence without exec()
+    base_src = "def call_fn(a: int, b: int) -> int:\n    return wire(a, b)\n"
+    head_src = "def call_fn(a: int, b: int) -> int:\n    return wire(b, a)\n"
+    diverges = _evaluate_concrete_divergence(
+        base_src, head_src, "call_fn", ("a", "b"), {"a": 1, "b": 2}
+    )
+    assert diverges is True
+
+    # When inputs are identical under EUF congruence closure, no divergence
+    same = _evaluate_concrete_divergence(
+        base_src, head_src, "call_fn", ("a", "b"), {"a": 5, "b": 5}
+    )
+    assert same is False
+
+    # 4. Egglog rewrite rules for Sub and Boolean idempotence
+    rw: list[str] = []
+    assert _canonicalize_sexpr("(Sub x 0)", rw) == "x"
+    assert _canonicalize_sexpr("(Sub x x)", rw) == "0"
+    assert _canonicalize_sexpr("(And x x)", rw) == "x"
+    assert _canonicalize_sexpr("(Or x x)", rw) == "x"
+    assert "sub_zero_identity" in rw
+    assert "sub_self_annihilation" in rw
+    assert "idempotent_And" in rw
+    assert "idempotent_Or" in rw

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import msgspec
 from typing import Literal
 
-SMTStatus = Literal["SAT", "UNSAT", "UNKNOWN", "SOLVER_UNAVAILABLE", "UNVERIFIED_HEURISTIC"]
+SMTStatus = Literal[
+    "SAT", "UNSAT", "UNKNOWN", "SOLVER_UNAVAILABLE", "UNVERIFIED_HEURISTIC"
+]
 SeverityLevel = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 VerdictKind = Literal[
     "PASS",
@@ -16,8 +18,7 @@ VerdictKind = Literal[
 ]
 
 
-@dataclass(frozen=True, slots=True)
-class CounterexampleWitness:
+class CounterexampleWitness(msgspec.Struct, frozen=True):
     """Concrete input assignment extracted from Z3 proving a semantic divergence or defect."""
 
     checker_id: str
@@ -28,8 +29,7 @@ class CounterexampleWitness:
     proof_time_ms: float
 
 
-@dataclass(frozen=True, slots=True)
-class CandidateFix:
+class CandidateFix(msgspec.Struct, frozen=True):
     """Machine-applicable source repair verified in-memory by egglog and Z3."""
 
     file_path: str
@@ -40,8 +40,7 @@ class CandidateFix:
     z3_verified_unsat: bool
 
 
-@dataclass(frozen=True, slots=True)
-class VerificationFinding:
+class VerificationFinding(msgspec.Struct, frozen=True):
     """Canonical verification finding emitted by Layer 5 symbolic and taint engines."""
 
     finding_id: str
@@ -56,8 +55,7 @@ class VerificationFinding:
     fixes: tuple[CandidateFix, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
-class InTotoVerificationPredicate:
+class InTotoVerificationPredicate(msgspec.Struct, frozen=True):
     """RFC 8785 canonical in-toto v1.0 predicate payload."""
 
     repo_id: str
@@ -71,16 +69,14 @@ class InTotoVerificationPredicate:
     schema_version: str = "verifyci.v2.0"
 
 
-@dataclass(frozen=True, slots=True)
-class DSSESignature:
+class DSSESignature(msgspec.Struct, frozen=True):
     """Dead Simple Signing Envelope (DSSE) cryptographic signature entry."""
 
     keyid: str
     sig: str
 
 
-@dataclass(frozen=True, slots=True)
-class DSSEEnvelope:
+class DSSEEnvelope(msgspec.Struct, frozen=True):
     """Standard DSSE v1.0 envelope wrapping an RFC 8785 canonical in-toto statement."""
 
     payloadType: str
@@ -88,8 +84,7 @@ class DSSEEnvelope:
     signatures: tuple[DSSESignature, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class RSLReferenceEntry:
+class RSLReferenceEntry(msgspec.Struct, frozen=True):
     """Tamper-evident hash-chained Reference State Log (RSL) entry for git ref state."""
 
     entry_id: str

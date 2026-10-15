@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import msgspec
 
 from verifyci_v2.contracts.ssa_ir import CutoffEvaluation, FunctionUSSA
 from verifyci_v2.ingestion.polyglot_bridge import PolyglotBridgeResolver
@@ -8,8 +8,7 @@ from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
 from verifyci_v2.ingestion.stack_graphs import StackGraphStitcher
 
 
-@dataclass(frozen=True, slots=True)
-class IncrementalIngestionPlan:
+class IncrementalIngestionPlan(msgspec.Struct, frozen=True):
     file_path: str
     evaluations: tuple[CutoffEvaluation, ...]
     functions_to_verify_locally: tuple[str, ...]
@@ -37,9 +36,7 @@ class SalsaIncrementalEngine:
         return self._ussa_by_qname.get(qualified_name)
 
     def all_functions(self) -> tuple[FunctionUSSA, ...]:
-        return tuple(
-            self._ussa_by_qname[k] for k in sorted(self._ussa_by_qname.keys())
-        )
+        return tuple(self._ussa_by_qname[k] for k in sorted(self._ussa_by_qname.keys()))
 
     def evaluate_function_mutation(self, new_func: FunctionUSSA) -> CutoffEvaluation:
         """Evaluates the 3-Case Salsa Early-Cutoff state machine for a single function."""
@@ -121,7 +118,11 @@ class SalsaIncrementalEngine:
         removed_qnames = sorted(old_qnames - new_qnames)
 
         # Pre-compute transitive callers of removed functions before re-indexing
-        pre_removed_callers = self.stitcher.transitive_blast_radius(removed_qnames) if removed_qnames else ()
+        pre_removed_callers = (
+            self.stitcher.transitive_blast_radius(removed_qnames)
+            if removed_qnames
+            else ()
+        )
 
         self.stitcher.upsert_file(file_path, source, language=language)
         self.bridge_resolver.scan_file(file_path, source, language=language)
@@ -151,15 +152,29 @@ class SalsaIncrementalEngine:
 
         self._file_to_qnames[file_path] = new_qnames
 
-        type_and_taint_callers = tuple(sorted(set(self.stitcher.transitive_blast_radius(interface_changed_seeds)) | set(pre_removed_callers)))
+        type_and_taint_callers = tuple(
+            sorted(
+                set(self.stitcher.transitive_blast_radius(interface_changed_seeds))
+                | set(pre_removed_callers)
+            )
+        )
         semantic_seeds = sorted(set(interface_changed_seeds) | set(cutoff_saved_seeds))
-        semantic_value_callers = tuple(sorted(set(self.stitcher.transitive_blast_radius(semantic_seeds)) | set(pre_removed_callers)))
+        semantic_value_callers = tuple(
+            sorted(
+                set(self.stitcher.transitive_blast_radius(semantic_seeds))
+                | set(pre_removed_callers)
+            )
+        )
 
         potentially_affected_by_cutoff = set(
             self.stitcher.transitive_blast_radius(cutoff_saved_seeds)
         )
         skipped_callers = tuple(
-            sorted(potentially_affected_by_cutoff - set(type_and_taint_callers) - set(local_verify))
+            sorted(
+                potentially_affected_by_cutoff
+                - set(type_and_taint_callers)
+                - set(local_verify)
+            )
         )
 
         return IncrementalIngestionPlan(

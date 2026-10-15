@@ -1,0 +1,39 @@
+{
+  "experiment_id": "CAP010",
+  "engine": "verifyci_v2",
+  "status": "passed",
+  "metrics": {
+    "metric_name": "recall_at_5",
+    "metric_value": 0.8343,
+    "target_threshold": 0.8,
+    "threshold_basis": "predeclared_five_gates_recall5_recall20_ndcg_abstain_false_rel",
+    "false_accept_count": 0,
+    "recall_at_5": 0.8343,
+    "recall_at_20": 0.9771,
+    "ndcg_at_10": 0.6198,
+    "abstention_rate": 1.0,
+    "false_relevant_rate": 0.0,
+    "answerable": 175.0,
+    "no_answer": 35.0
+  },
+  "counts": {
+    "cases": 210,
+    "scored": 210,
+    "detail": {
+      "hit_at_5": 146,
+      "hit_at_20": 171,
+      "abstained_correct": 35,
+      "false_relevant": 0
+    }
+  },
+  "not_scored_reason": null,
+  "provenance": {
+    "git_commit": "7bf4774014bd1248c970eee4923e6db8d5b4207c",
+    "git_dirty": true,
+    "python_version": "3.14.7",
+    "platform": "Windows-11",
+    "corpus_sha256": "62161689b4478475d4ec5a43f08f19f5214c1762a9e0c6d1e9ca0b85319dce31",
+    "label_sha256": "ea461629678dff8be90069fd8b3cf6b9ebec0937b23a6efb85054effb33c1a4e"
+  },
+  "v1_results_preserved": "88e0631eca6500415a032c5341d364d5c233829423aa16989d981d91ecc27e49"
+}

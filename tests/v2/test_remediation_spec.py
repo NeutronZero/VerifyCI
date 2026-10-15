@@ -130,7 +130,11 @@ def guarded_wire(x: int, a: int, b: int) -> tuple[int, int]:
         assert wg.input_assignments["x"] > 100
         assert wg.input_assignments["a"] != wg.input_assignments["b"]
         diverges = _evaluate_concrete_divergence(
-            base_guard, head_guard, "guarded_wire", f_bg.parameters, wg.input_assignments
+            base_guard,
+            head_guard,
+            "guarded_wire",
+            f_bg.parameters,
+            wg.input_assignments,
         )
         assert diverges is True
 
@@ -189,6 +193,7 @@ def process(a: int, b: int) -> int:
 
     # Case C: Force timeout (timeout_ms=0 / 1) -> must not emit z3_verified_unsat=True
     timeout_prover = Z3SymbolicProver(timeout_ms=1)
+
     # Monkeypatch solve to simulate timeout
     def timeout_mock(*args: Any, **kwargs: Any) -> tuple[bool, str]:
         return False, "UNKNOWN"
@@ -305,7 +310,12 @@ def test_p1_pyproject_discovers_all_test_suites() -> None:
     pyproject_path = Path("pyproject.toml")
     with open(pyproject_path, "rb") as f:
         data = tomllib.load(f)
-    testpaths = data.get("tool", {}).get("pytest", {}).get("ini_options", {}).get("testpaths", [])
+    testpaths = (
+        data.get("tool", {})
+        .get("pytest", {})
+        .get("ini_options", {})
+        .get("testpaths", [])
+    )
     assert "tests" in testpaths or "tests/v2" in testpaths
 
 
@@ -314,7 +324,9 @@ def test_p0_4_wasm_sandbox_rejects_unconfined_python_by_default() -> None:
 
     # Case A: Python callable with require_wasm_isolation=True raises SandboxCapabilityViolationError
     with pytest.raises(SandboxCapabilityViolationError):
-        sandbox.register_plugin("py_plugin", "def check(fns): return []", lambda _fns: [])
+        sandbox.register_plugin(
+            "py_plugin", "def check(fns): return []", lambda _fns: []
+        )
 
     # Case B: Real WAT module with infinite loop traps with SandboxFuelExhaustedError
     wat_infinite = '(module (func (export "run") (loop br 0)))'
@@ -398,8 +410,11 @@ def test_p1_retrieval_reports_scan_mode_and_memory_bytes() -> None:
     assert stats_no_exact.exact_float_bytes == 0
 
 
-def test_r2_1_spec_compiler_uses_real_z3_and_never_fabricates_sat(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_r2_1_spec_compiler_uses_real_z3_and_never_fabricates_sat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from verifyci_v2.neural import spec_compiler
+
     compiler = spec_compiler.IntentToSMTCompiler()
 
     # Case A: Monkeypatch _z3_mod = None -> verify_function_against_intent must not emit smt_status == "SAT"
@@ -452,8 +467,11 @@ def test_r2_1_spec_compiler_uses_real_z3_and_never_fabricates_sat(monkeypatch: p
     assert total_val - discount_val < 0
 
 
-def test_r2_2_adjudicator_distinguishes_smoke_from_frozen_corpus_and_calibrates_validly(tmp_path: Path) -> None:
+def test_r2_2_adjudicator_distinguishes_smoke_from_frozen_corpus_and_calibrates_validly(
+    tmp_path: Path,
+) -> None:
     from verifyci_v2.interface.cap_adjudicator import V2CapabilityAdjudicator
+
     adjudicator = V2CapabilityAdjudicator()
 
     # Smoke suite evaluation
@@ -475,7 +493,9 @@ def test_r2_2_adjudicator_distinguishes_smoke_from_frozen_corpus_and_calibrates_
     fake_cap = tmp_path / "fake_cap"
     fake_cap.mkdir()
     (fake_cap / "cases.jsonl").write_text('{"id": 1}\n', encoding="utf-8")
-    (fake_cap / "labels.jsonl").write_text('{"id": 1, "expected": "PASS"}\n', encoding="utf-8")
+    (fake_cap / "labels.jsonl").write_text(
+        '{"id": 1, "expected": "PASS"}\n', encoding="utf-8"
+    )
     (fake_cap / "CORPUS_SHA256").write_text("corrupted_sha256_hash\n", encoding="utf-8")
     (fake_cap / "LABEL_SHA256").write_text("corrupted_label_hash\n", encoding="utf-8")
 
@@ -493,7 +513,16 @@ def test_r2_2_adjudicator_distinguishes_smoke_from_frozen_corpus_and_calibrates_
 
 def test_r2_3_scripts_and_skill_acceptance_run_without_legacy_v1_module_error() -> None:
     from scripts.ci_test_selector import select_tests, validate_test_targets
-    from benchmarks.latency.fixture import env, extractor, graph_store, intent_align, provider, workload  # noqa: F401
+    from benchmarks.latency.fixture import (
+        env,
+        extractor,
+        graph_store,
+        intent_align,
+        provider,
+        workload,
+    )
+
+    assert (env, extractor, graph_store, intent_align, provider, workload) is not None
 
     # Invariant selection must produce existing v2 paths
     selected = select_tests(["verifyci_v2/symbolic/z3_prover.py"])
@@ -502,6 +531,7 @@ def test_r2_3_scripts_and_skill_acceptance_run_without_legacy_v1_module_error() 
 
     # FastMCP and CLI integration
     from verifyci_v2.interface.cli import run_cli
+
     res_vdiff = run_cli(["verify-diff", "--format", "json"])
     assert res_vdiff["status"] == "PASS"
 
@@ -644,12 +674,7 @@ def test_p0_cli_verify_diff_real_pipeline_and_exit_codes(tmp_path: Path) -> None
     assert main(["verify-diff", "--diff-file", str(bug_file), "--format", "json"]) == 1
 
     # Case 3: Syntax error diff -> FAIL (exit code 1)
-    syn_diff = (
-        "--- a/syntax.py\n"
-        "+++ b/syntax.py\n"
-        "@@ -1,1 +1,1 @@\n"
-        "+def broken(:\n"
-    )
+    syn_diff = "--- a/syntax.py\n+++ b/syntax.py\n@@ -1,1 +1,1 @@\n+def broken(:\n"
     syn_file = tmp_path / "syn.diff"
     syn_file.write_text(syn_diff, encoding="utf-8")
     res_syn = run_cli(["verify-diff", "--diff-file", str(syn_file), "--format", "json"])
@@ -688,15 +713,23 @@ def test_p0_cli_verify_diff_real_pipeline_and_exit_codes(tmp_path: Path) -> None
     )
     clean_file = tmp_path / "clean.diff"
     clean_file.write_text(clean_diff, encoding="utf-8")
-    res_clean = run_cli(["verify-diff", "--diff-file", str(clean_file), "--format", "json"])
+    res_clean = run_cli(
+        ["verify-diff", "--diff-file", str(clean_file), "--format", "json"]
+    )
     assert res_clean["status"] == "PASS"
-    assert main(["verify-diff", "--diff-file", str(clean_file), "--format", "json"]) == 0
+    assert (
+        main(["verify-diff", "--diff-file", str(clean_file), "--format", "json"]) == 0
+    )
 
     # Case 6: Missing diff file -> INFRA_ERROR (exit code 3)
     missing_path = tmp_path / "non_existent.diff"
-    res_missing = run_cli(["verify-diff", "--diff-file", str(missing_path), "--format", "json"])
+    res_missing = run_cli(
+        ["verify-diff", "--diff-file", str(missing_path), "--format", "json"]
+    )
     assert res_missing["status"] == "INFRA_ERROR"
-    assert main(["verify-diff", "--diff-file", str(missing_path), "--format", "json"]) == 3
+    assert (
+        main(["verify-diff", "--diff-file", str(missing_path), "--format", "json"]) == 3
+    )
 
 
 def test_p0_cli_ingest_tracks_failed_files(tmp_path: Path) -> None:
@@ -724,16 +757,31 @@ def test_p0_gittuf_rsl_real_git_plumbing_and_persistence(tmp_path: Path) -> None
 
     # Initialize real Git repository
     subprocess.run(["git", "init"], cwd=str(tmp_path), check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(tmp_path), check=True)
-    subprocess.run(["git", "config", "user.email", "test@verifyci.dev"], cwd=str(tmp_path), check=True)
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"], cwd=str(tmp_path), check=True
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@verifyci.dev"],
+        cwd=str(tmp_path),
+        check=True,
+    )
 
     dummy_file = tmp_path / "file.txt"
     dummy_file.write_text("hello\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=str(tmp_path), check=True)
-    subprocess.run(["git", "commit", "-m", "init commit"], cwd=str(tmp_path), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init commit"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
 
     commit_sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=str(tmp_path), check=True, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
 
     signer, pubkey = InTotoDSSESigner.generate_ephemeral()
@@ -787,16 +835,33 @@ def test_p0_gittuf_rsl_real_git_plumbing_and_persistence(tmp_path: Path) -> None
 
 def test_p0_conformal_selective_risk_control_false_pass_guarantee() -> None:
     from typing import Sequence
-    from verifyci_v2.neural.conformal import calibrate_judge_on_dataset, evaluate_with_conformal_gate
-    from verifyci_v2.contracts.ai_protocol import DiscriminativeJudgeProtocol, CategoricalChoice, ModelAttestationRecord
+    from verifyci_v2.neural.conformal import (
+        calibrate_judge_on_dataset,
+        evaluate_with_conformal_gate,
+    )
+    from verifyci_v2.contracts.ai_protocol import (
+        DiscriminativeJudgeProtocol,
+        CategoricalChoice,
+        ModelAttestationRecord,
+    )
 
     class MisclassifyingJudge(DiscriminativeJudgeProtocol):
         provider_name = "mock"
         model_id = "test-judge"
-        def judge_choice(self, state: dict[str, Any], question: str, options: Sequence[str]) -> CategoricalChoice:
+
+        def judge_choice(
+            self, state: dict[str, Any], question: str, options: Sequence[str]
+        ) -> CategoricalChoice:
             # Confidently misclassifies defect as safe with p("none") = 0.95
-            return CategoricalChoice(selected="none", distribution={"none": 0.95, "defect": 0.05}, confidence=0.95)
-        def attestation(self, conformal_hash: str | None = None) -> ModelAttestationRecord:
+            return CategoricalChoice(
+                selected="none",
+                distribution={"none": 0.95, "defect": 0.05},
+                confidence=0.95,
+            )
+
+        def attestation(
+            self, conformal_hash: str | None = None
+        ) -> ModelAttestationRecord:
             return ModelAttestationRecord(
                 provider_name="mock",
                 model_id="test",
@@ -810,12 +875,16 @@ def test_p0_conformal_selective_risk_control_false_pass_guarantee() -> None:
         ({"diff": f"defect_{i}"}, "defect") for i in range(15)
     ]
 
-    profile = calibrate_judge_on_dataset(MisclassifyingJudge(), labeled, options=("none", "defect"), alpha=0.05)
+    profile = calibrate_judge_on_dataset(
+        MisclassifyingJudge(), labeled, options=("none", "defect"), alpha=0.05
+    )
     # Misclassifying defect in upper tail forces tau_safe > 1.0 (fails closed to SMT)
     assert profile.tau_safe > 1.0
 
     # Under this profile, even an artifact with high safe probability must escalate to SMT
-    decision = evaluate_with_conformal_gate({"none": 0.999, "defect": 0.001}, profile, safe_label="none")
+    decision = evaluate_with_conformal_gate(
+        {"none": 0.999, "defect": 0.001}, profile, safe_label="none"
+    )
     assert decision.escalate_to_smt is True
 
 
@@ -837,7 +906,9 @@ def test_p1_duckdb_cpg_clears_stale_records_and_versions_edges(tmp_path: Path) -
     f1 = lower_file_to_ussa("a.py", "def f(): return 1\n")[0]
     f2 = lower_file_to_ussa("b.py", "def g(): return 2\n")[0]
 
-    edge_1 = CPGEdge("e1", f1.node_uid, f2.node_uid, "CALL", static_weight=1.0, coverage_hit_freq=0.0)
+    edge_1 = CPGEdge(
+        "e1", f1.node_uid, f2.node_uid, "CALL", static_weight=1.0, coverage_hit_freq=0.0
+    )
     store.record_commit_snapshot("commit_A", [f1, f2], [edge_1])
     assert len(store.get_functions_as_of("commit_A")) == 2
     assert len(store.get_edges_as_of("commit_A")) == 1
@@ -848,10 +919,24 @@ def test_p1_duckdb_cpg_clears_stale_records_and_versions_edges(tmp_path: Path) -
     assert len(store.get_edges_as_of("commit_A")) == 0
 
     # Versioned edge attributes across commits
-    edge_v1 = CPGEdge("shared_edge", f1.node_uid, f1.node_uid, "CALL", static_weight=1.0, coverage_hit_freq=0.0)
+    edge_v1 = CPGEdge(
+        "shared_edge",
+        f1.node_uid,
+        f1.node_uid,
+        "CALL",
+        static_weight=1.0,
+        coverage_hit_freq=0.0,
+    )
     store.record_commit_snapshot("commit_1", [f1], [edge_v1])
 
-    edge_v2 = CPGEdge("shared_edge", f1.node_uid, f1.node_uid, "CALL", static_weight=2.0, coverage_hit_freq=0.9)
+    edge_v2 = CPGEdge(
+        "shared_edge",
+        f1.node_uid,
+        f1.node_uid,
+        "CALL",
+        static_weight=2.0,
+        coverage_hit_freq=0.9,
+    )
     store.record_commit_snapshot("commit_2", [f1], [edge_v2])
 
     edges_c1 = store.get_edges_as_of("commit_1")

@@ -32,13 +32,19 @@ class SchemaConstrainedValidator:
         return {k: round(v / total, 6) for k, v in exps.items()}
 
     @staticmethod
-    def parse_constrained_boolean(raw_json_or_dict: str | dict[str, Any]) -> BooleanJudgment:
+    def parse_constrained_boolean(
+        raw_json_or_dict: str | dict[str, Any],
+    ) -> BooleanJudgment:
         data = (
             json.loads(raw_json_or_dict)
             if isinstance(raw_json_or_dict, str)
             else raw_json_or_dict
         )
-        if not isinstance(data, dict) or "verdict" not in data or "probability" not in data:
+        if (
+            not isinstance(data, dict)
+            or "verdict" not in data
+            or "probability" not in data
+        ):
             raise GrammarMaskError("Invalid BooleanJudgment schema")
         prob = float(data["probability"])
         if not (0.0 <= prob <= 1.0):
@@ -73,7 +79,9 @@ class SchemaConstrainedValidator:
     ) -> OrdinalScore:
         if not levels:
             raise GrammarMaskError("OrdinalScore requires at least one level")
-        choice = SchemaConstrainedValidator.build_constrained_choice(levels, level_logits)
+        choice = SchemaConstrainedValidator.build_constrained_choice(
+            levels, level_logits
+        )
         idx = list(levels).index(choice.selected)
         norm_score = idx / max(1, len(levels) - 1)
         return OrdinalScore(

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import asdict
+import msgspec
 from typing import Any, Sequence
 
 from cryptography.exceptions import InvalidSignature
@@ -29,13 +29,13 @@ INTOTO_PAYLOAD_TYPE = "application/vnd.in-toto+json"
 
 
 def dsse_pae(payload_type: str, payload_bytes: bytes) -> bytes:
-    """
-    Computes the Dead Simple Signing Envelope (DSSE v1.0) Pre-Authentication Encoding:
-    PAE(type, body) = "DSSEv1" + SP + LEN(type) + SP + type + SP + LEN(body) + SP + body
-    """
-    pt_bytes = payload_type.encode("utf-8")
-    header = f"DSSEv1 {len(pt_bytes)} ".encode("utf-8") + pt_bytes + f" {len(payload_bytes)} ".encode("utf-8")
-    return header + payload_bytes
+    """Delegates PAE to securesystemslib (the reference DSSE v1.0 implementation).
+    Byte-identical to the prior hand-rolled formula."""
+    from securesystemslib.dsse import Envelope
+
+    if isinstance(payload_type, bytes):
+        payload_type = payload_type.decode("utf-8")
+    return Envelope(payload_bytes, payload_type, signatures={}).pae()
 
 
 class InTotoDSSESigner:
@@ -47,7 +47,9 @@ class InTotoDSSESigner:
 
     def __init__(self, signing_key: Ed25519PrivateKey | None = None) -> None:
         if signing_key is None or not isinstance(signing_key, Ed25519PrivateKey):
-            raise TypeError("InTotoDSSESigner requires an explicit cryptography Ed25519PrivateKey instance")
+            raise TypeError(
+                "InTotoDSSESigner requires an explicit cryptography Ed25519PrivateKey instance"
+            )
         self._private_key = signing_key
         pub_bytes = self._private_key.public_key().public_bytes(
             encoding=Encoding.Raw,
@@ -78,7 +80,7 @@ class InTotoDSSESigner:
                 }
             ],
             "predicateType": "https://verifyci.dev/attestations/verification/v2",
-            "predicate": asdict(predicate),
+            "predicate": msgspec.to_builtins(predicate),
         }
         raw_payload = canonical_jcs_bytes(statement)
         pae_bytes = dsse_pae(INTOTO_PAYLOAD_TYPE, raw_payload)
@@ -102,7 +104,9 @@ class InTotoDSSESigner:
     ) -> bool:
         verifying_key = public_key or self.public_key
         try:
-            raw_payload = base64.b64decode(envelope.payload.encode("ascii"), validate=True)
+            raw_payload = base64.b64decode(
+                envelope.payload.encode("ascii"), validate=True
+            )
             pae_bytes = dsse_pae(envelope.payloadType, raw_payload)
             for s in envelope.signatures:
                 sig_bytes = base64.b64decode(s.sig.encode("ascii"), validate=True)
@@ -122,10 +126,17 @@ def export_sarif_v2(
     """Exports findings, Z3 counterexample witnesses, and verified CEGIS fixes to SARIF v2.1.0."""
     results: list[dict[str, Any]] = []
     for f in findings:
-        level_map = {"CRITICAL": "error", "HIGH": "error", "MEDIUM": "warning", "LOW": "note"}
+        level_map = {
+            "CRITICAL": "error",
+            "HIGH": "error",
+            "MEDIUM": "warning",
+            "LOW": "note",
+        }
         sarif_fixes = [
             {
-                "description": {"text": "Z3-verified UNSAT auto-repair synthesized by VerifyCI v2 CEGIS"},
+                "description": {
+                    "text": "Z3-verified UNSAT auto-repair synthesized by VerifyCI v2 CEGIS"
+                },
                 "artifactChanges": [
                     {
                         "artifactLocation": {"uri": fix.file_path},
@@ -160,7 +171,7 @@ def export_sarif_v2(
             "properties": {
                 "finding_id": f.finding_id,
                 "verdict": f.verdict,
-                "witness": asdict(f.witness) if f.witness else None,
+                "witness": msgspec.to_builtins(f.witness) if f.witness else None,
             },
         }
         if sarif_fixes:

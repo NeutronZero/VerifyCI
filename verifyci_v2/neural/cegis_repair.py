@@ -50,7 +50,8 @@ class CEGISAutoRepairEngine:
             return finding
 
         base_funcs = {
-            f.qualified_name: f for f in lower_file_to_ussa(file_path, base_source, language="python")
+            f.qualified_name: f
+            for f in lower_file_to_ussa(file_path, base_source, language="python")
         }
         func_base = base_funcs.get(target_qualified_name)
         if func_base is None:
@@ -69,7 +70,9 @@ class CEGISAutoRepairEngine:
             try:
                 cand_funcs = {
                     f.qualified_name: f
-                    for f in lower_file_to_ussa(file_path, proposed_src, language="python")
+                    for f in lower_file_to_ussa(
+                        file_path, proposed_src, language="python"
+                    )
                 }
             except SyntaxError:
                 continue

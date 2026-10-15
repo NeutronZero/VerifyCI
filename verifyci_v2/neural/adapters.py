@@ -35,15 +35,27 @@ class DeterministicJudgeAdapter:
         return ModelAttestationRecord(
             provider_name=self.provider_name,
             model_id=self._model_id,
-            weights_or_endpoint_hash=blake3_hex(self._model_id, domain="verifyci.v2.weights"),
-            prompt_template_hash=blake3_hex("vc2.prompt.v2.0", domain="verifyci.v2.prompt"),
+            weights_or_endpoint_hash=blake3_hex(
+                self._model_id, domain="verifyci.v2.weights"
+            ),
+            prompt_template_hash=blake3_hex(
+                "vc2.prompt.v2.0", domain="verifyci.v2.prompt"
+            ),
             conformal_profile_hash=conformal_hash,
             validation_mode="post_hoc_schema",
         )
 
     def judge_boolean(self, state: dict[str, Any], question: str) -> BooleanJudgment:
         safe_state_str = redact_secrets(canonical_jcs_str(state)).lower()
-        risk_Signals = ("raise ", "swap", "invert", "delete", "secret", "lock", "global ")
+        risk_Signals = (
+            "raise ",
+            "swap",
+            "invert",
+            "delete",
+            "secret",
+            "lock",
+            "global ",
+        )
         has_risk = any(tok in safe_state_str for tok in risk_Signals)
         if "contradict" in question.lower() or "bypass" in question.lower():
             verdict = has_risk
@@ -52,7 +64,11 @@ class DeterministicJudgeAdapter:
             verdict = not has_risk
             prob = 0.94 if not has_risk else 0.15
         return SchemaConstrainedValidator.parse_constrained_boolean(
-            {"verdict": verdict, "probability": prob, "rationale_tag": "deterministic_ast_heuristic"}
+            {
+                "verdict": verdict,
+                "probability": prob,
+                "rationale_tag": "deterministic_ast_heuristic",
+            }
         )
 
     def judge_choice(
@@ -71,9 +87,13 @@ class DeterministicJudgeAdapter:
                 logits[opt] += 4.0
             if "mock" in opt_l and ("test" in safe_text or "fixture" in safe_text):
                 logits[opt] += 4.5
-            elif "credential" in opt_l and ("akia" in raw_text or "<redacted_secret" in safe_text):
+            elif "credential" in opt_l and (
+                "akia" in raw_text or "<redacted_secret" in safe_text
+            ):
                 logits[opt] += 4.5
-            elif opt_l == "none" and not any(k in safe_text for k in ("error", "swap", "invert")):
+            elif opt_l == "none" and not any(
+                k in safe_text for k in ("error", "swap", "invert")
+            ):
                 logits[opt] += 3.5
 
         return SchemaConstrainedValidator.build_constrained_choice(options, logits)
@@ -127,7 +147,9 @@ class OpenAICompatibleJudgeAdapter(DeterministicJudgeAdapter):
     def provider_name(self) -> str:
         return "openai-compatible"
 
-    def prepare_redacted_request(self, state: dict[str, Any], question: str) -> dict[str, Any]:
+    def prepare_redacted_request(
+        self, state: dict[str, Any], question: str
+    ) -> dict[str, Any]:
         """Constructs a schema-locked request payload with all secrets scrubbed prior to egress."""
         scrubbed_state = redact_secrets(canonical_jcs_str(state))
         self.last_redacted_payload = scrubbed_state
@@ -136,8 +158,14 @@ class OpenAICompatibleJudgeAdapter(DeterministicJudgeAdapter):
             "temperature": 0.0,
             "logprobs": True,
             "messages": [
-                {"role": "system", "content": "You are a formal verification judge. Output strict JSON."},
-                {"role": "user", "content": f"State: {scrubbed_state}\nQuestion: {redact_secrets(question)}"},
+                {
+                    "role": "system",
+                    "content": "You are a formal verification judge. Output strict JSON.",
+                },
+                {
+                    "role": "user",
+                    "content": f"State: {scrubbed_state}\nQuestion: {redact_secrets(question)}",
+                },
             ],
         }
 
@@ -178,7 +206,11 @@ class DeterministicSynthesizerAdapter:
         tree = ast.parse(original_source, filename=file_path)
 
         for node in ast.walk(tree):
-            if rule_id == "VC2-CAP004-CALL-SWAP" and isinstance(node, ast.Call) and len(node.args) >= 2:
+            if (
+                rule_id == "VC2-CAP004-CALL-SWAP"
+                and isinstance(node, ast.Call)
+                and len(node.args) >= 2
+            ):
                 node.args[0], node.args[1] = node.args[1], node.args[0]
                 return ast.unparse(tree) + "\n"
 
@@ -196,17 +228,30 @@ class DeterministicSynthesizerAdapter:
                     if type(op) in invert_map:
                         node.test.ops[0] = invert_map[type(op)]
                         return ast.unparse(tree) + "\n"
-                elif isinstance(node.test, ast.UnaryOp) and isinstance(node.test.op, ast.Not):
+                elif isinstance(node.test, ast.UnaryOp) and isinstance(
+                    node.test.op, ast.Not
+                ):
                     node.test = node.test.operand
                     return ast.unparse(tree) + "\n"
 
-            if rule_id == "VC2-CAP004-RETURN-SWAP" and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                ret_nodes = [n for n in ast.walk(node) if isinstance(n, ast.Return) and n.value is not None]
+            if rule_id == "VC2-CAP004-RETURN-SWAP" and isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef)
+            ):
+                ret_nodes = [
+                    n
+                    for n in ast.walk(node)
+                    if isinstance(n, ast.Return) and n.value is not None
+                ]
                 if len(ret_nodes) >= 2:
-                    ret_nodes[0].value, ret_nodes[1].value = ret_nodes[1].value, ret_nodes[0].value
+                    ret_nodes[0].value, ret_nodes[1].value = (
+                        ret_nodes[1].value,
+                        ret_nodes[0].value,
+                    )
                     return ast.unparse(tree) + "\n"
 
-            if rule_id == "VC2-CAP002-SHADOW-ASSIGN" and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if rule_id == "VC2-CAP002-SHADOW-ASSIGN" and isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef)
+            ):
                 params = {a.arg for a in node.args.args}
                 new_body = [
                     stmt

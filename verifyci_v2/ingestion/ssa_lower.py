@@ -41,8 +41,12 @@ class _SSABuilderContext:
         self.parameters = parameters
         self.version_counters: dict[str, int] = {}
         self.current_env: dict[str, str] = {}
-        self.var_defs: dict[str, str] = {}  # ssa_var -> defining instruction or param ID
-        self.tainted_by_params: dict[str, set[str]] = {}  # ssa_var -> set of origin param names
+        self.var_defs: dict[
+            str, str
+        ] = {}  # ssa_var -> defining instruction or param ID
+        self.tainted_by_params: dict[
+            str, set[str]
+        ] = {}  # ssa_var -> set of origin param names
 
         self.blocks: list[USSABasicBlock] = []
         self.cfg_edges: list[CPGEdge] = []
@@ -101,7 +105,9 @@ class _SSABuilderContext:
                 self.tainted_by_params[src_ssa]
             )
 
-    def record_cfg(self, src_block: str, dst_block: str, label: str | None = None) -> None:
+    def record_cfg(
+        self, src_block: str, dst_block: str, label: str | None = None
+    ) -> None:
         edge_uid = blake3_hex(
             f"{self.qualified_name}:CFG:{src_block}->{dst_block}:{label or ''}",
             domain="verifyci.v2.cfg",
@@ -129,7 +135,9 @@ def _strip_docstring(stmts: list[ast.stmt]) -> list[ast.stmt]:
     return stmts
 
 
-def _expr_to_ssa_operands(expr: ast.AST, ctx: _SSABuilderContext) -> tuple[str, list[str]]:
+def _expr_to_ssa_operands(
+    expr: ast.AST, ctx: _SSABuilderContext
+) -> tuple[str, list[str]]:
     """Returns a canonical expression string and list of referenced SSA variables."""
     used_vars: list[str] = []
 
@@ -187,8 +195,28 @@ def _expr_to_ssa_operands(expr: ast.AST, ctx: _SSABuilderContext) -> tuple[str, 
             base = _visit(node.value)
             slc = _visit(node.slice)
             return f"{base}[{slc}]"
-        if isinstance(node, (ast.Tuple, ast.List)):
+        if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
             return "[" + ", ".join(_visit(e) for e in node.elts) + "]"
+        if isinstance(node, ast.Dict):
+            pairs = []
+            for k, v in zip(node.keys, node.values):
+                k_str = _visit(k) if k is not None else "**"
+                v_str = _visit(v)
+                pairs.append(f"{k_str}:{v_str}")
+            return "{" + ", ".join(pairs) + "}"
+        if isinstance(node, ast.JoinedStr):
+            parts_str = []
+            for val in node.values:
+                if isinstance(val, ast.FormattedValue):
+                    parts_str.append(f"{{{_visit(val.value)}}}")
+                elif isinstance(val, ast.Constant):
+                    parts_str.append(str(val.value))
+            return "f'" + "".join(parts_str) + "'"
+        if isinstance(node, ast.IfExp):
+            cond_s = _visit(node.test)
+            body_s = _visit(node.body)
+            else_s = _visit(node.orelse)
+            return f"(IfExp {cond_s} {body_s} {else_s})"
         return ast.unparse(node)
 
     rendered = _visit(expr)
@@ -254,7 +282,11 @@ def _lower_stmt_list(
                         inst_id=ctx.next_inst_id(),
                         opcode="BINOP",
                         target_var=new_ssa,
-                        operands=(f"({op_name} {prev_ssa} {rhs_str})", prev_ssa, *used_ssa),
+                        operands=(
+                            f"({op_name} {prev_ssa} {rhs_str})",
+                            prev_ssa,
+                            *used_ssa,
+                        ),
                         source_line=stmt.lineno,
                     )
                 )
@@ -308,7 +340,11 @@ def _lower_stmt_list(
 
         elif isinstance(stmt, (ast.While, ast.For, ast.AsyncFor)):
             loop_kind = type(stmt).__name__
-            cond_str = ast.unparse(stmt.test) if hasattr(stmt, "test") else ast.unparse(stmt.iter)
+            cond_str = (
+                ast.unparse(stmt.test)
+                if hasattr(stmt, "test")
+                else ast.unparse(stmt.iter)
+            )
             instructions.append(
                 USSAInstruction(
                     inst_id=ctx.next_inst_id(),
@@ -338,7 +374,9 @@ def _lower_stmt_list(
             if stmt.orelse:
                 current_block_id = _lower_stmt_list(stmt.orelse, ctx, current_block_id)
             if stmt.finalbody:
-                current_block_id = _lower_stmt_list(stmt.finalbody, ctx, current_block_id)
+                current_block_id = _lower_stmt_list(
+                    stmt.finalbody, ctx, current_block_id
+                )
 
         elif isinstance(stmt, ast.If):
             cond_str, cond_vars = _expr_to_ssa_operands(stmt.test, ctx)
@@ -408,7 +446,10 @@ def _lower_stmt_list(
                     merge_phis.append(
                         PhiNode(
                             target_var=phi_ssa,
-                            incoming_branches=((then_end_id, v_then), (else_end_id, v_else)),
+                            incoming_branches=(
+                                (then_end_id, v_then),
+                                (else_end_id, v_else),
+                            ),
                         )
                     )
                     ctx.record_dfg(v_then, phi_ssa)
@@ -468,7 +509,9 @@ def compute_ussa_digests(func_ussa: FunctionUSSA) -> tuple[str, str]:
         "canonical_signature": func_ussa.canonical_signature,
         "is_pure": func_ussa.taint_summary.is_pure,
         "param_to_return": list(func_ussa.taint_summary.param_to_return),
-        "param_to_sinks": [list(pair) for pair in func_ussa.taint_summary.param_to_sinks],
+        "param_to_sinks": [
+            list(pair) for pair in func_ussa.taint_summary.param_to_sinks
+        ],
         "mutated_globals": list(func_ussa.taint_summary.mutated_globals),
         "raised_exceptions": list(func_ussa.taint_summary.raised_exceptions),
     }
@@ -574,7 +617,9 @@ def lower_file_to_ussa(
         functions: list[FunctionUSSA] = []
         for stmt in tree.body:
             if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                functions.append(lower_python_function(stmt, file_path=file_path, repo_id=repo_id))
+                functions.append(
+                    lower_python_function(stmt, file_path=file_path, repo_id=repo_id)
+                )
         return tuple(functions)
 
     # Polyglot lowering for C/C++ and TypeScript/JavaScript
@@ -595,7 +640,9 @@ def lower_file_to_ussa(
         end_line = start_line + body_text.count("\n")
 
         # Strip C/TS single-line and block comments so comment edits preserve H_body
-        clean_body = re.sub(r"//.*?$|/\*.*?\*/", "", body_text, flags=re.MULTILINE | re.DOTALL)
+        clean_body = re.sub(
+            r"//.*?$|/\*.*?\*/", "", body_text, flags=re.MULTILINE | re.DOTALL
+        )
         insts = [
             USSAInstruction(
                 inst_id=f"i{line_idx + 1}",
@@ -638,7 +685,9 @@ def lower_file_to_ussa(
             taint_summary=taint,
         )
         h_body, h_interface = compute_ussa_digests(draft)
-        node_uid = blake3_hex(f"{repo_id}:{qname}:{h_body}", domain="verifyci.v2.node_uid")
+        node_uid = blake3_hex(
+            f"{repo_id}:{qname}:{h_body}", domain="verifyci.v2.node_uid"
+        )
         results.append(
             FunctionUSSA(
                 node_uid=node_uid,

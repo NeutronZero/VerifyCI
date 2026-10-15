@@ -8,6 +8,7 @@ storage/vuln_cache.db
 storage/embedding_cache_*.json
 .verifyci/embedding_cache_*.json
 benchmarks/beir/embedding_cache_*.json
+benchmarks/beir/corpus_h1_*.json
 benchmarks/beir/__pycache__/
 .ruff_cache/
 .coverage
@@ -18,3 +19,4 @@ benchmark-results*.json
 dist/
 *.egg-info/
 freebuff-chat-*.md
+*.sarif

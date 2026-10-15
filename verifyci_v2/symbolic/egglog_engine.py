@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
+import msgspec
 import re
 from typing import Iterable, Sequence
 
@@ -9,7 +9,9 @@ from verifyci_v2.contracts.attestation import VerdictKind, VerificationFinding
 from verifyci_v2.contracts.canonical import blake3_hex
 from verifyci_v2.contracts.ssa_ir import FunctionUSSA
 
-_COMMUTATIVE_OPS = frozenset({"Add", "Mult", "BitAnd", "BitOr", "BitXor", "Eq", "NotEq", "And", "Or"})
+_COMMUTATIVE_OPS = frozenset(
+    {"Add", "Mult", "BitAnd", "BitOr", "BitXor", "Eq", "NotEq", "And", "Or"}
+)
 _COMPARISON_FLIP = {
     "Lt": "Gt",
     "Gt": "Lt",
@@ -28,8 +30,7 @@ _NEGATED_COMP = {
 }
 
 
-@dataclass(frozen=True, slots=True)
-class EquivalenceSaturationResult:
+class EquivalenceSaturationResult(msgspec.Struct, frozen=True):
     is_equivalent: bool
     base_eclass_digest: str
     head_eclass_digest: str
@@ -38,7 +39,10 @@ class EquivalenceSaturationResult:
 
 
 def _has_floating_point(func: FunctionUSSA) -> bool:
-    if "float" in func.return_annotation.lower() or "float" in func.canonical_signature.lower():
+    if (
+        "float" in func.return_annotation.lower()
+        or "float" in func.canonical_signature.lower()
+    ):
         return True
     float_pattern = re.compile(r"(?:\b\d+\.\d+|\b\d+\.|\.\d+)\b|\bfloat\b")
     for block in func.basic_blocks:
@@ -96,6 +100,9 @@ def _canonicalize_sexpr(expr: str, rewrites_log: list[str]) -> str:
         )
         # Prefix binary op: (Add left right)
         if t0 in _COMMUTATIVE_OPS:
+            if t0 in ("And", "Or") and t1 == t2:
+                rewrites_log.append(f"idempotent_{t0}")
+                return t1
             if t0 == "Add" and t2 == "0":
                 rewrites_log.append("add_zero_identity")
                 return t1
@@ -113,6 +120,13 @@ def _canonicalize_sexpr(expr: str, rewrites_log: list[str]) -> str:
                 t1, t2 = t2, t1
             return f"({t0} {t1} {t2})"
 
+        if t0 == "Sub" and t2 == "0":
+            rewrites_log.append("sub_zero_identity")
+            return t1
+        if t0 == "Sub" and t1 == t2:
+            rewrites_log.append("sub_self_annihilation")
+            return "0"
+
         # Infix comparison: (left Op right)
         if t1 in _COMPARISON_FLIP:
             if t1 in ("Gt", "GtE"):
@@ -124,7 +138,9 @@ def _canonicalize_sexpr(expr: str, rewrites_log: list[str]) -> str:
                 return f"({t2} {t1} {t0})"
             return f"({t0} {t1} {t2})"
 
-    return "(" + " ".join(_canonicalize_sexpr(tok, rewrites_log) for tok in tokens) + ")"
+    return (
+        "(" + " ".join(_canonicalize_sexpr(tok, rewrites_log) for tok in tokens) + ")"
+    )
 
 
 def _split_top_level_sexpr(text: str) -> list[str]:
@@ -175,14 +191,23 @@ def saturate_function_egraph(func: FunctionUSSA) -> tuple[str, tuple[str, ...]]:
         for inst in block.instructions:
             raw_expr = inst.operands[0] if inst.operands else ""
             # Substitute known SSA variable definitions (dead-store / temp un-shadowing)
-            for ssa_var, sym_expr in sorted(env_subst.items(), key=lambda kv: len(kv[0]), reverse=True):
-                raw_expr = re.sub(rf"\b{re.escape(ssa_var)}\b", sym_expr, raw_expr)
+            if env_subst and raw_expr:
+                pattern = re.compile(
+                    r"\b("
+                    + "|".join(
+                        re.escape(k) for k in sorted(env_subst, key=len, reverse=True)
+                    )
+                    + r")\b"
+                )
+                raw_expr = pattern.sub(lambda m: env_subst[m.group(0)], raw_expr)
 
             saturated_expr = _canonicalize_sexpr(raw_expr, rewrites)
             if inst.opcode in ("ASSIGN", "BINOP") and inst.target_var:
                 env_subst[inst.target_var] = saturated_expr
             elif inst.opcode in ("RETURN", "RAISE", "CALL", "STORE_ATTR", "BRANCH"):
-                canonical_effects.append(f"{block.block_id}:{inst.opcode}:{saturated_expr}")
+                canonical_effects.append(
+                    f"{block.block_id}:{inst.opcode}:{saturated_expr}"
+                )
 
     eclass_signature = "|".join(canonical_effects)
     digest = blake3_hex(eclass_signature, domain="verifyci.v2.egglog.eclass")
@@ -235,7 +260,7 @@ class EgglogEquivalenceEngine:
         base_dig, base_rw = saturate_function_egraph(func_base)
         head_dig, head_rw = saturate_function_egraph(func_head)
         all_rw = tuple(sorted(set(base_rw) | set(head_rw)))
-        is_eq = (base_dig == head_dig)
+        is_eq = base_dig == head_dig
         return EquivalenceSaturationResult(
             is_equivalent=is_eq,
             base_eclass_digest=base_dig,
@@ -267,7 +292,9 @@ class EgglogEquivalenceEngine:
                     if callers
                     else f"Deleted symbol '{sym}' is still exported in __all__ or cross-language bridge"
                 )
-                fid = blake3_hex(f"CAP003A:{sym}:{reason}", domain="verifyci.v2.finding")[:16]
+                fid = blake3_hex(
+                    f"CAP003A:{sym}:{reason}", domain="verifyci.v2.finding"
+                )[:16]
                 findings.append(
                     VerificationFinding(
                         finding_id=fid,
@@ -294,13 +321,16 @@ class EgglogEquivalenceEngine:
         """
         tree = ast.parse(source, filename=file_path)
         findings: list[VerificationFinding] = []
-        nested_lock_orders: list[tuple[str, str, str, int]] = []  # (fn_name, lock1, lock2, lineno)
+        nested_lock_orders: list[
+            tuple[str, str, str, int]
+        ] = []  # (fn_name, lock1, lock2, lineno)
 
         for stmt in tree.body:
             if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             is_concurrent = isinstance(stmt, ast.AsyncFunctionDef) or any(
-                tok in stmt.name.lower() for tok in ("worker", "thread", "concurrent", "parallel", "async")
+                tok in stmt.name.lower()
+                for tok in ("worker", "thread", "concurrent", "parallel", "async")
             )
             acquired_locks: list[str] = []
             mutated_shared: list[tuple[str, int]] = []
@@ -308,28 +338,41 @@ class EgglogEquivalenceEngine:
             # Inspect `with lock:` / `async with lock:` blocks and nested lock orders
             for node in ast.walk(stmt):
                 if isinstance(node, (ast.With, ast.AsyncWith)):
-                    outer_locks = [ast.unparse(item.context_expr) for item in node.items]
+                    outer_locks = [
+                        ast.unparse(item.context_expr) for item in node.items
+                    ]
                     acquired_locks.extend(outer_locks)
                     for child in node.body:
                         if isinstance(child, (ast.With, ast.AsyncWith)):
-                            inner_locks = [ast.unparse(item.context_expr) for item in child.items]
+                            inner_locks = [
+                                ast.unparse(item.context_expr) for item in child.items
+                            ]
                             for l1 in outer_locks:
                                 for l2 in inner_locks:
                                     if l1 != l2:
-                                        nested_lock_orders.append((stmt.name, l1, l2, stmt.lineno))
+                                        nested_lock_orders.append(
+                                            (stmt.name, l1, l2, stmt.lineno)
+                                        )
 
                 elif isinstance(node, ast.Global):
                     for gname in node.names:
                         mutated_shared.append((gname, stmt.lineno))
                 elif isinstance(node, (ast.Assign, ast.AugAssign)):
-                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                    targets = (
+                        node.targets if isinstance(node, ast.Assign) else [node.target]
+                    )
                     for tgt in targets:
                         if isinstance(tgt, (ast.Attribute, ast.Subscript)):
-                            mutated_shared.append((ast.unparse(tgt), getattr(node, "lineno", stmt.lineno)))
+                            mutated_shared.append(
+                                (ast.unparse(tgt), getattr(node, "lineno", stmt.lineno))
+                            )
 
             if is_concurrent and mutated_shared and not acquired_locks:
                 state_name, line_no = mutated_shared[0]
-                fid = blake3_hex(f"CAP008:RACE:{file_path}:{stmt.name}:{state_name}", domain="verifyci.v2.finding")[:16]
+                fid = blake3_hex(
+                    f"CAP008:RACE:{file_path}:{stmt.name}:{state_name}",
+                    domain="verifyci.v2.finding",
+                )[:16]
                 findings.append(
                     VerificationFinding(
                         finding_id=fid,
@@ -352,7 +395,10 @@ class EgglogEquivalenceEngine:
             for fn2, m1, m2, _line2 in nested_lock_orders:
                 if l1 == m2 and l2 == m1 and (l2, l1) not in seen_inversions:
                     seen_inversions.add((l1, l2))
-                    fid = blake3_hex(f"CAP008:DEADLOCK:{file_path}:{fn1}:{fn2}:{l1}:{l2}", domain="verifyci.v2.finding")[:16]
+                    fid = blake3_hex(
+                        f"CAP008:DEADLOCK:{file_path}:{fn1}:{fn2}:{l1}:{l2}",
+                        domain="verifyci.v2.finding",
+                    )[:16]
                     findings.append(
                         VerificationFinding(
                             finding_id=fid,

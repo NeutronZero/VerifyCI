@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
+import msgspec
+from dataclasses import is_dataclass
 import hashlib
 import math
 import struct
@@ -56,7 +57,9 @@ def _escape_jcs_string(value: str) -> str:
 def _format_jcs_float(value: float) -> str:
     """RFC 8785 Section 3.2.2.3 IEEE 754 double-precision number serialization."""
     if math.isnan(value) or math.isinf(value):
-        raise CanonicalSerializationError("RFC 8785 forbids NaN and Infinity in canonical JSON")
+        raise CanonicalSerializationError(
+            "RFC 8785 forbids NaN and Infinity in canonical JSON"
+        )
     if value == 0.0:
         return "0"
     abs_v = abs(value)
@@ -124,11 +127,13 @@ def _to_jcs_str(obj: Any) -> str:
             + "}"
         )
     if is_dataclass(obj) and not isinstance(obj, type):
-        return _to_jcs_str(asdict(obj))
+        return _to_jcs_str(msgspec.to_builtins(obj))
     if hasattr(obj, "__struct_fields__"):
         struct_dict = {field: getattr(obj, field) for field in obj.__struct_fields__}
         return _to_jcs_str(struct_dict)
-    raise CanonicalSerializationError(f"Unsupported type for RFC 8785 JCS: {type(obj).__name__}")
+    raise CanonicalSerializationError(
+        f"Unsupported type for RFC 8785 JCS: {type(obj).__name__}"
+    )
 
 
 def canonical_jcs_str(obj: Any) -> str:

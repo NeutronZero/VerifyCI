@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
+import msgspec
 import re
 import time
 from typing import Any
@@ -104,15 +104,20 @@ def _ast_to_z3_val(node: ast.AST, z3_vars: dict[str, Any], z3_mod: Any) -> Any:
             a1 = _ast_to_z3_val(node.args[1], z3_vars, z3_mod)
             if a0 is not None and a1 is not None:
                 return z3_mod.If(a0 <= a1, a0, a1)
+        elif node.func.id == "abs" and len(node.args) == 1:
+            a0 = _ast_to_z3_val(node.args[0], z3_vars, z3_mod)
+            if a0 is not None:
+                return z3_mod.If(a0 >= 0, a0, -a0)
     return None
 
 
-@dataclass(frozen=True, slots=True)
-class CompiledSMTPostcondition:
+class CompiledSMTPostcondition(msgspec.Struct, frozen=True):
     """Formal postcondition compiled from natural-language commit/PR intent or invariant rules."""
 
     intent_text: str
-    constraint_kind: str  # 'NON_NEGATIVE_RETURN' | 'STRICT_POSITIVE_RETURN' | 'UPPER_BOUND_RETURN'
+    constraint_kind: (
+        str  # 'NON_NEGATIVE_RETURN' | 'STRICT_POSITIVE_RETURN' | 'UPPER_BOUND_RETURN'
+    )
     bound_value: int
     smt_lib_expr: str
 
@@ -150,7 +155,12 @@ class IntentToSMTCompiler:
         # Pattern 2: Strictly positive return invariant ("strictly positive", "> 0", "greater than zero")
         if any(
             phrase in safe_intent
-            for phrase in ("strictly positive", "greater than zero", "> 0", "must be positive")
+            for phrase in (
+                "strictly positive",
+                "greater than zero",
+                "> 0",
+                "must be positive",
+            )
         ):
             return CompiledSMTPostcondition(
                 intent_text=intent_text,
@@ -267,7 +277,9 @@ class IntentToSMTCompiler:
                     }
 
                     # Concretely evaluate function on witness to confirm violation
-                    if not self._evaluate_func_violates(stmt, witness_inputs, spec.bound_value, spec.constraint_kind):
+                    if not self._evaluate_func_violates(
+                        stmt, witness_inputs, spec.bound_value, spec.constraint_kind
+                    ):
                         continue
 
                     fid = blake3_hex(
@@ -318,7 +330,11 @@ class IntentToSMTCompiler:
         env = dict(local_env)
 
         for stmt in stmts:
-            if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+            if (
+                isinstance(stmt, ast.Assign)
+                and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Name)
+            ):
                 expanded_val = _InlineAssignTransformer(env).visit(stmt.value)
                 env[stmt.targets[0].id] = expanded_val
             elif isinstance(stmt, ast.Return):
@@ -328,12 +344,16 @@ class IntentToSMTCompiler:
                 break
             elif isinstance(stmt, ast.If):
                 expanded_test = _InlineAssignTransformer(env).visit(stmt.test)
-                body_paths = cls._collect_paths(stmt.body, current_guards + [(expanded_test, True)], env)
+                body_paths = cls._collect_paths(
+                    stmt.body, current_guards + [(expanded_test, True)], env
+                )
                 paths.extend(body_paths)
                 body_always_exits = cls._always_exits(stmt.body)
 
                 if stmt.orelse:
-                    orelse_paths = cls._collect_paths(stmt.orelse, current_guards + [(expanded_test, False)], env)
+                    orelse_paths = cls._collect_paths(
+                        stmt.orelse, current_guards + [(expanded_test, False)], env
+                    )
                     paths.extend(orelse_paths)
                     orelse_always_exits = cls._always_exits(stmt.orelse)
                     if body_always_exits and orelse_always_exits:
@@ -364,10 +384,14 @@ class IntentToSMTCompiler:
         return False
 
     @staticmethod
-    def _can_produce_violation(ret_expr: ast.AST, params: list[str], spec: CompiledSMTPostcondition) -> bool:
+    def _can_produce_violation(
+        ret_expr: ast.AST, params: list[str], spec: CompiledSMTPostcondition
+    ) -> bool:
         if isinstance(ret_expr, (ast.BinOp, ast.Name)):
             return True
-        if isinstance(ret_expr, ast.Constant) and isinstance(ret_expr.value, (int, float)):
+        if isinstance(ret_expr, ast.Constant) and isinstance(
+            ret_expr.value, (int, float)
+        ):
             if spec.constraint_kind == "NON_NEGATIVE_RETURN":
                 return ret_expr.value < spec.bound_value
             if spec.constraint_kind == "STRICT_POSITIVE_RETURN":
@@ -376,41 +400,49 @@ class IntentToSMTCompiler:
                 return ret_expr.value > spec.bound_value
         return bool(params)
 
-    @staticmethod
+    @classmethod
     def _evaluate_func_violates(
+        cls,
         fn_node: ast.FunctionDef | ast.AsyncFunctionDef,
         witness_inputs: dict[str, int],
         bound_val: int,
         constraint_kind: str,
     ) -> bool:
+        if _z3_mod is None:
+            return False
         try:
-            mod = ast.Module(body=[fn_node], type_ignores=[])
-            code = compile(mod, filename="<ast>", mode="exec")
-            safe_builtins = {
-                "range": range,
-                "len": len,
-                "abs": abs,
-                "min": min,
-                "max": max,
-                "bool": bool,
-                "int": int,
-                "float": float,
-                "tuple": tuple,
+            param_names = [a.arg for a in fn_node.args.args]
+            z3_vars = {
+                p: _z3_mod.IntVal(int(witness_inputs.get(p, 0))) for p in param_names
             }
-            env: dict[str, Any] = {"__builtins__": safe_builtins}
-            exec(code, env, env)
-            fn = env.get(fn_node.name)
-            if not callable(fn):
-                return False
-            ret = fn(**witness_inputs)
-            if not isinstance(ret, (int, float)):
-                return False
-            if constraint_kind == "NON_NEGATIVE_RETURN":
-                return bool(ret < bound_val)
-            if constraint_kind == "STRICT_POSITIVE_RETURN":
-                return bool(ret <= bound_val)
-            if constraint_kind == "UPPER_BOUND_RETURN":
-                return bool(ret > bound_val)
+            paths = cls._collect_paths(fn_node.body, incoming_guards=[], local_env={})
+            for guards, ret_expr, _ in paths:
+                s = _z3_mod.Solver()
+                feasible = True
+                for g_ast, branch_bool in guards:
+                    zg = _ast_to_z3_val(g_ast, z3_vars, _z3_mod)
+                    if zg is None:
+                        feasible = False
+                        break
+                    s.add(zg if branch_bool else _z3_mod.Not(zg))
+                if not feasible or s.check() != _z3_mod.sat:
+                    continue
+                zr = _ast_to_z3_val(ret_expr, z3_vars, _z3_mod)
+                if zr is None:
+                    continue
+                s_viol = _z3_mod.Solver()
+                for c in s.assertions():
+                    s_viol.add(c)
+                if constraint_kind == "NON_NEGATIVE_RETURN":
+                    s_viol.add(zr < bound_val)
+                elif constraint_kind == "STRICT_POSITIVE_RETURN":
+                    s_viol.add(zr <= bound_val)
+                elif constraint_kind == "UPPER_BOUND_RETURN":
+                    s_viol.add(zr > bound_val)
+                else:
+                    continue
+                if s_viol.check() == _z3_mod.sat:
+                    return True
+            return False
         except Exception:
             return False
-        return False

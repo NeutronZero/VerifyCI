@@ -9,6 +9,7 @@ Follows vc-evidence-adjudication, vc-evidence-integrity, and AGENTS.md:
 - Retains negative results, collision parity, and withdrawn claims.
 - Generates evidence/performance-evidence-bundle.json.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -47,7 +48,6 @@ def adjudicate_claims(benchmark_reports: list[dict[str, Any]]) -> dict[str, Any]
 
     num_runs = len(benchmark_reports)
 
-
     # --------------------------------------------------------------------------
     # Claim 1: IR Line Attribution Interval Indexing
     # Predicates:
@@ -55,12 +55,20 @@ def adjudicate_claims(benchmark_reports: list[dict[str, Any]]) -> dict[str, Any]
     #   P1.2: Speedup p50 >= 10.0x across all runs
     #   P1.3: Peak memory reduction >= 50%
     # --------------------------------------------------------------------------
-    ir_runs = [r["benchmarks"]["ir_line_attribution"]["dense_spans_500_intervals"] for r in benchmark_reports]
+    ir_runs = [
+        r["benchmarks"]["ir_line_attribution"]["dense_spans_500_intervals"]
+        for r in benchmark_reports
+    ]
     ir_speedups = [run["speedup_p50"] for run in ir_runs]
     ir_min_speedup = min(ir_speedups)
     ir_all_above_threshold = all(s >= 10.0 for s in ir_speedups)
     ir_mem_reductions = [
-        round(100.0 * (run.get("baseline_peak_bytes", 1) - run.get("optimized_peak_bytes", 1)) / max(1, run.get("baseline_peak_bytes", 1)), 1)
+        round(
+            100.0
+            * (run.get("baseline_peak_bytes", 1) - run.get("optimized_peak_bytes", 1))
+            / max(1, run.get("baseline_peak_bytes", 1)),
+            1,
+        )
         for run in ir_runs
     ]
     ir_mem_pass = all(m >= 50.0 for m in ir_mem_reductions)
@@ -94,12 +102,17 @@ def adjudicate_claims(benchmark_reports: list[dict[str, Any]]) -> dict[str, Any]
     #   P2.1: Semantic and schema equivalence verified
     #   P2.2: Speedup p50 >= 1.5x across all runs
     # --------------------------------------------------------------------------
-    json_runs = [r["benchmarks"]["json_serialization"]["complex_records_100_items"] for r in benchmark_reports]
+    json_runs = [
+        r["benchmarks"]["json_serialization"]["complex_records_100_items"]
+        for r in benchmark_reports
+    ]
     json_speedups = [run["speedup_p50"] for run in json_runs]
     json_all_pass = all(s >= 1.5 for s in json_speedups)
 
     claims["json_serialization"] = {
-        "status": "REPRODUCED" if (json_all_pass and num_runs > 1) else ("MEASURED" if json_all_pass else "UNESTABLISHED"),
+        "status": "REPRODUCED"
+        if (json_all_pass and num_runs > 1)
+        else ("MEASURED" if json_all_pass else "UNESTABLISHED"),
         "target": "dataclass_field_name_cache",
         "workload": "complex_records_100_items",
         "sample_count": num_runs,
@@ -120,12 +133,17 @@ def adjudicate_claims(benchmark_reports: list[dict[str, Any]]) -> dict[str, Any]
     #   P3.1: Exhaustive mapping equivalence verified
     #   P3.2: Speedup p50 >= 2.5x on distributed paths
     # --------------------------------------------------------------------------
-    dm_typical_runs = [r["benchmarks"]["diff_mapping"]["large_repo_10k_entities"] for r in benchmark_reports]
+    dm_typical_runs = [
+        r["benchmarks"]["diff_mapping"]["large_repo_10k_entities"]
+        for r in benchmark_reports
+    ]
     dm_typical_speedups = [run["speedup_p50"] for run in dm_typical_runs]
     dm_typical_pass = all(s >= 2.5 for s in dm_typical_speedups)
 
     claims["diff_mapping_typical_workload"] = {
-        "status": "REPRODUCED" if (dm_typical_pass and num_runs > 1) else ("MEASURED" if dm_typical_pass else "UNESTABLISHED"),
+        "status": "REPRODUCED"
+        if (dm_typical_pass and num_runs > 1)
+        else ("MEASURED" if dm_typical_pass else "UNESTABLISHED"),
         "target": "terminal_basename_candidate_index",
         "workload": "large_repo_10k_entities_500_files",
         "sample_count": num_runs,
@@ -144,7 +162,10 @@ def adjudicate_claims(benchmark_reports: list[dict[str, Any]]) -> dict[str, Any]
     # Counterexample / Qualification: Diff Mapping (Collision Stress)
     # Retained explicitly to prevent false universal acceleration claims.
     # --------------------------------------------------------------------------
-    dm_col_runs = [r["benchmarks"]["diff_mapping"]["basename_collisions_5k_entities"] for r in benchmark_reports]
+    dm_col_runs = [
+        r["benchmarks"]["diff_mapping"]["basename_collisions_5k_entities"]
+        for r in benchmark_reports
+    ]
     dm_col_speedups = [run["speedup_p50"] for run in dm_col_runs]
 
     claims["diff_mapping_collision_stress"] = {
@@ -163,7 +184,10 @@ def adjudicate_claims(benchmark_reports: list[dict[str, Any]]) -> dict[str, Any]
     # Negative Finding / Withdrawn Claim: Graph Cache Repeat-Freeze
     # Retained explicitly; claim is WITHDRAWN to preserve deep immutability.
     # --------------------------------------------------------------------------
-    freeze_runs = [r["benchmarks"]["graph_cache_freezing"]["repeated_freeze_already_frozen"] for r in benchmark_reports]
+    freeze_runs = [
+        r["benchmarks"]["graph_cache_freezing"]["repeated_freeze_already_frozen"]
+        for r in benchmark_reports
+    ]
     freeze_speedups = [run["speedup_p50"] for run in freeze_runs]
 
     claims["graph_cache_repeat_freeze"] = {
@@ -188,9 +212,20 @@ def adjudicate_claims(benchmark_reports: list[dict[str, Any]]) -> dict[str, Any]
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Adjudicate performance evidence bundle.")
-    parser.add_argument("report_paths", nargs="*", default=["scripts/benchmark_results.json"], help="Paths to benchmark JSON reports.")
-    parser.add_argument("--out", default="evidence/performance-evidence-bundle.json", help="Output evidence bundle path.")
+    parser = argparse.ArgumentParser(
+        description="Adjudicate performance evidence bundle."
+    )
+    parser.add_argument(
+        "report_paths",
+        nargs="*",
+        default=["scripts/benchmark_results.json"],
+        help="Paths to benchmark JSON reports.",
+    )
+    parser.add_argument(
+        "--out",
+        default="evidence/performance-evidence-bundle.json",
+        help="Output evidence bundle path.",
+    )
     args = parser.parse_args()
 
     reports = []
@@ -200,13 +235,17 @@ def main():
         data = load_benchmark_artifact(p)
         if data:
             reports.append(data)
-            source_artifacts.append({
-                "path": str(p),
-                "sha256": sha256_file(p),
-                "commit": data.get("environment", {}).get("git_commit", "unknown"),
-                "platform": data.get("environment", {}).get("platform", "unknown"),
-                "timestamp": data.get("environment", {}).get("timestamp_utc", "unknown"),
-            })
+            source_artifacts.append(
+                {
+                    "path": str(p),
+                    "sha256": sha256_file(p),
+                    "commit": data.get("environment", {}).get("git_commit", "unknown"),
+                    "platform": data.get("environment", {}).get("platform", "unknown"),
+                    "timestamp": data.get("environment", {}).get(
+                        "timestamp_utc", "unknown"
+                    ),
+                }
+            )
 
     if not reports:
         print("[FAIL] No valid benchmark reports found to adjudicate.")

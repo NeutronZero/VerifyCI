@@ -8,6 +8,7 @@ Enforces P0-6 & P1-6 Adjudication from Canonical Data:
 - Cross-checks recorded summary flags: NEVER trusts recorded "PASS" or "established".
 - Fails closed on any hash drift, missing cases, or recomputed gate violations.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -25,16 +26,22 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def assert_frozen_companion_hashes(cap_dir: Path, c_hash: str, l_hash: str, cap_name: str) -> None:
+def assert_frozen_companion_hashes(
+    cap_dir: Path, c_hash: str, l_hash: str, cap_name: str
+) -> None:
     c_file = cap_dir / "CORPUS_SHA256"
     if c_file.exists():
         expected_c = c_file.read_text(encoding="utf-8").strip()
-        assert c_hash == expected_c, f"{cap_name} CORPUS_SHA256 file drift: {c_hash} != {expected_c}"
+        assert c_hash == expected_c, (
+            f"{cap_name} CORPUS_SHA256 file drift: {c_hash} != {expected_c}"
+        )
 
     l_file = cap_dir / "LABEL_SHA256"
     if l_file.exists():
         expected_l = l_file.read_text(encoding="utf-8").strip()
-        assert l_hash == expected_l, f"{cap_name} LABEL_SHA256 file drift: {l_hash} != {expected_l}"
+        assert l_hash == expected_l, (
+            f"{cap_name} LABEL_SHA256 file drift: {l_hash} != {expected_l}"
+        )
 
 
 def adjudicate_cap009(cap_dir: Path) -> dict[str, Any]:
@@ -43,29 +50,57 @@ def adjudicate_cap009(cap_dir: Path) -> dict[str, Any]:
 
     # Provenance and frozen artifact verification
     prov = res["provenance"]
-    assert prov.get("git_commit") and prov["git_commit"] != "unknown", "CAP-009 missing valid git commit provenance"
-    assert prov.get("git_dirty") is False, "CAP-009 executed on dirty tree; clean implementation commit required"
-    assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), "CAP-009 config hash drift"
-    assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap009.py"), "CAP-009 harness hash drift"
-    assert prov["oracle_sha256"] == sha256_file(cap_dir / "author_cap009.py"), "CAP-009 oracle hash drift"
+    assert prov.get("git_commit") and prov["git_commit"] != "unknown", (
+        "CAP-009 missing valid git commit provenance"
+    )
+    assert prov.get("git_dirty") is False, (
+        "CAP-009 executed on dirty tree; clean implementation commit required"
+    )
+    assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), (
+        "CAP-009 config hash drift"
+    )
+    assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap009.py"), (
+        "CAP-009 harness hash drift"
+    )
+    assert prov["oracle_sha256"] == sha256_file(cap_dir / "author_cap009.py"), (
+        "CAP-009 oracle hash drift"
+    )
     c_hash = sha256_file(cap_dir / "cases.jsonl")
     l_hash = sha256_file(cap_dir / "labels.jsonl")
-    assert c_hash == cfg["corpus_sha256"], f"CAP-009 cases.jsonl drift: {c_hash} != {cfg['corpus_sha256']}"
-    assert l_hash == cfg["label_sha256"], f"CAP-009 labels.jsonl drift: {l_hash} != {cfg['label_sha256']}"
+    assert c_hash == cfg["corpus_sha256"], (
+        f"CAP-009 cases.jsonl drift: {c_hash} != {cfg['corpus_sha256']}"
+    )
+    assert l_hash == cfg["label_sha256"], (
+        f"CAP-009 labels.jsonl drift: {l_hash} != {cfg['label_sha256']}"
+    )
     assert_frozen_companion_hashes(cap_dir, c_hash, l_hash, "CAP-009")
 
     # Join result rows directly with frozen labels to verify correspondence
-    labels_raw = [json.loads(line) for line in (cap_dir / "labels.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    labels_raw = [
+        json.loads(line)
+        for line in (cap_dir / "labels.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     labels_by_id = {lbl["case_id"]: lbl for lbl in labels_raw}
     assert len(labels_by_id) == cfg["case_count"], "CAP-009 labels count mismatch"
 
     rows = res["cases"]
     assert len(rows) == cfg["case_count"], "CAP-009 case count mismatch"
     res_case_ids = {r["case_id"] for r in rows}
-    assert res_case_ids == set(labels_by_id.keys()), "CAP-009 case ID mismatch between results and frozen labels"
+    assert res_case_ids == set(labels_by_id.keys()), (
+        "CAP-009 case ID mismatch between results and frozen labels"
+    )
 
-    rep_rows = [r for r in rows if not labels_by_id[r["case_id"]].get("is_critical_adversarial", False)]
-    adv_rows = [r for r in rows if labels_by_id[r["case_id"]].get("is_critical_adversarial", False)]
+    rep_rows = [
+        r
+        for r in rows
+        if not labels_by_id[r["case_id"]].get("is_critical_adversarial", False)
+    ]
+    adv_rows = [
+        r
+        for r in rows
+        if labels_by_id[r["case_id"]].get("is_critical_adversarial", False)
+    ]
 
     # Canonical recomputations
     s_tp = sum(r["seed_tp"] for r in rep_rows)
@@ -90,7 +125,9 @@ def adjudicate_cap009(cap_dir: Path) -> dict[str, Any]:
         and impact_r >= cfg["gates"]["representative_impact_recall_min"]
     )
     if not gates_met:
-        raise ValueError(f"CAP-009 canonical gate failure: seed_p={seed_p}, impact_p={impact_p}")
+        raise ValueError(
+            f"CAP-009 canonical gate failure: seed_p={seed_p}, impact_p={impact_p}"
+        )
 
     return {
         "status": "MEASURED_MET",
@@ -112,21 +149,43 @@ def adjudicate_cap010(cap_dir: Path) -> dict[str, Any]:
 
     # Provenance and frozen hash verification
     prov = res["provenance"]
-    assert prov.get("git_commit") and prov["git_commit"] != "unknown", "CAP-010 missing valid git commit provenance"
-    assert prov.get("git_dirty") is False, "CAP-010 executed on dirty tree; clean implementation commit required"
-    assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), "CAP-010 config hash drift"
-    assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap010.py"), "CAP-010 harness hash drift"
-    assert prov["oracle_sha256"] == sha256_file(cap_dir / "author_cap010.py"), "CAP-010 oracle hash drift"
+    assert prov.get("git_commit") and prov["git_commit"] != "unknown", (
+        "CAP-010 missing valid git commit provenance"
+    )
+    assert prov.get("git_dirty") is False, (
+        "CAP-010 executed on dirty tree; clean implementation commit required"
+    )
+    assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), (
+        "CAP-010 config hash drift"
+    )
+    assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap010.py"), (
+        "CAP-010 harness hash drift"
+    )
+    assert prov["oracle_sha256"] == sha256_file(cap_dir / "author_cap010.py"), (
+        "CAP-010 oracle hash drift"
+    )
 
     c_hash = sha256_file(cap_dir / "cases.jsonl")
     l_hash = sha256_file(cap_dir / "labels.jsonl")
-    assert c_hash == cfg["corpus_sha256"], f"CAP-010 cases.jsonl drift: {c_hash} != {cfg['corpus_sha256']}"
-    assert l_hash == cfg["label_sha256"], f"CAP-010 labels.jsonl drift: {l_hash} != {cfg['label_sha256']}"
+    assert c_hash == cfg["corpus_sha256"], (
+        f"CAP-010 cases.jsonl drift: {c_hash} != {cfg['corpus_sha256']}"
+    )
+    assert l_hash == cfg["label_sha256"], (
+        f"CAP-010 labels.jsonl drift: {l_hash} != {cfg['label_sha256']}"
+    )
     assert_frozen_companion_hashes(cap_dir, c_hash, l_hash, "CAP-010")
 
     # Verify query IDs match the frozen query set exactly
-    cases_raw = [json.loads(line) for line in (cap_dir / "cases.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
-    labels_raw = [json.loads(line) for line in (cap_dir / "labels.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    cases_raw = [
+        json.loads(line)
+        for line in (cap_dir / "cases.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    labels_raw = [
+        json.loads(line)
+        for line in (cap_dir / "labels.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     doc_map = {c["id"]: c["text"] for c in cases_raw if c.get("kind") == "doc"}
     query_cases_by_qid = {c["qid"]: c for c in cases_raw if c.get("kind") == "query"}
     labels_by_qid = {lbl["qid"]: lbl for lbl in labels_raw}
@@ -135,7 +194,9 @@ def adjudicate_cap010(cap_dir: Path) -> dict[str, Any]:
     queries = res["queries"]
     assert len(queries) == cfg["query_count"], "CAP-010 query count mismatch"
     res_qids = {q["qid"] for q in queries}
-    assert res_qids == expected_qids, "CAP-010 query ID mismatch between results and frozen labels"
+    assert res_qids == expected_qids, (
+        "CAP-010 query ID mismatch between results and frozen labels"
+    )
 
     from benchmarks.common.retrieval_rules import evaluate_retrieval_abstention
 
@@ -150,8 +211,12 @@ def adjudicate_cap010(cap_dir: Path) -> dict[str, Any]:
         lbl = labels_by_qid[qid]
         q_case = query_cases_by_qid[qid]
 
-        assert q["category"] == lbl["category"] == q_case["category"], f"Category mismatch for {qid}"
-        assert q.get("is_held_out") == lbl.get("is_held_out") == q_case.get("is_held_out"), f"Held-out status mismatch for {qid}"
+        assert q["category"] == lbl["category"] == q_case["category"], (
+            f"Category mismatch for {qid}"
+        )
+        assert (
+            q.get("is_held_out") == lbl.get("is_held_out") == q_case.get("is_held_out")
+        ), f"Held-out status mismatch for {qid}"
 
         ranked_ids = q.get("ranked_doc_ids", [])
         is_no_answer = lbl.get("is_no_answer", False)
@@ -159,8 +224,12 @@ def adjudicate_cap010(cap_dir: Path) -> dict[str, Any]:
 
         if is_no_answer:
             no_answer_count += 1
-            abstained, _ = evaluate_retrieval_abstention(q_case["text"], ranked_ids, doc_map)
-            has_false_claim = any(did in rel and rel[did] >= 2 for did in ranked_ids[:5])
+            abstained, _ = evaluate_retrieval_abstention(
+                q_case["text"], ranked_ids, doc_map
+            )
+            has_false_claim = any(
+                did in rel and rel[did] >= 2 for did in ranked_ids[:5]
+            )
             if abstained and not has_false_claim:
                 no_answer_correct_abs += 1
             if (not abstained) or has_false_claim:
@@ -175,7 +244,15 @@ def adjudicate_cap010(cap_dir: Path) -> dict[str, Any]:
 
             def _dcg_score(ids: list[str], rel_map: dict[str, int], k: int) -> float:
                 import math
-                return sum(((2 ** rel_map[d] - 1) / math.log2(i + 2) for i, d in enumerate(ids[:k]) if d in rel_map), 0.0)
+
+                return sum(
+                    (
+                        (2 ** rel_map[d] - 1) / math.log2(i + 2)
+                        for i, d in enumerate(ids[:k])
+                        if d in rel_map
+                    ),
+                    0.0,
+                )
 
             ideal = sorted(rel.keys(), key=lambda d: -rel[d])
             idcg = _dcg_score(ideal, rel, 10)
@@ -215,38 +292,71 @@ def adjudicate_cap011(cap_dir: Path) -> dict[str, Any]:
     res = json.loads((cap_dir / "results.json").read_text(encoding="utf-8"))
 
     prov = res["provenance"]
-    assert prov.get("git_commit") and prov["git_commit"] != "unknown", "CAP-011 missing valid git commit provenance"
-    assert prov.get("git_dirty") is False, "CAP-011 executed on dirty tree; clean implementation commit required"
-    assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), "CAP-011 config hash drift"
-    assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap011.py"), "CAP-011 harness hash drift"
+    assert prov.get("git_commit") and prov["git_commit"] != "unknown", (
+        "CAP-011 missing valid git commit provenance"
+    )
+    assert prov.get("git_dirty") is False, (
+        "CAP-011 executed on dirty tree; clean implementation commit required"
+    )
+    assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), (
+        "CAP-011 config hash drift"
+    )
+    assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap011.py"), (
+        "CAP-011 harness hash drift"
+    )
 
     c_hash = sha256_file(cap_dir / "cases.jsonl")
     l_hash = sha256_file(cap_dir / "labels.jsonl")
-    assert c_hash == cfg["corpus_sha256"], f"CAP-011 cases.jsonl drift: {c_hash} != {cfg['corpus_sha256']}"
-    assert l_hash == cfg["label_sha256"], f"CAP-011 labels.jsonl drift: {l_hash} != {cfg['label_sha256']}"
+    assert c_hash == cfg["corpus_sha256"], (
+        f"CAP-011 cases.jsonl drift: {c_hash} != {cfg['corpus_sha256']}"
+    )
+    assert l_hash == cfg["label_sha256"], (
+        f"CAP-011 labels.jsonl drift: {l_hash} != {cfg['label_sha256']}"
+    )
     assert_frozen_companion_hashes(cap_dir, c_hash, l_hash, "CAP-011")
 
     # Verify label and case correspondence
-    labels_raw = [json.loads(line) for line in (cap_dir / "labels.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    labels_raw = [
+        json.loads(line)
+        for line in (cap_dir / "labels.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     labels_by_id = {lbl["case_id"]: lbl for lbl in labels_raw}
     assert len(labels_by_id) == cfg["case_count"], "CAP-011 labels count mismatch"
 
     rows = res["cases"]
     assert len(rows) == cfg["case_count"], "CAP-011 case count mismatch"
     res_case_ids = {r["case_id"] for r in rows}
-    assert res_case_ids == set(labels_by_id.keys()), "CAP-011 case ID mismatch between results and frozen labels"
+    assert res_case_ids == set(labels_by_id.keys()), (
+        "CAP-011 case ID mismatch between results and frozen labels"
+    )
 
-    tp = sum(1 for r in rows if labels_by_id[r["case_id"]]["is_secret"] and r["detected"])
-    fn = sum(1 for r in rows if labels_by_id[r["case_id"]]["is_secret"] and not r["detected"])
-    fp = sum(1 for r in rows if not labels_by_id[r["case_id"]]["is_secret"] and r["detected"])
-    tn = sum(1 for r in rows if not labels_by_id[r["case_id"]]["is_secret"] and not r["detected"])
+    tp = sum(
+        1 for r in rows if labels_by_id[r["case_id"]]["is_secret"] and r["detected"]
+    )
+    fn = sum(
+        1 for r in rows if labels_by_id[r["case_id"]]["is_secret"] and not r["detected"]
+    )
+    fp = sum(
+        1 for r in rows if not labels_by_id[r["case_id"]]["is_secret"] and r["detected"]
+    )
+    tn = sum(
+        1
+        for r in rows
+        if not labels_by_id[r["case_id"]]["is_secret"] and not r["detected"]
+    )
 
     rec = tp / max(1, tp + fn)
     prec = tp / max(1, tp + fp)
     far = fp / max(1, fp + tn)
     frr = fn / max(1, tp + fn)
 
-    ni_rows = [r for r in rows if labels_by_id[r["case_id"]].get("slice") == "name_independent" and labels_by_id[r["case_id"]]["is_secret"]]
+    ni_rows = [
+        r
+        for r in rows
+        if labels_by_id[r["case_id"]].get("slice") == "name_independent"
+        and labels_by_id[r["case_id"]]["is_secret"]
+    ]
     ni_rec = sum(1 for r in ni_rows if r["detected"]) / max(1, len(ni_rows))
 
     violations = res["metrics"]["redaction_violations"]
@@ -258,7 +368,9 @@ def adjudicate_cap011(cap_dir: Path) -> dict[str, Any]:
         and violations <= cfg["gates"]["redaction_violations_max"]
     )
     if not gates_met:
-        raise ValueError(f"CAP-011 canonical gate failure: rec={rec}, prec={prec}, ni_rec={ni_rec}")
+        raise ValueError(
+            f"CAP-011 canonical gate failure: rec={rec}, prec={prec}, ni_rec={ni_rec}"
+        )
 
     return {
         "status": "MEASURED_MET",
@@ -280,10 +392,18 @@ def adjudicate_cap012(cap_dir: Path) -> dict[str, Any]:
     res = json.loads((cap_dir / "results.json").read_text(encoding="utf-8"))
 
     prov = res["provenance"]
-    assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), "CAP-012 config hash drift"
-    assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap012.py"), "CAP-012 harness hash drift"
-    assert prov.get("git_commit") and prov["git_commit"] != "unknown", "CAP-012 missing valid git commit provenance"
-    assert prov.get("git_dirty") is False, "CAP-012 executed on dirty tree; clean implementation commit required"
+    assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), (
+        "CAP-012 config hash drift"
+    )
+    assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap012.py"), (
+        "CAP-012 harness hash drift"
+    )
+    assert prov.get("git_commit") and prov["git_commit"] != "unknown", (
+        "CAP-012 missing valid git commit provenance"
+    )
+    assert prov.get("git_dirty") is False, (
+        "CAP-012 executed on dirty tree; clean implementation commit required"
+    )
     assert cfg["experiment_id"] == "CAP-012"
 
     tiers = res["metrics"]["tiers"]
@@ -296,8 +416,14 @@ def adjudicate_cap012(cap_dir: Path) -> dict[str, Any]:
         t_data = tiers[tier_name]
         b_data = cfg["budgets"][tier_name]
 
-        assert "p50_ms" in t_data and "p95_ms" in t_data and "p99_ms" in t_data, f"CAP-012 tier {tier_name} missing latency fields"
-        assert "peak_rss_mb" in t_data and "storage_growth_per_rev" in t_data and "cache_hit_rate" in t_data, f"CAP-012 tier {tier_name} missing envelope fields"
+        assert "p50_ms" in t_data and "p95_ms" in t_data and "p99_ms" in t_data, (
+            f"CAP-012 tier {tier_name} missing latency fields"
+        )
+        assert (
+            "peak_rss_mb" in t_data
+            and "storage_growth_per_rev" in t_data
+            and "cache_hit_rate" in t_data
+        ), f"CAP-012 tier {tier_name} missing envelope fields"
 
         p95_ok = t_data["p95_ms"] <= b_data["p95_ms_max"]
         mem_ok = t_data["peak_rss_mb"] <= b_data["peak_rss_mb_max"]
@@ -317,7 +443,9 @@ def adjudicate_cap012(cap_dir: Path) -> dict[str, Any]:
         }
 
     if not all_budgets_met:
-        raise ValueError(f"CAP-012 performance budget exceeded (Fail-Closed): {budget_adjudications}")
+        raise ValueError(
+            f"CAP-012 performance budget exceeded (Fail-Closed): {budget_adjudications}"
+        )
 
     return {
         "status": "MEASURED_MET",
@@ -333,49 +461,95 @@ def adjudicate_cap013(cap_dir: Path) -> dict[str, Any]:
     res = json.loads((cap_dir / "results.json").read_text(encoding="utf-8"))
 
     prov = res["provenance"]
-    assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), "CAP-013 config hash drift"
-    assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap013.py"), "CAP-013 harness hash drift"
-    assert prov.get("git_commit") and prov["git_commit"] != "unknown", "CAP-013 missing valid git commit provenance"
-    assert prov.get("git_dirty") is False, "CAP-013 executed on dirty tree; clean implementation commit required"
+    assert prov["config_sha256"] == sha256_file(cap_dir / "config.json"), (
+        "CAP-013 config hash drift"
+    )
+    assert prov["harness_sha256"] == sha256_file(cap_dir / "measure_cap013.py"), (
+        "CAP-013 harness hash drift"
+    )
+    assert prov.get("git_commit") and prov["git_commit"] != "unknown", (
+        "CAP-013 missing valid git commit provenance"
+    )
+    assert prov.get("git_dirty") is False, (
+        "CAP-013 executed on dirty tree; clean implementation commit required"
+    )
 
     mutations = res["mutations"]
     declared_crit = cfg["critical_mutations"]
     crit_set = set(declared_crit)
 
     # Enforce all declared critical mutations are present in results and verify isolated sandbox execution evidence
-    present_crit_ids = {m["mutation_id"] for m in mutations if m["mutation_id"] in crit_set}
+    present_crit_ids = {
+        m["mutation_id"] for m in mutations if m["mutation_id"] in crit_set
+    }
     missing_crit = crit_set - present_crit_ids
     if missing_crit:
         raise ValueError(f"CAP-013 missing declared critical mutations: {missing_crit}")
 
     for m in mutations:
         evidence = m.get("applied_evidence", {})
-        assert evidence.get("target_file"), f"CAP-013 mutation {m['mutation_id']} missing target_file evidence"
-        assert evidence.get("patch_applied"), f"CAP-013 mutation {m['mutation_id']} missing patch_applied evidence"
-        assert evidence.get("sandbox_path"), f"CAP-013 mutation {m['mutation_id']} missing sandbox_path evidence"
-        assert evidence.get("cwd") and evidence["cwd"] == evidence["sandbox_path"], f"CAP-013 mutation {m['mutation_id']} did not execute with cwd in isolated sandbox"
-        assert "exit_status" in evidence, f"CAP-013 mutation {m['mutation_id']} missing exit status"
+        assert evidence.get("target_file"), (
+            f"CAP-013 mutation {m['mutation_id']} missing target_file evidence"
+        )
+        assert evidence.get("patch_applied"), (
+            f"CAP-013 mutation {m['mutation_id']} missing patch_applied evidence"
+        )
+        assert evidence.get("sandbox_path"), (
+            f"CAP-013 mutation {m['mutation_id']} missing sandbox_path evidence"
+        )
+        assert evidence.get("cwd") and evidence["cwd"] == evidence["sandbox_path"], (
+            f"CAP-013 mutation {m['mutation_id']} did not execute with cwd in isolated sandbox"
+        )
+        assert "exit_status" in evidence, (
+            f"CAP-013 mutation {m['mutation_id']} missing exit status"
+        )
 
         sb_str = evidence["sandbox_path"].replace("\\", "/").lower()
-        v_path_raw = evidence.get("verified_module_path", "").replace("VERIFYCI_LOCATION:", "").strip().replace("\\", "/").lower()
+        v_path_raw = (
+            evidence.get("verified_module_path", "")
+            .replace("VERIFYCI_LOCATION:", "")
+            .strip()
+            .replace("\\", "/")
+            .lower()
+        )
         if sb_str == "<sandbox>":
-            assert v_path_raw.startswith("<sandbox>"), f"CAP-013 mutation {m['mutation_id']} module {v_path_raw} was not loaded from sandbox {sb_str}"
+            assert v_path_raw.startswith("<sandbox>"), (
+                f"CAP-013 mutation {m['mutation_id']} module {v_path_raw} was not loaded from sandbox {sb_str}"
+            )
         else:
             sb_norm = str(Path(evidence["sandbox_path"]).resolve()).lower()
             v_path_norm = str(Path(v_path_raw).resolve()).lower() if v_path_raw else ""
-            assert v_path_norm.startswith(sb_norm), f"CAP-013 mutation {m['mutation_id']} module {v_path_norm} was not loaded from sandbox {sb_norm}"
+            assert v_path_norm.startswith(sb_norm), (
+                f"CAP-013 mutation {m['mutation_id']} module {v_path_norm} was not loaded from sandbox {sb_norm}"
+            )
 
         m_id = m["mutation_id"]
         if m_id in crit_set:
-            assert m["classification"] == "killed", f"Critical mutation {m_id} not classified as killed"
-            assert evidence["exit_status"] == 1, f"Critical mutation {m_id} exit status {evidence['exit_status']} != 1 (assertion failure required)"
-            assert "failed" in evidence.get("stdout_summary", "").lower(), f"Critical mutation {m_id} did not fail test assertions"
-            assert "error" not in evidence.get("stdout_summary", "").lower(), f"Critical mutation {m_id} had test/collection error: {evidence.get('stdout_summary')}"
+            assert m["classification"] == "killed", (
+                f"Critical mutation {m_id} not classified as killed"
+            )
+            assert evidence["exit_status"] == 1, (
+                f"Critical mutation {m_id} exit status {evidence['exit_status']} != 1 (assertion failure required)"
+            )
+            assert "failed" in evidence.get("stdout_summary", "").lower(), (
+                f"Critical mutation {m_id} did not fail test assertions"
+            )
+            assert "error" not in evidence.get("stdout_summary", "").lower(), (
+                f"Critical mutation {m_id} had test/collection error: {evidence.get('stdout_summary')}"
+            )
         elif m_id == "EQUIV-01_WHITESPACE_REORDER":
-            assert m["classification"] == "equivalent", f"Equivalent control {m_id} not classified as equivalent"
-            assert evidence["exit_status"] == 0, f"Equivalent control {m_id} failed regression test"
+            assert m["classification"] == "equivalent", (
+                f"Equivalent control {m_id} not classified as equivalent"
+            )
+            assert evidence["exit_status"] == 0, (
+                f"Equivalent control {m_id} failed regression test"
+            )
 
-    crit_rows = [m for m in mutations if m["mutation_id"] in crit_set and m["classification"] != "equivalent"]
+    crit_rows = [
+        m
+        for m in mutations
+        if m["mutation_id"] in crit_set and m["classification"] != "equivalent"
+    ]
     killed = sum(1 for m in crit_rows if m["classification"] == "killed")
     kill_rate = killed / len(crit_rows)
 
@@ -409,19 +583,31 @@ def adjudicate_cap013(cap_dir: Path) -> dict[str, Any]:
 
 
 def main() -> int:
-    print("Executing formal canonical evidence adjudication for CAP-009 through CAP-013...")
+    print(
+        "Executing formal canonical evidence adjudication for CAP-009 through CAP-013..."
+    )
     bundle: dict[str, Any] = {}
 
     try:
-        bundle["CAP-009"] = adjudicate_cap009(ROOT / "benchmarks" / "diff_impact_corpus" / "cap009")
+        bundle["CAP-009"] = adjudicate_cap009(
+            ROOT / "benchmarks" / "diff_impact_corpus" / "cap009"
+        )
         print("CAP-009: ADJUDICATED MEASURED_MET")
-        bundle["CAP-010"] = adjudicate_cap010(ROOT / "benchmarks" / "retrieval_generalization" / "cap010")
+        bundle["CAP-010"] = adjudicate_cap010(
+            ROOT / "benchmarks" / "retrieval_generalization" / "cap010"
+        )
         print("CAP-010: ADJUDICATED MEASURED_MET")
-        bundle["CAP-011"] = adjudicate_cap011(ROOT / "benchmarks" / "secret_heldout" / "cap011")
+        bundle["CAP-011"] = adjudicate_cap011(
+            ROOT / "benchmarks" / "secret_heldout" / "cap011"
+        )
         print("CAP-011: ADJUDICATED MEASURED_MET")
-        bundle["CAP-012"] = adjudicate_cap012(ROOT / "benchmarks" / "repo_perf" / "cap012")
+        bundle["CAP-012"] = adjudicate_cap012(
+            ROOT / "benchmarks" / "repo_perf" / "cap012"
+        )
         print("CAP-012: ADJUDICATED MEASURED_MET")
-        bundle["CAP-013"] = adjudicate_cap013(ROOT / "benchmarks" / "robustness" / "cap013")
+        bundle["CAP-013"] = adjudicate_cap013(
+            ROOT / "benchmarks" / "robustness" / "cap013"
+        )
         print("CAP-013: ADJUDICATED MEASURED_MET")
     except Exception as exc:
         print(f"ADJUDICATION REJECTED (Fail-Closed): {exc}", file=sys.stderr)

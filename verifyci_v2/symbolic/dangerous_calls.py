@@ -1,0 +1,160 @@
+"""Dangerous-call detection for added code.
+
+Equivalence of return values says nothing about safety: a patch that leaves the
+return expression untouched while calling `eval` on request input is
+return-equivalent and still a defect. This checker is independent of the
+symbolic prover so that a proven-equivalent diff cannot suppress it.
+"""
+
+from __future__ import annotations
+
+import ast
+
+from verifyci_v2.contracts.attestation import VerificationFinding
+from verifyci_v2.contracts.canonical import blake3_hex
+
+# Builtins whose mere invocation is a finding: the argument is data, not code.
+_DANGEROUS_BUILTINS: dict[str, str] = {
+    "eval": "executes arbitrary Python",
+    "exec": "executes arbitrary Python",
+    "compile": "compiles arbitrary source at runtime",
+    "__import__": "dynamic import bypasses import policy",
+}
+
+# `module.attr` spellings that execute a command or deserialise untrusted data.
+_DANGEROUS_ATTRIBUTES: dict[str, tuple[str, str]] = {
+    "system": ("os", "runs a shell command"),
+    "popen": ("subprocess", "spawns a process"),
+    "spawn": ("subprocess", "spawns a process"),
+    "call": ("subprocess", "spawns a process"),
+}
+
+_DANGEROUS_NAMES: dict[str, tuple[str, str]] = {
+    "loads": ("pickle", "deserialises untrusted data"),
+    "load": ("pickle", "deserialises untrusted data"),
+    "unsafe_load": ("yaml", "constructs arbitrary Python objects"),
+    "system": ("os", "runs a shell command"),
+}
+
+
+def _call_name(node: ast.Call) -> str | None:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+# Modules whose import grants code-execution or unsafe-deserialisation capability.
+# Inherited from the frozen cap002_heldout policy (case N-W2).
+_DANGEROUS_IMPORTS: dict[str, str] = {
+    "subprocess": "grants process and shell execution",
+    "ctypes": "grants raw foreign-function and memory access",
+    "marshal": "deserialises arbitrary code objects",
+    "pickle": "deserialises untrusted data",
+    "shelve": "deserialises untrusted data",
+    "pty": "grants pseudo-terminal process control",
+}
+
+
+def scan_dangerous_calls(
+    file_path: str, source: str
+) -> tuple[VerificationFinding, ...]:
+    """Reports dangerous-call usage. Operates on parsed Python only."""
+    try:
+        tree = ast.parse(source, filename=file_path)
+    except (SyntaxError, ValueError, IndentationError):
+        return ()
+
+    findings: list[VerificationFinding] = []
+    seen: set[tuple[int, str]] = set()
+
+    for node in ast.walk(tree):
+        modules: list[str] = []
+        if isinstance(node, ast.Import):
+            modules = [alias.name.split(".")[0] for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            modules = [node.module.split(".")[0]]
+        for module in modules:
+            reason = _DANGEROUS_IMPORTS.get(module)
+            if reason is None:
+                continue
+            key = (node.lineno, module)
+            if key in seen:
+                continue
+            seen.add(key)
+            fid = blake3_hex(
+                f"DANGEROUS_IMPORT:{file_path}:{node.lineno}:{module}",
+                domain="verifyci.v2.finding",
+            )[:16]
+            findings.append(
+                VerificationFinding(
+                    finding_id=fid,
+                    rule_id="VC2-DANGEROUS-IMPORT",
+                    severity="MEDIUM",
+                    verdict="FAIL",
+                    file_path=file_path,
+                    start_line=node.lineno,
+                    end_line=node.lineno,
+                    message=(
+                        f"Dangerous import '{module}' on line {node.lineno}: "
+                        f"{reason}."
+                    ),
+                )
+            )
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _call_name(node)
+        if name is None:
+            continue
+
+        reason: str | None = None
+        if isinstance(node.func, ast.Name) and name in _DANGEROUS_BUILTINS:
+            reason = _DANGEROUS_BUILTINS[name]
+        elif isinstance(node.func, ast.Attribute):
+            for attr, (module, why) in _DANGEROUS_ATTRIBUTES.items():
+                if name == attr and _has_module_ref(node.func.value, module):
+                    reason = why
+                    break
+        if reason is None:
+            for attr, (module, why) in _DANGEROUS_NAMES.items():
+                if name == attr and _has_module_ref(node.func.value, module):
+                    reason = why
+                    break
+
+        if reason is None:
+            continue
+
+        key = (node.lineno, name)
+        if key in seen:
+            continue
+        seen.add(key)
+        fid = blake3_hex(
+            f"DANGEROUS:{file_path}:{node.lineno}:{name}",
+            domain="verifyci.v2.finding",
+        )[:16]
+        findings.append(
+            VerificationFinding(
+                finding_id=fid,
+                rule_id="VC2-DANGEROUS-CALL",
+                severity="CRITICAL",
+                verdict="FAIL",
+                file_path=file_path,
+                start_line=node.lineno,
+                end_line=node.lineno,
+                message=f"Dangerous call '{name}' on line {node.lineno}: {reason}.",
+            )
+        )
+    return tuple(findings)
+
+
+def _has_module_ref(node: ast.AST, module: str) -> bool:
+    """Matches `os.system`, `subprocess.run`, and `from os import system` forms."""
+    if isinstance(node, ast.Name):
+        return node.id == module
+    if isinstance(node, ast.Attribute):
+        return node.attr == module
+    return False

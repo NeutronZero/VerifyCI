@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import msgspec
 from typing import Any, Callable
 
 from verifyci_v2.contracts.attestation import VerificationFinding
@@ -21,16 +21,14 @@ class SandboxCapabilityViolationError(PermissionError):
     """Raised when a checker plugin attempts forbidden host filesystem, socket, or subprocess I/O, or passes unconfined Python."""
 
 
-@dataclass(frozen=True, slots=True)
-class WasmSandboxConfig:
+class WasmSandboxConfig(msgspec.Struct, frozen=True):
     max_instruction_fuel: int = 10_000_000
     allow_filesystem: bool = False
     allow_network: bool = False
     require_wasm_isolation: bool = True
 
 
-@dataclass(frozen=True, slots=True)
-class WasmPluginExecutionReport:
+class WasmPluginExecutionReport(msgspec.Struct, frozen=True):
     plugin_id: str
     plugin_digest: str
     fuel_consumed: int
@@ -54,7 +52,8 @@ class WasmCheckerSandbox:
         self,
         plugin_id: str,
         plugin_source_or_wasm: bytes | str,
-        runner_fn: Callable[[tuple[FunctionUSSA, ...]], list[VerificationFinding]] | None = None,
+        runner_fn: Callable[[tuple[FunctionUSSA, ...]], list[VerificationFinding]]
+        | None = None,
     ) -> str:
         if self.config.require_wasm_isolation and runner_fn is not None:
             raise SandboxCapabilityViolationError(
@@ -68,7 +67,14 @@ class WasmCheckerSandbox:
             else plugin_source_or_wasm
         )
 
-        forbidden = ("os.system", "subprocess.", "socket.", "open(", "urllib.", "httpx.")
+        forbidden = (
+            "os.system",
+            "subprocess.",
+            "socket.",
+            "open(",
+            "urllib.",
+            "httpx.",
+        )
         if not self.config.allow_filesystem and not self.config.allow_network:
             for tok in forbidden:
                 if tok in text_repr:
@@ -115,7 +121,9 @@ class WasmCheckerSandbox:
             fuel_used = 0
             for fn in functions:
                 for blk in fn.basic_blocks:
-                    fuel_used += 500 + 150 * (len(blk.instructions) + len(blk.phi_nodes))
+                    fuel_used += 500 + 150 * (
+                        len(blk.instructions) + len(blk.phi_nodes)
+                    )
                     if fuel_used > self.config.max_instruction_fuel:
                         raise SandboxFuelExhaustedError(
                             f"Plugin '{plugin_id}' exhausted CPU fuel budget "
@@ -147,7 +155,10 @@ class WasmCheckerSandbox:
                     if isinstance(ret, int) and ret > 0:
                         findings_list.append(
                             VerificationFinding(
-                                finding_id=blake3_hex(f"{plugin_id}:{digest}:{ret}", domain="verifyci.v2.finding")[:16],
+                                finding_id=blake3_hex(
+                                    f"{plugin_id}:{digest}:{ret}",
+                                    domain="verifyci.v2.finding",
+                                )[:16],
                                 rule_id=f"WASM-{plugin_id.upper()}",
                                 severity="HIGH",
                                 verdict="FAIL",
@@ -196,7 +207,10 @@ class UnconfinedPythonCheckerRunner:
 
     def __init__(self, max_fuel: int = 10_000_000) -> None:
         self.max_fuel = max_fuel
-        self._plugins: dict[str, tuple[str, Callable[[tuple[FunctionUSSA, ...]], list[VerificationFinding]]]] = {}
+        self._plugins: dict[
+            str,
+            tuple[str, Callable[[tuple[FunctionUSSA, ...]], list[VerificationFinding]]],
+        ] = {}
 
     def register_plugin(
         self,

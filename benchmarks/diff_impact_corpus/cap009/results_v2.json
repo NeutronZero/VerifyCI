@@ -1,0 +1,35 @@
+{
+  "experiment_id": "CAP009",
+  "engine": "verifyci_v2",
+  "status": "passed",
+  "metrics": {
+    "metric_name": "impact_accuracy",
+    "metric_value": 1.0,
+    "target_threshold": 0.95,
+    "threshold_basis": "exact_set_match_against_frozen_impact_labels",
+    "false_accept_count": 0,
+    "seed_accuracy": 1.0,
+    "impact_accuracy": 1.0,
+    "missed_impact_rate": 0.0,
+    "critical_missed": 0.0
+  },
+  "counts": {
+    "cases": 225,
+    "scored": 225,
+    "detail": {
+      "seed_exact": 225,
+      "impact_exact": 225,
+      "critical_scored": 25
+    }
+  },
+  "not_scored_reason": null,
+  "provenance": {
+    "git_commit": "7bf4774014bd1248c970eee4923e6db8d5b4207c",
+    "git_dirty": true,
+    "python_version": "3.14.7",
+    "platform": "Windows-11",
+    "corpus_sha256": "a9f76b89c9f114590c04d7d2e2ee3714504d13ad7d9ff075df505d9d81048ea6",
+    "label_sha256": "5081fa37d3bfff1a67562900b2c54560dde688de60708feb77d883ab3b281d99"
+  },
+  "v1_results_preserved": "822c6f084d89140ddf6b23212683aa5b7dceb634d6b9bbf1c6a2efab82145e10"
+}

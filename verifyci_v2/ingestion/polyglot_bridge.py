@@ -5,7 +5,10 @@ import re
 
 from verifyci_v2.contracts.canonical import blake3_hex
 from verifyci_v2.contracts.ssa_ir import CPGEdge
-from verifyci_v2.ingestion.stack_graphs import StackGraphStitcher, _module_prefix_from_path
+from verifyci_v2.ingestion.stack_graphs import (
+    StackGraphStitcher,
+    _module_prefix_from_path,
+)
 
 _ROUTE_DECORATOR_RE = re.compile(
     r"@(?P<obj>[A-Za-z_]\w*)\.(?P<verb>route|get|post|put|delete|patch)\(\s*['\"](?P<path>[^'\"]+)['\"]"
@@ -38,7 +41,9 @@ class PolyglotBridgeResolver:
         self._c_functions: dict[str, str] = {}  # c_symbol -> qualified_name
         self._py_ffi_Waiters: list[tuple[str, str]] = []  # (py_caller_qname, c_symbol)
         self._http_routes: dict[str, str] = {}  # normalized_route -> py_handler_qname
-        self._http_clients: list[tuple[str, str]] = []  # (ts_caller_qname, normalized_route)
+        self._http_clients: list[
+            tuple[str, str]
+        ] = []  # (ts_caller_qname, normalized_route)
 
     def scan_file(self, file_path: str, source: str, language: str) -> None:
         mod_prefix = _module_prefix_from_path(file_path)
@@ -81,7 +86,9 @@ class PolyglotBridgeResolver:
 
                     # Check FFI calls inside function body
                     for child in ast.walk(stmt):
-                        if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
+                        if isinstance(child, ast.Call) and isinstance(
+                            child.func, ast.Attribute
+                        ):
                             if (
                                 isinstance(child.func.value, ast.Name)
                                 and child.func.value.id in ffi_handles
@@ -99,13 +106,19 @@ class PolyglotBridgeResolver:
             for idx, fm in enumerate(func_matches):
                 fn_qname = f"{mod_prefix}.{fm.group('name')}"
                 start = fm.end()
-                end = func_matches[idx + 1].start() if idx + 1 < len(func_matches) else len(source)
+                end = (
+                    func_matches[idx + 1].start()
+                    if idx + 1 < len(func_matches)
+                    else len(source)
+                )
                 body = source[start:end]
                 for fetch_m in _TS_FETCH_RE.finditer(body):
                     norm_url = normalize_route_template(fetch_m.group("url"))
                     self._http_clients.append((fn_qname, norm_url))
 
-    def resolve_bridges(self, stitcher: StackGraphStitcher | None = None) -> tuple[CPGEdge, ...]:
+    def resolve_bridges(
+        self, stitcher: StackGraphStitcher | None = None
+    ) -> tuple[CPGEdge, ...]:
         """Emits FFI_BRIDGE and HTTP_BRIDGE edges and registers them in the StackGraphStitcher."""
         edges: list[CPGEdge] = []
 

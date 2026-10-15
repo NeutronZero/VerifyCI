@@ -12,7 +12,7 @@ inputs:
     required: false
     default: "."
   db:
-    description: "Path to VerifyCI database (defaults to <path>/.verifyci/verifyci.db)"
+    description: "Path to VerifyCI database (defaults to <path>/.verifyci/store.vc2)"
     required: false
     default: ""
   base-ref:
@@ -176,7 +176,7 @@ runs:
 
         # Resolve Database Path
         if [ -z "$DB_ARG" ]; then
-          DB_PATH="$REPO_PATH/.verifyci/verifyci.db"
+          DB_PATH="$REPO_PATH/.verifyci/store.vc2"
         else
           DB_PATH="$DB_ARG"
         fi
@@ -185,7 +185,7 @@ runs:
         if [ ! -f "$DB_PATH" ]; then
           echo "::group::Initializing and Ingesting Codebase"
           verifyci init "$REPO_PATH"
-          verifyci ingest "$REPO_PATH"
+          verifyci ingest "$REPO_PATH" --db "$DB_PATH"
           echo "::endgroup::"
         fi
 
