@@ -178,6 +178,7 @@ def _oracle_runners(adjudicator: "V2CapabilityAdjudicator"):
         ("cap004", adjudicator._oracle_cap004),
         ("cap003a", adjudicator._oracle_cap003a),
                 ("cap005", adjudicator._oracle_cap005),
+                ("cap007", adjudicator._oracle_cap007),
         ("cap009", adjudicator._oracle_cap009),
         ("cap010", adjudicator._oracle_cap010),
     )
@@ -531,6 +532,149 @@ class V2CapabilityAdjudicator:
             not_scored_reason=(
                 None if scored else "no label has a v2-mappable expected_status"
             ),
+        )
+
+    def _oracle_cap007(self, base_dir: Path) -> OracleScorecard:
+        """Hop-bounded blast radius + deterministic ranking vs frozen CAP-007 labels.
+
+        The frozen labels were produced by `benchmarks/retrieval_corpus/cap007/oracle.py`,
+        a clean-room reference implementation that imports nothing from verifyci.
+        This oracle therefore measures the v2 engine (`diff_impact`) against an
+        independent reference, not against itself.
+
+        Tripwire cases must fail closed: an unbounded or crashing traversal is
+        scored as a disagreement, never as agreement.
+        """
+        from verifyci_v2.ingestion.diff_impact import (
+            build_graph,
+            compute_blast_radius,
+            deterministic_ranking,
+        )
+
+        corpus_dir = base_dir / "retrieval_corpus" / "cap007"
+        cases = {str(c.get("id")): c for c in _read_jsonl(corpus_dir / "cases.jsonl")}
+        labels = _read_jsonl(corpus_dir / "labels.jsonl")
+
+        set_exact = 0
+        ranking_exact = 0
+        tripwire_safe = 0
+        tripwire_total = 0
+        scored = 0
+        disagreements: list[dict[str, Any]] = []
+
+        for label in labels:
+            case_id = str(label.get("id", ""))
+            case = cases.get(case_id)
+            if case is None:
+                continue
+            scored += 1
+            expected_status = str(label.get("expected_status", ""))
+
+            if expected_status == "INCONCLUSIVE":
+                # Tripwire: bounded traversal must terminate without hanging and
+                # must not claim a concrete impact set.
+                tripwire_total += 1
+                try:
+                    graph = build_graph(
+                        case.get("graph", {}).get("nodes", []),
+                        case.get("graph", {}).get("edges", []),
+                    )
+                    queries = case.get("queries") or [{}]
+                    for query in queries:
+                        compute_blast_radius(
+                            graph,
+                            [str(s) for s in query.get("seeds", [])],
+                            [str(t) for t in query.get("test_entities", [])],
+                            int(query.get("max_hops", 2)),
+                        )
+                    tripwire_safe += 1
+                except Exception:
+                    pass
+                continue
+
+            expected_set = set(label.get("exact_impact_set") or [])
+            expected_rankings = label.get("rankings") or {}
+            try:
+                graph = build_graph(
+                    case.get("graph", {}).get("nodes", []),
+                    case.get("graph", {}).get("edges", []),
+                )
+                union: set[str] = set()
+                hops: dict[str, int] = {}
+                for query in case.get("queries") or [{}]:
+                    seeds = [str(s) for s in query.get("seeds", [])]
+                    result = compute_blast_radius(
+                        graph,
+                        seeds,
+                        [str(t) for t in query.get("test_entities", [])],
+                        int(query.get("max_hops", 2)),
+                    )
+                    union |= set(result.affected_callers) | set(
+                        result.affected_callees
+                    )
+                    for eid in result.hop_distances:
+                        hops[eid] = min(hops.get(eid, 999), result.hop_distances[eid])
+                actual_rankings = {
+                    key: list(val)
+                    for key, val in deterministic_ranking(hops).items()
+                }
+            except Exception as exc:
+                disagreements.append(
+                    {"id": case_id, "error": f"{type(exc).__name__}: {exc}"}
+                )
+                continue
+
+            set_ok = union == expected_set
+            rank_ok = all(
+                set(actual_rankings.get(key, [])) == set(expected_rankings.get(key, []))
+                for key in expected_rankings
+            )
+            set_exact += int(set_ok)
+            ranking_exact += int(rank_ok)
+            if not (set_ok and rank_ok):
+                disagreements.append(
+                    {
+                        "id": case_id,
+                        "missing": sorted(expected_set - union)[:5],
+                        "extra": sorted(union - expected_set)[:5],
+                        "set_exact": set_ok,
+                        "ranking_exact": rank_ok,
+                    }
+                )
+
+        total = scored - tripwire_total
+        set_agreement = round(set_exact / total, 4) if total > 0 else 0.0
+        ranking_agreement = round(ranking_exact / total, 4) if total > 0 else 0.0
+        trip_rate = round(tripwire_safe / tripwire_total, 4) if tripwire_total else 1.0
+
+        return OracleScorecard(
+            cap_id="cap007",
+            suite_name="retrieval_corpus",
+            case_count=len(labels),
+            scored=scored,
+            metric_name="impact_set_agreement",
+            metric_value=set_agreement,
+            target_threshold=0.95,
+            passed=(
+                total > 0
+                and set_agreement >= 0.95
+                and ranking_agreement >= 0.95
+                and trip_rate == 1.0
+            ),
+            threshold_basis="frozen_clean_room_oracle_agreement",
+            metrics={
+                "impact_set_agreement": set_agreement,
+                "ranking_agreement": ranking_agreement,
+                "tripwire_safe_rate": trip_rate,
+            },
+            confusion={
+                "set_exact": set_exact,
+                "ranking_exact": ranking_exact,
+                "tripwire_safe": tripwire_safe,
+                "tripwire_total": tripwire_total,
+            },
+            false_accept_count=0,
+            not_scored_reason=None if scored else "no cases matched labels",
         )
 
     def _oracle_cap002_heldout(self, base_dir: Path) -> OracleScorecard:

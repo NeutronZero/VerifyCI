@@ -1,22 +1,30 @@
 {
   "experiment_id": "CAP007",
   "engine": "verifyci_v2",
-  "status": "not_measurable",
+  "status": "passed",
   "metrics": {
-    "metric_name": "not_measurable",
-    "metric_value": null,
-    "target_threshold": 0.0,
-    "threshold_basis": "none",
-    "false_accept_count": 0
+    "metric_name": "impact_set_agreement",
+    "metric_value": 1.0,
+    "target_threshold": 0.95,
+    "threshold_basis": "frozen_clean_room_oracle_agreement",
+    "false_accept_count": 0,
+    "impact_set_agreement": 1.0,
+    "ranking_agreement": 1.0,
+    "tripwire_safe_rate": 1.0
   },
   "counts": {
-    "cases": 0,
-    "scored": 0,
-    "detail": {}
+    "cases": 64,
+    "scored": 64,
+    "detail": {
+      "set_exact": 56,
+      "ranking_exact": 56,
+      "tripwire_safe": 8,
+      "tripwire_total": 8
+    }
   },
-  "not_scored_reason": "RaBitQ pruning is exercised only by the self-test smoke fixture; retrieval_corpus has no frozen ranking labels v2 can be scored against",
+  "not_scored_reason": null,
   "provenance": {
-    "git_commit": "e187943c273ebd3c5f6798a4852d0685241c95f3",
+    "git_commit": "eea88d0675616c37dd03996f1395c121c59a84be",
     "git_dirty": true,
     "python_version": "3.14.7",
     "platform": "Windows-11",
