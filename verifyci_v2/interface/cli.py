@@ -386,6 +386,47 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
 
                 # Removal provenance against the stored base revision.
                 stored_source = base_sources.get(file_path)
+                if not stored_source:
+                    # Fail closed on an ungrounded removal. A removal cannot be
+                    # verified against nothing: without the base revision there
+                    # is no record to confirm the removed lines ever existed.
+                    # Silently skipping the check would report PASS for a patch
+                    # that deletes code, which is the opposite of abstaining.
+                    # Only a NET deletion counts. A refactor that rewrites a
+                    # body (`-return x + 1` / `+return 1 + x`) also shows removed
+                    # lines, but nothing was deleted; keying on raw removals
+                    # would abstain on ordinary equivalence-preserving edits.
+                    _removed_lines = [
+                        ln
+                        for ln in file_entry["diff"].splitlines()
+                        if ln.startswith("-") and not ln.startswith("---")
+                    ]
+                    _added_lines = [
+                        ln
+                        for ln in file_entry["diff"].splitlines()
+                        if ln.startswith("+") and not ln.startswith("+++")
+                    ]
+                    if len(_removed_lines) > len(_added_lines):
+                        findings.append(
+                            VerificationFinding(
+                                finding_id=blake3_hex(
+                                    f"REM_UNGROUNDED:{file_path}",
+                                    domain="verifyci.v2.finding",
+                                )[:16],
+                                rule_id="VC2-REMOVAL-NO-BASE-RECORD",
+                                severity="MEDIUM",
+                                verdict="INCONCLUSIVE",
+                                file_path=file_path,
+                                start_line=1,
+                                end_line=1,
+                                message=(
+                                    f"Diff removes {len(_removed_lines)} line(s) from "
+                                    f"'{file_path}' but no stored base revision is "
+                                    "available; the removal cannot be verified. "
+                                    "Failing closed."
+                                ),
+                            )
+                        )
                 if stored_source:
                     try:
                         provenance = analyze_removal_provenance(
