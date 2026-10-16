@@ -876,11 +876,14 @@ def _vc2_repair_empty_bodies(source: str) -> str:
     for idx, line in enumerate(lines):
         out.append(line)
         stripped = line.strip()
-        if not (stripped.startswith("def ") and stripped.endswith(":")):
+        is_block_header = (
+            stripped.startswith("def ") or stripped.startswith("class ")
+        ) and stripped.endswith(":")
+        if not is_block_header:
             continue
         following = lines[idx + 1] if idx + 1 < len(lines) else ""
-        if following.strip() and not following[:1].isspace():
-            continue  # next line is at module level: this def genuinely has a body
+        if following.strip() and following[:1].isspace():
+            continue  # an indented next line means this block already has a body
         indent = line[: len(line) - len(line.lstrip())]
         out.append(f"{indent}    pass")
     return "\n".join(out) + "\n"

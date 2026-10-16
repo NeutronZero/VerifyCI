@@ -179,7 +179,9 @@ def _split_top_level_sexpr(text: str) -> list[str]:
     return tokens
 
 
-def saturate_function_egraph(func: FunctionUSSA) -> tuple[str, tuple[str, ...]]:
+def saturate_function_egraph(
+    func: FunctionUSSA,
+) -> tuple[str | None, tuple[str, ...]]:
     """
     Loads a FunctionUSSA into an equality-saturation e-graph:
     - Performs alpha-renaming of local SSA temporaries to positional canonical IDs.
@@ -222,6 +224,13 @@ def saturate_function_egraph(func: FunctionUSSA) -> tuple[str, tuple[str, ...]]:
                 canonical_effects.append(
                     f"{block.block_id}:{inst.opcode}:{saturated_expr}"
                 )
+
+    if not canonical_effects:
+        # No RETURN/CALL/BRANCH effect was captured, so the signature would be
+        # empty and its digest identical for *any* two bodies. Claiming
+        # equivalence from an empty signature asserts "these are equivalent" on
+        # no evidence at all, so abstain instead.
+        return None, tuple(sorted(set(rewrites)))
 
     eclass_signature = "|".join(canonical_effects)
     digest = blake3_hex(eclass_signature, domain="verifyci.v2.egglog.eclass")
@@ -283,6 +292,22 @@ class EgglogEquivalenceEngine:
             # callers: the next call starts from a clean scope.
             _EGGLOG_CHECK_EGRAPH = None
         all_rw = tuple(sorted(set(base_rw) | set(head_rw)))
+        if base_dig is None or head_dig is None:
+            # Without a structural signature there is nothing to compare; the
+            # honest answer is "undecided", never "equivalent".
+            return EquivalenceSaturationResult(
+                is_equivalent=False,
+                base_eclass_digest=(
+                    base_dig
+                    or blake3_hex("NO-EVIDENCE", domain="verifyci.v2.egglog.eclass")
+                ),
+                head_eclass_digest=(
+                    head_dig
+                    or blake3_hex("NO-EVIDENCE", domain="verifyci.v2.egglog.eclass")
+                ),
+                applied_rewrites=all_rw,
+                verdict="INCONCLUSIVE",
+            )
         is_eq = base_dig == head_dig
         return EquivalenceSaturationResult(
             is_equivalent=is_eq,
