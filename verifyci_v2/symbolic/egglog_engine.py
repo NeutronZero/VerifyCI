@@ -275,8 +275,13 @@ class EgglogEquivalenceEngine:
         # fix) while letting base/head expressions unify within this call.
         global _EGGLOG_CHECK_EGRAPH
         _EGGLOG_CHECK_EGRAPH = EGraph() if _HAS_EGGLOG_LIBRARY else None
-        base_dig, base_rw = saturate_function_egraph(func_base)
-        head_dig, head_rw = saturate_function_egraph(func_head)
+        try:
+            base_dig, base_rw = saturate_function_egraph(func_base)
+            head_dig, head_rw = saturate_function_egraph(func_head)
+        finally:
+            # Do not leak the per-call EGraph to direct `_canonicalize_sexpr`
+            # callers: the next call starts from a clean scope.
+            _EGGLOG_CHECK_EGRAPH = None
         all_rw = tuple(sorted(set(base_rw) | set(head_rw)))
         is_eq = base_dig == head_dig
         return EquivalenceSaturationResult(
@@ -457,6 +462,9 @@ if _HAS_EGGLOG_LIBRARY:
     def enun(value: i64Like) -> _EExpr: ...
 
     @function
+    def enot(a: _EExpr) -> _EExpr: ...
+
+    @function
     def eadd(a: _EExpr, b: _EExpr) -> _EExpr: ...
 
     @function
@@ -470,6 +478,24 @@ if _HAS_EGGLOG_LIBRARY:
 
     @function
     def exor(a: _EExpr, b: _EExpr) -> _EExpr: ...
+
+    @function
+    def esub(a: _EExpr, b: _EExpr) -> _EExpr: ...
+
+    @function
+    def ediv(a: _EExpr, b: _EExpr) -> _EExpr: ...
+
+    @function
+    def emod(a: _EExpr, b: _EExpr) -> _EExpr: ...
+
+    @function
+    def eband(a: _EExpr, b: _EExpr) -> _EExpr: ...
+
+    @function
+    def ebor(a: _EExpr, b: _EExpr) -> _EExpr: ...
+
+    @function
+    def ebxor(a: _EExpr, b: _EExpr) -> _EExpr: ...
 
     a, b = vars_('a b', _EExpr)
 
@@ -489,6 +515,23 @@ if _HAS_EGGLOG_LIBRARY:
                 rewrite(eor(a, enun(0))).to(a),
                 rewrite(eand(a, a)).to(a),
                 rewrite(eor(a, a)).to(a),
+                # Bitwise commutativity
+                rewrite(eband(a, b)).to(eband(b, a)),
+                rewrite(ebor(a, b)).to(ebor(b, a)),
+                rewrite(ebxor(a, b)).to(ebxor(b, a)),
+                # Subtraction identity
+                rewrite(esub(a, enun(0))).to(a),
+                rewrite(esub(a, a)).to(enun(0)),
+                # Division/modulo identity
+                rewrite(ediv(a, enun(1))).to(a),
+                rewrite(emod(a, enun(0))).to(enun(0)),
+                # Bitwise identities
+                rewrite(eband(a, enun(0))).to(enun(0)),
+                rewrite(ebor(a, enun(0))).to(a),
+                rewrite(ebxor(a, enun(0))).to(a),
+                rewrite(ebxor(a, a)).to(enun(0)),
+                # Double negation elimination
+                rewrite(enot(enot(a))).to(a),
             )
         )
     except Exception:
@@ -538,13 +581,17 @@ def _parse_egglog_sexpr(text: str):
     lo = op.upper()
     mapping = {
         "ADD": "add",
+        "SUB": "sub",
         "MULT": "mul",
+        "FLOORDIV": "div",
+        "DIV": "div",
+        "MOD": "mod",
         "AND": "and",
         "OR": "or",
         "XOR": "xor",
-        "BITAND": "and",
-        "BITOR": "or",
-        "BITXOR": "xor",
+        "BITAND": "band",
+        "BITOR": "bor",
+        "BITXOR": "bxor",
     }
     if lo not in mapping:
         return None
@@ -599,12 +646,20 @@ def _render_egglog_repr(s: str) -> str:
         return v
     if fname == "enun" and len(parts) == 1:
         return parts[0]
+    if fname == "enot" and len(parts) == 1:
+        return "NOT(" + _render_egglog_repr(parts[0]) + ")"
     mapping = {
         "eadd": "Add",
+        "esub": "Sub",
         "emul": "Mult",
+        "ediv": "FloorDiv",
+        "emod": "Mod",
         "eand": "And",
         "eor": "Or",
         "exor": "Xor",
+        "eband": "BitAnd",
+        "ebor": "BitOr",
+        "ebxor": "BitXor",
     }
     if fname in mapping and len(parts) == 2:
         return "(" + mapping[fname] + " " + _render_egglog_repr(parts[0]) + " " + _render_egglog_repr(parts[1]) + ")"
@@ -626,13 +681,24 @@ def _egglog_canonicalize_sexpr(expr: str, rewrites: list[str]) -> str | None:
                 return enun(p[1])
             if p[0] == "var":
                 return evar(str(p[1]))
+            if p[0] == "op" and p[1] == "NOT":
+                inner = to_expr(p[2])
+                if inner is None:
+                    return None
+                return enot(inner)
             if p[0] == "bin":
                 opmap = {
                     "add": eadd,
+                    "sub": esub,
                     "mul": emul,
+                    "div": ediv,
+                    "mod": emod,
                     "and": eand,
                     "or": eor,
                     "xor": exor,
+                    "band": eband,
+                    "bor": ebor,
+                    "bxor": ebxor,
                 }
                 if p[1] not in opmap:
                     return None

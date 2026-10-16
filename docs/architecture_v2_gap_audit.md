@@ -9,7 +9,7 @@
 
 ## Verdict
 
-The v2 engine implements the verification core faithfully (Z3 SMT proving, U-SSA, DuckDB CPG, RaBitQ index, WASM sandbox, DSSE provenance, four provider adapters, conformal gate, CEGIS loop, msgspec contracts, Salsa early cutoff) and several spec-named technologies now genuinely imported and used (`tree_sitter` polyglot extraction, `watchfiles` hot reload, `securesystemslib` DSSE PAE, `msgspec`). Still aspirational: `egglog`, `llguidance`, the `Model2Vec` library (deliberate: BLAKE3-derived offline embedder), and a `gittuf` binary RSL (hand-rolled hash chain). `kw_only=True` on contracts is not applied. Redaction module exists under `verifyci_v2/secrets/` (spec-compat shim) and `verifyci_v2/symbolic/`. Measured capability scores (6/7 pass, fail-closed) are unchanged; breadth/spec-discipline issues remain, and several spec claims are still overstated.
+The v2 engine implements the verification core faithfully (Z3 SMT proving, U-SSA, DuckDB CPG, RaBitQ index, WASM sandbox, DSSE provenance, four provider adapters, conformal gate, CEGIS loop, msgspec contracts, Salsa early cutoff) and several spec-named technologies now genuinely imported and used (`tree_sitter` polyglot extraction, `watchfiles` hot reload, `securesystemslib` DSSE PAE, `msgspec`). Still aspirational: `egglog`, `llguidance`, the `Model2Vec` library (deliberate: BLAKE3-derived offline embedder), and a `gittuf` binary RSL (hand-rolled hash chain). `kw_only=True` on contracts is now applied. Redaction module exists under `verifyci_v2/secrets/` (spec-compat shim) and `verifyci_v2/symbolic/`. Measured capability scores (6/7 pass, fail-closed) are unchanged; breadth/spec-discipline issues remain, and several spec claims are still overstated.
 
 ---
 
@@ -49,8 +49,8 @@ The v2 engine implements the verification core faithfully (Z3 SMT proving, U-SSA
 | securesystemslib DSSE PAE | §1.5,§3.7 | yes | swapped |
 | tree_sitter (core) | §3.2a | yes | real (C/C++/JS/TS/Go/Rust; Python via ast) |
 | watchfiles | §3.1 | yes | `start_hot_reload` |
-| egglog | §1.2,§1.5,§3.5a,§5 | no | hand-rolled equality saturation |
-| llguidance | §1.2,§3.6b | no | post-hoc schema validation |
+| egglog | §1.2,§1.5,§3.5a,§5 | partial | `EGraph` drives canonicalization for Add/Sub/Mult/Div/Mod/bitwise/And/Or/Xor/NOT with commutativity, identity and double-negation rules; unsupported forms fall back to the hand-rolled path; per-`check_equivalence` EGraph isolation prevents global accumulation |
+| llguidance | §1.2,§3.6b | partial | `TokenLevelGrammarMask` compiles JSON schemas via `JsonCompiler` and drives `LLMatcher` to validate candidate completions; per-token logit masking is fail-closed (raises) when a tokenizer yields no usable mask |
 | Model2Vec library | §3.4b | no | BLAKE3-derived offline embedder (deliberate) |
 | gittuf binary RSL | §3.7 | partial | hand-rolled hash chain |
 
@@ -86,8 +86,8 @@ The v2 engine implements the verification core faithfully (Z3 SMT proving, U-SSA
 | 3.2 | polyglot | partially: TS extraction + bridge resolver run during ingest |
 | 3.3 | Salsa | implemented |
 | 3.4 | DuckDB + RaBitQ | schema present; RaBitQ present; Model2Vec not library |
-| 3.5 | symbolic (Z3 + egglog) | Z3 real, egglog hand-rolled |
-| 3.6 | BYO-AI | 4 adapters + conformal + CEGIS; llguidance absent |
+| 3.5 | symbolic (Z3 + egglog) | Z3 real; egglog `EGraph` now drives expression canonicalization |
+| 3.6 | BYO-AI | 4 adapters + conformal + CEGIS; llguidance grammar compilation live |
 | 3.7 | Wasm + provenance | Wasm real; DSSE real; gittuf hand-rolled |
 | 4 | contracts | msgspec ✓; `kw_only=True` missing |
 | 5 | failure modes | present incl. redaction |
@@ -97,7 +97,7 @@ The v2 engine implements the verification core faithfully (Z3 SMT proving, U-SSA
 
 ## 4. Recommendation
 
-1. Do not advertise `egglog`, `llguidance`, `Model2Vec` as shipped. `tree_sitter` and `watchfiles` are now genuinely used.
+1. `egglog` and `llguidance` are now genuinely used but partial; keep them out of release marketing until their coverage matches the spec. `tree_sitter` and `watchfiles` are used.
 2. Apply `kw_only=True` to §4 contracts (or remove from spec).
 3. `secrets/redaction.py` naming now resolves.
 4. Hot reload available; decide auto-start in `vc2 mcp`.
