@@ -44,7 +44,7 @@ def _run_worker(
     Any integrity problem is recorded as an anomaly rather than propagated as a
     pass, so a contended or crashed worker cannot be mistaken for success.
     """
-    from verifyci_v2.store.revision_store import LedgerIntegrityError, RevisionStore
+    from revision_store_v2 import LedgerIntegrityError, RevisionStore
 
     try:
         store = RevisionStore(db_path)
@@ -120,7 +120,7 @@ def _run_worker(
 
 def run_case(case: dict[str, Any], timeout_seconds: float = 30.0) -> dict[str, Any]:
     """Executes a case's workers concurrently and reports observed invariants."""
-    from verifyci_v2.store.revision_store import RevisionStore
+    from revision_store_v2 import RevisionStore
 
     with tempfile.TemporaryDirectory(prefix="vc2_cap008_") as tmp:
         db_path = str(Path(tmp) / "ledger.sqlite")

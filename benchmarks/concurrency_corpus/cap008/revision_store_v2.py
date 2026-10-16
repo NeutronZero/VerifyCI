@@ -1,9 +1,21 @@
-"""Concurrency-safe revision store for temporal/concurrency attestation.
+"""Protocol test substrate for CAP-008 concurrency attestation.
+
+**This is not the VerifyCI system of record.** The product store is DuckDB
+(`verifyci_v2/store/duckdb_cpg.py`), per the architecture spec's single-store
+invariant. This module exists only because the frozen `worker_protocol.json`
+prescribes SQLite semantics (`journal_mode=WAL`, `busy_timeout=5000`) for its
+multi-process contention cases.
+
+That prescription cannot be satisfied by DuckDB: DuckDB takes a single writer,
+so it cannot exercise write contention, lock exhaustion or torn reads at all.
+Running this corpus against DuckDB would make its tripwires unfalsifiable -
+they would trivially pass because contention cannot occur. The substrate is
+therefore SQLite, confined here to the benchmark tree so it is not mistaken for
+a supported product store.
 
 CAP-008 requires a store that several OS processes can write concurrently
 while a reader observes a consistent snapshot. SQLite in WAL mode with a busy
-timeout is the smallest correct substrate; DuckDB is deliberately not used for
-the write path because it takes a single writer.
+timeout is the smallest correct substrate.
 
 Canonicalisation follows the frozen protocol: a revision's `canonical_hash` is
 the SHA-256 of a canonical JSON projection of its identity and its entities and
@@ -364,15 +376,21 @@ class RevisionStore:
         ]
 
     def events(self) -> list[dict[str, Any]]:
+        """Ledger events in append order, including the payload.
+
+        The payload is required to re-derive each event hash; a projection
+        without it can only check chain continuity, not event integrity.
+        """
         return [
             {
                 "event_id": r[0],
                 "event_type": r[1],
+                "payload": json.loads(r[4]) if r[4] else {},
                 "prev_event_hash": r[2],
                 "event_hash": r[3],
             }
             for r in self._conn.execute(
-                "SELECT event_id, event_type, prev_event_hash, event_hash "
+                "SELECT event_id, event_type, prev_event_hash, event_hash, payload "
                 "FROM ledger_events ORDER BY seq"
             )
         ]
@@ -384,7 +402,12 @@ class RevisionStore:
         ]
 
     def verify_ledger_chain(self) -> bool:
-        """Re-walks the hash chain; a break is an integrity failure."""
+        """Re-derives the whole hash chain; a break is an integrity failure.
+
+        Each event hash is recomputed from its own id, type, payload and the
+        predecessor's hash. A structurally linked chain with a tampered payload
+        fails here, which a linkage-only check would miss.
+        """
         prev: str | None = None
         for event in self.events():
             if event["prev_event_hash"] != prev:
@@ -392,15 +415,12 @@ class RevisionStore:
             body = {
                 "id": event["event_id"],
                 "type": event["event_type"],
-                "payload": None,
+                "payload": event["payload"],
                 "prev_event_hash": prev,
             }
-            # Payload is not carried in the read projection, so continuity is
-            # checked structurally: each event must chain to its predecessor.
-            if event["prev_event_hash"] is None and prev is not None:
+            if compute_sha256(canonical_json(body)) != event["event_hash"]:
                 return False
             prev = event["event_hash"]
-            del body
         return True
 
     def canonical_store_hash(self) -> str:
