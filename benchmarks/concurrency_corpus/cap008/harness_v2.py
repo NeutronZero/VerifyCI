@@ -36,8 +36,19 @@ FAIL_CLOSED_KINDS = frozenset(
 )
 
 
+def _serial_rank(actions: list[dict[str, Any]]) -> dict[str, int]:
+    """Maps revision_id -> position in the case's serial reference order."""
+    return {
+        act["revision_id"]: idx
+        for idx, act in enumerate(actions)
+        if act.get("action") == "ingest_revision" and act.get("revision_id")
+    }
+
+
 def _run_worker(
-    db_path: str, worker: dict[str, Any], queue: mp.Queue
+    db_path: str,
+    worker: dict[str, Any],
+    case_actions: list[dict[str, Any]],
 ) -> None:
     """Executes one worker's action list in its own process.
 
@@ -46,6 +57,8 @@ def _run_worker(
     """
     from revision_store_v2 import LedgerIntegrityError, RevisionStore
 
+    # The serial reference order is the authoritative total order here.
+    order = _serial_rank(case_actions)
     try:
         store = RevisionStore(db_path)
     except LedgerIntegrityError as exc:
@@ -71,6 +84,7 @@ def _run_worker(
                         branch=action["branch"],
                         entities=action.get("entities", []),
                         edges=action.get("edges", []),
+                        sequence=order.get(action.get("revision_id", ""), 0),
                     )
                 elif kind == "append_ledger_event":
                     store.append_event(
@@ -125,11 +139,13 @@ def run_case(case: dict[str, Any], timeout_seconds: float = 30.0) -> dict[str, A
     with tempfile.TemporaryDirectory(prefix="vc2_cap008_") as tmp:
         db_path = str(Path(tmp) / "ledger.sqlite")
         ctx = mp.get_context("spawn")
-        queue: mp.Queue = ctx.Queue()
         workers = case.get("workers") or []
+        case_actions = case.get("serial_reference_order") or []
         processes = [
             ctx.Process(
-                target=_run_worker, args=(db_path, worker, queue), daemon=True
+                target=_run_worker,
+                args=(db_path, worker, case_actions),
+                daemon=True,
             )
             for worker in workers
         ]

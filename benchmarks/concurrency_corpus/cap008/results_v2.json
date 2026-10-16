@@ -1,30 +1,30 @@
 {
   "experiment_id": "CAP008",
   "engine": "verifyci_v2",
-  "status": "failed",
+  "status": "passed",
   "metrics": {
     "metric_name": "branch_state_agreement",
-    "metric_value": 0.7917,
+    "metric_value": 1.0,
     "target_threshold": 0.95,
     "threshold_basis": "frozen_worker_protocol",
     "false_accept_count": 0,
-    "branch_state_agreement": 0.7917,
+    "branch_state_agreement": 1.0,
     "chain_continuity_rate": 1.0,
-    "disjoint_invariance_rate": 0.875,
+    "disjoint_invariance_rate": 1.0,
     "tripwire_fail_closed_rate": 1.0
   },
   "counts": {
     "cases": 64,
     "scored": 48,
     "detail": {
-      "state_exact": 38,
+      "state_exact": 48,
       "tripwire_fail_closed": 16,
       "tripwire_total": 16
     }
   },
   "not_scored_reason": null,
   "provenance": {
-    "git_commit": "0edcd5ee51e34ea35dad412d7030b8390c6b6de8",
+    "git_commit": "2b9acd20ea38c8f8a4fc80cf19686eb4988c57a5",
     "git_dirty": true,
     "python_version": "3.14.7",
     "platform": "Windows-11",

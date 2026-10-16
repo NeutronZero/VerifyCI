@@ -184,7 +184,8 @@ class RevisionStore:
                 commit_id TEXT NOT NULL,
                 parent_revision_id TEXT,
                 branch TEXT NOT NULL,
-                canonical_hash TEXT NOT NULL
+                canonical_hash TEXT NOT NULL,
+                sequence INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS entities (
                 revision_id TEXT NOT NULL,
@@ -230,6 +231,7 @@ class RevisionStore:
         branch: str,
         entities: list[dict[str, Any]] | None = None,
         edges: list[dict[str, Any]] | None = None,
+        sequence: int = 0,
     ) -> str:
         """Atomically writes a revision and advances its branch head."""
         entities = entities or []
@@ -250,9 +252,17 @@ class RevisionStore:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 "INSERT OR REPLACE INTO revisions (revision_id, repository_id, "
-                "commit_id, parent_revision_id, branch, canonical_hash) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (revision_id, repository_id, commit_id, parent_revision_id, branch, digest),
+                "commit_id, parent_revision_id, branch, canonical_hash, sequence) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    revision_id,
+                    repository_id,
+                    commit_id,
+                    parent_revision_id,
+                    branch,
+                    digest,
+                    int(sequence),
+                ),
             )
             conn.execute("DELETE FROM entities WHERE revision_id = ?", (revision_id,))
             conn.executemany(
@@ -274,11 +284,26 @@ class RevisionStore:
                     for e in edges
                 ],
             )
-            conn.execute(
-                "INSERT OR REPLACE INTO branch_heads (branch, latest_revision_id) "
-                "VALUES (?, ?)",
-                (branch, revision_id),
-            )
+            current = conn.execute(
+                "SELECT latest_revision_id FROM branch_heads WHERE branch = ?",
+                (branch,),
+            ).fetchone()
+            advance = True
+            if current is not None:
+                head_seq = conn.execute(
+                    "SELECT sequence FROM revisions WHERE revision_id = ?",
+                    (current[0],),
+                ).fetchone()
+                # Without a total order the head would depend on which writer
+                # committed last, which is exactly the nondeterminism the
+                # serial-reference protocol forbids.
+                advance = head_seq is None or int(sequence) >= int(head_seq[0])
+            if advance:
+                conn.execute(
+                    "INSERT OR REPLACE INTO branch_heads "
+                    "(branch, latest_revision_id) VALUES (?, ?)",
+                    (branch, revision_id),
+                )
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
