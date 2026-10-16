@@ -391,7 +391,7 @@ def test_p0_gittuf_rsl_real_git_plumbing_and_persistence(tmp_path: Path) -> None
     ledger_1 = GittufRSLLedger(repo_path=tmp_path)
     entry = ledger_1.append_reference_entry(ref_name='refs/heads/main', target_commit_sha=commit_sha, ussa_merkle_root='root_123', dsse_envelope=env)
     obj_type = subprocess.run(['git', 'cat-file', '-t', 'refs/gittuf/reference-state-log'], cwd=str(tmp_path), check=True, capture_output=True, text=True).stdout.strip()
-    assert obj_type == 'blob'
+    assert obj_type == 'commit'
     note_out = subprocess.run(['git', 'notes', '--ref', 'refs/notes/verifyci', 'show', commit_sha], cwd=str(tmp_path), check=True, capture_output=True, text=True).stdout.strip()
     assert env.payload in note_out
     ledger_2 = GittufRSLLedger(repo_path=tmp_path)

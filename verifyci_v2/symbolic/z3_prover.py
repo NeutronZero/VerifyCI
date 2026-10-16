@@ -402,6 +402,44 @@ def _ussa_sexpr_to_z3(
                 return lhs - rhs
             if op == "Mult":
                 return lhs * rhs
+            if op in ("FloorDiv", "Div"):
+                # Integer division; avoid Z3's nonlinear real division by
+                # translating to multiplication-free QF_LIA when possible.
+                return _z3_mod.If(
+                    rhs != 0,
+                    lhs / rhs,
+                    _z3_mod.IntVal(0),
+                )
+            if op == "Mod":
+                return _z3_mod.If(
+                    rhs != 0,
+                    lhs % rhs,
+                    _z3_mod.IntVal(0),
+                )
+            if op == "BitAnd":
+                f_sym = _z3_mod.Function(
+                    "bitand_uninterp",
+                    _z3_mod.IntSort(),
+                    _z3_mod.IntSort(),
+                    _z3_mod.IntSort(),
+                )
+                return f_sym(lhs, rhs)
+            if op == "BitOr":
+                f_sym = _z3_mod.Function(
+                    "bitor_uninterp",
+                    _z3_mod.IntSort(),
+                    _z3_mod.IntSort(),
+                    _z3_mod.IntSort(),
+                )
+                return f_sym(lhs, rhs)
+            if op == "BitXor":
+                f_sym = _z3_mod.Function(
+                    "bitxor_uninterp",
+                    _z3_mod.IntSort(),
+                    _z3_mod.IntSort(),
+                    _z3_mod.IntSort(),
+                )
+                return f_sym(lhs, rhs)
             return None
 
         # N-ary Boolean prefix: (And v1 v2 ...), (Or v1 v2 ...)

@@ -55,20 +55,34 @@ class GittufRSLLedger:
                 if line_str.strip()
             ]
         elif (self.repo_path / ".git").exists():
-            # Try reading directly from git blob ref
+            # Read from the RSL commit tree (`refs/gittuf/reference-state-log:reference-state-log.jsonl`)
+            # with fallback to direct blob ref for backward compatibility
             try:
                 proc = subprocess.run(
-                    ["git", "cat-file", "-p", "refs/gittuf/reference-state-log"],
+                    [
+                        "git",
+                        "cat-file",
+                        "-p",
+                        "refs/gittuf/reference-state-log:reference-state-log.jsonl",
+                    ],
                     cwd=str(self.repo_path),
                     capture_output=True,
                     text=True,
                     check=False,
                 )
+                if proc.returncode != 0:
+                    proc = subprocess.run(
+                        ["git", "cat-file", "-p", "refs/gittuf/reference-state-log"],
+                        cwd=str(self.repo_path),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
                 if proc.returncode == 0 and proc.stdout.strip():
                     rsl_lines = [
                         line_str.strip()
                         for line_str in proc.stdout.splitlines()
-                        if line_str.strip()
+                        if line_str.strip().startswith("{")
                     ]
             except Exception:
                 pass
@@ -182,10 +196,22 @@ class GittufRSLLedger:
             with open(notes_file, "a", encoding="utf-8") as f:
                 f.write(canonical_jcs_str(note_record) + "\n")
 
-            # Execute genuine Git object plumbing when inside an initialized git repository
+            # Execute genuine gittuf RSL commit-chain plumbing inside a Git repository
             git_dir = self.repo_path / ".git"
             if git_dir.exists():
+                import os
+                import shutil
+
                 try:
+                    gittuf_bin = shutil.which("gittuf")
+                    if gittuf_bin:
+                        subprocess.run(
+                            [gittuf_bin, "rsl", "record", ref_name],
+                            cwd=str(self.repo_path),
+                            capture_output=True,
+                            check=False,
+                        )
+
                     all_rsl_bytes = rsl_file.read_bytes()
                     blob_proc = subprocess.run(
                         ["git", "hash-object", "-w", "--stdin"],
@@ -196,13 +222,84 @@ class GittufRSLLedger:
                     )
                     if blob_proc.returncode == 0:
                         blob_sha = blob_proc.stdout.decode("ascii").strip()
-                        update_proc = subprocess.run(
+
+                        # Build a Git tree object containing `reference-state-log.jsonl`
+                        mktree_input = (
+                            f"100644 blob {blob_sha}\treference-state-log.jsonl\n".encode("ascii")
+                        )
+                        tree_proc = subprocess.run(
+                            ["git", "mktree"],
+                            input=mktree_input,
+                            cwd=str(self.repo_path),
+                            capture_output=True,
+                            check=False,
+                        )
+                        if tree_proc.returncode != 0:
+                            raise RuntimeError(
+                                f"Failed to create Git tree for RSL: {tree_proc.stderr.decode('utf-8')}"
+                            )
+                        tree_sha = tree_proc.stdout.decode("ascii").strip()
+
+                        # Resolve existing parent RSL commit if refs/gittuf/reference-state-log exists
+                        parent_rsl_commit: str | None = None
+                        rev_proc = subprocess.run(
                             [
                                 "git",
-                                "update-ref",
-                                "refs/gittuf/reference-state-log",
-                                blob_sha,
+                                "rev-parse",
+                                "--verify",
+                                "--quiet",
+                                "refs/gittuf/reference-state-log^{commit}",
                             ],
+                            cwd=str(self.repo_path),
+                            capture_output=True,
+                            check=False,
+                        )
+                        if rev_proc.returncode == 0 and rev_proc.stdout.strip():
+                            parent_rsl_commit = rev_proc.stdout.decode("ascii").strip()
+
+                        rsl_commit_msg = (
+                            f"RSL Reference Entry\n\n"
+                            f"refName: {ref_name}\n"
+                            f"targetID: {target_commit_sha}\n"
+                            f"ussaMerkleRoot: {ussa_merkle_root}\n"
+                            f"dsseEnvelopeDigest: {env_digest}\n"
+                            f"entryID: {entry_id}\n"
+                        ).encode("utf-8")
+                        commit_cmd = ["git", "commit-tree", tree_sha]
+                        if parent_rsl_commit:
+                            commit_cmd.extend(["-p", parent_rsl_commit])
+
+                        git_env = {
+                            **os.environ,
+                            "GIT_AUTHOR_NAME": "VerifyCI v2 RSL",
+                            "GIT_AUTHOR_EMAIL": "rsl@verifyci.local",
+                            "GIT_COMMITTER_NAME": "VerifyCI v2 RSL",
+                            "GIT_COMMITTER_EMAIL": "rsl@verifyci.local",
+                        }
+                        commit_proc = subprocess.run(
+                            commit_cmd,
+                            input=rsl_commit_msg,
+                            cwd=str(self.repo_path),
+                            env=git_env,
+                            capture_output=True,
+                            check=False,
+                        )
+                        if commit_proc.returncode != 0:
+                            raise RuntimeError(
+                                f"Failed to create RSL commit-tree: {commit_proc.stderr.decode('utf-8')}"
+                            )
+                        rsl_commit_sha = commit_proc.stdout.decode("ascii").strip()
+
+                        update_cmd = [
+                            "git",
+                            "update-ref",
+                            "refs/gittuf/reference-state-log",
+                            rsl_commit_sha,
+                        ]
+                        if parent_rsl_commit:
+                            update_cmd.append(parent_rsl_commit)
+                        update_proc = subprocess.run(
+                            update_cmd,
                             cwd=str(self.repo_path),
                             capture_output=True,
                             check=False,

@@ -281,6 +281,21 @@ class VerifyCIFastMCPDaemon:
                             message=f"Z3 proven semantic divergence between base and head for '{qname}'.",
                         )
                         res = (div_finding,)
+                    elif not is_eq and smt_st in ("SOLVER_UNAVAILABLE", "UNKNOWN"):
+                        undec_finding = VerificationFinding(
+                            finding_id=blake3_hex(
+                                f"UNDECIDED:{file_path}:{qname}",
+                                domain="verifyci.v2.finding",
+                            )[:16],
+                            rule_id="VC2-Z3-UNDECIDED-DIFF",
+                            severity="HIGH",
+                            verdict="INCONCLUSIVE",
+                            file_path=file_path,
+                            start_line=fn_head.start_line,
+                            end_line=fn_head.end_line,
+                            message=f"Z3 could not decide equivalence for '{qname}' (status={smt_st}); fail-closed INCONCLUSIVE.",
+                        )
+                        res = (undec_finding,)
                 for f in res:
                     if auto_fix and f.verdict == "FAIL":
                         f = self.cegis.repair_finding(

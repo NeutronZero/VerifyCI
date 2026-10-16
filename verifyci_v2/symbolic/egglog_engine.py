@@ -16,6 +16,8 @@ from verifyci_v2.contracts.attestation import VerdictKind, VerificationFinding
 from verifyci_v2.contracts.canonical import blake3_hex
 from verifyci_v2.contracts.ssa_ir import FunctionUSSA
 
+_EGGLOG_CHECK_EGRAPH = None  # per-check_equivalence EGraph (Bug C fix)
+
 _COMMUTATIVE_OPS = frozenset(
     {"Add", "Mult", "BitAnd", "BitOr", "BitXor", "Eq", "NotEq", "And", "Or"}
 )
@@ -269,6 +271,10 @@ class EgglogEquivalenceEngine:
                 applied_rewrites=(),
                 verdict="INCONCLUSIVE",
             )
+        # Fresh EGraph per check_equivalence call: isolates across calls (Bug C
+        # fix) while letting base/head expressions unify within this call.
+        global _EGGLOG_CHECK_EGRAPH
+        _EGGLOG_CHECK_EGRAPH = EGraph() if _HAS_EGGLOG_LIBRARY else None
         base_dig, base_rw = saturate_function_egraph(func_base)
         head_dig, head_rw = saturate_function_egraph(func_head)
         all_rw = tuple(sorted(set(base_rw) | set(head_rw)))
@@ -468,7 +474,6 @@ if _HAS_EGGLOG_LIBRARY:
     a, b = vars_('a b', _EExpr)
 
     _E_RULES = None
-    _EGGLOG_SATURATION_EGRAPH = None
     try:
         _E_RULES = (
             ruleset(
@@ -647,10 +652,7 @@ def _egglog_canonicalize_sexpr(expr: str, rewrites: list[str]) -> str | None:
         if ex is None:
             return None
 
-        global _EGGLOG_SATURATION_EGRAPH
-        if _EGGLOG_SATURATION_EGRAPH is None:
-            _EGGLOG_SATURATION_EGRAPH = EGraph()
-        egraph = _EGGLOG_SATURATION_EGRAPH
+        egraph = _EGGLOG_CHECK_EGRAPH
         egraph.register(ex)
         egraph.run(_E_RULES)
         canonical = egraph.extract(ex)

@@ -324,6 +324,7 @@ class DuckDBCPGStore:
             "(commit_sha, file_path, source_text) VALUES (?, ?, ?)",
             rows,
         )
+        self._conn.commit()
         return len(rows)
 
     def load_source_snapshot(self, commit_sha: str) -> dict[str, str]:

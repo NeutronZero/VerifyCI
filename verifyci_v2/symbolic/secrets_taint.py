@@ -577,6 +577,15 @@ class TaintTrackedSecretEngine:
             sensitive_var = any(
                 k in var_name.lower() for k in _SENSITIVE_NAME_TOKENS
             )
+            # Compute sink reachability before the acceptance gate so that any
+            # credential/sensitive variable flowing into an active I/O sink is
+            # always caught regardless of entropy.
+            flows_to_sink = any(
+                self._trace_ussa_dfg_to_sink(
+                    ussa_funcs, vn, node.lineno
+                )
+                for vn in var_names
+            )
             # Acceptance: a named rule matched, or the value is high-entropy
             # under a credential-ish identifier, or it is an explicit
             # production credential assignment.
@@ -584,11 +593,7 @@ class TaintTrackedSecretEngine:
                 matched_rule is None
                 and not (sensitive_var and max_entropy >= 3.85)
                 and not (is_credential_var and not is_test_file)
-                and not (
-                    is_credential_var
-                    and not is_test_file
-                    and not _looks_like_placeholder(var_name, raw_literal)
-                )
+                and not (sensitive_var and flows_to_sink)
             ):
                 continue
 
