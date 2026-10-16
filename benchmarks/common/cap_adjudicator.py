@@ -177,6 +177,7 @@ def _oracle_runners(adjudicator: "V2CapabilityAdjudicator"):
         ("cap002_heldout", adjudicator._oracle_cap002_heldout),
         ("cap004", adjudicator._oracle_cap004),
         ("cap003a", adjudicator._oracle_cap003a),
+                ("cap005", adjudicator._oracle_cap005),
         ("cap009", adjudicator._oracle_cap009),
         ("cap010", adjudicator._oracle_cap010),
     )
@@ -449,6 +450,87 @@ class V2CapabilityAdjudicator:
                 "tn": tn,
             },
             false_accept_count=fn,
+        )
+
+    def _oracle_cap005(self, base_dir: Path) -> OracleScorecard:
+        """Real-patch verdict agreement against the frozen CAP-005 corpus.
+
+        The frozen 64-case `patch_real` corpus ships `cases.jsonl` + `labels.jsonl`
+        with an exact id match and an adjudicated `expected_status` per case, so
+        this capability is measurable without authoring any new evidence.
+
+        Fail-closed mapping matches CAP-002 held-out: a stricter verdict than the
+        label is accepted, a laxer one is not, and HUMAN_REVIEW has no v2 verdict
+        so it is reported as unmapped rather than silently credited.
+        """
+        from verifyci_v2.interface.cli import run_cli
+
+        corpus_dir = base_dir / "patch_real" / "cap005"
+        cases = {str(c.get("id")): c for c in _read_jsonl(corpus_dir / "cases.jsonl")}
+        labels = _read_jsonl(corpus_dir / "labels.jsonl")
+
+        acceptable = {
+            "PASS": {"PASS"},
+            "FAIL": {"FAIL"},
+            "INCONCLUSIVE": {"INCONCLUSIVE", "FAIL"},
+        }
+        agreed = 0
+        false_accepts = 0
+        unmapped = 0
+        scored = 0
+
+        for label in labels:
+            case_id = str(label.get("id", ""))
+            case = cases.get(case_id)
+            if case is None:
+                continue
+            expected = str(label.get("expected_status", ""))
+            allowed = acceptable.get(expected)
+            if allowed is None:
+                unmapped += 1
+                continue
+
+            scored += 1
+            with tempfile.NamedTemporaryFile(
+                "w", suffix=".diff", delete=False, encoding="utf-8"
+            ) as fh:
+                fh.write(case.get("diff", ""))
+                diff_path = fh.name
+            try:
+                result = run_cli(
+                    ["verify-diff", "--diff-file", diff_path, "--format", "json"]
+                )
+                actual = str(result.get("status", "INCONCLUSIVE"))
+            except Exception as exc:
+                actual = f"ERROR:{type(exc).__name__}"
+            finally:
+                Path(diff_path).unlink(missing_ok=True)
+
+            if actual in allowed:
+                agreed += 1
+            if expected in ("FAIL", "INCONCLUSIVE") and actual == "PASS":
+                false_accepts += 1
+
+        agreement = round(agreed / scored, 4) if scored else 0.0
+        # v1 parity bar: v1 scored 64/64 (100%) on this frozen corpus
+        # (benchmarks/patch_real/cap005/RESULTS.md).
+        bar = 1.0
+        return OracleScorecard(
+            cap_id="cap005",
+            suite_name="patch_real",
+            case_count=len(labels),
+            scored=scored,
+            metric_name="verdict_agreement",
+            metric_value=agreement,
+            target_threshold=bar,
+            passed=agreement >= bar and false_accepts == 0 and scored > 0,
+            threshold_basis="v1_parity_and_zero_false_accepts",
+            metrics={"agreement": agreement, "false_accepts": float(false_accepts)},
+            confusion={"agreed": agreed, "unmapped": unmapped},
+            false_accept_count=false_accepts,
+            not_scored_reason=(
+                None if scored else "no label has a v2-mappable expected_status"
+            ),
         )
 
     def _oracle_cap002_heldout(self, base_dir: Path) -> OracleScorecard:
