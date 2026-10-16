@@ -276,11 +276,22 @@ def _lower_stmt_list(
                     index_str, idx_used = _expr_to_ssa_operands(tgt.slice, ctx)
                     for u in (*used_ssa, *ctl_used, *idx_used):
                         ctx.mutated_globals.add(u)
+                    # A subscript store against a local container versions it, so
+                    # later reads pick up the mutation (otherwise `a[k]=v`
+                    # followed by `return a` collapses to the pre-mutation
+                    # container and a store-only difference becomes invisible
+                    # to equivalence).
+                    if isinstance(tgt.value, ast.Name):
+                        new_ssa = ctx.new_version(tgt.value.id)
+                        ctx.record_dfg(container_str, new_ssa)
+                        target_var = new_ssa
+                    else:
+                        target_var = f"{container_str}[{index_str}]"
                     instructions.append(
                         USSAInstruction(
                             inst_id=ctx.next_inst_id(),
                             opcode="STORE_SUBSCRIPT",
-                            target_var=f"{container_str}[{index_str}]",
+                            target_var=target_var,
                             operands=(
                                 expr_str,
                                 container_str,
@@ -552,9 +563,10 @@ def lower_python_function(
     *,
     file_path: str,
     repo_id: str = "default-repo",
+    scope: str = "",
 ) -> FunctionUSSA:
     mod_prefix = _module_prefix_from_path(file_path)
-    qname = f"{mod_prefix}.{stmt.name}"
+    qname = f"{mod_prefix}.{scope}{stmt.name}"
     params = tuple(arg.arg for arg in stmt.args.args)
     param_sigs = [
         f"{arg.arg}:{ast.unparse(arg.annotation)}" if arg.annotation else arg.arg
@@ -640,11 +652,26 @@ def lower_file_to_ussa(
     if language == "python":
         tree = ast.parse(source, filename=file_path)
         functions: list[FunctionUSSA] = []
-        for stmt in tree.body:
-            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                functions.append(
-                    lower_python_function(stmt, file_path=file_path, repo_id=repo_id)
-                )
+
+        def _collect(body: list[ast.stmt], scope: str) -> None:
+            for stmt in body:
+                if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    functions.append(
+                        lower_python_function(
+                            stmt,
+                            file_path=file_path,
+                            repo_id=repo_id,
+                            scope=scope,
+                        )
+                    )
+                elif isinstance(stmt, ast.ClassDef):
+                    # Most behaviour in Python lives in methods. Stopping at
+                    # module level left every method unlowered, so a change
+                    # inside a class produced no functions at all and no
+                    # comparison ran.
+                    _collect(stmt.body, f"{scope}{stmt.name}.")
+
+        _collect(tree.body, "")
         return tuple(functions)
 
     # Polyglot lowering for C/C++ and TypeScript/JavaScript

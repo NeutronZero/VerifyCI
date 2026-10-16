@@ -218,9 +218,16 @@ def saturate_function_egraph(
                 raw_expr = pattern.sub(lambda m: env_subst[m.group(0)], raw_expr)
 
             saturated_expr = _canonicalize_sexpr(raw_expr, rewrites)
-            if inst.opcode in ("ASSIGN", "BINOP") and inst.target_var:
+            if inst.opcode in ("ASSIGN", "BINOP", "STORE_SUBSCRIPT") and inst.target_var:
                 env_subst[inst.target_var] = saturated_expr
-            elif inst.opcode in ("RETURN", "RAISE", "CALL", "STORE_ATTR", "BRANCH"):
+            if inst.opcode in (
+                "RETURN",
+                "RAISE",
+                "CALL",
+                "STORE_ATTR",
+                "STORE_SUBSCRIPT",
+                "BRANCH",
+            ):
                 canonical_effects.append(
                     f"{block.block_id}:{inst.opcode}:{saturated_expr}"
                 )

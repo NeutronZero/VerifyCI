@@ -619,6 +619,30 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
                 # valid module. This is a no-op for already-valid sources.
                 base_src = _vc2_repair_empty_bodies(base_src)
                 head_src = _vc2_repair_empty_bodies(head_src)
+
+                # A newly added dependency that does not resolve cannot be
+                # analysed or attributed, so the patch is unverified there.
+                for module in _vc2_unresolvable_added_imports(added_lines):
+                    findings.append(
+                        VerificationFinding(
+                            finding_id=blake3_hex(
+                                f"UNRESOLVED:{file_path}:{module}",
+                                domain="verifyci.v2.finding",
+                            )[:16],
+                            rule_id="VC2-UNRESOLVABLE-IMPORT",
+                            severity="MEDIUM",
+                            verdict="INCONCLUSIVE",
+                            file_path=file_path,
+                            start_line=1,
+                            end_line=1,
+                            message=(
+                                f"Patch adds an import of '{module}', which does not "
+                                "resolve in this environment. The dependency's "
+                                "origin and the code using it cannot be verified. "
+                                "Failing closed."
+                            ),
+                        )
+                    )
                 try:
                     funcs_b = {
                         f.qualified_name: f
@@ -632,6 +656,32 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
                             file_path, head_src, language="python"
                         )
                     }
+                    if not funcs_h and any(
+                        ln[:1].isspace() for ln in added_lines if ln.strip()
+                    ):
+                        # The changed lines are an excerpt from inside a scope the
+                        # hunk never shows, so no enclosing function could be located
+                        # and nothing was analysed. Certifying PASS here would vouch
+                        # for a change that was never examined. A column-zero hunk is
+                        # module-level code, which the checks above already cover.
+                        findings.append(
+                            VerificationFinding(
+                                finding_id=blake3_hex(
+                                    f"NOSCOPE:{file_path}", domain="verifyci.v2.finding"
+                                )[:16],
+                                rule_id="VC2-NO-DEFINABLE-SCOPE",
+                                severity="MEDIUM",
+                                verdict="INCONCLUSIVE",
+                                file_path=file_path,
+                                start_line=1,
+                                end_line=1,
+                                message=(
+                                    f"Changed lines in '{file_path}' belong to a scope "
+                                    "with no function definition in the hunk, so no "
+                                    "enclosing function could be verified. Failing closed."
+                                ),
+                            )
+                        )
                     for qname, fh in funcs_h.items():
                         fb = funcs_b.get(qname)
                         if fb is not None and fb.h_body != fh.h_body:
@@ -861,6 +911,49 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
         }
 
     raise ValueError(f"Unsupported command: {ns.command}")
+
+
+def _vc2_unresolvable_added_imports(added_lines: list[str]) -> list[str]:
+    """Top-level modules a patch newly imports that do not resolve here.
+
+    A dependency that cannot be resolved is a surface the patch cannot be
+    verified against: the code using it cannot be analysed and its origin
+    cannot be checked. Relative imports are skipped because they name code
+    inside the repository rather than an external dependency.
+    """
+    import ast
+    import importlib.util
+    import sys as _sys
+
+    modules: set[str] = set()
+    for line in added_lines:
+        text = line.strip()
+        if not (text.startswith("import ") or text.startswith("from ")):
+            continue
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level and node.level > 0:
+                    continue
+                if node.module:
+                    modules.add(node.module.split(".")[0])
+
+    unresolved: list[str] = []
+    for module in sorted(modules):
+        if not module or module in _sys.stdlib_module_names:
+            continue
+        try:
+            found = importlib.util.find_spec(module) is not None
+        except (ImportError, ValueError):
+            found = False
+        if not found:
+            unresolved.append(module)
+    return unresolved
 
 
 def _vc2_repair_empty_bodies(source: str) -> str:
