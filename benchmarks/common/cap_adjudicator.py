@@ -182,6 +182,7 @@ def _oracle_runners(adjudicator: "V2CapabilityAdjudicator"):
                 ("cap013", adjudicator._oracle_cap013),
                 ("cap012", adjudicator._oracle_cap012),
                 ("cap006", adjudicator._oracle_cap006),
+                ("cap008", adjudicator._oracle_cap008),
         ("cap009", adjudicator._oracle_cap009),
         ("cap010", adjudicator._oracle_cap010),
     )
@@ -965,6 +966,90 @@ class V2CapabilityAdjudicator:
                 "t1_equivalent": t1_equivalent,
                 "tripwire_failed_closed": tripwire_failed_closed,
                 "tripwire_total": tripwire_total,
+            },
+            false_accept_count=0,
+            not_scored_reason=None if scored else "no PASS-labelled cases matched",
+        )
+
+    def _oracle_cap008(self, base_dir: Path) -> OracleScorecard:
+        """Concurrency invariants against the frozen CAP-008 corpus.
+
+        Executes each case's workers as real OS processes against one shared
+        revision store, then checks the frozen invariants:
+          * branch states (canonical hash, counts, head) match the labels,
+          * the ledger hash chain is continuous,
+          * disjoint branches are invariant (A||B == A alone),
+          * tripwires fail closed.
+        """
+        import sys as _sys
+
+        harness_dir = base_dir / "concurrency_corpus" / "cap008"
+        if not (harness_dir / "cases.jsonl").exists():
+            return OracleScorecard(
+                cap_id="cap008",
+                suite_name="concurrency_corpus",
+                case_count=0,
+                scored=0,
+                metric_name="branch_state_agreement",
+                metric_value=None,
+                target_threshold=0.95,
+                passed=None,
+                threshold_basis="frozen_worker_protocol",
+                not_scored_reason="frozen cap008 corpus is missing",
+            )
+
+        _sys.path.insert(0, str(harness_dir))
+        try:
+            import harness_v2
+        except Exception as exc:  # pragma: no cover - import guard
+            return OracleScorecard(
+                cap_id="cap008",
+                suite_name="concurrency_corpus",
+                case_count=0,
+                scored=0,
+                metric_name="branch_state_agreement",
+                metric_value=None,
+                target_threshold=0.95,
+                passed=None,
+                threshold_basis="frozen_worker_protocol",
+                not_scored_reason=f"harness unavailable: {type(exc).__name__}",
+            )
+
+        result = harness_v2.run_suite()
+        scored = int(result["scored"])
+        state = float(result["branch_state_agreement"])
+        chain = float(result["chain_continuity_rate"])
+        invariance = float(result["disjoint_invariance_rate"])
+        trip = float(result["tripwire_fail_closed_rate"])
+
+        passed = (
+            scored > 0
+            and state >= 0.95
+            and chain >= 0.95
+            and invariance >= 0.95
+            and trip == 1.0
+        )
+
+        return OracleScorecard(
+            cap_id="cap008",
+            suite_name="concurrency_corpus",
+            case_count=int(result["cases_total"]),
+            scored=scored,
+            metric_name="branch_state_agreement",
+            metric_value=state,
+            target_threshold=0.95,
+            passed=passed,
+            threshold_basis="frozen_worker_protocol",
+            metrics={
+                "branch_state_agreement": state,
+                "chain_continuity_rate": chain,
+                "disjoint_invariance_rate": invariance,
+                "tripwire_fail_closed_rate": trip,
+            },
+            confusion={
+                "state_exact": int(result["state_exact"]),
+                "tripwire_fail_closed": int(result["tripwire_fail_closed"]),
+                "tripwire_total": int(result["tripwire_total"]),
             },
             false_accept_count=0,
             not_scored_reason=None if scored else "no PASS-labelled cases matched",

@@ -1,22 +1,30 @@
 {
   "experiment_id": "CAP008",
   "engine": "verifyci_v2",
-  "status": "not_measurable",
+  "status": "failed",
   "metrics": {
-    "metric_name": "not_measurable",
-    "metric_value": null,
-    "target_threshold": 0.0,
-    "threshold_basis": "none",
-    "false_accept_count": 0
+    "metric_name": "branch_state_agreement",
+    "metric_value": 0.8125,
+    "target_threshold": 0.95,
+    "threshold_basis": "frozen_worker_protocol",
+    "false_accept_count": 0,
+    "branch_state_agreement": 0.8125,
+    "chain_continuity_rate": 1.0,
+    "disjoint_invariance_rate": 0.8333,
+    "tripwire_fail_closed_rate": 1.0
   },
   "counts": {
-    "cases": 0,
-    "scored": 0,
-    "detail": {}
+    "cases": 64,
+    "scored": 48,
+    "detail": {
+      "state_exact": 39,
+      "tripwire_fail_closed": 16,
+      "tripwire_total": 16
+    }
   },
-  "not_scored_reason": "corpus expects a multi-process worker-protocol ledger replay; v2 exposes only the static datalog_concurrency_invariants rule",
+  "not_scored_reason": null,
   "provenance": {
-    "git_commit": "e187943c273ebd3c5f6798a4852d0685241c95f3",
+    "git_commit": "dea6f9e92e5ff344925fa294014846adc6f4ad8b",
     "git_dirty": true,
     "python_version": "3.14.7",
     "platform": "Windows-11",
