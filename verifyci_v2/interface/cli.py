@@ -573,6 +573,11 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
                             continue
 
                 # Lower to USSA and run symbolic verification if base and head are parseable
+                # A hunk can leave the base side bodiless (`def f(x):`) even when
+                # the head parses; repair both sides identically so lowering sees a
+                # valid module. This is a no-op for already-valid sources.
+                base_src = _vc2_repair_empty_bodies(base_src)
+                head_src = _vc2_repair_empty_bodies(head_src)
                 try:
                     funcs_b = {
                         f.qualified_name: f
