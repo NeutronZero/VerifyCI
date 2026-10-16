@@ -180,6 +180,7 @@ def _oracle_runners(adjudicator: "V2CapabilityAdjudicator"):
                 ("cap005", adjudicator._oracle_cap005),
                 ("cap007", adjudicator._oracle_cap007),
                 ("cap013", adjudicator._oracle_cap013),
+                ("cap012", adjudicator._oracle_cap012),
         ("cap009", adjudicator._oracle_cap009),
         ("cap010", adjudicator._oracle_cap010),
     )
@@ -771,6 +772,81 @@ class V2CapabilityAdjudicator:
                 "false_declines": int(result["false_declines"]),
             },
             false_accept_count=int(round(incorrect * result["critical_total"])),
+            not_scored_reason=None,
+        )
+
+    def _oracle_cap012(self, base_dir: Path) -> OracleScorecard:
+        """Repository performance envelope against the frozen CAP-012 budgets.
+
+        Budgets (p95 latency and peak RSS per tier) come from the frozen
+        `config.json` and are never modified. This oracle only supplies the v2
+        tier fixtures and measures the real ingest path
+        (`SalsaIncrementalEngine.ingest_file`) against those predeclared
+        budgets.
+        """
+        import sys as _sys
+
+        tier_dir = base_dir / "repo_perf" / "cap012"
+        if not (tier_dir / "config.json").exists():
+            return OracleScorecard(
+                cap_id="cap012",
+                suite_name="repo_perf",
+                case_count=0,
+                scored=0,
+                metric_name="budget_compliance",
+                metric_value=None,
+                target_threshold=1.0,
+                passed=None,
+                threshold_basis="frozen_config_budgets",
+                not_scored_reason="frozen cap012 config is missing",
+            )
+
+        _sys.path.insert(0, str(tier_dir))
+        try:
+            import tiers_v2
+        except Exception as exc:  # pragma: no cover - import guard
+            return OracleScorecard(
+                cap_id="cap012",
+                suite_name="repo_perf",
+                case_count=0,
+                scored=0,
+                metric_name="budget_compliance",
+                metric_value=None,
+                target_threshold=1.0,
+                passed=None,
+                threshold_basis="frozen_config_budgets",
+                not_scored_reason=f"tier harness unavailable: {type(exc).__name__}",
+            )
+
+        envelope = tiers_v2.run_envelope()
+        compliance = float(envelope["budget_compliance"])
+        tiers = envelope["tiers"]
+        over_budget = sorted(
+            name for name, spec in tiers.items() if not spec["within_budget"]
+        )
+
+        # Every predeclared tier must land inside its frozen budget.
+        return OracleScorecard(
+            cap_id="cap012",
+            suite_name="repo_perf",
+            case_count=int(envelope["tiers_total"]),
+            scored=int(envelope["tiers_total"]),
+            metric_name="budget_compliance",
+            metric_value=compliance,
+            target_threshold=1.0,
+            passed=compliance == 1.0 and int(envelope["tiers_total"]) > 0,
+            threshold_basis="frozen_config_budgets",
+            metrics={
+                "budget_compliance": compliance,
+                "worst_p95_budget_utilisation": float(
+                    envelope["worst_p95_budget_utilisation"]
+                ),
+            },
+            confusion={
+                "tiers_within_budget": int(envelope["tiers_within_budget"]),
+                "tiers_total": int(envelope["tiers_total"]),
+            },
+            false_accept_count=len(over_budget),
             not_scored_reason=None,
         )
 

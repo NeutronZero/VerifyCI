@@ -1,22 +1,27 @@
 {
   "experiment_id": "CAP012",
   "engine": "verifyci_v2",
-  "status": "not_measurable",
+  "status": "passed",
   "metrics": {
-    "metric_name": "not_measurable",
-    "metric_value": null,
-    "target_threshold": 0.0,
-    "threshold_basis": "none",
-    "false_accept_count": 0
+    "metric_name": "budget_compliance",
+    "metric_value": 1.0,
+    "target_threshold": 1.0,
+    "threshold_basis": "frozen_config_budgets",
+    "false_accept_count": 0,
+    "budget_compliance": 1.0,
+    "worst_p95_budget_utilisation": 0.2515
   },
   "counts": {
-    "cases": 0,
-    "scored": 0,
-    "detail": {}
+    "cases": 3,
+    "scored": 3,
+    "detail": {
+      "tiers_within_budget": 3,
+      "tiers_total": 3
+    }
   },
-  "not_scored_reason": "incremental speedup is exercised only by the self-test smoke fixture; repo_perf has no frozen latency baseline v2 can be scored against",
+  "not_scored_reason": null,
   "provenance": {
-    "git_commit": "e187943c273ebd3c5f6798a4852d0685241c95f3",
+    "git_commit": "eb342ec5eab39c4f12b799df941401f35bb8e1d9",
     "git_dirty": true,
     "python_version": "3.14.7",
     "platform": "Windows-11",
