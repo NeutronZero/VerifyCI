@@ -505,6 +505,56 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
                             base_src = textwrap.dedent(base_src)
                             parsed_head_ok = True
                         except SyntaxError:
+                            pass
+
+                        if not parsed_head_ok:
+                            # A hunk may end right after a `def` header, leaving
+                            # a bodiless declaration. Give it a body first.
+                            try:
+                                repaired_head = _vc2_repair_empty_bodies(
+                                    textwrap.dedent(head_src)
+                                )
+                                ast.parse(repaired_head, filename=file_path)
+                                repaired_base = _vc2_repair_empty_bodies(
+                                    textwrap.dedent(base_src)
+                                )
+                                ast.parse(repaired_base, filename=file_path)
+                                head_src = repaired_head
+                                base_src = repaired_base
+                                parsed_head_ok = True
+                            except SyntaxError:
+                                pass
+
+                        if not parsed_head_ok:
+                            # A partial diff hunk is a *fragment*: after dedent
+                            # it may still contain a top-level `return`, which is
+                            # legal only inside a function. Wrapping the fragment
+                            # in a synthetic function restores a parseable module
+                            # so the real checks can run instead of reporting a
+                            # false syntax failure. Base and head are wrapped
+                            # identically so the comparison stays apples-to-apples.
+                            try:
+                                dedented_head = textwrap.dedent(head_src)
+                                dedented_base = textwrap.dedent(base_src)
+                                wrapped_head = (
+                                    "def __vc2_fragment__():\n"
+                                    + textwrap.indent(dedented_head, "    ")
+                                    + "\n"
+                                )
+                                ast.parse(wrapped_head, filename=file_path)
+                                wrapped_base = (
+                                    "def __vc2_fragment__():\n"
+                                    + textwrap.indent(dedented_base, "    ")
+                                    + "\n"
+                                )
+                                ast.parse(wrapped_base, filename=file_path)
+                                head_src = wrapped_head
+                                base_src = wrapped_base
+                                parsed_head_ok = True
+                            except SyntaxError:
+                                pass
+
+                        if not parsed_head_ok:
                             findings.append(
                                 VerificationFinding(
                                     finding_id=blake3_hex(
@@ -767,6 +817,29 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
     raise ValueError(f"Unsupported command: {ns.command}")
 
 
+def _vc2_repair_empty_bodies(source: str) -> str:
+    """Gives a body to a ``def`` that a partial diff hunk left bodiless.
+
+    A hunk can end immediately after a ``def`` header, producing
+    ``def f(x):`` with no indented block - a syntax error that says nothing
+    about the patch. Synthesising ``pass`` keeps the declaration parseable so
+    the real checks run, instead of reporting a false syntax failure.
+    """
+    lines = source.splitlines()
+    out: list[str] = []
+    for idx, line in enumerate(lines):
+        out.append(line)
+        stripped = line.strip()
+        if not (stripped.startswith("def ") and stripped.endswith(":")):
+            continue
+        following = lines[idx + 1] if idx + 1 < len(lines) else ""
+        if following.strip() and not following[:1].isspace():
+            continue  # next line is at module level: this def genuinely has a body
+        indent = line[: len(line) - len(line.lstrip())]
+        out.append(f"{indent}    pass")
+    return "\n".join(out) + "\n"
+
+
 def _parse_unified_diff(diff_text: str) -> list[dict[str, Any]]:
     """
     Parses unified diff into per-file chunks containing:
@@ -794,7 +867,18 @@ def _parse_unified_diff(diff_text: str) -> list[dict[str, Any]]:
             )
 
     for line in diff_text.splitlines():
-        if line.startswith("--- a/") or line.startswith("--- b/"):
+        if line.startswith("diff --git "):
+            # A new file header ends the previous file's chunk. Without this
+            # boundary the *next* file's `diff --git` line is appended to the
+            # current file's reconstructed source, which then fails to parse
+            # and is reported as a syntax error in an unrelated file.
+            flush_current()
+            current_file = None
+            base_lines = []
+            head_lines = []
+            added_lines = []
+            raw_lines = [line]
+        elif line.startswith("--- a/") or line.startswith("--- b/"):
             flush_current()
             current_file = line[6:].strip()
             base_lines = []
