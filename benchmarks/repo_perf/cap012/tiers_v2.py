@@ -70,6 +70,16 @@ def measure_tier(
     files = generate_tier(file_count, commit_files, seed)
     commit_files = min(commit_files, len(files))
 
+    # Warm the tier once before the baseline so one-time imports (z3, duckdb,
+    # grammar tables) are not charged to the measured runs.
+    warm_engine = SalsaIncrementalEngine(repo_id=f"cap012_{file_count}_warm")
+    for file_path, source in files:
+        warm_engine.ingest_file(file_path, source, language="python")
+    del warm_engine
+
+    baseline_rss_mb = _peak_rss_mb()
+    peak_rss_mb = baseline_rss_mb
+
     durations: list[float] = []
     for run in range(warmup_runs + repetition_count):
         engine = SalsaIncrementalEngine(repo_id=f"cap012_{file_count}_{run}")
@@ -80,10 +90,16 @@ def measure_tier(
         for file_path, source in files[-commit_files:]:
             engine.ingest_file(file_path, source + "\n# revision bump\n", language="python")
         elapsed_ms = (time.perf_counter() - start) * 1000.0
+        peak_rss_mb = max(peak_rss_mb, _peak_rss_mb())
         if run >= warmup_runs:
             durations.append(elapsed_ms)
 
     durations.sort()
+    # RSS is reported as the *delta* attributable to this tier's ingest, not
+    # absolute process RSS. Absolute RSS absorbs whatever else the host process
+    # already loaded (test runner, other modules), which made the measurement
+    # depend on run order rather than on the engine.
+    peak_rss_delta = max(0.0, peak_rss_mb - baseline_rss_mb)
 
     def pct(p: float) -> float:
         if not durations:
@@ -100,7 +116,9 @@ def measure_tier(
         "p50_ms": round(pct(0.50), 3),
         "p95_ms": round(pct(0.95), 3),
         "samples": len(durations),
-        "peak_rss_mb": round(_peak_rss_mb(), 3),
+        "rss_delta_mb": round(peak_rss_delta, 3),
+        "baseline_rss_mb": round(baseline_rss_mb, 3),
+        "process_rss_mb": round(peak_rss_mb, 3),
     }
 
 
@@ -132,7 +150,7 @@ def run_envelope() -> dict[str, Any]:
         measured["p95_budget_ms"] = p95_max
         measured["rss_budget_mb"] = rss_max
         measured["p95_within_budget"] = measured["p95_ms"] <= p95_max
-        measured["rss_within_budget"] = measured["peak_rss_mb"] <= rss_max
+        measured["rss_within_budget"] = measured["rss_delta_mb"] <= rss_max
         measured["within_budget"] = bool(
             measured["p95_within_budget"] and measured["rss_within_budget"]
         )

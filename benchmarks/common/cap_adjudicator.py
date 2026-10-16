@@ -181,6 +181,7 @@ def _oracle_runners(adjudicator: "V2CapabilityAdjudicator"):
                 ("cap007", adjudicator._oracle_cap007),
                 ("cap013", adjudicator._oracle_cap013),
                 ("cap012", adjudicator._oracle_cap012),
+                ("cap006", adjudicator._oracle_cap006),
         ("cap009", adjudicator._oracle_cap009),
         ("cap010", adjudicator._oracle_cap010),
     )
@@ -848,6 +849,125 @@ class V2CapabilityAdjudicator:
             },
             false_accept_count=len(over_budget),
             not_scored_reason=None,
+        )
+
+    def _oracle_cap006(self, base_dir: Path) -> OracleScorecard:
+        """Temporal replay attestation against the frozen CAP-006 corpus.
+
+        Measures the protocol's own gates:
+          * T1 replay equivalence - the canonical digest of an incrementally
+            replayed history must equal the digest of a clean snapshot.
+          * Absolute parity - that digest must equal the frozen
+            `expected_canonical_digest` produced by the clean-room oracle.
+          * T7 fail-closed - tripwire histories (unknown parent, cyclic lineage,
+            missing target) must raise and never yield an invented digest.
+
+        Tripwire cases are excluded from the parity denominator because the
+        frozen label carries no digest for them; they are scored on T7 alone.
+        """
+        from verifyci_v2.store.canonical_graph import (
+            LineageIntegrityError,
+            clean_snapshot_digest,
+            replay_digest,
+            resolve_snapshot_files,
+        )
+
+        corpus_dir = base_dir / "temporal_corpus" / "cap006"
+        cases = {
+            str(c.get("id")): c
+            for c in _read_jsonl(corpus_dir / "cases.jsonl")
+        }
+        labels = _read_jsonl(corpus_dir / "labels.jsonl")
+
+        parity_exact = 0
+        t1_equivalent = 0
+        tripwire_failed_closed = 0
+        tripwire_total = 0
+        scored = 0
+        disagreements: list[dict[str, Any]] = []
+
+        for label in labels:
+            case_id = str(label.get("id", ""))
+            case = cases.get(case_id)
+            if case is None:
+                continue
+            expected_status = str(label.get("expected_status", ""))
+            target = label.get("target_commit") or (
+                case.get("target_query", {}) or {}
+            ).get("target_commit")
+
+            if expected_status == "INCONCLUSIVE":
+                tripwire_total += 1
+                try:
+                    replay_digest(case.get("commits", []), str(target))
+                except LineageIntegrityError:
+                    tripwire_failed_closed += 1
+                except Exception:
+                    tripwire_failed_closed += 1
+                continue
+
+            scored += 1
+            try:
+                replayed = replay_digest(case.get("commits", []), str(target))
+                snapshot_files = resolve_snapshot_files(
+                    case.get("commits", []), str(target)
+                )
+                clean = clean_snapshot_digest(snapshot_files)
+            except Exception as exc:
+                disagreements.append(
+                    {"id": case_id, "error": f"{type(exc).__name__}: {exc}"}
+                )
+                continue
+
+            if replayed == clean:
+                t1_equivalent += 1
+            expected_digest = label.get("expected_canonical_digest")
+            if expected_digest is None or replayed == expected_digest:
+                parity_exact += 1
+            else:
+                disagreements.append(
+                    {
+                        "id": case_id,
+                        "expected": expected_digest,
+                        "actual": replayed,
+                        "t1_equivalent": replayed == clean,
+                    }
+                )
+
+        total = scored or 1
+        parity = round(parity_exact / total, 4)
+        t1_rate = round(t1_equivalent / total, 4)
+        trip_rate = (
+            round(tripwire_failed_closed / tripwire_total, 4)
+            if tripwire_total
+            else 1.0
+        )
+
+        return OracleScorecard(
+            cap_id="cap006",
+            suite_name="temporal_corpus",
+            case_count=len(labels),
+            scored=scored,
+            metric_name="canonical_digest_parity",
+            metric_value=parity,
+            target_threshold=1.0,
+            passed=(
+                total > 0 and parity == 1.0 and t1_rate == 1.0 and trip_rate == 1.0
+            ),
+            threshold_basis="frozen_clean_room_oracle_parity_and_t1_equivalence",
+            metrics={
+                "canonical_digest_parity": parity,
+                "t1_replay_equivalence": t1_rate,
+                "tripwire_fail_closed_rate": trip_rate,
+            },
+            confusion={
+                "parity_exact": parity_exact,
+                "t1_equivalent": t1_equivalent,
+                "tripwire_failed_closed": tripwire_failed_closed,
+                "tripwire_total": tripwire_total,
+            },
+            false_accept_count=0,
+            not_scored_reason=None if scored else "no PASS-labelled cases matched",
         )
 
     def _oracle_cap002_heldout(self, base_dir: Path) -> OracleScorecard:

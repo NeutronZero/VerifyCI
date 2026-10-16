@@ -1,22 +1,30 @@
 {
   "experiment_id": "CAP006",
   "engine": "verifyci_v2",
-  "status": "not_measurable",
+  "status": "passed",
   "metrics": {
-    "metric_name": "not_measurable",
-    "metric_value": null,
-    "target_threshold": 0.0,
-    "threshold_basis": "none",
-    "false_accept_count": 0
+    "metric_name": "canonical_digest_parity",
+    "metric_value": 1.0,
+    "target_threshold": 1.0,
+    "threshold_basis": "frozen_clean_room_oracle_parity_and_t1_equivalence",
+    "false_accept_count": 0,
+    "canonical_digest_parity": 1.0,
+    "t1_replay_equivalence": 1.0,
+    "tripwire_fail_closed_rate": 1.0
   },
   "counts": {
-    "cases": 0,
-    "scored": 0,
-    "detail": {}
+    "cases": 64,
+    "scored": 56,
+    "detail": {
+      "parity_exact": 56,
+      "t1_equivalent": 56,
+      "tripwire_failed_closed": 8,
+      "tripwire_total": 8
+    }
   },
-  "not_scored_reason": "corpus expects exact canonical graph digests per commit; v2 DuckDB CPG digest is not yet byte-compatible with the frozen oracle",
+  "not_scored_reason": null,
   "provenance": {
-    "git_commit": "e187943c273ebd3c5f6798a4852d0685241c95f3",
+    "git_commit": "1072b9e090c7010d486a786035b32bb9a13b3f16",
     "git_dirty": true,
     "python_version": "3.14.7",
     "platform": "Windows-11",
