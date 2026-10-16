@@ -1,22 +1,31 @@
 {
   "experiment_id": "CAP013",
   "engine": "verifyci_v2",
-  "status": "not_measurable",
+  "status": "passed",
   "metrics": {
-    "metric_name": "not_measurable",
-    "metric_value": null,
-    "target_threshold": 0.0,
-    "threshold_basis": "none",
-    "false_accept_count": 0
+    "metric_name": "mutation_kill_rate",
+    "metric_value": 1.0,
+    "target_threshold": 1.0,
+    "threshold_basis": "frozen_config_gates",
+    "false_accept_count": 0,
+    "mutation_kill_rate": 1.0,
+    "incorrect_pass_rate": 0.0,
+    "false_decline_rate": 0.0,
+    "oracle_disagreement_rate": 0.0
   },
   "counts": {
-    "cases": 0,
-    "scored": 0,
-    "detail": {}
+    "cases": 5,
+    "scored": 5,
+    "detail": {
+      "critical_killed": 5,
+      "critical_total": 5,
+      "invalid_mutations": 0,
+      "false_declines": 0
+    }
   },
-  "not_scored_reason": "mutation invariance is exercised only by the self-test smoke fixture; robustness has no frozen invariance labels v2 can be scored against",
+  "not_scored_reason": null,
   "provenance": {
-    "git_commit": "e187943c273ebd3c5f6798a4852d0685241c95f3",
+    "git_commit": "fb47280dad37ec123f729b3700b13260d90cdfc9",
     "git_dirty": true,
     "python_version": "3.14.7",
     "platform": "Windows-11",

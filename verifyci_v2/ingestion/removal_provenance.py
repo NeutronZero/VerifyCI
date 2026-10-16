@@ -235,8 +235,6 @@ def analyze_removal_provenance(
             verdict = "INCONCLUSIVE"
     if fabricated:
         verdict = "FABRICATED"
-    elif unverified and verdict == "VERIFIED":
-        verdict = "INCONCLUSIVE"
 
     return RemovalProvenance(
         verdict=verdict,

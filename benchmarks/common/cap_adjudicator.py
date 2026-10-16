@@ -179,6 +179,7 @@ def _oracle_runners(adjudicator: "V2CapabilityAdjudicator"):
         ("cap003a", adjudicator._oracle_cap003a),
                 ("cap005", adjudicator._oracle_cap005),
                 ("cap007", adjudicator._oracle_cap007),
+                ("cap013", adjudicator._oracle_cap013),
         ("cap009", adjudicator._oracle_cap009),
         ("cap010", adjudicator._oracle_cap010),
     )
@@ -675,6 +676,102 @@ class V2CapabilityAdjudicator:
             },
             false_accept_count=0,
             not_scored_reason=None if scored else "no cases matched labels",
+        )
+
+    def _oracle_cap013(self, base_dir: Path) -> OracleScorecard:
+        """Mutation kill rate against the frozen CAP-013 gates.
+
+        Gates are read from the frozen `config.json` and are never relaxed here:
+        `critical_mutation_kill_rate_min`, `incorrect_pass_rate_max`,
+        `oracle_disagreement_rate_max`, `false_decline_rate_max`.
+
+        The mutation table is the v2-native `mutations_v2.py`: the frozen v1
+        table targets `verifyci.*` modules that no longer exist. Each mutation is
+        applied in an isolated sandbox copy and classified killed/survived by
+        running a behaviour probe; a surviving critical mutation is a reported
+        verification gap, never hidden.
+        """
+        import json as _json
+
+        config_path = base_dir / "robustness" / "cap013" / "config.json"
+        if not config_path.exists():
+            return OracleScorecard(
+                cap_id="cap013",
+                suite_name="robustness",
+                case_count=0,
+                scored=0,
+                metric_name="mutation_kill_rate",
+                metric_value=None,
+                target_threshold=1.0,
+                passed=None,
+                threshold_basis="frozen_config_gates",
+                not_scored_reason="frozen cap013 config is missing",
+            )
+
+        config = _json.loads(config_path.read_text(encoding="utf-8"))
+        gates = config.get("gates", {})
+        kill_min = float(gates.get("critical_mutation_kill_rate_min", 1.0))
+        incorrect_max = float(gates.get("incorrect_pass_rate_max", 0.0))
+        decline_max = float(gates.get("false_decline_rate_max", 0.05))
+        disagreement_max = float(gates.get("oracle_disagreement_rate_max", 0.0))
+
+        import sys as _sys
+
+        _sys.path.insert(0, str(base_dir / "robustness" / "cap013"))
+        try:
+            import mutations_v2
+        except Exception as exc:  # pragma: no cover - import guard
+            return OracleScorecard(
+                cap_id="cap013",
+                suite_name="robustness",
+                case_count=0,
+                scored=0,
+                metric_name="mutation_kill_rate",
+                metric_value=None,
+                target_threshold=kill_min,
+                passed=None,
+                threshold_basis="frozen_config_gates",
+                not_scored_reason=f"mutation harness unavailable: {type(exc).__name__}",
+            )
+
+        result = mutations_v2.run_suite()
+        kill_rate = float(result["mutation_kill_rate"])
+        incorrect = float(result["incorrect_pass_rate"])
+        decline = float(result["false_decline_rate"])
+        disagreement = float(result["oracle_disagreement_rate"])
+
+        passed = (
+            kill_rate >= kill_min
+            and incorrect <= incorrect_max
+            and decline <= decline_max
+            and disagreement <= disagreement_max
+            and result["critical_total"] > 0
+        )
+
+        return OracleScorecard(
+            cap_id="cap013",
+            suite_name="robustness",
+            case_count=int(result["critical_total"]),
+            scored=int(result["critical_total"]),
+            metric_name="mutation_kill_rate",
+            metric_value=kill_rate,
+            target_threshold=kill_min,
+            passed=passed,
+            threshold_basis="frozen_config_gates",
+            metrics={
+                "mutation_kill_rate": kill_rate,
+                "incorrect_pass_rate": incorrect,
+                "false_decline_rate": decline,
+                "oracle_disagreement_rate": disagreement,
+            },
+            confusion={
+                "critical_killed": int(result["critical_killed"]),
+                "critical_total": int(result["critical_total"]),
+                "invalid_mutations": int(result["critical_invalid"]),
+                "false_declines": int(result["false_declines"]),
+            },
+            false_accept_count=int(round(incorrect * result["critical_total"])),
+            not_scored_reason=None,
         )
 
     def _oracle_cap002_heldout(self, base_dir: Path) -> OracleScorecard:
