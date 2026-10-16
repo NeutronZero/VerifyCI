@@ -267,6 +267,31 @@ def _lower_stmt_list(
                             source_line=stmt.lineno,
                         )
                     )
+                elif isinstance(tgt, ast.Subscript):
+                    # A store into a container is an observable effect. Dropping
+                    # it made the mutation invisible to the whole downstream
+                    # pipeline, so two bodies differing only in a store lowered to
+                    # the same USSA and compared equal.
+                    container_str, ctl_used = _expr_to_ssa_operands(tgt.value, ctx)
+                    index_str, idx_used = _expr_to_ssa_operands(tgt.slice, ctx)
+                    for u in (*used_ssa, *ctl_used, *idx_used):
+                        ctx.mutated_globals.add(u)
+                    instructions.append(
+                        USSAInstruction(
+                            inst_id=ctx.next_inst_id(),
+                            opcode="STORE_SUBSCRIPT",
+                            target_var=f"{container_str}[{index_str}]",
+                            operands=(
+                                expr_str,
+                                container_str,
+                                index_str,
+                                *used_ssa,
+                                *ctl_used,
+                                *idx_used,
+                            ),
+                            source_line=stmt.lineno,
+                        )
+                    )
 
         elif isinstance(stmt, ast.AugAssign):
             if isinstance(stmt.target, ast.Name):

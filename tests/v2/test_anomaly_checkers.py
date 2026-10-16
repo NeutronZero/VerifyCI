@@ -136,6 +136,65 @@ def test_refactoring_that_is_equivalent_proves_unsat() -> None:
     assert status == "UNSAT"
 
 
+def test_positional_to_keyword_rebinding_is_not_proven_equivalent() -> None:
+    """Changing a call from positional to keyword binding is a semantic change.
+
+    The call normalizer used to discard the keyword name, so `f(a, x)` and
+    `f(a, endpoint=x)` normalised identically and the prover reported them
+    equivalent on a rebinding it never actually checked.
+    """
+    prover = Z3SymbolicProver(timeout_ms=3000)
+    base_src = "def route(rule):\n    return add_url_rule(rule, 'e')\n"
+    head_src = "def route(rule):\n    return add_url_rule(rule, endpoint='e')\n"
+    base = _lower("src/m.py", base_src)
+    head = _lower("src/m.py", head_src)
+    name = next(iter(base))
+    is_eq, status = prover.prove_equivalence(
+        base_source=base_src,
+        cand_source=head_src,
+        func_base=base[name],
+        func_cand=head[name],
+    )
+    assert is_eq is False, "a positional/keyword rebinding was reported equivalent"
+    assert status != "UNSAT"
+
+
+def test_identical_keyword_binding_on_both_sides_still_proves_unsat() -> None:
+    """The keyword guard must not reject a genuinely unchanged keyword call."""
+    prover = Z3SymbolicProver(timeout_ms=3000)
+    src = "def route(rule, ep):\n    return add_url_rule(rule, endpoint=ep)\n"
+    base = _lower("src/m.py", src)
+    head = _lower("src/m.py", src)
+    name = next(iter(base))
+    is_eq, status = prover.prove_equivalence(
+        base_source=src,
+        cand_source=src,
+        func_base=base[name],
+        func_cand=head[name],
+    )
+    assert is_eq is True
+    assert status == "UNSAT"
+
+
+def test_empty_structural_signature_never_claims_equivalence() -> None:
+    """No captured effect means no evidence, so the engine must abstain.
+
+    When a function body produced no RETURN/CALL/BRANCH effect the signature
+    was empty and its digest matched for *any* two bodies, so unrelated
+    functions were reported as equivalent.
+    """
+    from verifyci_v2.symbolic.egglog_engine import EgglogEquivalenceEngine
+
+    base_src = "def a(ctx):\n    formatter = ctx.make_formatter()\n"
+    head_src = "def a(ctx):\n    formatter = ctx.make_formatter(prog_name=ctx.name)\n"
+    base = _lower("src/m.py", base_src)
+    head = _lower("src/m.py", head_src)
+    name = next(iter(base))
+    result = EgglogEquivalenceEngine().check_equivalence(base[name], head[name])
+    assert result.is_equivalent is False
+    assert result.verdict == "INCONCLUSIVE"
+
+
 # --- intent compiler ------------------------------------------------------
 
 

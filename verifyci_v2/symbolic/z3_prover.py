@@ -72,6 +72,22 @@ def _supported_fragment_doc() -> str:
     )
 
 
+def _split_kwarg(arg_s: str) -> tuple[str, str] | None:
+    """Splits a `name=value` call argument into `(name, value)`.
+
+    Returns None when the argument is not a keyword binding. Requiring the
+    name to be an identifier keeps a literal such as `'a=b'` from being read as
+    a binding it never expressed.
+    """
+    if "=" not in arg_s or arg_s.startswith("("):
+        return None
+    name, _, value = arg_s.partition("=")
+    name = name.strip()
+    if not name.isidentifier():
+        return None
+    return name, value.strip()
+
+
 def _to_z3_int(val: Any) -> Any:
     if _z3_mod is None or val is None:
         return None
@@ -353,18 +369,26 @@ def _ussa_sexpr_to_z3(
             return None
         callee = items[0].strip()
         args_z3: list[Any] = []
+        kw_names: list[str] = []
         for raw_arg in items[1:]:
             arg_s = raw_arg.strip()
             if not arg_s:
                 continue
-            if "=" in arg_s and not arg_s.startswith("("):
-                arg_s = arg_s.split("=", 1)[1].strip()
+            kw = _split_kwarg(arg_s)
+            if kw is not None:
+                # Bound by keyword. Fold the name into the callee symbol so the
+                # binding is part of the term: `f(a, k=x)` and `f(a, x)` are
+                # different calls and must not encode to the same symbol, while
+                # two sides that agree on the binding still encode congruently.
+                kw_name, arg_s = kw
+                kw_names.append(kw_name)
             z_arg = _to_z3_int(_ussa_sexpr_to_z3(arg_s, ssa_env, z3_vars, parameters))
             if z_arg is None:
                 return None
             args_z3.append(z_arg)
+        sym_name = callee + "".join(f"@kw:{n}" for n in kw_names)
         arg_sorts = [_z3_mod.IntSort() for _ in args_z3]
-        f_sym = _z3_mod.Function(callee, *arg_sorts, _z3_mod.IntSort())
+        f_sym = _z3_mod.Function(sym_name, *arg_sorts, _z3_mod.IntSort())
         return f_sym(*args_z3)
 
     # Parenthesized U-SSA S-expression
@@ -587,17 +611,32 @@ class _USSASymbolicExtractor:
                     arg_s = raw_arg.strip()
                     if not arg_s:
                         continue
-                    if "=" in arg_s and not arg_s.startswith("("):
-                        arg_s = arg_s.split("=", 1)[1].strip()
+                    kw_name = ""
+                    kw = _split_kwarg(arg_s)
+                    if kw is not None:
+                        kw_name, arg_s = kw
                     # Recurse on nested call arguments first
                     self._extract_calls_from_sexpr(
                         arg_s, ssa_env, expr_env, path_guards_z3, source_line
                     )
-                    norm_args.append(
-                        _normalize_ussa_expr(arg_s, expr_env, self.param_set)
-                    )
+                    norm_arg = _normalize_ussa_expr(arg_s, expr_env, self.param_set)
+                    if kw_name:
+                        # Keep the binding visible. Passing an argument
+                        # positionally and passing the same argument by keyword
+                        # are different calls; dropping the name made the two
+                        # normalise identically and compare equal.
+                        norm_arg = f"kw:{kw_name}={norm_arg}"
+                    norm_args.append(norm_arg)
+                    # A keyword binding has no positional encoding here, so it
+                    # cannot be encoded as an int. Report None and let the
+                    # caller fall back to comparing `norm_args`, which retains
+                    # the binding, instead of silently ignoring it.
                     z3_args.append(
-                        _ussa_sexpr_to_z3(arg_s, ssa_env, self.z3_vars, self.param_set)
+                        None
+                        if kw_name
+                        else _ussa_sexpr_to_z3(
+                            arg_s, ssa_env, self.z3_vars, self.param_set
+                        )
                     )
                 self.calls.append(
                     _USSACallRecord(
