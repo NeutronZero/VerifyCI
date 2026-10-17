@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import msgspec
 from dataclasses import is_dataclass
 import functools
@@ -102,8 +103,6 @@ def _format_jcs_float(value: float) -> str:
             return f"{m}e{exp_sign}{abs(exp)}"
     return rep
 
-
-import json
 
 _FAST_JCS_TYPES = (str, int, bool, type(None), list, tuple, dict)
 
