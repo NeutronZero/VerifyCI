@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import importlib.util
 import sys
 from typing import Sequence
 
@@ -38,6 +37,8 @@ def find_unresolvable_imports(added_lines: Sequence[str]) -> list[str]:
                     continue  # relative in-repo import
                 if node.module:
                     modules.add(node.module.split(".")[0])
+
+    import importlib.util
 
     unresolved: list[str] = []
     for mod in sorted(modules):

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import difflib
 import re
 from typing import Sequence
 
@@ -72,6 +71,9 @@ class DiffFileEntry:
     def __setattr__(self, name: str, value: Any) -> None:
         raise AttributeError("DiffFileEntry is immutable")
 
+    def __getitem__(self, item: str) -> Any:
+        return getattr(self, item)
+
     @classmethod
     def from_sources(
         cls,
@@ -86,6 +88,8 @@ class DiffFileEntry:
         head_lines = head_source.splitlines()
 
         if not diff:
+            import difflib
+
             diff_lines = list(
                 difflib.unified_diff(
                     base_lines,

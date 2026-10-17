@@ -84,6 +84,9 @@ class DiffFileEntry:
     # resolve old-side line numbers.
     diff: str = ""
 
+    def __getitem__(self, item: str) -> Any:
+        return getattr(self, item)
+
     @classmethod
     def from_sources(
         cls,
@@ -716,17 +719,26 @@ def parse_file_sources(
     file_path: str, base_src: str, head_src: str
 ) -> _SourceParse:
     """Make a diff hunk parseable, or report the syntax finding that blocks it."""
+    base_err: SyntaxError | None = None
+    head_err: SyntaxError | None = None
     try:
         ast.parse(head_src, filename=file_path)
-        syntax_error: SyntaxError | None = None
     except SyntaxError as exc:
-        syntax_error = exc
+        head_err = exc
+
+    try:
+        ast.parse(base_src, filename=file_path)
+    except SyntaxError as exc:
+        base_err = exc
+
+    if base_err is None and head_err is None:
+        return _SourceParse(base_source=base_src, head_source=head_src)
 
     repaired = _parseable_pair(file_path, base_src, head_src)
     if repaired is not None:
         return _SourceParse(base_source=repaired[0], head_source=repaired[1])
 
-    assert syntax_error is not None
+    syntax_error = head_err or base_err or SyntaxError(f"Unparseable fragment in {file_path}")
     return _SourceParse(
         base_source=base_src,
         head_source=head_src,

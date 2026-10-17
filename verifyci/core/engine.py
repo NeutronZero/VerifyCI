@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass, field
-import textwrap
 from typing import Callable, Mapping, Sequence
 
 from verifyci.contracts.attestation import (
@@ -60,6 +58,8 @@ def parseable_source(file_path: str, source: str) -> tuple[str, VerificationFind
         syntax_err = first_err
 
     # Try dedenting
+    import textwrap
+
     dedented = textwrap.dedent(source)
     try:
         ast.parse(dedented, filename=file_path)
@@ -99,17 +99,36 @@ def parseable_source(file_path: str, source: str) -> tuple[str, VerificationFind
     return source, finding
 
 
-@dataclass
 class VerificationKernel:
-    """Minimal secure verification kernel with zero heavyweight dependencies."""
+    """Minimal secure verification kernel with zero heavyweight dependencies (slotted model)."""
 
-    base_sources: Mapping[str, str] = field(default_factory=dict)
-    base_commit_sha: str = "none"
-    head_commit_sha: str = "none"
-    policy_hash: str = "default_policy"
-    extension_checkers: Sequence[ExtensionChecker] = field(default_factory=tuple)
-    required_capabilities: Sequence[CapabilityDeclaration] = field(default_factory=tuple)
-    block_on_unresolved_imports: bool = False
+    __slots__ = (
+        "base_commit_sha",
+        "base_sources",
+        "block_on_unresolved_imports",
+        "extension_checkers",
+        "head_commit_sha",
+        "policy_hash",
+        "required_capabilities",
+    )
+
+    def __init__(
+        self,
+        base_sources: Mapping[str, str] | None = None,
+        base_commit_sha: str = "none",
+        head_commit_sha: str = "none",
+        policy_hash: str = "default_policy",
+        extension_checkers: Sequence[ExtensionChecker] = (),
+        required_capabilities: Sequence[CapabilityDeclaration] = (),
+        block_on_unresolved_imports: bool = False,
+    ) -> None:
+        self.base_sources = dict(base_sources or {})
+        self.base_commit_sha = base_commit_sha
+        self.head_commit_sha = head_commit_sha
+        self.policy_hash = policy_hash
+        self.extension_checkers = tuple(extension_checkers)
+        self.required_capabilities = tuple(required_capabilities)
+        self.block_on_unresolved_imports = block_on_unresolved_imports
 
     def verify_entries(self, entries: Sequence[DiffFileEntry]) -> VerificationCertificate:
         """Run all verification checks across changed file entries and produce attestation certificate."""

@@ -12,9 +12,6 @@ from verifyci import __version__
 from verifyci.contracts.verdict import VerificationVerdict
 from verifyci.core.diff_parser import DiffFileEntry, parse_unified_diff
 from verifyci.core.engine import VerificationKernel
-from verifyci.extensions.protocols import DictBaseSourceProvider
-from verifyci.extensions.z3_adapter import Z3ProverAdapter
-from verifyci.interface.sarif_exporter import certificate_to_sarif
 
 
 def _format_text_summary(cert) -> str:
@@ -65,6 +62,8 @@ def run_verify_diff(args: argparse.Namespace) -> int:
 
     extension_checkers = []
     if args.with_prover:
+        from verifyci.extensions.z3_adapter import Z3ProverAdapter
+
         prover = Z3ProverAdapter(default_timeout_ms=args.timeout)
 
         def prover_checker(entry: DiffFileEntry, base_srcs: Any) -> list[Any]:
@@ -93,6 +92,8 @@ def run_verify_diff(args: argparse.Namespace) -> int:
     if output_fmt == "json":
         rendered = json.dumps(cert.to_dict(), indent=2)
     elif output_fmt == "sarif":
+        from verifyci.interface.sarif_exporter import certificate_to_sarif
+
         rendered = json.dumps(certificate_to_sarif(cert), indent=2)
     else:
         rendered = _format_text_summary(cert)

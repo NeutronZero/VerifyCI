@@ -399,14 +399,16 @@ class V2CapabilityAdjudicator:
             predicted = False
             try:
                 for entry in parse_unified_diff(case.get("diff", "")):
-                    if entry["file_path"].endswith(".py"):
+                    file_path = getattr(entry, "file_path", None) if hasattr(entry, "file_path") else entry["file_path"]
+                    head_source = getattr(entry, "head_source", None) if hasattr(entry, "head_source") else entry["head_source"]
+                    if file_path.endswith(".py"):
                         found = engine.scan_python_source(
-                            entry["file_path"], entry["head_source"]
+                            file_path, head_source
                         )
                     else:
                         found = engine.scan_config_lines(
-                            entry["file_path"],
-                            entry["head_source"].splitlines(),
+                            file_path,
+                            head_source.splitlines(),
                         )
                     if any(f.verdict == "FAIL" for f in found):
                         predicted = True
