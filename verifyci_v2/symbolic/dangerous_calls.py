@@ -27,6 +27,19 @@ _DANGEROUS_ATTRIBUTES: dict[str, tuple[str, str]] = {
     "popen": ("subprocess", "spawns a process"),
     "spawn": ("subprocess", "spawns a process"),
     "call": ("subprocess", "spawns a process"),
+    "run": ("subprocess", "spawns a process and runs a command"),
+    "check_output": ("subprocess", "spawns a process and captures output"),
+    "check_call": ("subprocess", "spawns a process and checks exit code"),
+    "posix_spawn": ("os", "spawns a process via posix_spawn"),
+    "posix_spawnp": ("os", "spawns a process via posix_spawnp"),
+    "execl": ("os", "replaces current process with new executable"),
+    "execle": ("os", "replaces current process with new executable"),
+    "execlp": ("os", "replaces current process with new executable"),
+    "execlpe": ("os", "replaces current process with new executable"),
+    "execv": ("os", "replaces current process with new executable"),
+    "execve": ("os", "replaces current process with new executable"),
+    "execvp": ("os", "replaces current process with new executable"),
+    "execvpe": ("os", "replaces current process with new executable"),
 }
 
 _DANGEROUS_NAMES: dict[str, tuple[str, str]] = {
@@ -70,13 +83,25 @@ def scan_dangerous_calls(
     findings: list[VerificationFinding] = []
     seen: set[tuple[int, str]] = set()
 
+    # Track import aliases, e.g. `import subprocess as sub` or `from subprocess import run as r`
+    module_aliases: dict[str, str] = {}  # local_alias -> base_module
+    symbol_aliases: dict[str, tuple[str, str]] = {}  # local_alias -> (base_module, original_attr)
+
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             modules: list[str] = []
             if isinstance(node, ast.Import):
-                modules = [alias.name.split(".")[0] for alias in node.names]
+                for alias in node.names:
+                    root_mod = alias.name.split(".")[0]
+                    modules.append(root_mod)
+                    local_name = alias.asname or alias.name
+                    module_aliases[local_name] = root_mod
             elif node.module:
-                modules = [node.module.split(".")[0]]
+                root_mod = node.module.split(".")[0]
+                modules = [root_mod]
+                for alias in node.names:
+                    local_name = alias.asname or alias.name
+                    symbol_aliases[local_name] = (root_mod, alias.name)
             for module in modules:
                 reason = _DANGEROUS_IMPORTS.get(module)
                 if reason is None:
@@ -115,11 +140,18 @@ def scan_dangerous_calls(
         reason: str | None = None
         if isinstance(node.func, ast.Name):
             reason = _DANGEROUS_BUILTINS.get(name)
+            if reason is None and name in symbol_aliases:
+                base_mod, orig_attr = symbol_aliases[name]
+                attr_spec = _DANGEROUS_ATTRIBUTES.get(orig_attr)
+                if attr_spec and attr_spec[0] == base_mod:
+                    reason = attr_spec[1]
+                elif (name_spec := _DANGEROUS_NAMES.get(orig_attr)) and name_spec[0] == base_mod:
+                    reason = name_spec[1]
         elif isinstance(node.func, ast.Attribute):
             attr_spec = _DANGEROUS_ATTRIBUTES.get(name)
-            if attr_spec and _has_module_ref(node.func.value, attr_spec[0]):
+            if attr_spec and _has_module_ref(node.func.value, attr_spec[0], module_aliases):
                 reason = attr_spec[1]
-            elif (name_spec := _DANGEROUS_NAMES.get(name)) and _has_module_ref(node.func.value, name_spec[0]):
+            elif (name_spec := _DANGEROUS_NAMES.get(name)) and _has_module_ref(node.func.value, name_spec[0], module_aliases):
                 reason = name_spec[1]
 
         if reason is None:
@@ -148,10 +180,16 @@ def scan_dangerous_calls(
     return tuple(findings)
 
 
-def _has_module_ref(node: ast.AST, module: str) -> bool:
-    """Matches `os.system`, `subprocess.run`, and `from os import system` forms."""
+def _has_module_ref(
+    node: ast.AST, module: str, module_aliases: dict[str, str] | None = None
+) -> bool:
+    """Matches `os.system`, `subprocess.run`, `sub.run`, and `from os import system` forms."""
     if isinstance(node, ast.Name):
-        return node.id == module
+        if node.id == module:
+            return True
+        if module_aliases and module_aliases.get(node.id) == module:
+            return True
     if isinstance(node, ast.Attribute):
-        return node.attr == module
+        if node.attr == module:
+            return True
     return False

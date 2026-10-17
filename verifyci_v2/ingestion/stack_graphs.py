@@ -450,11 +450,23 @@ class StackGraphStitcher:
         *,
         max_depth: int = 8,
     ) -> tuple[str, ...]:
-        """Computes deterministic transitive callers Callers+(f) up to max_depth."""
+        callers, _ = self.transitive_blast_radius_with_truncation(
+            seed_qualified_names, max_depth=max_depth
+        )
+        return callers
+
+    def transitive_blast_radius_with_truncation(
+        self,
+        seed_qualified_names: Iterable[str],
+        *,
+        max_depth: int = 8,
+    ) -> tuple[tuple[str, ...], bool]:
+        """Computes deterministic transitive callers Callers+(f) up to max_depth and reports whether truncated."""
         seeds = set(seed_qualified_names)
         visited: set[str] = set()
         frontier = list(sorted(seeds))
         depth = 0
+        truncated = False
         while frontier and depth < max_depth:
             next_frontier: set[str] = set()
             for curr in frontier:
@@ -464,7 +476,9 @@ class StackGraphStitcher:
                         next_frontier.add(caller)
             frontier = sorted(next_frontier)
             depth += 1
-        return tuple(sorted(visited))
+        if frontier and depth >= max_depth:
+            truncated = True
+        return tuple(sorted(visited)), truncated
 
     def graph_merkle_root(self) -> str:
         digests = [

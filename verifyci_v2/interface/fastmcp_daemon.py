@@ -94,9 +94,15 @@ class VerifyCIFastMCPDaemon:
         self.prover = Z3SymbolicProver()
         self.secret_engine = TaintTrackedSecretEngine()
         self.cegis = CEGISAutoRepairEngine(prover=self.prover)
-        self.signer, self.signer_pubkey = InTotoDSSESigner.generate_ephemeral()
+        loaded_signer = InTotoDSSESigner.from_env()
+        if loaded_signer is not None:
+            self.signer = loaded_signer
+            self.signer_pubkey = loaded_signer.public_key
+        else:
+            self.signer, self.signer_pubkey = InTotoDSSESigner.generate_ephemeral()
         self.rsl = GittufRSLLedger()
         self._session_findings: list[VerificationFinding] = []
+        self._session_findings_by_id: dict[str, list[VerificationFinding]] = {}
         self.rate_limiter = TokenBucketRateLimiter(
             capacity=self.budget.rate_limit_capacity,
             refill_per_sec=self.budget.rate_limit_refill_per_sec,
@@ -111,6 +117,7 @@ class VerifyCIFastMCPDaemon:
             "vc_search_rabitq": self._tool_search_rabitq,
             "vc_anchor_attestation": self._tool_anchor_attestation,
             "vc_verify_contract": self._tool_verify_contract,
+            "vc_clear_session": self._tool_clear_session,
         }
 
     def list_tools(self) -> tuple[str, ...]:
@@ -200,7 +207,7 @@ class VerifyCIFastMCPDaemon:
         seeds: list[str] = args.get("qualified_names", [])
         max_depth: int = int(args.get("max_depth", 8))
         commit_sha: str = args.get("commit_sha", "working-tree")
-        affected = self.engine.stitcher.transitive_blast_radius(
+        affected, truncated = self.engine.stitcher.transitive_blast_radius_with_truncation(
             seeds, max_depth=max_depth
         )
         cte_reachability = [
@@ -214,6 +221,8 @@ class VerifyCIFastMCPDaemon:
             "transitive_callers": list(affected),
             "affected_count": len(affected),
             "cte_reachability": cte_reachability,
+            "truncated": truncated,
+            "max_depth": max_depth,
         }
 
     def _tool_query_ussa(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -306,6 +315,8 @@ class VerifyCIFastMCPDaemon:
                             target_qualified_name=qname,
                         )
                     self._session_findings.append(f)
+                    if session_id := args.get("session_id"):
+                        self._session_findings_by_id.setdefault(session_id, []).append(f)
                     findings.append(msgspec.to_builtins(f))
 
         return {"finding_count": len(findings), "findings": findings}
@@ -315,6 +326,8 @@ class VerifyCIFastMCPDaemon:
         source: str = args["source"]
         findings = self.secret_engine.scan_python_source(file_path, source)
         self._session_findings.extend(findings)
+        if session_id := args.get("session_id"):
+            self._session_findings_by_id.setdefault(session_id, []).extend(findings)
         return {
             "finding_count": len(findings),
             "findings": [msgspec.to_builtins(f) for f in findings],
@@ -327,12 +340,21 @@ class VerifyCIFastMCPDaemon:
         return msgspec.to_builtins(stats)
 
     def _tool_anchor_attestation(self, args: dict[str, Any]) -> dict[str, Any]:
+        session_id: str | None = args.get("session_id")
+        auto_clear: bool = bool(args.get("auto_clear", True))
         base_sha: str = args.get("base_commit_sha", "0" * 40)
         head_sha: str = args.get("head_commit_sha", "1" * 40)
         ref_name: str = args.get("ref_name", "refs/heads/main")
         merkle = self.engine.stitcher.graph_merkle_root()
 
-        session_findings = tuple(self._session_findings)
+        if session_id and session_id in self._session_findings_by_id:
+            session_findings = tuple(self._session_findings_by_id[session_id])
+            if auto_clear:
+                self._session_findings_by_id.pop(session_id, None)
+        else:
+            session_findings = tuple(self._session_findings)
+            if auto_clear:
+                self._session_findings.clear()
         pred = InTotoVerificationPredicate(
             repo_id=self.repo_id,
             base_commit_sha=base_sha,
@@ -360,6 +382,21 @@ class VerifyCIFastMCPDaemon:
             "dsse_envelope": msgspec.to_builtins(envelope),
             "sarif_v2": sarif,
         }
+
+    def clear_session(self, session_id: str | None = None) -> int:
+        """Clears accumulated findings for a specific session_id or global session."""
+        if session_id:
+            count = len(self._session_findings_by_id.pop(session_id, []))
+            return count
+        count = len(self._session_findings)
+        self._session_findings.clear()
+        self._session_findings_by_id.clear()
+        return count
+
+    def _tool_clear_session(self, args: dict[str, Any]) -> dict[str, Any]:
+        session_id = args.get("session_id")
+        cleared = self.clear_session(session_id)
+        return {"cleared_findings_count": cleared, "session_id": session_id}
 
     async def watch_workspace_once(self, root_dir: str) -> int:
         """Scans working tree files and incrementally updates changed files in memory."""

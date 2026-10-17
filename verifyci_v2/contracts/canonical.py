@@ -108,8 +108,10 @@ _FAST_JCS_TYPES = (str, int, bool, type(None), list, tuple, dict)
 
 
 def _has_custom_jcs_types(obj: Any) -> bool:
-    if obj is None or isinstance(obj, (int, bool, str)):
+    if obj is None or isinstance(obj, (int, bool)):
         return False
+    if isinstance(obj, str):
+        return any(ord(c) > 0xFFFF for c in obj)
     if isinstance(obj, float):
         return True
     if isinstance(obj, (bytes, bytearray, memoryview)):
@@ -118,7 +120,7 @@ def _has_custom_jcs_types(obj: Any) -> bool:
         return any(_has_custom_jcs_types(item) for item in obj)
     if isinstance(obj, dict):
         for k, v in obj.items():
-            if not isinstance(k, str) or _has_custom_jcs_types(v):
+            if not isinstance(k, str) or any(ord(c) > 0xFFFF for c in k) or _has_custom_jcs_types(v):
                 return True
         return False
     return True

@@ -76,6 +76,42 @@ class InTotoDSSESigner:
         priv = Ed25519PrivateKey.generate()
         return cls(signing_key=priv), priv.public_key()
 
+    @classmethod
+    def from_private_bytes(cls, data: bytes) -> InTotoDSSESigner:
+        """Loads an Ed25519 private key from 32-byte raw seed or PKCS8/OpenSSH PEM bytes."""
+        if len(data) == 32:
+            priv = Ed25519PrivateKey.from_private_bytes(data)
+            return cls(signing_key=priv)
+        from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+        priv_loaded = load_pem_private_key(data, password=None)
+        if not isinstance(priv_loaded, Ed25519PrivateKey):
+            raise TypeError("Loaded key is not an Ed25519 private key")
+        return cls(signing_key=priv_loaded)
+
+    @classmethod
+    def from_pem_file(cls, path: str) -> InTotoDSSESigner:
+        """Loads an Ed25519 private key from a PEM file path."""
+        with open(path, "rb") as fh:
+            return cls.from_private_bytes(fh.read())
+
+    @classmethod
+    def from_env(cls, env_var: str = "VERIFYCI_SIGNING_KEY") -> InTotoDSSESigner | None:
+        """Attempts to load a signing key from an environment variable (base64 or PEM). Returns None if absent."""
+        import os
+
+        val = os.environ.get(env_var)
+        if not val:
+            return None
+        val_clean = val.strip()
+        if "PRIVATE KEY" in val_clean:
+            return cls.from_private_bytes(val_clean.encode("utf-8"))
+        try:
+            raw = base64.b64decode(val_clean)
+            return cls.from_private_bytes(raw)
+        except Exception:
+            return None
+
     @property
     def public_key(self) -> Ed25519PublicKey:
         return self._private_key.public_key()
