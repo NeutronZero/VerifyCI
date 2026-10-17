@@ -606,23 +606,13 @@ class DuckDBCPGStore:
         for qname, freq in coverage_by_qname.items():
             cur.execute(
                 """
-                SELECT COUNT(*) FROM cpg_edges
+                UPDATE cpg_edges
+                SET coverage_hit_freq = ?, static_weight = 1.0 + ?
                 WHERE src_node_uid = ? OR dst_node_uid = ?
                 """,
-                (qname, qname),
+                (freq, freq, qname, qname),
             )
-            cnt_row = cur.fetchone()
-            matched = int(cnt_row[0]) if cnt_row and cnt_row[0] is not None else 0
-            if matched > 0:
-                cur.execute(
-                    """
-                    UPDATE cpg_edges
-                    SET coverage_hit_freq = ?, static_weight = 1.0 + ?
-                    WHERE src_node_uid = ? OR dst_node_uid = ?
-                    """,
-                    (freq, freq, qname, qname),
-                )
-                updated += matched
+            updated += max(0, cur.rowcount)
         self._conn.commit()
         return updated
 
@@ -630,21 +620,38 @@ class DuckDBCPGStore:
         self,
         affected_qnames: Iterable[str],
     ) -> dict[str, tuple[str, ...]]:
+        candidate_tests = [
+            qn for qn in affected_qnames if "test_" in qn or ".tests." in qn
+        ]
+        if not candidate_tests:
+            return {
+                "tier1_dynamically_executed": (),
+                "tier2_statically_reached": (),
+            }
+
         cur = self._conn.cursor()
         tier1: set[str] = set()
         tier2: set[str] = set()
-        for qn in affected_qnames:
-            if "test_" in qn or ".tests." in qn:
-                cur.execute(
-                    "SELECT MAX(coverage_hit_freq) FROM cpg_edges WHERE src_node_uid = ? OR dst_node_uid = ?",
-                    (qn, qn),
-                )
-                row = cur.fetchone()
-                freq = float(row[0]) if row and row[0] is not None else 0.0
-                if freq > 0.0:
-                    tier1.add(qn)
-                else:
-                    tier2.add(qn)
+        placeholders = ", ".join("?" for _ in candidate_tests)
+        cur.execute(
+            f"""
+            SELECT src_node_uid
+            FROM cpg_edges
+            WHERE src_node_uid IN ({placeholders}) AND coverage_hit_freq > 0.0
+            UNION
+            SELECT dst_node_uid
+            FROM cpg_edges
+            WHERE dst_node_uid IN ({placeholders}) AND coverage_hit_freq > 0.0
+            """,
+            (*candidate_tests, *candidate_tests),
+        )
+        tier1_set = {str(row[0]) for row in cur.fetchall()}
+        for qn in candidate_tests:
+            if qn in tier1_set:
+                tier1.add(qn)
+            else:
+                tier2.add(qn)
+
         return {
             "tier1_dynamically_executed": tuple(sorted(tier1)),
             "tier2_statically_reached": tuple(sorted(tier2)),

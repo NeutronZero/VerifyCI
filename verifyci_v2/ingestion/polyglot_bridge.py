@@ -64,11 +64,8 @@ class PolyglotBridgeResolver:
             for node in ast.walk(tree):
                 if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
                     func = node.value.func
-                    callee_str = ast.unparse(func)
-                    if any(
-                        tok in callee_str
-                        for tok in ("CDLL", "LoadLibrary", "dlopen", "ffi.dlopen")
-                    ):
+                    fn_name = func.id if isinstance(func, ast.Name) else (func.attr if isinstance(func, ast.Attribute) else None)
+                    if fn_name in {"CDLL", "LoadLibrary", "dlopen"} or (fn_name and any(tok in ast.unparse(func) for tok in ("CDLL", "LoadLibrary", "dlopen", "ffi.dlopen"))):
                         for tgt in node.targets:
                             if isinstance(tgt, ast.Name):
                                 ffi_handles.add(tgt.id)
@@ -78,6 +75,8 @@ class PolyglotBridgeResolver:
                     qname = f"{mod_prefix}.{stmt.name}"
                     # Check route decorators
                     for dec in stmt.decorator_list:
+                        if not isinstance(dec, ast.Call):
+                            continue
                         dec_src = "@" + ast.unparse(dec)
                         rm = _ROUTE_DECORATOR_RE.search(dec_src)
                         if rm:

@@ -1594,18 +1594,19 @@ def _evaluate_concrete_divergence(
         ext_b = _USSASymbolicExtractor(fb, bound_vars)
         ext_h = _USSASymbolicExtractor(fh, bound_vars)
 
+        s = _z3_mod.Solver()
+
         # 1. Check return ITE divergence under EUF (e.g. wire(1, 2) != wire(2, 1) is SAT; wire(1, 1) != wire(1, 1) is UNSAT)
         ite_b = ext_b.build_return_ite()
         ite_h = ext_h.build_return_ite()
         if ite_b is not None and ite_h is not None:
-            s = _z3_mod.Solver()
             s.add(ite_b != ite_h)
             if s.check() == _z3_mod.sat:
                 return True
 
         # 2. Check call-site argument divergence along active branch guards
         for call_b, call_h in zip(ext_b.calls, ext_h.calls):
-            s = _z3_mod.Solver()
+            s.reset()
             for g in (*call_b.path_guards_z3, *call_h.path_guards_z3):
                 if g is not None:
                     s.add(g)
@@ -1619,9 +1620,9 @@ def _evaluate_concrete_divergence(
                 zb = _to_z3_int(arg_b)
                 zh = _to_z3_int(arg_h)
                 if zb is not None and zh is not None:
-                    s_arg = _z3_mod.Solver()
-                    s_arg.add(zb != zh)
-                    if s_arg.check() == _z3_mod.sat:
+                    s.reset()
+                    s.add(zb != zh)
+                    if s.check() == _z3_mod.sat:
                         return True
         return False
     except Exception:

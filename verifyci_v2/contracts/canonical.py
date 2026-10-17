@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import msgspec
 from dataclasses import is_dataclass
+import functools
 import hashlib
 import math
+import re
 import struct
 from typing import Any
 
@@ -22,13 +24,19 @@ class CanonicalSerializationError(ValueError):
     """Raised when an object violates RFC 8785 (JCS) canonicalization rules."""
 
 
+@functools.lru_cache(maxsize=4096)
 def _utf16_sort_key(key: str) -> bytes:
     """RFC 8785 Section 3.2.3 requires sorting object keys by UTF-16BE code units."""
     return key.encode("utf-16-be")
 
 
+_NEED_ESCAPE_RE = re.compile(r'[\x00-\x1f\\"]')
+
+
 def _escape_jcs_string(value: str) -> str:
     """RFC 8785 Section 3.2.2 string escaping."""
+    if not _NEED_ESCAPE_RE.search(value):
+        return f'"{value}"'
     out: list[str] = ['"']
     for ch in value:
         code = ord(ch)

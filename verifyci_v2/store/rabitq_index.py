@@ -289,7 +289,7 @@ class RaBitQHybridIndex:
         bm25_rank_map = {uid: rank + 1 for rank, uid in enumerate(bm25_ranked)}
 
         dense_results_sorted = sorted(dense_results, key=lambda x: x[3], reverse=True)
-        final_items: list[RaBitQSearchResult] = []
+        candidates: list[tuple[float, float, RaBitQVectorEntry, float, float, bool]] = []
         rrf_k = 60.0
 
         for dense_rank_idx, (entry, s_hat, eps, exact_ip, was_pruned) in enumerate(
@@ -300,23 +300,33 @@ class RaBitQHybridIndex:
             rrf = entry.coverage_weight * (
                 (0.65 / (rrf_k + d_rank)) + (0.35 / (rrf_k + b_rank))
             )
-            final_items.append(
-                RaBitQSearchResult(
-                    node_uid=entry.node_uid,
-                    qualified_name=entry.qualified_name,
-                    estimated_ip=round(s_hat, 6),
-                    error_bound=round(eps, 6),
-                    exact_score=round(exact_ip, 6),
-                    hybrid_rrf_score=round(rrf, 6),
-                    was_pruned_from_rerank=was_pruned,
-                )
+            candidates.append(
+                (round(rrf, 6), round(exact_ip, 6), entry, s_hat, eps, was_pruned)
             )
 
-        final_items.sort(
-            key=lambda r: (r.hybrid_rrf_score, r.exact_score), reverse=True
+        if top_k < len(candidates):
+            top_candidates = heapq.nlargest(
+                top_k, candidates, key=lambda c: (c[0], c[1])
+            )
+        else:
+            top_candidates = sorted(
+                candidates, key=lambda c: (c[0], c[1]), reverse=True
+            )
+
+        results = tuple(
+            RaBitQSearchResult(
+                node_uid=entry.node_uid,
+                qualified_name=entry.qualified_name,
+                estimated_ip=round(s_hat, 6),
+                error_bound=round(eps, 6),
+                exact_score=exact_score,
+                hybrid_rrf_score=rrf_score,
+                was_pruned_from_rerank=was_pruned,
+            )
+            for rrf_score, exact_score, entry, s_hat, eps, was_pruned in top_candidates
         )
         return RaBitQQueryStats(
-            results=tuple(final_items[:top_k]),
+            results=results,
             total_candidates=len(self._entries),
             pruned_by_error_bound=pruned_count,
             evaluated_exact_count=evaluated_exact,

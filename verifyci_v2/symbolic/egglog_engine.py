@@ -47,17 +47,19 @@ class EquivalenceSaturationResult(msgspec.Struct, frozen=True, kw_only=True):
     verdict: VerdictKind = "HEURISTIC_EQUIVALENT_CANDIDATE"
 
 
+_FLOAT_PATTERN = re.compile(r"(?:\b\d+\.\d+|\b\d+\.|\.\d+)\b|\bfloat\b")
+
+
 def _has_floating_point(func: FunctionUSSA) -> bool:
     if (
         "float" in func.return_annotation.lower()
         or "float" in func.canonical_signature.lower()
     ):
         return True
-    float_pattern = re.compile(r"(?:\b\d+\.\d+|\b\d+\.|\.\d+)\b|\bfloat\b")
     for block in func.basic_blocks:
         for inst in block.instructions:
             for op in inst.operands:
-                if float_pattern.search(op):
+                if _FLOAT_PATTERN.search(op):
                     return True
     return False
 

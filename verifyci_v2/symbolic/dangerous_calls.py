@@ -71,40 +71,41 @@ def scan_dangerous_calls(
     seen: set[tuple[int, str]] = set()
 
     for node in ast.walk(tree):
-        modules: list[str] = []
-        if isinstance(node, ast.Import):
-            modules = [alias.name.split(".")[0] for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            modules = [node.module.split(".")[0]]
-        for module in modules:
-            reason = _DANGEROUS_IMPORTS.get(module)
-            if reason is None:
-                continue
-            key = (node.lineno, module)
-            if key in seen:
-                continue
-            seen.add(key)
-            fid = blake3_hex(
-                f"DANGEROUS_IMPORT:{file_path}:{node.lineno}:{module}",
-                domain="verifyci.v2.finding",
-            )[:16]
-            findings.append(
-                VerificationFinding(
-                    finding_id=fid,
-                    rule_id="VC2-DANGEROUS-IMPORT",
-                    severity="MEDIUM",
-                    verdict="FAIL",
-                    file_path=file_path,
-                    start_line=node.lineno,
-                    end_line=node.lineno,
-                    message=(
-                        f"Dangerous import '{module}' on line {node.lineno}: "
-                        f"{reason}."
-                    ),
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            modules: list[str] = []
+            if isinstance(node, ast.Import):
+                modules = [alias.name.split(".")[0] for alias in node.names]
+            elif node.module:
+                modules = [node.module.split(".")[0]]
+            for module in modules:
+                reason = _DANGEROUS_IMPORTS.get(module)
+                if reason is None:
+                    continue
+                key = (node.lineno, module)
+                if key in seen:
+                    continue
+                seen.add(key)
+                fid = blake3_hex(
+                    f"DANGEROUS_IMPORT:{file_path}:{node.lineno}:{module}",
+                    domain="verifyci.v2.finding",
+                )[:16]
+                findings.append(
+                    VerificationFinding(
+                        finding_id=fid,
+                        rule_id="VC2-DANGEROUS-IMPORT",
+                        severity="MEDIUM",
+                        verdict="FAIL",
+                        file_path=file_path,
+                        start_line=node.lineno,
+                        end_line=node.lineno,
+                        message=(
+                            f"Dangerous import '{module}' on line {node.lineno}: "
+                            f"{reason}."
+                        ),
+                    )
                 )
-            )
+            continue
 
-    for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         name = _call_name(node)
@@ -112,18 +113,14 @@ def scan_dangerous_calls(
             continue
 
         reason: str | None = None
-        if isinstance(node.func, ast.Name) and name in _DANGEROUS_BUILTINS:
-            reason = _DANGEROUS_BUILTINS[name]
+        if isinstance(node.func, ast.Name):
+            reason = _DANGEROUS_BUILTINS.get(name)
         elif isinstance(node.func, ast.Attribute):
-            for attr, (module, why) in _DANGEROUS_ATTRIBUTES.items():
-                if name == attr and _has_module_ref(node.func.value, module):
-                    reason = why
-                    break
-        if reason is None:
-            for attr, (module, why) in _DANGEROUS_NAMES.items():
-                if name == attr and _has_module_ref(node.func.value, module):
-                    reason = why
-                    break
+            attr_spec = _DANGEROUS_ATTRIBUTES.get(name)
+            if attr_spec and _has_module_ref(node.func.value, attr_spec[0]):
+                reason = attr_spec[1]
+            elif (name_spec := _DANGEROUS_NAMES.get(name)) and _has_module_ref(node.func.value, name_spec[0]):
+                reason = name_spec[1]
 
         if reason is None:
             continue

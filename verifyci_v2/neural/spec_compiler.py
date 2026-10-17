@@ -206,10 +206,14 @@ class IntentToSMTCompiler:
             if not paths:
                 continue
 
+            s = _z3_mod.Solver() if _z3_mod is not None else None
+            if s is not None:
+                s.set("timeout", 2000)
+
             for guards, ret_expr, line_no in paths:
                 elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
 
-                if _z3_mod is None:
+                if _z3_mod is None or s is None:
                     # R2-1: When solver is unavailable, NEVER fabricate SAT
                     if self._can_produce_violation(ret_expr, params, spec):
                         fid = blake3_hex(
@@ -242,8 +246,7 @@ class IntentToSMTCompiler:
                     continue
 
                 # Z3 is available: encode full execution path and negate postcondition
-                s = _z3_mod.Solver()
-                s.set("timeout", 2000)
+                s.reset()
                 z3_vars: dict[str, Any] = {p: _z3_mod.Int(p) for p in params}
 
                 can_encode = True

@@ -414,9 +414,11 @@ class StackGraphStitcher:
             if imported_target in self._qname_to_file:
                 return (imported_target,)
             # Check if imported_target matches any known qualified name exactly
+            last_sym = imported_target.split(".")[-1]
+            candidates = self._symbol_to_qnames.get(last_sym, ())
             matching = [
                 qn
-                for qn in self._qname_to_file
+                for qn in candidates
                 if qn == imported_target or qn.endswith(f".{imported_target}")
             ]
             if len(matching) == 1:
@@ -449,14 +451,15 @@ class StackGraphStitcher:
         max_depth: int = 8,
     ) -> tuple[str, ...]:
         """Computes deterministic transitive callers Callers+(f) up to max_depth."""
+        seeds = set(seed_qualified_names)
         visited: set[str] = set()
-        frontier = list(sorted(set(seed_qualified_names)))
+        frontier = list(sorted(seeds))
         depth = 0
         while frontier and depth < max_depth:
             next_frontier: set[str] = set()
             for curr in frontier:
                 for caller in self._callers_of.get(curr, ()):
-                    if caller not in visited and caller not in seed_qualified_names:
+                    if caller not in visited and caller not in seeds:
                         visited.add(caller)
                         next_frontier.add(caller)
             frontier = sorted(next_frontier)

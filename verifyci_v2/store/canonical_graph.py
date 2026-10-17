@@ -319,17 +319,27 @@ def validate_history(commits: list[dict[str, Any]]) -> None:
                 f"commit {commit_id} references unknown parent {parent_id}"
             )
 
-    # Cycle detection over the parent chain.
+    # Cycle detection over the parent chain in O(V) time and O(V) space.
+    # 0 = unvisited, 1 = visiting (in active path), 2 = verified acyclic
+    state: dict[str, int] = {}
     for start in by_id:
-        seen: set[str] = set()
+        if state.get(start) == 2:
+            continue
         cursor: str | None = start
+        path: list[str] = []
         while cursor is not None:
-            if cursor in seen:
+            cstate = state.get(cursor, 0)
+            if cstate == 1:
                 raise LineageIntegrityError(
                     f"cyclic lineage detected at commit {cursor}"
                 )
-            seen.add(cursor)
+            if cstate == 2:
+                break
+            state[cursor] = 1
+            path.append(cursor)
             cursor = by_id[cursor].get("parent_id")
+        for node in path:
+            state[node] = 2
 
 
 def replay_digest(commits: list[dict[str, Any]], target_commit: str) -> str:

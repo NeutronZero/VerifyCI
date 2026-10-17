@@ -422,18 +422,21 @@ class TaintTrackedSecretEngine:
         # assignment to inspect, so this runs before the assignment loop and
         # claims those literals.
         claimed: set[tuple[str, str]] = set()
-        # Literals bound directly by an assignment are handled by the loop
-        # below, which reports the matched rule and sink reachability. This pass
-        # exists only to reach literals nested in calls, dicts and f-strings.
-        direct_assign_values = {
-            id(n.value) for n in ast.walk(tree) if isinstance(n, ast.Assign)
-        }
-        for const_node in ast.walk(tree):
-            if not (
-                isinstance(const_node, ast.Constant)
-                and isinstance(const_node.value, str)
-            ):
-                continue
+        direct_assign_values: set[int] = set()
+        const_nodes: list[ast.Constant] = []
+        compare_nodes: list[ast.Compare] = []
+        assign_nodes: list[ast.Assign] = []
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                assign_nodes.append(node)
+                direct_assign_values.add(id(node.value))
+            elif isinstance(node, ast.Compare):
+                compare_nodes.append(node)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                const_nodes.append(node)
+
+        for const_node in const_nodes:
             if id(const_node) in direct_assign_values:
                 continue
             literal = const_node.value
@@ -473,9 +476,7 @@ class TaintTrackedSecretEngine:
         # Rule 1: hardcoded credential comparison, e.g. `if password == "secret":`.
         # This is a Compare, not an Assign, so the assignment loop below cannot
         # see it.
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Compare):
-                continue
+        for node in compare_nodes:
             if not any(op.__class__.__name__ in _HARDCODED_COMPARE_OPS for op in node.ops):
                 continue
             names = [
@@ -522,8 +523,8 @@ class TaintTrackedSecretEngine:
                 )
             )
 
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Assign) or not isinstance(
+        for node in assign_nodes:
+            if not isinstance(
                 node.value, (ast.Constant, ast.BinOp)
             ):
                 continue

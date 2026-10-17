@@ -94,29 +94,48 @@ def seed_entities(diff: str, entities: Iterable[dict[str, Any]]) -> tuple[set[st
     are considered so a rename still attributes to the entity recorded under
     its post-rename location.
     """
-    entity_list = list(entities)
+    file_hunks = parse_file_hunks(diff)
+    if not file_hunks:
+        return (set(), set())
+
+    entities_by_path: dict[str, list[dict[str, Any]]] = {}
+    for entity in entities:
+        path = _clean(str(entity.get('file_path', '')))
+        if path:
+            entities_by_path.setdefault(path, []).append(entity)
+
     seeds: set[str] = set()
     attributed_files: set[str] = set()
-    for file_hunk in parse_file_hunks(diff):
-        for entity in entity_list:
-            entity_path = _clean(str(entity.get('file_path', '')))
-            if entity_path not in (file_hunk.old_path, file_hunk.new_path):
-                continue
-            entity_start, entity_end = _entity_span(entity)
-            if entity_end < entity_start:
-                continue
-            touched = False
-            for span in file_hunk.spans:
-                if span.new_count > 0 and _span_overlaps(entity_start, entity_end, span.new_start, span.new_start + span.new_count - 1):
-                    touched = True
-                    break
-                if span.old_count > 0 and _span_overlaps(entity_start, entity_end, span.old_start, span.old_start + span.old_count - 1):
-                    touched = True
-                    break
-            if touched:
-                seeds.add(str(entity.get('revision_entity_id', '')))
-                attributed_files.add(entity_path)
-    diff_files = {path for hunk in parse_file_hunks(diff) for path in (hunk.old_path, hunk.new_path) if path}
+    diff_files: set[str] = set()
+
+    for file_hunk in file_hunks:
+        for p in (file_hunk.old_path, file_hunk.new_path):
+            if p:
+                diff_files.add(p)
+
+        target_paths: set[str] = set()
+        if file_hunk.old_path in entities_by_path:
+            target_paths.add(file_hunk.old_path)
+        if file_hunk.new_path in entities_by_path:
+            target_paths.add(file_hunk.new_path)
+
+        for path in target_paths:
+            for entity in entities_by_path[path]:
+                entity_start, entity_end = _entity_span(entity)
+                if entity_end < entity_start:
+                    continue
+                touched = False
+                for span in file_hunk.spans:
+                    if span.new_count > 0 and _span_overlaps(entity_start, entity_end, span.new_start, span.new_start + span.new_count - 1):
+                        touched = True
+                        break
+                    if span.old_count > 0 and _span_overlaps(entity_start, entity_end, span.old_start, span.old_start + span.old_count - 1):
+                        touched = True
+                        break
+                if touched:
+                    seeds.add(str(entity.get('revision_entity_id', '')))
+                    attributed_files.add(path)
+
     unattributed = diff_files - attributed_files
     return (seeds, unattributed)
 

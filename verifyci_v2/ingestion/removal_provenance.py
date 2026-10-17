@@ -195,8 +195,14 @@ def analyze_removal_provenance(
     verified = fabricated = unverified = 0
     reasons: list[str] = []
 
+    entities_by_path: dict[str, list[dict[str, Any]]] = {}
+    for e in entities:
+        norm_p = normalize_path(str(e.get("file_path", "")))
+        if norm_p:
+            entities_by_path.setdefault(norm_p, []).append(e)
+
     for hunk in hunks:
-        file_entities = _entity_records(entities, hunk.file_path)
+        file_entities = entities_by_path.get(hunk.file_path, [])
         if not file_entities:
             unverified += len(hunk.removed)
             reasons.append(
@@ -281,7 +287,10 @@ def _classify_line(
             continue
         if not metadata.get("snippet_is_complete"):
             continue
-        snippet_lines = snippet.splitlines()
+        snippet_lines = metadata.get("_split_lines")
+        if snippet_lines is None:
+            snippet_lines = snippet.splitlines()
+            metadata["_split_lines"] = snippet_lines
         offset = line_no - int(entity.get("line_start", 0))
         if offset < 0 or offset >= len(snippet_lines):
             continue

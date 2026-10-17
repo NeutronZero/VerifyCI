@@ -10,6 +10,7 @@ the verdict INCONCLUSIVE. Absence of proof is never reported as compliance.
 """
 from __future__ import annotations
 import ast
+import functools
 import msgspec
 from typing import Any
 Verdict = str
@@ -58,7 +59,8 @@ def _is_dynamic(node: ast.AST) -> bool:
     is_lit, _ = _literal(node)
     return not is_lit
 
-def _receiver_tokens(name: str) -> set[str]:
+@functools.lru_cache(maxsize=1024)
+def _receiver_tokens(name: str) -> frozenset[str]:
     tokens: set[str] = set()
     for raw in name.replace('.', '_').split('_'):
         if not raw:
@@ -72,7 +74,7 @@ def _receiver_tokens(name: str) -> set[str]:
                 current += ch
         if current:
             tokens.add(current.lower())
-    return {_RECEIVER_SYNONYMS.get(t, t) for t in tokens}
+    return frozenset(_RECEIVER_SYNONYMS.get(t, t) for t in tokens)
 
 def _resolve_receiver(contract: dict[str, Any], receiver: str | None) -> str | None:
     """Returns 'ok', 'bad', or None when the receiver type cannot be grounded."""
