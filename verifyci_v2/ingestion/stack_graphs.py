@@ -6,6 +6,7 @@ except Exception:  # pragma: no cover
     _ts_extract = None
 
 import ast
+import functools
 import re
 from typing import Any, Iterable
 
@@ -34,6 +35,7 @@ _CONTROL_KEYWORDS = frozenset(
 )
 
 
+@functools.lru_cache(maxsize=4096)
 def _module_prefix_from_path(file_path: str) -> str:
     cleaned = file_path.replace("\\", "/").lstrip("./")
     for ext in (".py", ".ts", ".tsx", ".js", ".jsx", ".c", ".cpp", ".h", ".rs", ".go"):
@@ -299,6 +301,7 @@ class StackGraphStitcher:
         self._qname_to_file: dict[str, str] = {}
         self._callers_of: dict[str, set[str]] = {}
         self._callees_of: dict[str, set[str]] = {}
+        self._bridge_edges: list[tuple[str, str]] = []
         self._unresolved_references: list[dict[str, Any]] = []
 
     def upsert_file(
@@ -314,6 +317,27 @@ class StackGraphStitcher:
         self._file_graphs[file_path] = fsg
         self._rebuild_indices()
         return True
+
+    def batch_upsert(
+        self, files: Iterable[tuple[str, str] | tuple[str, str, str]]
+    ) -> int:
+        """Batch upserts multiple files, building indices once across all updated files."""
+        changed = 0
+        for entry in files:
+            file_path = entry[0]
+            source = entry[1]
+            language = entry[2] if len(entry) > 2 else "python"
+            new_xxh3 = xxh3_64_hex(source)
+            existing = self._file_graphs.get(file_path)
+            if existing is not None and existing.file_xxh3 == new_xxh3:
+                continue
+            self._file_graphs[file_path] = build_file_stack_graph(
+                file_path, source, language
+            )
+            changed += 1
+        if changed > 0:
+            self._rebuild_indices()
+        return changed
 
     def remove_file(self, file_path: str) -> None:
         if file_path in self._file_graphs:
@@ -364,6 +388,10 @@ class StackGraphStitcher:
                             }
                         )
 
+        for caller, callee in self._bridge_edges:
+            self._callees_of.setdefault(caller, set()).add(callee)
+            self._callers_of.setdefault(callee, set()).add(caller)
+
     def get_unresolved_references(self) -> tuple[dict[str, Any], ...]:
         """Returns all unresolved PUSH_SYMBOL references across all loaded file stack graphs."""
         return tuple(self._unresolved_references)
@@ -407,6 +435,7 @@ class StackGraphStitcher:
 
     def register_bridge_edge(self, caller_qname: str, callee_qname: str) -> None:
         """Injects a cross-language FFI or HTTP bridge edge into the stitched call graph."""
+        self._bridge_edges.append((caller_qname, callee_qname))
         self._callees_of.setdefault(caller_qname, set()).add(callee_qname)
         self._callers_of.setdefault(callee_qname, set()).add(caller_qname)
 

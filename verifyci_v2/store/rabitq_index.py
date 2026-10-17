@@ -108,10 +108,13 @@ class RaBitQHybridIndex:
         self._doc_tokens: dict[str, dict[str, int]] = {}
         self._doc_lengths: dict[str, int] = {}
         self._doc_freqs: dict[str, int] = {}
+        self._postings: dict[str, list[tuple[str, int]]] = {}
         self._avg_dl: float = 1.0
         # Corpus statistics are rebuilt lazily: recomputing them on every
         # upsert makes bulk indexing quadratic in the document count.
         self._globals_dirty: bool = False
+        self._quantized_bytes: int = 0
+        self._exact_float_bytes: int = 0
 
     def upsert_document(
         self,
@@ -132,7 +135,14 @@ class RaBitQHybridIndex:
             coverage_weight=cov_weight,
             retain_exact=self.retain_exact_vectors,
         )
+        old_entry = self._entries.get(node_uid)
+        if old_entry is not None:
+            self._quantized_bytes -= (old_entry.dimension // 8) + 16
+            self._exact_float_bytes -= len(old_entry.exact_vector) * 8
+
         self._entries[node_uid] = entry
+        self._quantized_bytes += (entry.dimension // 8) + 16
+        self._exact_float_bytes += len(entry.exact_vector) * 8
 
         # Update BM25 token statistics
         tokens = [w.lower() for w in _WORD_RE.findall(enriched_text)]
@@ -146,11 +156,15 @@ class RaBitQHybridIndex:
 
     def _recompute_bm25_globals(self) -> None:
         self._doc_freqs.clear()
+        self._postings.clear()
         total_len = 0
         for uid, tf_map in self._doc_tokens.items():
             total_len += self._doc_lengths[uid]
-            for term in tf_map:
+            for term, tf in tf_map.items():
                 self._doc_freqs[term] = self._doc_freqs.get(term, 0) + 1
+                if term not in self._postings:
+                    self._postings[term] = []
+                self._postings[term].append((uid, tf))
         n_docs = len(self._doc_tokens)
         self._avg_dl = (total_len / n_docs) if n_docs > 0 else 1.0
         self._globals_dirty = False
@@ -186,8 +200,8 @@ class RaBitQHybridIndex:
         top_k: int = 5,
         confidence_z: float = 3.89,  # >99.99% normal concentration bound
     ) -> RaBitQQueryStats:
-        q_bytes = sum((e.dimension // 8) + 16 for e in self._entries.values())
-        f_bytes = sum(len(e.exact_vector) * 8 for e in self._entries.values())
+        q_bytes = self._quantized_bytes
+        f_bytes = self._exact_float_bytes
 
         if not self._entries:
             return RaBitQQueryStats(
@@ -252,8 +266,23 @@ class RaBitQHybridIndex:
             dense_results.append((entry, s_hat, eps, exact_ip, False))
 
         # Pass 3: Fuse with BM25 lexical rankings and coverage weights via Weighted RRF
+        self._ensure_globals()
         q_terms = [w.lower() for w in _WORD_RE.findall(query_text)]
-        bm25_scores = {uid: self._bm25_score(q_terms, uid) for uid in self._entries}
+        n_docs = max(1, len(self._entries))
+        k1 = 1.5
+        b = 0.75
+        bm25_scores: dict[str, float] = {}
+
+        for term in set(q_terms):
+            df = self._doc_freqs.get(term, 0)
+            if df == 0:
+                continue
+            idf = math.log(1.0 + (n_docs - df + 0.5) / (df + 0.5))
+            for uid, tf in self._postings.get(term, ()):
+                dl = self._doc_lengths[uid]
+                denom = tf + k1 * (1.0 - b + b * (dl / self._avg_dl))
+                bm25_scores[uid] = bm25_scores.get(uid, 0.0) + idf * ((tf * (k1 + 1.0)) / denom)
+
         bm25_ranked = sorted(
             bm25_scores.keys(), key=lambda u: bm25_scores[u], reverse=True
         )

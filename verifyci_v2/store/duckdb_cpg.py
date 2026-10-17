@@ -8,14 +8,12 @@ import time
 import zlib
 from typing import Iterable, Literal, Sequence
 
+import msgspec
+
 from verifyci_v2.contracts.canonical import blake3_hex, canonical_jcs_bytes
 from verifyci_v2.contracts.ssa_ir import (
     CPGEdge,
     FunctionUSSA,
-    PhiNode,
-    TaintSummary,
-    USSABasicBlock,
-    USSAInstruction,
 )
 
 try:
@@ -29,63 +27,7 @@ def _compress_ussa(func: FunctionUSSA) -> bytes:
 
 
 def _decompress_ussa(blob: bytes) -> FunctionUSSA:
-    raw = json.loads(zlib.decompress(blob).decode("utf-8"))
-    blocks = tuple(
-        USSABasicBlock(
-            block_id=b["block_id"],
-            phi_nodes=tuple(
-                PhiNode(
-                    target_var=p["target_var"],
-                    incoming_branches=tuple(
-                        (br[0], br[1]) for br in p["incoming_branches"]
-                    ),
-                )
-                for p in b["phi_nodes"]
-            ),
-            instructions=tuple(
-                USSAInstruction(
-                    inst_id=i["inst_id"],
-                    opcode=i["opcode"],
-                    target_var=i["target_var"],
-                    operands=tuple(i["operands"]),
-                    callee_symbol=i.get("callee_symbol"),
-                    source_line=i.get("source_line", 0),
-                )
-                for i in b["instructions"]
-            ),
-            terminator_condition=b.get("terminator_condition"),
-        )
-        for b in raw["basic_blocks"]
-    )
-    cfg_edges = tuple(CPGEdge(**e) for e in raw["cfg_edges"])
-    dfg_edges = tuple(CPGEdge(**e) for e in raw["dfg_edges"])
-    ts = raw["taint_summary"]
-    taint = TaintSummary(
-        param_to_return=tuple(ts["param_to_return"]),
-        param_to_sinks=tuple((pair[0], pair[1]) for pair in ts["param_to_sinks"]),
-        mutated_globals=tuple(ts["mutated_globals"]),
-        raised_exceptions=tuple(ts["raised_exceptions"]),
-        is_pure=bool(ts["is_pure"]),
-    )
-    return FunctionUSSA(
-        node_uid=raw["node_uid"],
-        repo_id=raw["repo_id"],
-        qualified_name=raw["qualified_name"],
-        file_path=raw["file_path"],
-        language=raw["language"],
-        start_line=int(raw["start_line"]),
-        end_line=int(raw["end_line"]),
-        canonical_signature=raw["canonical_signature"],
-        parameters=tuple(raw["parameters"]),
-        return_annotation=raw["return_annotation"],
-        basic_blocks=blocks,
-        cfg_edges=cfg_edges,
-        dfg_edges=dfg_edges,
-        call_targets=tuple(raw["call_targets"]),
-        taint_summary=taint,
-        h_body=raw["h_body"],
-        h_interface=raw["h_interface"],
-    )
+    return msgspec.json.decode(zlib.decompress(blob), type=FunctionUSSA)
 
 
 def _pack_rabitq_bits(vec: Sequence[float]) -> tuple[bytes, float, float]:

@@ -29,13 +29,26 @@ INTOTO_PAYLOAD_TYPE = "application/vnd.in-toto+json"
 
 
 def dsse_pae(payload_type: str, payload_bytes: bytes) -> bytes:
-    """Delegates PAE to securesystemslib (the reference DSSE v1.0 implementation).
-    Byte-identical to the prior hand-rolled formula."""
-    from securesystemslib.dsse import Envelope
+    """Delegates PAE to securesystemslib (the reference DSSE v1.0 implementation) when available.
+    Falls back to the standard-conformant PAE byte formula if securesystemslib is not installed."""
+    try:
+        from securesystemslib.dsse import Envelope
 
-    if isinstance(payload_type, bytes):
-        payload_type = payload_type.decode("utf-8")
-    return Envelope(payload_bytes, payload_type, signatures={}).pae()
+        if isinstance(payload_type, bytes):
+            payload_type = payload_type.decode("utf-8")
+        return Envelope(payload_bytes, payload_type, signatures={}).pae()
+    except ImportError:
+        pt_bytes = (
+            payload_type.encode("utf-8")
+            if isinstance(payload_type, str)
+            else payload_type
+        )
+        header = (
+            f"DSSEv1 {len(pt_bytes)} ".encode("utf-8")
+            + pt_bytes
+            + f" {len(payload_bytes)} ".encode("utf-8")
+        )
+        return header + payload_bytes
 
 
 class InTotoDSSESigner:
