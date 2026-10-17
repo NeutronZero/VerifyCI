@@ -48,6 +48,7 @@ _UNSUPPORTED_USSA_OPCODES = {
     "LOOP_ASYNCFOR": "AsyncFor",
     "LOOP_WHILE": "While",
     "TRY_BLOCK": "Try",
+    "STORE_SUBSCRIPT": "SubscriptAssignment",
 }
 
 
@@ -1538,6 +1539,12 @@ class Z3SymbolicProver:
                 return False, "UNKNOWN"
 
         if not ext_b.returns and not ext_c.returns:
+            if not ext_b.calls and not ext_c.calls and not ext_b.guards and not ext_c.guards:
+                # No captured effects on either side: absence of evidence is not evidence of equivalence.
+                # If function bodies differ without any return/call/guard evidence, fail closed to UNKNOWN.
+                return False, "UNKNOWN"
+            if len(ext_b.calls) != len(ext_c.calls) or len(ext_b.guards) != len(ext_c.guards):
+                return False, "UNKNOWN"
             return True, "UNSAT"
 
         # Unified Path-Sensitive Return ITE Equivalence Check: ITE_base != ITE_cand
