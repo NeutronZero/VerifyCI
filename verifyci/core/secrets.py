@@ -19,6 +19,7 @@ _KNOWN_SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("AWS_KEY", re.compile(r"\b(?:AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}\b")),
     ("GITHUB_TOKEN", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9_]{20,255}|github_pat_[A-Za-z0-9_]{82})\b")),
     ("SLACK_TOKEN", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,120}\b")),
+    ("SLACK_WEBHOOK", re.compile(r"https://hooks\.slack\.com/services/T[0-9A-Za-z_]{8,14}/B[0-9A-Za-z_]{8,14}/[0-9A-Za-z_]{20,36}")),
     ("STRIPE_KEY", re.compile(r"\b[rs]k_live_[0-9a-zA-Z]{16,99}\b")),
     ("OPENAI_KEY", re.compile(r"\bsk-(?:proj-|live-)?[A-Za-z0-9_-]{12,120}\b")),
     ("GOOGLE_KEY", re.compile(r"\bAIza[0-9A-Za-z_-]{30,50}\b")),

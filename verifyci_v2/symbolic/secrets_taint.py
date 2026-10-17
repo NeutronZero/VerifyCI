@@ -29,6 +29,12 @@ _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
     ("SLACK_TOKEN", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,120}\b")),
+    (
+        "SLACK_WEBHOOK",
+        re.compile(
+            r"https://hooks\.slack\.com/services/T[0-9A-Za-z_]{8,14}/B[0-9A-Za-z_]{8,14}/[0-9A-Za-z_]{20,36}"
+        ),
+    ),
     ("STRIPE_LIVE_KEY", re.compile(r"\b[rs]k_live_[0-9a-zA-Z]{16,99}\b")),
     (
         "GOOGLE_API_KEY",

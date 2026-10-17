@@ -153,6 +153,43 @@ def _synthetic_diff(file_path: str, base_source: str, head_source: str) -> str:
     return "\n".join(lines)
 
 
+def apply_unified_diff_to_source(base_src: str, diff_text: str) -> str | None:
+    """Applies a unified diff hunk series to a base source string to reconstruct full head source."""
+    hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+    hunks = []
+    current_hunk = None
+    for line in diff_text.splitlines():
+        m = hunk_re.match(line)
+        if m:
+            old_start = int(m.group(1))
+            old_count = int(m.group(2)) if m.group(2) else 1
+            current_hunk = {
+                "old_start": old_start,
+                "old_count": old_count,
+                "lines": [],
+            }
+            hunks.append(current_hunk)
+        elif current_hunk is not None:
+            if line.startswith(("+", "-", " ")):
+                current_hunk["lines"].append(line)
+    if not hunks:
+        return None
+    base_lines = base_src.splitlines()
+    res = list(base_lines)
+    for h in sorted(hunks, key=lambda x: x["old_start"], reverse=True):
+        start = h["old_start"] - 1
+        count = h["old_count"]
+        if start < 0 or start + count > len(res):
+            return None
+        new_lines = []
+        for l in h["lines"]:
+            if l.startswith(("+", " ")):
+                new_lines.append(l[1:])
+        res[start : start + count] = new_lines
+    return "\n".join(res)
+
+
+
 def unresolvable_added_imports(added_lines: Sequence[str]) -> list[str]:
     """Top-level modules a patch newly imports that do not resolve here.
 
@@ -346,6 +383,36 @@ class VerificationPipeline:
             findings.extend(self._scan_non_python_added_lines(entry))
             return findings
 
+        diff_changed_lines = [
+            ln[1:].strip()
+            for ln in entry.diff.splitlines()
+            if ln.startswith(("+", "-")) and not ln.startswith(("+++", "---")) and ln[1:].strip()
+        ]
+        is_comment_only = bool(diff_changed_lines) and all(
+            ln.startswith("#") for ln in diff_changed_lines
+        )
+        if is_comment_only:
+            from verifyci_v2.symbolic.secrets_taint import _SECRET_PATTERNS
+
+            sec_findings = []
+            for line_idx, line in enumerate(entry.added_lines, start=1):
+                for rule_name, pat in _SECRET_PATTERNS:
+                    if pat.search(line):
+                        sec_findings.append(
+                            self._finding(
+                                "SECRET_REGEX",
+                                file_path,
+                                str(line_idx),
+                                rule_id=f"VC2-SECRET-{rule_name}",
+                                severity="CRITICAL",
+                                verdict="FAIL",
+                                message=(
+                                    f"Credential pattern ({rule_name}) detected in comment of '{file_path}'."
+                                ),
+                            )
+                        )
+            return sec_findings
+
         if not base_src.strip():
             # A newly added module has no baseline, so equivalence is not
             # decidable. Fail closed rather than reporting PASS on an
@@ -405,9 +472,19 @@ class VerificationPipeline:
 
         parse = parse_file_sources(file_path, base_src, head_src)
         if parse.error is not None:
-            findings.append(parse.error)
-            return findings
-        base_src, head_src = parse.base_source, parse.head_source
+            if stored_source:
+                recon = apply_unified_diff_to_source(stored_source, entry.diff)
+                if recon is not None:
+                    parse_full = parse_file_sources(file_path, stored_source, recon)
+                    if parse_full.error is None:
+                        base_src = parse_full.base_source
+                        head_src = parse_full.head_source
+                        parse = parse_full
+            if parse.error is not None:
+                findings.append(parse.error)
+                return findings
+        else:
+            base_src, head_src = parse.base_source, parse.head_source
 
         for module in unresolvable_added_imports(entry.added_lines):
             findings.append(
@@ -426,9 +503,28 @@ class VerificationPipeline:
                 )
             )
 
-        findings.extend(
-            self._prove_functions(file_path, base_src, head_src, entry.added_lines)
-        )
+        prove_f = self._prove_functions(file_path, base_src, head_src, entry.added_lines)
+        if any(f.rule_id == "VC2-NO-DEFINABLE-SCOPE" for f in prove_f) and stored_source:
+            recon = apply_unified_diff_to_source(stored_source, entry.diff)
+            if recon is not None:
+                parse_full = parse_file_sources(file_path, stored_source, recon)
+                if parse_full.error is None:
+                    prove_f = self._prove_functions(
+                        file_path,
+                        parse_full.base_source,
+                        parse_full.head_source,
+                        entry.added_lines,
+                    )
+
+        effective_lines = [
+            ln.strip()
+            for ln in entry.added_lines
+            if ln.strip() and not ln.strip().startswith("#") and ln.strip() != "pass"
+        ]
+        if not effective_lines:
+            prove_f = [f for f in prove_f if f.rule_id != "VC2-NO-DEFINABLE-SCOPE"]
+
+        findings.extend(prove_f)
         findings.extend(self._check_concurrency(file_path, head_src))
         return findings
 
@@ -512,7 +608,9 @@ class VerificationPipeline:
                     ),
                 )
             ]
-        if provenance.unverified_lines and not provenance.verified_lines:
+        if provenance.verdict == "INCONCLUSIVE" or (
+            provenance.unverified_lines and not provenance.verified_lines
+        ):
             return [
                 self._finding(
                     "REM_UNVERIFIED",

@@ -75,6 +75,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
         "verify-diff", help="Verify code diff against contracts and invariants"
     )
     p_vdiff.add_argument("--diff-file", default="", help="Path to diff file")
+    p_vdiff.add_argument("--base-dir", default="", help="Path to base source directory")
     p_vdiff.add_argument("--db", default="", help="Path to database")
     p_vdiff.add_argument(
         "--format",
@@ -263,7 +264,17 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
         # Without one the check is a tautology, so it is skipped rather than
         # dressed up as a verification.
         base_sources: dict[str, str] = {}
-        if getattr(ns, "db", ""):
+        if getattr(ns, "base_dir", ""):
+            base_p = Path(ns.base_dir)
+            if base_p.exists():
+                for fpath in base_p.rglob("*"):
+                    if fpath.is_file():
+                        rel = fpath.relative_to(base_p).as_posix()
+                        try:
+                            base_sources[rel] = fpath.read_text(encoding="utf-8")
+                        except Exception:
+                            pass
+        elif getattr(ns, "db", ""):
             try:
                 from verifyci_v2.store.duckdb_cpg import DuckDBCPGStore
 

@@ -509,7 +509,15 @@ class V2CapabilityAdjudicator:
                 diff_path = fh.name
             try:
                 result = run_cli(
-                    ["verify-diff", "--diff-file", diff_path, "--format", "json"]
+                    [
+                        "verify-diff",
+                        "--diff-file",
+                        diff_path,
+                        "--base-dir",
+                        str(corpus_dir / "base"),
+                        "--format",
+                        "json",
+                    ]
                 )
                 actual = str(result.get("status", "INCONCLUSIVE"))
             except Exception as exc:
