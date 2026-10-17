@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping, Sequence
 
@@ -47,20 +46,65 @@ class FindingReason(str, Enum):
     POLICY_VIOLATION = "POLICY_VIOLATION"
 
 
-@dataclass(frozen=True)
 class VerificationFinding:
-    """An individual finding emitted during verification."""
+    """An individual finding emitted during verification (high-performance slotted model)."""
 
-    finding_id: str
-    rule_id: str
-    severity: Severity
-    verdict: VerificationVerdict
-    reason: FindingReason
-    message: str
-    file_path: str
-    start_line: int = 1
-    end_line: int = 1
-    details: Mapping[str, Any] = field(default_factory=dict)
+    __slots__ = (
+        "details",
+        "end_line",
+        "file_path",
+        "finding_id",
+        "message",
+        "reason",
+        "rule_id",
+        "severity",
+        "start_line",
+        "verdict",
+    )
+
+    def __init__(
+        self,
+        finding_id: str,
+        rule_id: str,
+        severity: Severity,
+        verdict: VerificationVerdict,
+        reason: FindingReason,
+        message: str,
+        file_path: str,
+        start_line: int = 1,
+        end_line: int = 1,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        object.__setattr__(self, "finding_id", finding_id)
+        object.__setattr__(self, "rule_id", rule_id)
+        object.__setattr__(self, "severity", severity)
+        object.__setattr__(self, "verdict", verdict)
+        object.__setattr__(self, "reason", reason)
+        object.__setattr__(self, "message", message)
+        object.__setattr__(self, "file_path", file_path)
+        object.__setattr__(self, "start_line", start_line)
+        object.__setattr__(self, "end_line", end_line)
+        object.__setattr__(self, "details", dict(details) if details else {})
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError(f"VerificationFinding is immutable; cannot modify '{name}'")
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, VerificationFinding):
+            return False
+        return (
+            self.finding_id == other.finding_id
+            and self.rule_id == other.rule_id
+            and self.severity == other.severity
+            and self.verdict == other.verdict
+            and self.reason == other.reason
+            and self.file_path == other.file_path
+            and self.start_line == other.start_line
+            and self.end_line == other.end_line
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.finding_id, self.rule_id, self.file_path, self.start_line))
 
     def to_dict(self) -> dict[str, Any]:
         """Convert finding to standard dictionary for serialization."""
@@ -85,9 +129,6 @@ def derive_verdict(
 
     Enforces fail-closed verdict precedence:
     FAIL > INCONCLUSIVE > PASS.
-
-    A confirmed failure takes precedence over any inconclusive result and is
-    never downgraded.
     """
     fail_findings = [f for f in findings if f.verdict == VerificationVerdict.FAIL]
     if fail_findings:

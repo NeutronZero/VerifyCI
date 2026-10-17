@@ -23,6 +23,7 @@ from benchmarks.common.measure_v2 import (
 )
 
 BENCHMARKS_ROOT = Path(__file__).resolve().parents[2] / "benchmarks"
+pytestmark = pytest.mark.benchmark
 
 
 def _measure_scripts() -> list[Path]:

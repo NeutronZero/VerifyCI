@@ -236,6 +236,8 @@ def test_r2_1_spec_compiler_uses_real_z3_and_never_fabricates_sat(monkeypatch: p
     discount_val = finding.witness.input_assignments['discount']
     assert total_val - discount_val < 0
 
+
+@pytest.mark.benchmark
 def test_r2_2_adjudicator_distinguishes_smoke_from_frozen_corpus_and_calibrates_validly(tmp_path: Path) -> None:
     from verifyci_v2.interface.cap_adjudicator import V2CapabilityAdjudicator
     adjudicator = V2CapabilityAdjudicator()

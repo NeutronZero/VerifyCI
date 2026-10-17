@@ -46,7 +46,8 @@ otel-semconv = ["opentelemetry-semantic-conventions>=0.40b0"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0", "pytest-xdist>=3.5", "ruff>=0.15", "psutil>=5.9.0"]
 
 [project.scripts]
-verifyci = "verifyci_v2.interface.cli:main"
+verifyci = "verifyci.interface.cli:main"
+vc = "verifyci.interface.cli:main"
 vc2 = "verifyci_v2.interface.cli:main"
 
 [project.urls]
@@ -66,13 +67,14 @@ packages = ["verifyci", "verifyci_v2"]
 only-include = ["verifyci_v2", "README.md", "pyproject.toml", "CHANGELOG.md"]
 
 [tool.pytest.ini_options]
-addopts = "-n auto"
+addopts = "-n auto -m 'not benchmark and not performance'"
 asyncio_mode = "strict"
 testpaths = ["tests"]
 junit_family = "xunit2"
 markers = [
     "invariant: Critical fail-closed safety invariants and contracts (always executed)",
     "evidence: Frozen empirical benchmark reproductions and evidence claims",
+    "benchmark: Expensive multi-corpus adjudications and performance benchmarks",
     "unit: Fast isolated unit tests without external state",
     "integration: Multi-component end-to-end integration tests",
     "performance: Regression benchmark tests with latency thresholds",

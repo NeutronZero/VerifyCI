@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import difflib
 import re
 from typing import Sequence
@@ -12,28 +11,66 @@ from verifyci.contracts.attestation import normalize_path
 _HUNK_HEADER_RE = re.compile(r"^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@")
 
 
-@dataclass(frozen=True)
 class RemovedLine:
     """A line removed in a diff, with its estimated old-side 1-indexed line number."""
 
-    line_number: int
-    content: str
+    __slots__ = ("content", "line_number")
+
+    def __init__(self, line_number: int, content: str) -> None:
+        object.__setattr__(self, "line_number", line_number)
+        object.__setattr__(self, "content", content)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError("RemovedLine is immutable")
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, RemovedLine):
+            return False
+        return self.line_number == other.line_number and self.content == other.content
 
 
-@dataclass(frozen=True)
 class DiffFileEntry:
-    """Structured representation of changes in a single file."""
+    """Structured representation of changes in a single file (high-performance slotted model)."""
 
-    file_path: str
-    old_file_path: str = ""
-    is_rename: bool = False
-    is_deletion: bool = False
-    is_binary: bool = False
-    base_source: str = ""
-    head_source: str = ""
-    added_lines: tuple[str, ...] = ()
-    removed_lines: tuple[RemovedLine, ...] = ()
-    raw_diff: str = ""
+    __slots__ = (
+        "added_lines",
+        "base_source",
+        "file_path",
+        "head_source",
+        "is_binary",
+        "is_deletion",
+        "is_rename",
+        "old_file_path",
+        "raw_diff",
+        "removed_lines",
+    )
+
+    def __init__(
+        self,
+        file_path: str,
+        old_file_path: str = "",
+        is_rename: bool = False,
+        is_deletion: bool = False,
+        is_binary: bool = False,
+        base_source: str = "",
+        head_source: str = "",
+        added_lines: Sequence[str] = (),
+        removed_lines: Sequence[RemovedLine] = (),
+        raw_diff: str = "",
+    ) -> None:
+        object.__setattr__(self, "file_path", normalize_path(file_path))
+        object.__setattr__(self, "old_file_path", normalize_path(old_file_path or file_path))
+        object.__setattr__(self, "is_rename", is_rename)
+        object.__setattr__(self, "is_deletion", is_deletion)
+        object.__setattr__(self, "is_binary", is_binary)
+        object.__setattr__(self, "base_source", base_source)
+        object.__setattr__(self, "head_source", head_source)
+        object.__setattr__(self, "added_lines", tuple(added_lines))
+        object.__setattr__(self, "removed_lines", tuple(removed_lines))
+        object.__setattr__(self, "raw_diff", raw_diff)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError("DiffFileEntry is immutable")
 
     @classmethod
     def from_sources(

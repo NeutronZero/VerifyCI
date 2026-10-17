@@ -39,6 +39,10 @@ def test_core_does_not_import_heavy_dependencies() -> None:
     assert proc.returncode == 0, f"Prohibited modules imported by verifyci.core: {proc.stdout}"
 
 
+import pytest
+
+
+@pytest.mark.performance
 def test_core_import_latency_under_40ms() -> None:
     """Measure fresh process import latency of verifyci.core."""
     code = (

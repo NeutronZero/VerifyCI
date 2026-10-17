@@ -14,6 +14,7 @@ import pytest
 from benchmarks.common.cap_adjudicator import V2CapabilityAdjudicator
 
 BENCHMARKS_ROOT = Path(__file__).resolve().parents[2] / "benchmarks"
+pytestmark = pytest.mark.benchmark
 
 MEASURED_CAPS = {
     "cap002b",

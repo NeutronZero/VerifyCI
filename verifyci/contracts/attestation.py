@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import hashlib
 import json
 from typing import Any, Mapping, Sequence
@@ -37,28 +36,51 @@ def canonical_json_bytes(data: Any) -> bytes:
     ).encode("utf-8")
 
 
-@dataclass(frozen=True)
 class CanonicalAttestationPayload:
-    """Deterministic attestation payload.
+    """Deterministic attestation payload (high-performance slotted model)."""
 
-    Identical normalized verification inputs, policy, analyzer versions,
-    and deterministic results produce identical canonical payloads and digests.
-    """
+    __slots__ = (
+        "analyzer_version",
+        "base_commit_sha",
+        "files",
+        "findings",
+        "head_commit_sha",
+        "policy_hash",
+        "schema_version",
+        "verdict",
+    )
 
-    base_commit_sha: str
-    head_commit_sha: str
-    files: tuple[str, ...]
-    policy_hash: str
-    verdict: VerificationVerdict
-    findings: tuple[VerificationFinding, ...]
-    schema_version: str = ATTESTATION_SCHEMA_VERSION
-    analyzer_version: str = f"verifyci-{__version__}"
+    def __init__(
+        self,
+        base_commit_sha: str,
+        head_commit_sha: str,
+        files: Sequence[str],
+        policy_hash: str,
+        verdict: VerificationVerdict,
+        findings: Sequence[VerificationFinding],
+        schema_version: str = ATTESTATION_SCHEMA_VERSION,
+        analyzer_version: str | None = None,
+    ) -> None:
+        object.__setattr__(self, "base_commit_sha", base_commit_sha)
+        object.__setattr__(self, "head_commit_sha", head_commit_sha)
+        object.__setattr__(self, "files", tuple(files))
+        object.__setattr__(self, "policy_hash", policy_hash)
+        object.__setattr__(self, "verdict", verdict)
+        object.__setattr__(self, "findings", tuple(findings))
+        object.__setattr__(self, "schema_version", schema_version)
+        object.__setattr__(
+            self,
+            "analyzer_version",
+            analyzer_version or f"verifyci-{__version__}",
+        )
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError(f"CanonicalAttestationPayload is immutable; cannot modify '{name}'")
 
     def to_normalized_dict(self) -> dict[str, Any]:
         """Produce a normalized dictionary guaranteed to be deterministic."""
         normalized_files = sorted({normalize_path(f) for f in self.files if f})
-        
-        # Findings sorted deterministically by (file_path, start_line, rule_id, finding_id)
+
         sorted_findings = sorted(
             [f.to_dict() for f in self.findings],
             key=lambda d: (
@@ -95,16 +117,40 @@ class CanonicalAttestationPayload:
         return hasher.hexdigest()
 
 
-@dataclass(frozen=True)
 class VerificationCertificate:
     """Complete verification certificate including envelope metadata and digest."""
 
-    digest: str
-    digest_algorithm: str
-    verdict: VerificationVerdict
-    payload: CanonicalAttestationPayload
-    rationale: str
-    execution_metadata: Mapping[str, Any] = field(default_factory=dict)
+    __slots__ = (
+        "digest",
+        "digest_algorithm",
+        "execution_metadata",
+        "payload",
+        "rationale",
+        "verdict",
+    )
+
+    def __init__(
+        self,
+        digest: str,
+        digest_algorithm: str,
+        verdict: VerificationVerdict,
+        payload: CanonicalAttestationPayload,
+        rationale: str,
+        execution_metadata: Mapping[str, Any] | None = None,
+    ) -> None:
+        object.__setattr__(self, "digest", digest)
+        object.__setattr__(self, "digest_algorithm", digest_algorithm)
+        object.__setattr__(self, "verdict", verdict)
+        object.__setattr__(self, "payload", payload)
+        object.__setattr__(self, "rationale", rationale)
+        object.__setattr__(
+            self,
+            "execution_metadata",
+            dict(execution_metadata) if execution_metadata else {},
+        )
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError(f"VerificationCertificate is immutable; cannot modify '{name}'")
 
     def to_dict(self) -> dict[str, Any]:
         """Export certificate for external consumers."""
