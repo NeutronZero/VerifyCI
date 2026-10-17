@@ -12,6 +12,7 @@ import ast
 from pathlib import Path
 import subprocess
 import sys
+from typing import Any
 
 import pytest
 
@@ -49,26 +50,34 @@ def test_no_measure_script_imports_v1() -> None:
     assert not offenders, f"v1 imports remain: {offenders}"
 
 
-def test_every_capability_has_a_declared_status() -> None:
+@pytest.fixture(scope="module")
+def capability_results() -> dict[str, dict[str, Any]]:
+    return {cap_id: build_result(cap_id) for cap_id in _CAP_DIRS}
+
+
+def test_every_capability_has_a_declared_status(
+    capability_results: dict[str, dict[str, Any]],
+) -> None:
     """Each cap must be passed, failed, or explicitly not measurable."""
-    for cap_id in _CAP_DIRS:
-        result = build_result(cap_id)
+    for cap_id, result in capability_results.items():
         assert result["status"] in ("passed", "failed", "not_measurable"), cap_id
         if result["status"] == "not_measurable":
             assert result["not_scored_reason"], cap_id
 
 
-def test_unmeasurable_never_reports_a_pass() -> None:
-    for cap_id in _CAP_DIRS:
-        result = build_result(cap_id)
+def test_unmeasurable_never_reports_a_pass(
+    capability_results: dict[str, dict[str, Any]],
+) -> None:
+    for cap_id, result in capability_results.items():
         if result["metrics"]["metric_value"] is None:
             assert result["status"] == "not_measurable", cap_id
             assert not result["status"] == "passed", cap_id
 
 
-def test_measured_capabilities_declare_their_bar() -> None:
-    for cap_id in _CAP_DIRS:
-        result = build_result(cap_id)
+def test_measured_capabilities_declare_their_bar(
+    capability_results: dict[str, dict[str, Any]],
+) -> None:
+    for cap_id, result in capability_results.items():
         if result["status"] in ("passed", "failed"):
             assert result["metrics"]["target_threshold"] > 0, cap_id
             assert result["metrics"]["threshold_basis"], cap_id
@@ -84,10 +93,16 @@ def test_v2_results_do_not_overwrite_v1_records() -> None:
 
 @pytest.mark.parametrize("cap_id", ["cap011", "cap009"])
 def test_measure_shim_runs_and_reports(cap_id: str) -> None:
+    cap_target = f"measure_{cap_id}.py"
     script = next(
-        s for s in _measure_scripts() if cap_id.upper().replace("_", "-") in s.name.upper()
-        or cap_id in s.read_text(encoding="utf-8")
+        (s for s in _measure_scripts() if s.name.lower() == cap_target),
+        None,
     )
+    if script is None:
+        script = next(
+            s for s in _measure_scripts() if cap_id.upper().replace("_", "-") in s.name.upper()
+            or cap_id in s.read_text(encoding="utf-8")
+        )
     proc = subprocess.run(
         [sys.executable, str(script), "--no-write"],
         capture_output=True,

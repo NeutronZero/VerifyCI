@@ -25,10 +25,14 @@ MEASURED_CAPS = {
     "cap010",
 }
 
+@pytest.fixture(scope="module")
+def corpus_adjudication_report() -> dict:
+    return V2CapabilityAdjudicator().adjudicate_corpus(BENCHMARKS_ROOT)
+
 
 @pytest.fixture(scope="module")
-def oracle_report() -> dict:
-    return V2CapabilityAdjudicator().adjudicate_corpus_oracles(BENCHMARKS_ROOT)
+def oracle_report(corpus_adjudication_report: dict) -> dict:
+    return corpus_adjudication_report["oracles"]
 
 
 def test_oracle_measures_every_measurable_capability(oracle_report: dict) -> None:
@@ -76,9 +80,11 @@ def test_oracle_thresholds_are_declared_with_a_basis(oracle_report: dict) -> Non
         assert scorecard["target_threshold"] > 0
 
 
-def test_corpus_adjudication_surfaces_oracles() -> None:
+def test_corpus_adjudication_surfaces_oracles(
+    corpus_adjudication_report: dict,
+) -> None:
     """`adjudicate --corpus` must report integrity AND measurement together."""
-    report = V2CapabilityAdjudicator().adjudicate_corpus(BENCHMARKS_ROOT)
+    report = corpus_adjudication_report
     assert report["all_verified"] is True
     assert "oracles" in report
     assert report["oracles"]["measured_capabilities"] >= len(MEASURED_CAPS)

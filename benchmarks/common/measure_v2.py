@@ -157,16 +157,23 @@ def main(cap_id: str | None = None, *, write: bool = True) -> int:
         args = parser.parse_args()
         targets = args.cap or sorted(_CAP_DIRS)
         write = not args.no_write
+        as_json = args.json
     else:
+        parser = argparse.ArgumentParser(description=f"Measure VerifyCI v2 {cap_id}")
+        parser.add_argument("--no-write", action="store_true")
+        parser.add_argument("--json", action="store_true")
+        args, _ = parser.parse_known_args()
         targets = [cap_id]
-        as_json = False
+        if args.no_write:
+            write = False
+        as_json = args.json
 
     results = [build_result(t) for t in targets]
     if write:
         for cap in targets:
             write_result(cap)
 
-    if cap_id is None and locals().get("as_json"):
+    if as_json:
         print(json.dumps(results, indent=2))
     else:
         for result in results:

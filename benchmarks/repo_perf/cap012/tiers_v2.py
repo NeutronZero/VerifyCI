@@ -47,9 +47,12 @@ def generate_tier(
 
 
 def _peak_rss_mb() -> float:
-    import psutil
+    try:
+        import psutil
 
-    return psutil.Process().memory_info().rss / (1024 * 1024)
+        return psutil.Process().memory_info().rss / (1024 * 1024)
+    except ImportError:
+        return 0.0
 
 
 def measure_tier(

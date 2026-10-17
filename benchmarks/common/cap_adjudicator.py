@@ -150,6 +150,7 @@ def _declared_unmeasurable(cap_id: str) -> "OracleScorecard":
 
 
 _CAP010_INDEX: dict[str, Any] = {}
+_ORACLES_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def _cap010_retriever(docs: dict[str, str]):
@@ -231,6 +232,7 @@ class V2CapabilityAdjudicator:
         benchmark_dir: str | Path | None = None,
         *,
         benchmarks_root: str | Path | None = None,
+        force: bool = False,
     ) -> dict[str, Any]:
         """
         Loads frozen benchmark corpora, validates SHA-256 digests against CORPUS_SHA256 and
@@ -358,7 +360,7 @@ class V2CapabilityAdjudicator:
                 }
             )
 
-        oracles = self.adjudicate_corpus_oracles(base_dir)
+        oracles = self.adjudicate_corpus_oracles(base_dir, force=force)
         return {
             "schema_version": "verifyci.v2.corpus_adjudication",
             "benchmark_dir": str(base_dir),
@@ -1460,7 +1462,7 @@ class V2CapabilityAdjudicator:
         )
 
     def adjudicate_corpus_oracles(
-        self, benchmark_dir: str | Path | None = None
+        self, benchmark_dir: str | Path | None = None, *, force: bool = False
     ) -> dict[str, Any]:
         """Executes v2 engines against frozen corpora and scores against ground truth.
 
@@ -1479,6 +1481,10 @@ class V2CapabilityAdjudicator:
         if not base_dir.is_dir():
             raise FileNotFoundError(f"Benchmark directory not found: {base_dir}")
 
+        cache_key = str(base_dir.resolve())
+        if not force and cache_key in _ORACLES_CACHE:
+            return _ORACLES_CACHE[cache_key]
+
         scorecards: list[OracleScorecard] = []
         for cap_id, runner in _oracle_runners(self):
             try:
@@ -1490,7 +1496,7 @@ class V2CapabilityAdjudicator:
             scorecards.append(_declared_unmeasurable(cap_id))
 
         measured = [sc for sc in scorecards if sc.passed is not None]
-        return {
+        report = {
             "schema_version": "verifyci.v2.corpus_oracle_adjudication",
             "benchmark_dir": str(base_dir),
             "measured_capabilities": len(measured),
@@ -1500,6 +1506,8 @@ class V2CapabilityAdjudicator:
             "total_false_accepts": sum(sc.false_accept_count for sc in scorecards),
             "scorecards": [asdict(sc) for sc in scorecards],
         }
+        _ORACLES_CACHE[cache_key] = report
+        return report
 
     def _eval_cap001_retrieval(self) -> CapabilityScorecard:
         t0 = time.perf_counter_ns()

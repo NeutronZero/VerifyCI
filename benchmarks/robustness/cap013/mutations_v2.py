@@ -111,7 +111,18 @@ def _run_probe(sandbox: Path, probe: str, timeout: int = 600) -> bool:
     """Returns True when the probe passes on this tree."""
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pytest", probe, "-q", "--no-header", "-p", "no:cacheprovider"],
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                probe,
+                "-q",
+                "--no-header",
+                "-p",
+                "no:cacheprovider",
+                "-o",
+                "addopts=",
+            ],
             cwd=str(sandbox),
             capture_output=True,
             text=True,
