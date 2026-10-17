@@ -103,7 +103,32 @@ def _format_jcs_float(value: float) -> str:
     return rep
 
 
+import json
+
+_FAST_JCS_TYPES = (str, int, bool, type(None), list, tuple, dict)
+
+
+def _has_custom_jcs_types(obj: Any) -> bool:
+    if obj is None or isinstance(obj, (int, bool, str)):
+        return False
+    if isinstance(obj, float):
+        return True
+    if isinstance(obj, (bytes, bytearray, memoryview)):
+        return True
+    if isinstance(obj, (list, tuple)):
+        return any(_has_custom_jcs_types(item) for item in obj)
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if not isinstance(k, str) or _has_custom_jcs_types(v):
+                return True
+        return False
+    return True
+
+
 def _to_jcs_str(obj: Any) -> str:
+    if not _has_custom_jcs_types(obj):
+        return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
     if obj is None:
         return "null"
     if obj is True:
@@ -162,11 +187,16 @@ def xxh3_64_hex(data: bytes | str) -> str:
     return hashlib.blake2s(raw, digest_size=8, person=b"vc2_xxh3").hexdigest()
 
 
+@functools.lru_cache(maxsize=128)
+def _domain_header_bytes(domain: str) -> bytes:
+    domain_bytes = domain.encode("utf-8")
+    return struct.pack(">I", len(domain_bytes)) + domain_bytes
+
+
 def blake3_bytes(data: bytes | str, *, domain: str = "verifyci.v2") -> bytes:
     """Domain-separated 256-bit cryptographic digest for Merkle and Salsa identities."""
     raw = data.encode("utf-8") if isinstance(data, str) else bytes(data)
-    domain_bytes = domain.encode("utf-8")
-    framed = struct.pack(">I", len(domain_bytes)) + domain_bytes + raw
+    framed = _domain_header_bytes(domain) + raw
     if _blake3_mod is not None:
         return bytes(_blake3_mod.blake3(framed).digest())
     return hashlib.blake2b(framed, digest_size=32).digest()
