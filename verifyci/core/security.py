@@ -35,12 +35,13 @@ _DANGEROUS_ATTRIBUTES: dict[str, tuple[str, str]] = {
 
 
 class DangerousCallVisitor(ast.NodeVisitor):
-    """AST visitor that resolves import aliases to detect dangerous calls."""
+    """AST visitor that resolves import aliases and assigned aliases to detect dangerous calls."""
 
     def __init__(self, file_path: str) -> None:
         self.file_path = file_path
         self.module_aliases: dict[str, str] = {}  # alias -> canonical module name
         self.symbol_aliases: dict[str, tuple[str, str]] = {}  # alias -> (module, canonical attr)
+        self.builtin_aliases: dict[str, str] = {}  # alias -> canonical builtin name
         self.findings: list[VerificationFinding] = []
 
     def visit_Import(self, node: ast.Import) -> None:
@@ -54,20 +55,67 @@ class DangerousCallVisitor(ast.NodeVisitor):
         module = node.module or ""
         base_mod = module.split(".")[0]
         for alias in node.names:
-            target_name = alias.asname or alias.name
-            self.symbol_aliases[target_name] = (base_mod, alias.name)
+            if alias.name == "*":
+                # Handle star imports: from subprocess import * or from os import *
+                for attr, (expected_mod, _) in _DANGEROUS_ATTRIBUTES.items():
+                    if expected_mod == base_mod:
+                        self.symbol_aliases[attr] = (base_mod, attr)
+            else:
+                target_name = alias.asname or alias.name
+                self.symbol_aliases[target_name] = (base_mod, alias.name)
+        self.generic_visit(node)
+
+    def _track_alias_assignment(self, target: ast.AST, value: ast.AST) -> None:
+        if not isinstance(target, ast.Name):
+            return
+        target_id = target.id
+
+        # 1. Alias assigned to another name (e.g. my_eval = eval or cmd = system)
+        if isinstance(value, ast.Name):
+            source_id = value.id
+            if source_id in _DANGEROUS_BUILTINS:
+                self.builtin_aliases[target_id] = source_id
+            elif source_id in self.builtin_aliases:
+                self.builtin_aliases[target_id] = self.builtin_aliases[source_id]
+            elif source_id in self.symbol_aliases:
+                self.symbol_aliases[target_id] = self.symbol_aliases[source_id]
+            elif source_id in self.module_aliases:
+                self.module_aliases[target_id] = self.module_aliases[source_id]
+
+        # 2. Alias assigned to attribute (e.g. cmd = os.system or cmd = my_os.system)
+        elif isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name):
+            recv_name = value.value.id
+            attr_name = value.attr
+            canonical_mod = self.module_aliases.get(recv_name, recv_name)
+            if attr_name in _DANGEROUS_ATTRIBUTES:
+                expected_mod, _ = _DANGEROUS_ATTRIBUTES[attr_name]
+                if canonical_mod == expected_mod:
+                    self.symbol_aliases[target_id] = (canonical_mod, attr_name)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        for target in node.targets:
+            self._track_alias_assignment(target, node.value)
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if node.value is not None:
+            self._track_alias_assignment(node.target, node.value)
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
         lineno = getattr(node, "lineno", 1)
 
-        # 1. Direct function call: e.g. eval(...) or imported symbol alias run(...)
+        # 1. Direct function call: e.g. eval(...) or my_eval(...) or imported symbol alias run(...)
         if isinstance(func, ast.Name):
             name = func.id
             if name in _DANGEROUS_BUILTINS:
                 reason_desc = _DANGEROUS_BUILTINS[name]
                 self._record_finding(name, lineno, reason_desc)
+            elif name in self.builtin_aliases:
+                orig_builtin = self.builtin_aliases[name]
+                reason_desc = _DANGEROUS_BUILTINS[orig_builtin]
+                self._record_finding(orig_builtin, lineno, reason_desc)
             elif name in self.symbol_aliases:
                 mod, attr = self.symbol_aliases[name]
                 if attr in _DANGEROUS_ATTRIBUTES and _DANGEROUS_ATTRIBUTES[attr][0] == mod:

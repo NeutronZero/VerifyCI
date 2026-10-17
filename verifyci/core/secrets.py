@@ -13,7 +13,7 @@ from verifyci.contracts.verdict import (
     VerificationFinding,
     VerificationVerdict,
 )
-from verifyci.core.canonical import content_digest_hex, redact_token
+from verifyci.core.canonical import content_digest_hex, redact_secrets, redact_token
 
 _KNOWN_SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("AWS_KEY", re.compile(r"(?:AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}")),
@@ -175,3 +175,9 @@ def scan_secrets_in_source(file_path: str, source: str) -> list[VerificationFind
             pass
 
     return findings
+
+
+def sanitize_message(text: str) -> str:
+    """Sanitize secrets and credentials from message strings, exceptions, and logs."""
+    patterns = [pat for _, pat in _KNOWN_SECRET_PATTERNS]
+    return redact_secrets(text, patterns)

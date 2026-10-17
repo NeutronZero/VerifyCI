@@ -21,6 +21,34 @@ def normalize_path(path: str) -> str:
     return p
 
 
+def is_path_traversal(path: str) -> bool:
+    """Check if a path attempts directory traversal or escapes the repository root."""
+    if not path or "\x00" in path:
+        return True
+    p = path.strip()
+    if p.startswith(("//", "\\\\", "/", "\\")):
+        return True
+    if len(p) >= 2 and p[1] == ":":
+        return True
+    lower = p.lower()
+    if "%2e" in lower or "%2f" in lower or "%5c" in lower:
+        return True
+    norm = normalize_path(p)
+    if norm.startswith(("/", "\\")):
+        return True
+    depth = 0
+    for part in norm.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            depth -= 1
+            if depth < 0:
+                return True
+        else:
+            depth += 1
+    return False
+
+
 def canonical_json_bytes(data: Any) -> bytes:
     """RFC 8785 JSON Canonicalization Scheme (JCS).
 

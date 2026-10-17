@@ -56,6 +56,7 @@ class WasmtimeSandboxAdapter(SandboxProtocol):
         engine = wt.Engine(config)
         store = wt.Store(engine)
         store.set_fuel(fuel_limit)
+        store.set_limits(memory_size=memory_limit_bytes)
 
         try:
             if isinstance(plugin_wasm, str):
@@ -65,6 +66,14 @@ class WasmtimeSandboxAdapter(SandboxProtocol):
                 wasm_bytes = plugin_wasm
 
             module = wt.Module(engine, wasm_bytes)
+
+            # Strict host isolation: reject modules that attempt to import unconfined host capabilities
+            if module.imports:
+                unauthorized = [f"{imp.module}::{imp.name}" for imp in module.imports]
+                raise WasmSandboxCapabilityError(
+                    f"Plugin '{plugin_id}' attempts unauthorized host imports: {unauthorized}"
+                )
+
             instance = wt.Instance(store, module, [])
 
             run_fn = instance.exports(store).get("run")
@@ -93,6 +102,10 @@ class WasmtimeSandboxAdapter(SandboxProtocol):
             err_str = str(exc)
             if "fuel" in err_str.lower() or "all fuel consumed" in err_str.lower():
                 raise WasmFuelExhaustedError(f"Plugin '{plugin_id}' exhausted fuel limit ({fuel_limit})") from exc
+            if "memory" in err_str.lower() and "limit" in err_str.lower():
+                raise WasmSandboxCapabilityError(
+                    f"Plugin '{plugin_id}' exceeded memory limit ({memory_limit_bytes} bytes): {exc}"
+                ) from exc
             return SandboxResult(
                 output=None,
                 fuel_consumed=fuel_limit,

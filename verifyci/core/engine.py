@@ -11,6 +11,7 @@ from verifyci.contracts.attestation import (
     ATTESTATION_DIGEST_DOMAIN,
     CanonicalAttestationPayload,
     VerificationCertificate,
+    is_path_traversal,
 )
 from verifyci.contracts.capabilities import CapabilityDeclaration
 from verifyci.contracts.verdict import (
@@ -24,7 +25,7 @@ from verifyci.core.canonical import content_digest_hex
 from verifyci.core.diff_parser import DiffFileEntry
 from verifyci.core.imports import check_unresolved_imports
 from verifyci.core.provenance import verify_removal_provenance
-from verifyci.core.secrets import scan_secrets_in_source
+from verifyci.core.secrets import sanitize_message, scan_secrets_in_source
 from verifyci.core.security import scan_dangerous_calls
 
 ExtensionChecker = Callable[[DiffFileEntry, Mapping[str, str]], Sequence[VerificationFinding]]
@@ -156,6 +157,22 @@ class VerificationKernel:
         findings: list[VerificationFinding] = []
         file_path = entry.file_path
 
+        # 0. Path traversal validation
+        if is_path_traversal(file_path) or (entry.old_file_path and is_path_traversal(entry.old_file_path)):
+            finding_id = content_digest_hex(f"path_traversal:{file_path}")[:16]
+            findings.append(
+                VerificationFinding(
+                    finding_id=finding_id,
+                    rule_id="VC-POLICY-PATH-TRAVERSAL",
+                    severity=Severity.CRITICAL,
+                    verdict=VerificationVerdict.FAIL,
+                    reason=FindingReason.POLICY_VIOLATION,
+                    message=f"Path traversal detected in diff file path '{file_path}'",
+                    file_path=file_path,
+                )
+            )
+            return findings
+
         # 1. Non-Python added lines secret scan
         if not file_path.endswith(".py"):
             findings.extend(scan_secrets_in_source(file_path, "\n".join(entry.added_lines)))
@@ -189,10 +206,18 @@ class VerificationKernel:
         for checker in self.extension_checkers:
             try:
                 ext_findings = checker(entry, self.base_sources)
-                findings.extend(ext_findings)
+                if not isinstance(ext_findings, (list, tuple)):
+                    raise TypeError(f"Extension checker returned non-sequence: {type(ext_findings).__name__}")
+                for f in ext_findings:
+                    if not isinstance(f, VerificationFinding):
+                        raise TypeError(f"Extension finding is not VerificationFinding: {type(f).__name__}")
+                    if not isinstance(f.verdict, VerificationVerdict):
+                        raise ValueError(f"Extension finding has invalid verdict: {f.verdict}")
+                    findings.append(f)
             except Exception as exc:
-                # Extension crash fails closed to INCONCLUSIVE, never silent PASS
-                finding_id = content_digest_hex(f"ext_crash:{file_path}:{exc}")[:16]
+                # Extension crash or malformed result fails closed to INCONCLUSIVE, never silent PASS
+                safe_exc = sanitize_message(str(exc))
+                finding_id = content_digest_hex(f"ext_crash:{file_path}:{safe_exc}")[:16]
                 findings.append(
                     VerificationFinding(
                         finding_id=finding_id,
@@ -200,7 +225,7 @@ class VerificationKernel:
                         severity=Severity.HIGH,
                         verdict=VerificationVerdict.INCONCLUSIVE,
                         reason=FindingReason.CAPABILITY_UNAVAILABLE,
-                        message=f"Extension checker failed closed on '{file_path}': {exc}",
+                        message=f"Extension checker failed closed on '{file_path}': {safe_exc}",
                         file_path=file_path,
                     )
                 )
