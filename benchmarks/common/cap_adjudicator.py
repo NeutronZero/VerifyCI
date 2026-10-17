@@ -391,9 +391,9 @@ class V2CapabilityAdjudicator:
         Prediction is "this case violates the secret invariant" = the engine
         emitted at least one FAIL finding for the patched source.
         """
-        from verifyci_v2.pipeline import parse_unified_diff
+        from verifyci.core.diff_parser import parse_unified_diff
+        from verifyci.core.secrets import scan_secrets_in_source
 
-        engine = TaintTrackedSecretEngine()
         pairs: list[tuple[bool, bool]] = []
         for case in cases:
             predicted = False
@@ -401,16 +401,8 @@ class V2CapabilityAdjudicator:
                 for entry in parse_unified_diff(case.get("diff", "")):
                     file_path = getattr(entry, "file_path", None) if hasattr(entry, "file_path") else entry["file_path"]
                     head_source = getattr(entry, "head_source", None) if hasattr(entry, "head_source") else entry["head_source"]
-                    if file_path.endswith(".py"):
-                        found = engine.scan_python_source(
-                            file_path, head_source
-                        )
-                    else:
-                        found = engine.scan_config_lines(
-                            file_path,
-                            head_source.splitlines(),
-                        )
-                    if any(f.verdict == "FAIL" for f in found):
+                    findings = scan_secrets_in_source(file_path, head_source)
+                    if any(getattr(f.verdict, "value", str(f.verdict)) == "FAIL" for f in findings):
                         predicted = True
                         break
             except Exception:
