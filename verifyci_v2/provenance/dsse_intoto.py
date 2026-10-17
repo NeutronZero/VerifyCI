@@ -21,7 +21,7 @@ from verifyci_v2.contracts.attestation import (
     VerificationFinding,
 )
 from verifyci_v2.contracts.canonical import (
-    blake3_hex,
+    content_digest_hex,
     canonical_jcs_bytes,
 )
 
@@ -68,7 +68,7 @@ class InTotoDSSESigner:
             encoding=Encoding.Raw,
             format=PublicFormat.Raw,
         )
-        self.keyid = blake3_hex(pub_bytes, domain="verifyci.v2.dsse.keyid")[:16]
+        self.keyid = content_digest_hex(pub_bytes, domain="verifyci.v2.dsse.keyid")[:16]
 
     @classmethod
     def generate_ephemeral(cls) -> tuple[InTotoDSSESigner, Ed25519PublicKey]:
@@ -171,8 +171,15 @@ def export_sarif_v2(
     *,
     ussa_merkle_root: str,
     rsl_entry_hash: str,
+    verdict_status: str = "PASS",
+    rationale: str = "",
 ) -> dict[str, Any]:
-    """Exports findings, Z3 counterexample witnesses, and verified CEGIS fixes to SARIF v2.1.0."""
+    """Exports findings, Z3 counterexample witnesses, and verified CEGIS fixes to SARIF v2.1.0.
+
+    `verdict_status` and `rationale` land in `runs[].invocations[].properties`, which is
+    a standard SARIF property bag. That keeps the document valid SARIF while still
+    letting the CI action read the gate verdict back out of the report file.
+    """
     results: list[dict[str, Any]] = []
     for f in findings:
         level_map = {
@@ -242,6 +249,15 @@ def export_sarif_v2(
                     "ussa_merkle_root": ussa_merkle_root,
                     "gittuf_rsl_entry_hash": rsl_entry_hash,
                 },
+                "invocations": [
+                    {
+                        "executionSuccessful": verdict_status != "FAIL",
+                        "properties": {
+                            "verdict": verdict_status,
+                            "rationale": rationale,
+                        },
+                    }
+                ],
                 "results": results,
             }
         ],

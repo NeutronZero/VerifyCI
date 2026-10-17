@@ -5,7 +5,7 @@ import re
 import struct
 from typing import Sequence
 
-from verifyci_v2.contracts.canonical import blake3_bytes
+from verifyci_v2.contracts.canonical import content_digest_bytes
 from verifyci_v2.contracts.ssa_ir import FunctionUSSA
 
 try:
@@ -85,7 +85,7 @@ class OfflineBLAKE3Model2VecEmbedder:
         out: list[float] = []
         blocks_needed = (self._dimension + 7) // 8
         for blk_idx in range(blocks_needed):
-            digest = blake3_bytes(f"{token}:{blk_idx}", domain="verifyci.v2.model2vec")
+            digest = content_digest_bytes(f"{token}:{blk_idx}", domain="verifyci.v2.model2vec")
             ints = struct.unpack(">8i", digest)
             for val in ints:
                 out.append(val / 2147483648.0)

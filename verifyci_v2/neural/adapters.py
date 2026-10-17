@@ -9,9 +9,9 @@ from verifyci_v2.contracts.ai_protocol import (
     ModelAttestationRecord,
     OrdinalScore,
 )
-from verifyci_v2.contracts.canonical import blake3_hex, canonical_jcs_str
+from verifyci_v2.contracts.canonical import content_digest_hex, canonical_jcs_str
 from verifyci_v2.neural.grammar_mask import SchemaConstrainedValidator
-from verifyci_v2.symbolic.secrets_taint import redact_secrets
+from verifyci_v2.contracts.redaction import redact_in_place_mapping
 
 
 class DeterministicJudgeAdapter:
@@ -35,10 +35,10 @@ class DeterministicJudgeAdapter:
         return ModelAttestationRecord(
             provider_name=self.provider_name,
             model_id=self._model_id,
-            weights_or_endpoint_hash=blake3_hex(
+            weights_or_endpoint_hash=content_digest_hex(
                 self._model_id, domain="verifyci.v2.weights"
             ),
-            prompt_template_hash=blake3_hex(
+            prompt_template_hash=content_digest_hex(
                 "vc2.prompt.v2.0", domain="verifyci.v2.prompt"
             ),
             conformal_profile_hash=conformal_hash,
@@ -46,7 +46,7 @@ class DeterministicJudgeAdapter:
         )
 
     def judge_boolean(self, state: dict[str, Any], question: str) -> BooleanJudgment:
-        safe_state_str = redact_secrets(canonical_jcs_str(state)).lower()
+        safe_state_str = redact_in_place_mapping(canonical_jcs_str(state)).lower()
         risk_Signals = (
             "raise ",
             "swap",
@@ -78,7 +78,7 @@ class DeterministicJudgeAdapter:
         options: Sequence[str],
     ) -> CategoricalChoice:
         raw_text = canonical_jcs_str(state).lower()
-        safe_text = redact_secrets(raw_text).lower()
+        safe_text = redact_in_place_mapping(raw_text).lower()
         logits: dict[str, float] = {opt: 0.0 for opt in options}
 
         for opt in options:
@@ -104,7 +104,7 @@ class DeterministicJudgeAdapter:
         question: str,
         levels: Sequence[str],
     ) -> OrdinalScore:
-        safe_text = redact_secrets(canonical_jcs_str(state)).lower()
+        safe_text = redact_in_place_mapping(canonical_jcs_str(state)).lower()
         logits = {lvl: 0.0 for lvl in levels}
         if "critical" in safe_text or "auth" in safe_text:
             logits[levels[-1]] = 3.5
@@ -113,22 +113,15 @@ class DeterministicJudgeAdapter:
         return SchemaConstrainedValidator.build_constrained_score(levels, logits)
 
 
-class LocalONNXJudgeAdapter(DeterministicJudgeAdapter):
-    """CPU-only quantized ONNX adapter (`provider = "local-onnx"`)."""
-
-    def __init__(self, model_id: str = "bge-reranker-v2-m3-onnx-int8") -> None:
-        super().__init__(model_id=model_id)
-
-    @property
-    def provider_name(self) -> str:
-        return "local-onnx"
-
-
 class OpenAICompatibleJudgeAdapter(DeterministicJudgeAdapter):
     """
     Vendor-neutral adapter for Ollama (`http://localhost:11434/v1`), vLLM, llama.cpp,
     OpenRouter, OpenAI, Anthropic, or Gemini (`provider = "openai-compatible"`).
     Enforces automatic pre-egress secret redaction before any HTTP request is constructed.
+
+    Judgment itself is inherited and remains deterministic: this class provides the
+    egress surface (`prepare_redacted_request`), not an inference backend. A remote
+    caller that consumes that payload is responsible for returning the judgment.
     """
 
     def __init__(
@@ -151,7 +144,7 @@ class OpenAICompatibleJudgeAdapter(DeterministicJudgeAdapter):
         self, state: dict[str, Any], question: str
     ) -> dict[str, Any]:
         """Constructs a schema-locked request payload with all secrets scrubbed prior to egress."""
-        scrubbed_state = redact_secrets(canonical_jcs_str(state))
+        scrubbed_state = redact_in_place_mapping(canonical_jcs_str(state))
         self.last_redacted_payload = scrubbed_state
         return {
             "model": self.model_id,
@@ -164,7 +157,10 @@ class OpenAICompatibleJudgeAdapter(DeterministicJudgeAdapter):
                 },
                 {
                     "role": "user",
-                    "content": f"State: {scrubbed_state}\nQuestion: {redact_secrets(question)}",
+                    "content": (
+                        f"State: {scrubbed_state}\n"
+                        f"Question: {redact_in_place_mapping(question)}"
+                    ),
                 },
             ],
         }
@@ -202,7 +198,7 @@ class DeterministicSynthesizerAdapter:
         attempt: int = 1,
     ) -> str:
         # Always scrub secrets before processing in synthesizer pipeline
-        self.last_redacted_source = redact_secrets(original_source)
+        self.last_redacted_source = redact_in_place_mapping(original_source)
         tree = ast.parse(original_source, filename=file_path)
 
         for node in ast.walk(tree):

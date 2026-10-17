@@ -12,7 +12,7 @@ from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
 from verifyci_v2.ingestion.stack_graphs import StackGraphStitcher
 from verifyci_v2.neural.adapters import DeterministicJudgeAdapter, OpenAICompatibleJudgeAdapter
 from verifyci_v2.neural.cegis_repair import CEGISAutoRepairEngine
-from verifyci_v2.neural.conformal import calibrate_judge_on_dataset, evaluate_with_conformal_gate
+from verifyci_v2.contracts.conformal import calibrate_judge_on_dataset, evaluate_with_conformal_gate
 from verifyci_v2.provenance.dsse_intoto import InTotoDSSESigner
 from verifyci_v2.provenance.gittuf_rsl import GittufRSLLedger, RSLTamperDetectedError
 from verifyci_v2.sandbox.wasm_runner import SandboxCapabilityViolationError, SandboxFuelExhaustedError, WasmCheckerSandbox, WasmSandboxConfig
@@ -402,7 +402,7 @@ def test_p0_gittuf_rsl_real_git_plumbing_and_persistence(tmp_path: Path) -> None
 
 def test_p0_conformal_selective_risk_control_false_pass_guarantee() -> None:
     from typing import Sequence
-    from verifyci_v2.neural.conformal import calibrate_judge_on_dataset, evaluate_with_conformal_gate
+    from verifyci_v2.contracts.conformal import calibrate_judge_on_dataset, evaluate_with_conformal_gate
     from verifyci_v2.contracts.ai_protocol import DiscriminativeJudgeProtocol, CategoricalChoice, ModelAttestationRecord
 
     class MisclassifyingJudge(DiscriminativeJudgeProtocol):

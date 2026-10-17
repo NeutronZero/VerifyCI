@@ -11,7 +11,7 @@ from verifyci_v2.neural.adapters import (
     OpenAICompatibleJudgeAdapter,
 )
 from verifyci_v2.neural.cegis_repair import CEGISAutoRepairEngine
-from verifyci_v2.neural.conformal import (
+from verifyci_v2.contracts.conformal import (
     calibrate_judge_on_dataset,
     compute_conformal_quantile,
     evaluate_with_conformal_gate,

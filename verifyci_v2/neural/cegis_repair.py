@@ -6,7 +6,7 @@ from verifyci_v2.contracts.ai_protocol import GenerativeSynthesizerProtocol
 from verifyci_v2.contracts.attestation import CandidateFix, VerificationFinding
 from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
 from verifyci_v2.neural.adapters import DeterministicSynthesizerAdapter
-from verifyci_v2.secrets.redaction import redact_secrets
+from verifyci_v2.contracts.redaction import redact_secrets
 from verifyci_v2.symbolic.z3_prover import (
     Z3SymbolicProver,
     _evaluate_concrete_divergence,

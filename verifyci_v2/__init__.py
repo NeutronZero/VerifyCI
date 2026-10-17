@@ -3,19 +3,14 @@ from __future__ import annotations
 import msgspec
 import os
 import tomllib
-from typing import Literal
+from typing import Literal, TYPE_CHECKING
 
-from verifyci_v2.interface.fastmcp_daemon import (
-    IngressBudgetConfig,
-    VerifyCIFastMCPDaemon,
-)
-from verifyci_v2.neural.adapters import (
-    DeterministicJudgeAdapter,
-    LocalONNXJudgeAdapter,
-    OpenAICompatibleJudgeAdapter,
-)
+from verifyci_v2.contracts.ingress import IngressBudgetConfig
 
-AIProviderKind = Literal["deterministic", "local-onnx", "ollama", "openai-compatible"]
+AIProviderKind = Literal["deterministic", "ollama", "openai-compatible"]
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from verifyci_v2.contracts.ai_protocol import DiscriminativeJudgeProtocol
 
 
 class VerifyCIConfig(msgspec.Struct, frozen=True, kw_only=True):
@@ -91,13 +86,22 @@ class VerifyCIConfig(msgspec.Struct, frozen=True, kw_only=True):
             ),
         )
 
-    def build_judge(
-        self,
-    ) -> (
-        DeterministicJudgeAdapter | LocalONNXJudgeAdapter | OpenAICompatibleJudgeAdapter
-    ):
-        if self.ai_provider == "local-onnx":
-            return LocalONNXJudgeAdapter(model_id=self.ai_model)
+    def build_judge(self) -> "DiscriminativeJudgeProtocol":
+        """Build the System 1 judge for the configured provider.
+
+        `local-onnx` is intentionally absent: there is no ONNX inference backend in
+        this build, and an adapter that only renamed a string field would have made
+        the attested `ai_provider` claim something the engine never did.
+
+        The adapter import is deferred so that `import verifyci_v2` stays cheap:
+        the `neural` package eagerly pulls the Z3 prover, which no configuration
+        reader needs.
+        """
+        from verifyci_v2.neural.adapters import (
+            DeterministicJudgeAdapter,
+            OpenAICompatibleJudgeAdapter,
+        )
+
         if self.ai_provider in ("ollama", "openai-compatible"):
             return OpenAICompatibleJudgeAdapter(
                 base_url=self.ai_base_url,
@@ -108,7 +112,7 @@ class VerifyCIConfig(msgspec.Struct, frozen=True, kw_only=True):
 
 
 __all__ = [
+    "AIProviderKind",
     "IngressBudgetConfig",
     "VerifyCIConfig",
-    "VerifyCIFastMCPDaemon",
 ]

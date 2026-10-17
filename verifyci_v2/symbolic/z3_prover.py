@@ -11,7 +11,7 @@ from verifyci_v2.contracts.attestation import (
     SMTStatus,
     VerificationFinding,
 )
-from verifyci_v2.contracts.canonical import blake3_hex
+from verifyci_v2.contracts.canonical import content_digest_hex
 from verifyci_v2.contracts.ssa_ir import CPGEdge, FunctionUSSA, USSABasicBlock
 from verifyci_v2.symbolic.egglog_engine import EgglogEquivalenceEngine
 
@@ -1000,7 +1000,7 @@ class Z3SymbolicProver:
         eq_res = self.egglog.check_equivalence(func_base, func_head)
         if eq_res.is_equivalent:
             elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-            fid = blake3_hex(
+            fid = content_digest_hex(
                 f"EQUIV:{func_head.qualified_name}:{eq_res.head_eclass_digest}",
                 domain="verifyci.v2.finding",
             )[:16]
@@ -1117,7 +1117,7 @@ class Z3SymbolicProver:
                     ),
                     proof_time_ms=round(elapsed_ms, 3),
                 )
-                fid = blake3_hex(
+                fid = content_digest_hex(
                     f"CALL_SWAP:{file_path}:{call_h.source_line}:{call_h.callee}",
                     domain="verifyci.v2.finding",
                 )[:16]
@@ -1180,7 +1180,7 @@ class Z3SymbolicProver:
                 head_return_state=str(ret_h0.norm_expr),
                 proof_time_ms=round(elapsed_ms, 3),
             )
-            fid = blake3_hex(
+            fid = content_digest_hex(
                 f"RET_SWAP:{file_path}:{ret_h0.source_line}",
                 domain="verifyci.v2.finding",
             )[:16]
@@ -1243,7 +1243,7 @@ class Z3SymbolicProver:
                     head_return_state=f"if {guard_h.norm_cond} -> {guard_h.else_summary}",
                     proof_time_ms=round(elapsed_ms, 3),
                 )
-                fid = blake3_hex(
+                fid = content_digest_hex(
                     f"GUARD_INV:{file_path}:{guard_h.source_line}",
                     domain="verifyci.v2.finding",
                 )[:16]
@@ -1311,7 +1311,7 @@ class Z3SymbolicProver:
                     head_return_state=f"overwrites {sh.param_name}={sh.norm_val}",
                     proof_time_ms=round(elapsed_ms, 3),
                 )
-                fid = blake3_hex(
+                fid = content_digest_hex(
                     f"SHADOW:{file_path}:{sh.source_line}:{sh.param_name}",
                     domain="verifyci.v2.finding",
                 )[:16]
@@ -1347,7 +1347,7 @@ class Z3SymbolicProver:
                     head_return_state="",
                     proof_time_ms=round(elapsed_ms, 3),
                 )
-                fid = blake3_hex(
+                fid = content_digest_hex(
                     f"UNSUPPORTED:{file_path}:{func_head.qualified_name}:{found_construct}",
                     domain="verifyci.v2.finding",
                 )[:16]
@@ -1373,7 +1373,7 @@ class Z3SymbolicProver:
                 # equivalence. Returning nothing here would let the caller
                 # report PASS for an unverified behavioural change.
                 elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-                fid = blake3_hex(
+                fid = content_digest_hex(
                     f"UNAVAILABLE:{file_path}:{func_head.qualified_name}:{func_head.h_body}",
                     domain="verifyci.v2.finding",
                 )[:16]

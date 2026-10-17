@@ -13,7 +13,7 @@ from verifyci_v2.ingestion.salsa_cutoff import SalsaIncrementalEngine
 from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
 from verifyci_v2.neural.adapters import DeterministicJudgeAdapter
 from verifyci_v2.neural.cegis_repair import CEGISAutoRepairEngine
-from verifyci_v2.neural.conformal import calibrate_judge_on_dataset
+from verifyci_v2.contracts.conformal import calibrate_judge_on_dataset
 from verifyci_v2.store.duckdb_cpg import DuckDBCPGStore
 from verifyci_v2.store.model2vec_embed import build_neighborhood_header
 from verifyci_v2.store.rabitq_index import RaBitQHybridIndex
@@ -391,14 +391,14 @@ class V2CapabilityAdjudicator:
         Prediction is "this case violates the secret invariant" = the engine
         emitted at least one FAIL finding for the patched source.
         """
-        from verifyci_v2.interface.cli import _parse_unified_diff
+        from verifyci_v2.pipeline import parse_unified_diff
 
         engine = TaintTrackedSecretEngine()
         pairs: list[tuple[bool, bool]] = []
         for case in cases:
             predicted = False
             try:
-                for entry in _parse_unified_diff(case.get("diff", "")):
+                for entry in parse_unified_diff(case.get("diff", "")):
                     if entry["file_path"].endswith(".py"):
                         found = engine.scan_python_source(
                             entry["file_path"], entry["head_source"]

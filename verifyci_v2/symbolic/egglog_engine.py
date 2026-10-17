@@ -13,7 +13,7 @@ except Exception:  # pragma: no cover
     _HAS_EGGLOG_LIBRARY = False
 
 from verifyci_v2.contracts.attestation import VerdictKind, VerificationFinding
-from verifyci_v2.contracts.canonical import blake3_hex
+from verifyci_v2.contracts.canonical import content_digest_hex
 from verifyci_v2.contracts.ssa_ir import FunctionUSSA
 
 _EGGLOG_CHECK_EGRAPH = None  # per-check_equivalence EGraph (Bug C fix)
@@ -242,7 +242,7 @@ def saturate_function_egraph(
         return None, tuple(sorted(set(rewrites)))
 
     eclass_signature = "|".join(canonical_effects)
-    digest = blake3_hex(eclass_signature, domain="verifyci.v2.egglog.eclass")
+    digest = content_digest_hex(eclass_signature, domain="verifyci.v2.egglog.eclass")
     return digest, tuple(sorted(set(rewrites)))
 
 
@@ -262,8 +262,8 @@ class EgglogEquivalenceEngine:
         if _has_floating_point(func_base) or _has_floating_point(func_head):
             return EquivalenceSaturationResult(
                 is_equivalent=False,
-                base_eclass_digest=func_base.h_body or blake3_hex("base_float"),
-                head_eclass_digest=func_head.h_body or blake3_hex("head_float"),
+                base_eclass_digest=func_base.h_body or content_digest_hex("base_float"),
+                head_eclass_digest=func_head.h_body or content_digest_hex("head_float"),
                 applied_rewrites=(),
                 verdict="INCONCLUSIVE",
             )
@@ -308,11 +308,11 @@ class EgglogEquivalenceEngine:
                 is_equivalent=False,
                 base_eclass_digest=(
                     base_dig
-                    or blake3_hex("NO-EVIDENCE", domain="verifyci.v2.egglog.eclass")
+                    or content_digest_hex("NO-EVIDENCE", domain="verifyci.v2.egglog.eclass")
                 ),
                 head_eclass_digest=(
                     head_dig
-                    or blake3_hex("NO-EVIDENCE", domain="verifyci.v2.egglog.eclass")
+                    or content_digest_hex("NO-EVIDENCE", domain="verifyci.v2.egglog.eclass")
                 ),
                 applied_rewrites=all_rw,
                 verdict="INCONCLUSIVE",
@@ -349,7 +349,7 @@ class EgglogEquivalenceEngine:
                     if callers
                     else f"Deleted symbol '{sym}' is still exported in __all__ or cross-language bridge"
                 )
-                fid = blake3_hex(
+                fid = content_digest_hex(
                     f"CAP003A:{sym}:{reason}", domain="verifyci.v2.finding"
                 )[:16]
                 findings.append(
@@ -426,7 +426,7 @@ class EgglogEquivalenceEngine:
 
             if is_concurrent and mutated_shared and not acquired_locks:
                 state_name, line_no = mutated_shared[0]
-                fid = blake3_hex(
+                fid = content_digest_hex(
                     f"CAP008:RACE:{file_path}:{stmt.name}:{state_name}",
                     domain="verifyci.v2.finding",
                 )[:16]
@@ -452,7 +452,7 @@ class EgglogEquivalenceEngine:
             for fn2, m1, m2, _line2 in nested_lock_orders:
                 if l1 == m2 and l2 == m1 and (l2, l1) not in seen_inversions:
                     seen_inversions.add((l1, l2))
-                    fid = blake3_hex(
+                    fid = content_digest_hex(
                         f"CAP008:DEADLOCK:{file_path}:{fn1}:{fn2}:{l1}:{l2}",
                         domain="verifyci.v2.finding",
                     )[:16]

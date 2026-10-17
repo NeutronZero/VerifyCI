@@ -10,8 +10,15 @@ from verifyci_v2.contracts.attestation import (
     InTotoVerificationPredicate,
     VerificationFinding,
 )
-from verifyci_v2.contracts.canonical import blake3_hex, canonical_jcs_str
+from verifyci_v2.contracts.canonical import canonical_jcs_str
+from verifyci_v2.contracts.ingress import (
+    IngressBudgetConfig,
+    IngressLimitExceededError,
+    TokenBucketRateLimiter,
+)
+from verifyci_v2 import VerifyCIConfig
 from verifyci_v2.ingestion.salsa_cutoff import SalsaIncrementalEngine
+from verifyci_v2.pipeline import DiffFileEntry, VerificationPipeline
 from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
 from verifyci_v2.neural.cegis_repair import CEGISAutoRepairEngine
 from verifyci_v2.provenance.dsse_intoto import InTotoDSSESigner, export_sarif_v2
@@ -21,43 +28,6 @@ from verifyci_v2.store.model2vec_embed import build_neighborhood_header
 from verifyci_v2.store.rabitq_index import RaBitQHybridIndex
 from verifyci_v2.symbolic.secrets_taint import TaintTrackedSecretEngine
 from verifyci_v2.symbolic.z3_prover import Z3SymbolicProver
-
-
-class IngressLimitExceededError(RuntimeError):
-    """Raised when a tool call exceeds rate limits, payload bounds, or CPU wall-clock budgets."""
-
-
-class IngressBudgetConfig(msgspec.Struct, frozen=True, kw_only=True):
-    max_payload_bytes: int = 2 * 1024 * 1024  # 2 MiB max payload
-    rate_limit_capacity: float = 50.0  # Burst capacity (requests)
-    rate_limit_refill_per_sec: float = 25.0  # Token refill rate
-    max_query_wall_ms: float = 500.0  # Per-query wall-clock budget
-
-
-class TokenBucketRateLimiter:
-    """Deterministic token-bucket rate limiter protecting the stateful MCP daemon."""
-
-    def __init__(
-        self,
-        capacity: float = 50.0,
-        refill_per_sec: float = 25.0,
-        clock: Callable[[], float] = time.monotonic,
-    ) -> None:
-        self.capacity = capacity
-        self.refill_per_sec = refill_per_sec
-        self._clock = clock
-        self._tokens = capacity
-        self._last_timestamp = clock()
-
-    def consume(self, tokens: float = 1.0) -> bool:
-        now = self._clock()
-        elapsed = max(0.0, now - self._last_timestamp)
-        self._last_timestamp = now
-        self._tokens = min(self.capacity, self._tokens + elapsed * self.refill_per_sec)
-        if self._tokens >= tokens:
-            self._tokens -= tokens
-            return True
-        return False
 
 
 class VerifyCIFastMCPDaemon:
@@ -71,8 +41,17 @@ class VerifyCIFastMCPDaemon:
         self,
         repo_id: str = "default-repo",
         budget: IngressBudgetConfig | None = None,
+        config: VerifyCIConfig | None = None,
     ) -> None:
+        # The attested `ai_provider` is read from configuration rather than
+        # hardcoded, so the signed predicate describes the provider this daemon
+        # actually built its judge from.
+        self.config = config or VerifyCIConfig.load()
+        if repo_id == "default-repo":
+            repo_id = self.config.repo_id
         self.repo_id = repo_id
+        self._judge = None
+        self._pipeline_obj: VerificationPipeline | None = None
         self.budget = budget or IngressBudgetConfig()
         self.engine = SalsaIncrementalEngine(repo_id=repo_id)
         self.cpg_store = DuckDBCPGStore()
@@ -123,8 +102,43 @@ class VerifyCIFastMCPDaemon:
     def list_tools(self) -> tuple[str, ...]:
         return tuple(sorted(self._tools.keys()))
 
+    @property
+    def judge(self) -> Any:
+        """System 1 judge for the configured provider, built on first use.
+
+        Deferred because constructing the adapter imports the `neural` package,
+        which transitively loads the Z3 prover. Paying that on every daemon
+        construction would dominate the sub-20ms tool-latency budget the daemon
+        exists to meet.
+        """
+        if self._judge is None:
+            self._judge = self.config.build_judge()
+        return self._judge
+
+    def close(self) -> None:
+        """Release long-lived resources held by the daemon (CPG store, watchers)."""
+        watcher = getattr(self, "_watch_thread", None)
+        if watcher is not None:
+            self._watch_thread = None
+        self.cpg_store.close()
+
+    def __enter__(self) -> VerifyCIFastMCPDaemon:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
     def invoke_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        """Executes an MCP tool under rate-limiter, payload-size, and wall-clock budget guards."""
+        """Executes an MCP tool under rate-limiter, payload-size, and wall-clock budget guards.
+
+        Guards that refuse work *before* it starts (rate limit, payload bound,
+        unknown tool) raise `IngressLimitExceededError`. The wall-clock budget is
+        a different case: the handler has already run, so the result exists but
+        the engine cannot vouch for it having finished inside its deadline.
+        Discarding a completed result would lose work the caller already paid
+        for, and reporting success would overstate what was verified, so the
+        call fails closed with an explicit INCONCLUSIVE verdict instead.
+        """
         if not self.rate_limiter.consume(1.0):
             raise IngressLimitExceededError(
                 "MCP rate limit exceeded (token bucket depleted)"
@@ -141,13 +155,49 @@ class VerifyCIFastMCPDaemon:
             raise KeyError(f"Unknown VerifyCI v2 MCP tool: {tool_name}")
 
         start_ns = time.perf_counter_ns()
-        result = handler(arguments)
+        try:
+            result = handler(arguments)
+        except Exception as exc:
+            # A tool that raises has produced no verdict. Letting the exception
+            # escape would surface as an opaque transport error and could be
+            # mistaken for "nothing to report"; fail closed with the reason.
+            elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+            return {
+                "status": "ok",
+                "tool": tool_name,
+                "latency_ms": round(elapsed_ms, 3),
+                "stackgraph_merkle_root": self.engine.stitcher.graph_merkle_root(),
+                "data": {
+                    "verdict": "INCONCLUSIVE",
+                    "tool_error": True,
+                    "error_type": type(exc).__name__,
+                    "rationale": f"Tool '{tool_name}' failed closed: {exc}",
+                    "findings": [],
+                },
+            }
         elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
 
         if elapsed_ms > self.budget.max_query_wall_ms:
-            raise IngressLimitExceededError(
-                f"Tool '{tool_name}' exceeded wall-clock budget ({elapsed_ms:.2f}ms > {self.budget.max_query_wall_ms:.2f}ms)"
-            )
+            return {
+                "status": "ok",
+                "tool": tool_name,
+                "latency_ms": round(elapsed_ms, 3),
+                "stackgraph_merkle_root": self.engine.stitcher.graph_merkle_root(),
+                "data": {
+                    "verdict": "INCONCLUSIVE",
+                    "budget_exceeded": True,
+                    "elapsed_ms": round(elapsed_ms, 3),
+                    "budget_ms": self.budget.max_query_wall_ms,
+                    "rationale": (
+                        f"Tool '{tool_name}' exceeded its wall-clock budget "
+                        f"({elapsed_ms:.2f}ms > {self.budget.max_query_wall_ms:.2f}ms); "
+                        "failing closed."
+                    ),
+                    "findings": result.get("findings", [])
+                    if isinstance(result, dict)
+                    else [],
+                },
+            }
 
         return {
             "status": "ok",
@@ -247,79 +297,81 @@ class VerifyCIFastMCPDaemon:
         base_source: str = args["base_source"]
         head_source: str = args["head_source"]
         auto_fix: bool = bool(args.get("auto_fix", False))
+        session_id: str | None = args.get("session_id")
 
-        base_fns = {
-            f.qualified_name: f
-            for f in lower_file_to_ussa(file_path, base_source, repo_id=self.repo_id)
-        }
-        head_fns = {
-            f.qualified_name: f
-            for f in lower_file_to_ussa(file_path, head_source, repo_id=self.repo_id)
-        }
+        # Same pipeline the CLI gate runs, so an agent driving the daemon gets
+        # the same checks, the same rule ids, and the same severities. This
+        # method used to reimplement a subset of them.
+        result = self._pipeline().verify_files(
+            [DiffFileEntry.from_sources(file_path, base_source, head_source)]
+        )
 
         findings = []
-        for qname, fn_head in head_fns.items():
-            fn_base = base_fns.get(qname)
-            if fn_base is not None:
-                res = self.prover.prove_function_diff(
-                    file_path=file_path,
-                    base_source=base_source,
-                    head_source=head_source,
-                    func_base=fn_base,
-                    func_head=fn_head,
+        for finding in result.findings:
+            if auto_fix and finding.verdict == "FAIL":
+                target = self._enclosing_qualified_name(
+                    file_path, head_source, finding.start_line, finding.end_line
                 )
-                if not res and fn_base.h_body != fn_head.h_body:
-                    is_eq, smt_st = self.prover.prove_equivalence(
+                if target is not None:
+                    finding = self.cegis.repair_finding(
+                        file_path=file_path,
                         base_source=base_source,
-                        cand_source=head_source,
-                        func_base=fn_base,
-                        func_cand=fn_head,
+                        head_source=head_source,
+                        finding=finding,
+                        target_qualified_name=target,
                     )
-                    if not is_eq and smt_st == "SAT":
-                        div_finding = VerificationFinding(
-                            finding_id=blake3_hex(
-                                f"DIVERGE:{file_path}:{qname}",
-                                domain="verifyci.v2.finding",
-                            )[:16],
-                            rule_id="VC2-Z3-SEMANTIC-DIVERGENCE",
-                            severity="HIGH",
-                            verdict="FAIL",
-                            file_path=file_path,
-                            start_line=fn_head.start_line,
-                            end_line=fn_head.end_line,
-                            message=f"Z3 proven semantic divergence between base and head for '{qname}'.",
-                        )
-                        res = (div_finding,)
-                    elif not is_eq and smt_st in ("SOLVER_UNAVAILABLE", "UNKNOWN"):
-                        undec_finding = VerificationFinding(
-                            finding_id=blake3_hex(
-                                f"UNDECIDED:{file_path}:{qname}",
-                                domain="verifyci.v2.finding",
-                            )[:16],
-                            rule_id="VC2-Z3-UNDECIDED-DIFF",
-                            severity="HIGH",
-                            verdict="INCONCLUSIVE",
-                            file_path=file_path,
-                            start_line=fn_head.start_line,
-                            end_line=fn_head.end_line,
-                            message=f"Z3 could not decide equivalence for '{qname}' (status={smt_st}); fail-closed INCONCLUSIVE.",
-                        )
-                        res = (undec_finding,)
-                for f in res:
-                    if auto_fix and f.verdict == "FAIL":
-                        f = self.cegis.repair_finding(
-                            file_path=file_path,
-                            base_source=base_source,
-                            head_source=head_source,
-                            finding=f,
-                            target_qualified_name=qname,
-                        )
-                    self._session_findings.append(f)
-                    if session_id := args.get("session_id"):
-                        self._session_findings_by_id.setdefault(session_id, []).append(f)
-                    findings.append(msgspec.to_builtins(f))
+            self._session_findings.append(finding)
+            if session_id:
+                self._session_findings_by_id.setdefault(session_id, []).append(finding)
+            findings.append(msgspec.to_builtins(finding))
 
-        return {"finding_count": len(findings), "findings": findings}
+        return {
+            "verdict": result.status,
+            "rationale": result.rationale,
+            "finding_count": len(findings),
+            "findings": findings,
+        }
+
+    def _base_sources(self) -> dict[str, str]:
+        """Stored base revision, when the daemon has a file-backed store."""
+        if self.cpg_store.db_path == ":memory:":
+            return {}
+        try:
+            return self.cpg_store.load_source_snapshot("HEAD")
+        except Exception:
+            return {}
+
+    def _pipeline(self) -> VerificationPipeline:
+        """Long-lived pipeline, so the prover and taint engine are built once."""
+        if self._pipeline_obj is None:
+            self._pipeline_obj = VerificationPipeline(
+                repo_id=self.repo_id,
+                base_sources=self._base_sources(),
+            )
+        return self._pipeline_obj
+
+    @staticmethod
+    def _enclosing_qualified_name(
+        file_path: str, source: str, start_line: int, end_line: int
+    ) -> str | None:
+        """Qualified name of the function whose line span contains a finding.
+
+        Auto-repair is scoped to one function. A finding that cannot be placed
+        inside one is left unrepaired rather than repaired against a guess.
+        """
+        try:
+            funcs = lower_file_to_ussa(file_path, source)
+        except Exception:
+            return None
+        enclosing = [
+            fn
+            for fn in funcs
+            if fn.start_line <= start_line and fn.end_line >= end_line
+        ]
+        if not enclosing:
+            return None
+        # Innermost wins: nested defs produce several containing functions.
+        return min(enclosing, key=lambda f: f.end_line - f.start_line).qualified_name
 
     def _tool_triage_secrets(self, args: dict[str, Any]) -> dict[str, Any]:
         file_path: str = args["file_path"]
@@ -363,7 +415,7 @@ class VerifyCIFastMCPDaemon:
             gittuf_rsl_entry_hash=self.rsl.latest_entry.entry_id
             if self.rsl.latest_entry
             else "genesis",
-            ai_provider="deterministic",
+            ai_provider=self.judge.provider_name,
             conformal_profile_hash=None,
             findings=session_findings,
         )

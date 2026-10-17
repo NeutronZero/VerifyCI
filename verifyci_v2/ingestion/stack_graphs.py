@@ -10,7 +10,7 @@ import functools
 import re
 from typing import Any, Iterable
 
-from verifyci_v2.contracts.canonical import blake3_hex, xxh3_64_hex
+from verifyci_v2.contracts.canonical import content_digest_hex, fingerprint_hex
 from verifyci_v2.contracts.ssa_ir import (
     FileStackGraph,
     StackGraphEdge,
@@ -61,7 +61,7 @@ def build_file_stack_graph(
     file_path: str, source: str, language: str = "python"
 ) -> FileStackGraph:
     """Computes a per-file scope graph with PUSH_SYMBOL and POP_SYMBOL nodes in isolation."""
-    file_xxh3 = xxh3_64_hex(source)
+    file_xxh3 = fingerprint_hex(source)
     mod_prefix = _module_prefix_from_path(file_path)
     root_id = f"{file_path}::ROOT"
 
@@ -308,7 +308,7 @@ class StackGraphStitcher:
         self, file_path: str, source: str, language: str = "python"
     ) -> bool:
         """Updates a file's stack graph only if its XXH3 digest changed. Returns True if recomputed."""
-        new_xxh3 = xxh3_64_hex(source)
+        new_xxh3 = fingerprint_hex(source)
         existing = self._file_graphs.get(file_path)
         if existing is not None and existing.file_xxh3 == new_xxh3:
             return False
@@ -327,7 +327,7 @@ class StackGraphStitcher:
             file_path = entry[0]
             source = entry[1]
             language = entry[2] if len(entry) > 2 else "python"
-            new_xxh3 = xxh3_64_hex(source)
+            new_xxh3 = fingerprint_hex(source)
             existing = self._file_graphs.get(file_path)
             if existing is not None and existing.file_xxh3 == new_xxh3:
                 continue
@@ -484,4 +484,4 @@ class StackGraphStitcher:
         digests = [
             f"{path}:{fsg.file_xxh3}" for path, fsg in sorted(self._file_graphs.items())
         ]
-        return blake3_hex("|".join(digests), domain="verifyci.v2.stackgraph")
+        return content_digest_hex("|".join(digests), domain="verifyci.v2.stackgraph")

@@ -3,6 +3,8 @@ from __future__ import annotations
 import msgspec
 from typing import Literal
 
+from verifyci_v2.contracts.canonical import CONTENT_DIGEST_ALGORITHM
+
 SMTStatus = Literal[
     "SAT", "UNSAT", "UNKNOWN", "SOLVER_UNAVAILABLE", "UNVERIFIED_HEURISTIC"
 ]
@@ -56,7 +58,12 @@ class VerificationFinding(msgspec.Struct, frozen=True, kw_only=True):
 
 
 class InTotoVerificationPredicate(msgspec.Struct, frozen=True, kw_only=True):
-    """RFC 8785 canonical in-toto v1.0 predicate payload."""
+    """RFC 8785 canonical in-toto v1.0 predicate payload.
+
+    `content_digest_algorithm` records which digest produced `findings[].finding_id`
+    and `ussa_merkle_root`, so a verifier reading this attestation can tell from
+    the evidence alone how those identifiers were computed.
+    """
 
     repo_id: str
     base_commit_sha: str
@@ -67,6 +74,7 @@ class InTotoVerificationPredicate(msgspec.Struct, frozen=True, kw_only=True):
     conformal_profile_hash: str | None
     findings: tuple[VerificationFinding, ...]
     schema_version: str = "verifyci.v2.0"
+    content_digest_algorithm: str = CONTENT_DIGEST_ALGORITHM
 
 
 class DSSESignature(msgspec.Struct, frozen=True, kw_only=True):

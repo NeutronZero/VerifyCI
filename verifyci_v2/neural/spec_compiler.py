@@ -7,8 +7,8 @@ import time
 from typing import Any
 
 from verifyci_v2.contracts.attestation import CounterexampleWitness, VerificationFinding
-from verifyci_v2.contracts.canonical import blake3_hex
-from verifyci_v2.symbolic.secrets_taint import redact_secrets
+from verifyci_v2.contracts.canonical import content_digest_hex
+from verifyci_v2.contracts.redaction import redact_in_place_mapping
 
 try:
     import z3 as _z3_mod  # type: ignore[import-untyped]
@@ -130,7 +130,7 @@ class IntentToSMTCompiler:
     """
 
     def compile_intent(self, intent_text: str) -> CompiledSMTPostcondition | None:
-        safe_intent = redact_secrets(intent_text).lower()
+        safe_intent = redact_in_place_mapping(intent_text).lower()
 
         # Pattern 1: Non-negative return invariant ("never drops below zero", "non-negative", ">= 0")
         if any(
@@ -216,7 +216,7 @@ class IntentToSMTCompiler:
                 if _z3_mod is None or s is None:
                     # R2-1: When solver is unavailable, NEVER fabricate SAT
                     if self._can_produce_violation(ret_expr, params, spec):
-                        fid = blake3_hex(
+                        fid = content_digest_hex(
                             f"INTENT:{file_path}:{stmt.name}:{line_no}:{spec.smt_lib_expr}",
                             domain="verifyci.v2.finding",
                         )[:16]
@@ -285,7 +285,7 @@ class IntentToSMTCompiler:
                     ):
                         continue
 
-                    fid = blake3_hex(
+                    fid = content_digest_hex(
                         f"INTENT:{file_path}:{stmt.name}:{line_no}:{spec.smt_lib_expr}",
                         domain="verifyci.v2.finding",
                     )[:16]

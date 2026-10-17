@@ -16,13 +16,26 @@ from verifyci_v2.contracts.attestation import (
     VerificationFinding,
 )
 from verifyci_v2.contracts.canonical import (
+    CONTENT_DIGEST_ALGORITHM,
+    FINGERPRINT_ALGORITHM,
     CanonicalSerializationError,
-    blake3_bytes,
-    blake3_hex,
     canonical_digest,
     canonical_jcs_bytes,
     canonical_jcs_str,
-    xxh3_64_hex,
+    content_digest_bytes,
+    content_digest_hex,
+    fingerprint_hex,
+)
+from verifyci_v2.contracts.conformal import (
+    calibrate_judge_on_dataset,
+    compute_conformal_quantile,
+    conformal_profile_digest,
+    evaluate_with_conformal_gate,
+)
+from verifyci_v2.contracts.redaction import (
+    RedactionResult,
+    redact_in_place_mapping,
+    redact_secrets,
 )
 from verifyci_v2.contracts.ssa_ir import (
     CPGEdge,
@@ -35,7 +48,9 @@ from verifyci_v2.contracts.ssa_ir import (
 )
 
 __all__ = [
+    "CONTENT_DIGEST_ALGORITHM",
     "CPGEdge",
+    "FINGERPRINT_ALGORITHM",
     "CalibratedDecision",
     "CandidateFix",
     "CanonicalSerializationError",
@@ -50,14 +65,21 @@ __all__ = [
     "InTotoVerificationPredicate",
     "ModelAttestationRecord",
     "OrdinalScore",
+    "RedactionResult",
     "USSABasicBlock",
     "USSAFunction",
     "USSAInstruction",
     "VerificationFinding",
-    "blake3_bytes",
-    "blake3_hex",
+    "content_digest_bytes",
+    "content_digest_hex",
+    "calibrate_judge_on_dataset",
     "canonical_digest",
     "canonical_jcs_bytes",
     "canonical_jcs_str",
-    "xxh3_64_hex",
+    "compute_conformal_quantile",
+    "conformal_profile_digest",
+    "evaluate_with_conformal_gate",
+    "redact_in_place_mapping",
+    "redact_secrets",
+    "fingerprint_hex",
 ]

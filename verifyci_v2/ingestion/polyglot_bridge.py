@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 import re
 
-from verifyci_v2.contracts.canonical import blake3_hex
+from verifyci_v2.contracts.canonical import content_digest_hex
 from verifyci_v2.contracts.ssa_ir import CPGEdge
 from verifyci_v2.ingestion.stack_graphs import (
     StackGraphStitcher,
@@ -124,7 +124,7 @@ class PolyglotBridgeResolver:
         for py_caller, c_symbol in self._py_ffi_Waiters:
             c_target = self._c_functions.get(c_symbol)
             if c_target:
-                edge_uid = blake3_hex(
+                edge_uid = content_digest_hex(
                     f"FFI:{py_caller}->{c_target}",
                     domain="verifyci.v2.bridge",
                 )[:24]
@@ -143,7 +143,7 @@ class PolyglotBridgeResolver:
         for ts_caller, route_template in self._http_clients:
             py_handler = self._http_routes.get(route_template)
             if py_handler:
-                edge_uid = blake3_hex(
+                edge_uid = content_digest_hex(
                     f"HTTP:{ts_caller}->{py_handler}:{route_template}",
                     domain="verifyci.v2.bridge",
                 )[:24]

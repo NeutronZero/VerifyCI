@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 import re
 
-from verifyci_v2.contracts.canonical import blake3_hex, canonical_jcs_bytes
+from verifyci_v2.contracts.canonical import content_digest_hex, canonical_jcs_bytes
 from verifyci_v2.contracts.ssa_ir import (
     CPGEdge,
     FunctionUSSA,
@@ -88,7 +88,7 @@ class _SSABuilderContext:
     def record_dfg(self, src_ssa: str, dst_ssa: str) -> None:
         if src_ssa == dst_ssa:
             return
-        edge_uid = blake3_hex(
+        edge_uid = content_digest_hex(
             f"{self.qualified_name}:DFG:{src_ssa}->{dst_ssa}",
             domain="verifyci.v2.dfg",
         )[:24]
@@ -108,7 +108,7 @@ class _SSABuilderContext:
     def record_cfg(
         self, src_block: str, dst_block: str, label: str | None = None
     ) -> None:
-        edge_uid = blake3_hex(
+        edge_uid = content_digest_hex(
             f"{self.qualified_name}:CFG:{src_block}->{dst_block}:{label or ''}",
             domain="verifyci.v2.cfg",
         )[:24]
@@ -535,7 +535,7 @@ def compute_ussa_digests(func_ussa: FunctionUSSA) -> tuple[str, str]:
         }
         for b in func_ussa.basic_blocks
     ]
-    h_body = blake3_hex(
+    h_body = content_digest_hex(
         canonical_jcs_bytes(normalized_blocks),
         domain="verifyci.v2.ussa.body",
     )
@@ -551,7 +551,7 @@ def compute_ussa_digests(func_ussa: FunctionUSSA) -> tuple[str, str]:
         "mutated_globals": list(func_ussa.taint_summary.mutated_globals),
         "raised_exceptions": list(func_ussa.taint_summary.raised_exceptions),
     }
-    h_interface = blake3_hex(
+    h_interface = content_digest_hex(
         canonical_jcs_bytes(interface_payload),
         domain="verifyci.v2.ussa.interface",
     )
@@ -609,7 +609,7 @@ def lower_python_function(
         taint_summary=taint_summary,
     )
     h_body, h_interface = compute_ussa_digests(draft)
-    node_uid = blake3_hex(
+    node_uid = content_digest_hex(
         f"{repo_id}:{qname}:{h_body}",
         domain="verifyci.v2.node_uid",
     )
@@ -737,7 +737,7 @@ def lower_file_to_ussa(
             taint_summary=taint,
         )
         h_body, h_interface = compute_ussa_digests(draft)
-        node_uid = blake3_hex(
+        node_uid = content_digest_hex(
             f"{repo_id}:{qname}:{h_body}", domain="verifyci.v2.node_uid"
         )
         results.append(

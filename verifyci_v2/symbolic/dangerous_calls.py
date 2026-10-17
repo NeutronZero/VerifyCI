@@ -11,7 +11,7 @@ from __future__ import annotations
 import ast
 
 from verifyci_v2.contracts.attestation import VerificationFinding
-from verifyci_v2.contracts.canonical import blake3_hex
+from verifyci_v2.contracts.canonical import content_digest_hex
 
 # Builtins whose mere invocation is a finding: the argument is data, not code.
 _DANGEROUS_BUILTINS: dict[str, str] = {
@@ -110,7 +110,7 @@ def scan_dangerous_calls(
                 if key in seen:
                     continue
                 seen.add(key)
-                fid = blake3_hex(
+                fid = content_digest_hex(
                     f"DANGEROUS_IMPORT:{file_path}:{node.lineno}:{module}",
                     domain="verifyci.v2.finding",
                 )[:16]
@@ -161,7 +161,7 @@ def scan_dangerous_calls(
         if key in seen:
             continue
         seen.add(key)
-        fid = blake3_hex(
+        fid = content_digest_hex(
             f"DANGEROUS:{file_path}:{node.lineno}:{name}",
             domain="verifyci.v2.finding",
         )[:16]

@@ -4,7 +4,7 @@ import msgspec
 from typing import Any, Callable
 
 from verifyci_v2.contracts.attestation import VerificationFinding
-from verifyci_v2.contracts.canonical import blake3_hex
+from verifyci_v2.contracts.canonical import content_digest_hex
 from verifyci_v2.contracts.ssa_ir import FunctionUSSA
 
 try:
@@ -82,7 +82,7 @@ class WasmCheckerSandbox:
                         f"Plugin '{plugin_id}' contains forbidden capability reference: '{tok}'"
                     )
 
-        digest = blake3_hex(plugin_source_or_wasm, domain="verifyci.v2.wasm.plugin")
+        digest = content_digest_hex(plugin_source_or_wasm, domain="verifyci.v2.wasm.plugin")
 
         if runner_fn is not None:
             self._plugins[plugin_id] = (digest, runner_fn)
@@ -155,7 +155,7 @@ class WasmCheckerSandbox:
                     if isinstance(ret, int) and ret > 0:
                         findings_list.append(
                             VerificationFinding(
-                                finding_id=blake3_hex(
+                                finding_id=content_digest_hex(
                                     f"{plugin_id}:{digest}:{ret}",
                                     domain="verifyci.v2.finding",
                                 )[:16],
@@ -218,7 +218,7 @@ class UnconfinedPythonCheckerRunner:
         source: str,
         runner_fn: Callable[[tuple[FunctionUSSA, ...]], list[VerificationFinding]],
     ) -> str:
-        digest = blake3_hex(source, domain="verifyci.v2.unconfined.plugin")
+        digest = content_digest_hex(source, domain="verifyci.v2.unconfined.plugin")
         self._plugins[plugin_id] = (digest, runner_fn)
         return digest
 

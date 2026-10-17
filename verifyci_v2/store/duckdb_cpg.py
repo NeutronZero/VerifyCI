@@ -6,11 +6,11 @@ import sqlite3
 import struct
 import time
 import zlib
-from typing import Iterable, Literal, Sequence
+from typing import Any, Iterable, Literal, Sequence
 
 import msgspec
 
-from verifyci_v2.contracts.canonical import blake3_hex, canonical_jcs_bytes
+from verifyci_v2.contracts.canonical import content_digest_hex, canonical_jcs_bytes
 from verifyci_v2.contracts.ssa_ir import (
     CPGEdge,
     FunctionUSSA,
@@ -119,6 +119,53 @@ class DuckDBCPGStore:
         else:
             self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._init_schema()
+
+    @property
+    def _conn(self) -> Any:
+        """Live connection handle.
+
+        Raises after `close()` rather than returning None, so use-after-close
+        surfaces as an explicit error instead of an `AttributeError` deep inside
+        a query method.
+        """
+        conn = getattr(self, "_DuckDBCPGStore__conn", None)
+        if conn is None:
+            raise RuntimeError(
+                "DuckDBCPGStore is closed; open a new store or keep a reference "
+                "and call close() when finished"
+            )
+        return conn
+
+    @_conn.setter
+    def _conn(self, value: Any) -> None:
+        self.__conn = value
+
+    def close(self) -> None:
+        """Close the underlying DuckDB or SQLite handle.
+
+        Safe to call more than once. Callers that open a store per invocation
+        should use `with DuckDBCPGStore(...) as store:` so the handle is
+        released on every path, including exceptions.
+        """
+        # `getattr` rather than attribute access: `__del__` also runs when
+        # `__init__` raised before the handle was assigned.
+        conn = getattr(self, "_DuckDBCPGStore__conn", None)
+        if conn is None:
+            return
+        self.__conn = None
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    def __enter__(self) -> DuckDBCPGStore:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
 
     def _init_schema(self) -> None:
         cur = self._conn.cursor()
@@ -395,7 +442,7 @@ class DuckDBCPGStore:
 
             for target in fn.call_targets:
                 resolved_dst = qname_lookup.get(target, target)
-                call_uid = blake3_hex(
+                call_uid = content_digest_hex(
                     f"{fn.qualified_name}:CALL:{resolved_dst}",
                     domain="verifyci.v2.call_edge",
                 )[:24]

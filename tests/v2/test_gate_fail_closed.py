@@ -131,7 +131,10 @@ def test_divergence_fails_closed_without_solver(tmp_path: Path) -> None:
 
 def test_secret_engine_crash_is_inconclusive_not_pass(tmp_path: Path) -> None:
     """A checker exception must surface, never be swallowed into a PASS."""
-    import verifyci_v2.symbolic.secrets_taint as secrets_taint
+    # The pipeline owns engine construction, so it is the module that resolves
+    # the name at call time; patching the engine's defining module would leave
+    # the already-imported reference untouched.
+    import verifyci_v2.pipeline as pipeline_module
 
     diff_file = _write_diff(tmp_path, ARITHMETIC_DIVERGENCE_DIFF)
 
@@ -139,14 +142,14 @@ def test_secret_engine_crash_is_inconclusive_not_pass(tmp_path: Path) -> None:
         def scan_python_source(self, *args: object, **kwargs: object) -> tuple:
             raise RuntimeError("engine down")
 
-    real_engine = secrets_taint.TaintTrackedSecretEngine
-    secrets_taint.TaintTrackedSecretEngine = _ExplodingSecretEngine  # type: ignore[assignment]
+    real_engine = pipeline_module.TaintTrackedSecretEngine
+    pipeline_module.TaintTrackedSecretEngine = _ExplodingSecretEngine  # type: ignore[assignment,misc]
     try:
         result = run_cli(
             ["verify-diff", "--diff-file", diff_file, "--format", "json"]
         )
     finally:
-        secrets_taint.TaintTrackedSecretEngine = real_engine  # type: ignore[assignment]
+        pipeline_module.TaintTrackedSecretEngine = real_engine  # type: ignore[assignment,misc]
 
     assert any(
         f["rule_id"] == "VC2-SECRET-ENGINE-ERROR" for f in result["findings"]

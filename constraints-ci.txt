@@ -2,32 +2,31 @@
 #
 # The composite action installs this repository from source
 # (`pip install "${ACTION_PATH}"`). Source installs resolve `pyproject.toml`
-# floors (`pydantic>=2.13`, ...) to whatever is newest at action-run time.
-# This file pins the exact versions tested in `uv.lock` so consumer runs
-# cannot float onto yanked or breaking-major dependencies.
+# floors to whatever is newest at action-run time, so this file pins the exact
+# versions resolved in `uv.lock` and a consumer run cannot float onto a yanked
+# or breaking-major dependency.
 #
 # Regeneration (required whenever a runtime floor in pyproject.toml changes):
 #   1. `uv lock`
-#   2. Re-extract the 1:1 versions below from `uv.lock` `[[package]]` entries.
-#   3. `tests/interface/test_action_hardening.py::test_constraints_match_uv_lock`
-#      enforces name-for-name and version-for-version parity (CI-gated).
-aiohttp==3.14.3
-cryptography==50.0.2
-duckdb==1.5.6
-fastapi==0.142.2
-fastmcp==4.0.11
-msgspec==0.22.0
-opentelemetry-api==1.45.0
-pydantic==2.13.5
-pyyaml==6.0.3
-rustworkx==0.18.1
-securesystemslib==1.5.1
+#   2. `uv pip compile pyproject.toml -o constraints-ci.txt` (or extract the
+#      1:1 versions from the `[[package]]` entries in `uv.lock`).
+#
+# Every entry below corresponds to a runtime dependency actually imported by
+# `verifyci_v2`; optional extras (temporal, embeddings, otel-semconv) are not
+# pinned here because they are not installed by the action.
 tree-sitter==0.26.0
+tree-sitter-python==0.25.0
 tree-sitter-c==0.24.2
 tree-sitter-cpp==0.23.4
-tree-sitter-javascript==0.25.0
-tree-sitter-python==0.25.0
 tree-sitter-typescript==0.23.2
-typer==0.27.2
-wasmtime==49.0.0
+tree-sitter-javascript==0.25.0
 z3-solver==5.1.0.0
+duckdb==1.5.6
+cryptography==50.0.2
+wasmtime==49.0.0
+msgspec==0.22.0
+securesystemslib==1.5.1
+blake3==1.0.11
+xxhash==4.0.1
+egglog==14.0.0
+llguidance==1.9.1

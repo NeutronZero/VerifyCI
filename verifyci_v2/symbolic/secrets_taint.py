@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import base64
 import binascii
-import math
 import re
 import textwrap
 import urllib.parse
@@ -13,9 +12,13 @@ from verifyci_v2.contracts.ai_protocol import (
     DiscriminativeJudgeProtocol,
 )
 from verifyci_v2.contracts.attestation import VerificationFinding
-from verifyci_v2.contracts.canonical import blake3_hex
+from verifyci_v2.contracts.canonical import content_digest_hex
+from verifyci_v2.contracts.redaction import (
+    _has_long_sequential_run,
+    shannon_entropy,
+)
 from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
-from verifyci_v2.neural.conformal import evaluate_with_conformal_gate
+from verifyci_v2.contracts.conformal import evaluate_with_conformal_gate
 
 _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("AWS_ACCESS_KEY", re.compile(r"\b(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}\b")),
@@ -96,32 +99,8 @@ def _looks_like_placeholder(var_name: str, value: str) -> bool:
     return _has_long_sequential_run(value.lower())
 
 
-def _has_long_sequential_run(value: str, run_length: int = 12) -> bool:
-    for start in range(len(value) - run_length + 1):
-        window = value[start : start + run_length]
-        ascending = all(
-            ord(window[i + 1]) - ord(window[i]) == 1 for i in range(run_length - 1)
-        )
-        descending = all(
-            ord(window[i]) - ord(window[i + 1]) == 1 for i in range(run_length - 1)
-        )
-        if ascending or descending:
-            return True
-    return False
-
 _BASE64_CANDIDATE_RE = re.compile(r"^[A-Za-z0-9+/]{20,}={0,2}$")
 _HEX_CANDIDATE_RE = re.compile(r"^[0-9a-fA-F]{32,}$")
-
-
-def shannon_entropy(text: str) -> float:
-    """Computes the Shannon entropy H(X) in bits per character."""
-    if not text:
-        return 0.0
-    length = len(text)
-    counts: dict[str, int] = {}
-    for ch in text:
-        counts[ch] = counts.get(ch, 0) + 1
-    return -sum((c / length) * math.log2(c / length) for c in counts.values())
 
 
 def multi_pass_decode(raw_value: str, max_passes: int = 3) -> tuple[str, ...]:
@@ -177,30 +156,6 @@ def is_test_or_fixture_partition(file_path: str) -> bool:
         return True
     fname = parts[-1]
     return fname.startswith("test_") or fname.endswith("_test.py") or "fixture" in fname
-
-
-def redact_secrets(text: str) -> str:
-    """
-    Scrubs matched credential patterns and high-entropy token assignments before any payload
-    is sent to an external BYO-AI endpoint.
-    """
-    redacted = text
-    counter = 0
-    for _rule_name, pattern in _SECRET_PATTERNS:
-        for match in list(pattern.finditer(redacted)):
-            counter += 1
-            redacted = redacted.replace(match.group(0), f"<REDACTED_SECRET_{counter}>")
-
-    # Also scrub high-entropy string literals assigned to secret/token/key/password variables
-    assign_re = re.compile(
-        r"(?i)\b(api_key|secret|token|password|passwd|client_secret)\s*=\s*['\"]([^'\"]{16,})['\"]"
-    )
-    for match in list(assign_re.finditer(redacted)):
-        candidate = match.group(2)
-        if shannon_entropy(candidate) >= 3.7 and not candidate.startswith("<REDACTED_"):
-            counter += 1
-            redacted = redacted.replace(candidate, f"<REDACTED_SECRET_{counter}>")
-    return redacted
 
 
 def _resolve_constant_string(node: ast.AST | None) -> str | None:
@@ -328,7 +283,7 @@ class TaintTrackedSecretEngine:
                 continue
             for rule_name, pattern in _SECRET_PATTERNS:
                 if pattern.search(line):
-                    fid = blake3_hex(
+                    fid = content_digest_hex(
                         f"CFG_RULE:{file_path}:{index}:{rule_name}",
                         domain="verifyci.v2.finding",
                     )[:16]
@@ -361,7 +316,7 @@ class TaintTrackedSecretEngine:
                 continue
             if shannon_entropy(value) < 3.0:
                 continue
-            fid = blake3_hex(
+            fid = content_digest_hex(
                 f"CFG_CRED:{file_path}:{index}:{key}", domain="verifyci.v2.finding"
             )[:16]
             findings.append(
@@ -453,7 +408,7 @@ class TaintTrackedSecretEngine:
             if matched_rule is None:
                 continue
             claimed.add((matched_rule, literal))
-            fid = blake3_hex(
+            fid = content_digest_hex(
                 f"RULE:{file_path}:{const_node.lineno}:{matched_rule}:{literal}",
                 domain="verifyci.v2.finding",
             )[:16]
@@ -503,7 +458,7 @@ class TaintTrackedSecretEngine:
             if credential_name is None:
                 continue
             line_no = node.lineno
-            fid = blake3_hex(
+            fid = content_digest_hex(
                 f"AUTH_CMP:{file_path}:{line_no}:{credential_name}",
                 domain="verifyci.v2.finding",
             )[:16]
@@ -637,7 +592,7 @@ class TaintTrackedSecretEngine:
             )
             sink_note = " and flows into active I/O sink" if flows_to_sink else ""
 
-            fid = blake3_hex(
+            fid = content_digest_hex(
                 f"SECRET:{file_path}:{node.lineno}:{var_name}:{rule_tag}",
                 domain="verifyci.v2.finding",
             )[:16]
