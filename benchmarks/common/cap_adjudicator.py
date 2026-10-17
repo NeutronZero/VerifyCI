@@ -58,11 +58,15 @@ class OracleScorecard:
     not_scored_reason: str | None = None
 
 
+import msgspec
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
+    decode = msgspec.json.decode
     return [
-        json.loads(line)
+        decode(line)
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
@@ -88,10 +92,18 @@ def _prf(tp: int, fp: int, fn: int, tn: int) -> dict[str, float]:
 
 
 def _binary_counts(pairs: list[tuple[bool, bool]]) -> tuple[int, int, int, int]:
-    tp = sum(1 for pred, gold in pairs if pred and gold)
-    fp = sum(1 for pred, gold in pairs if pred and not gold)
-    fn = sum(1 for pred, gold in pairs if not pred and gold)
-    tn = sum(1 for pred, gold in pairs if not pred and not gold)
+    tp = fp = fn = tn = 0
+    for pred, gold in pairs:
+        if pred:
+            if gold:
+                tp += 1
+            else:
+                fp += 1
+        else:
+            if gold:
+                fn += 1
+            else:
+                tn += 1
     return tp, fp, fn, tn
 
 
