@@ -12,6 +12,7 @@ executed against v2.
 """
 from __future__ import annotations
 
+import ast
 import shutil
 import subprocess
 import sys
@@ -23,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Files copied into the sandbox. The full tree is not needed: the engine
 # package plus the test package is enough to run a behaviour probe.
-SANDBOX_PATHS = ("verifyci_v2", "tests", "pyproject.toml")
+SANDBOX_PATHS = ("verifyci", "verifyci_v2", "tests", "pyproject.toml")
 
 #: Critical mutations: each removes a real verification guarantee.
 #: A v2 mutation is killed when its probe fails on the mutated tree.
@@ -57,11 +58,11 @@ PRODUCTION_MUTATION_MAP: dict[str, dict[str, Any]] = {
         "patch_desc": "Relax exact path identity to basename matching",
     },
     "MUT-05_RELAXED_FAIL_CLOSED_CHECK": {
-        "rel_path": "verifyci_v2/interface/cli.py",
-        "search": 'rule_id="VC2-Z3-UNDECIDED-DIFF"',
-        "replace": 'rule_id="VC2-Z3-UNDECIDED-DIFF"  # mutated: fail-closed marker neutralised',
+        "rel_path": "verifyci_v2/symbolic/z3_prover.py",
+        "search": 'rule_id="VC2-Z3-UNSUPPORTED-AST"',
+        "replace": 'rule_id="VC2-MUTATED-UNSUPPORTED-AST"',
         "probe": "tests/v2/test_remediation_spec.py::test_r2_4_unsupported_ast_diff_emits_inconclusive_never_silent_pass",
-        "patch_desc": "Neutralise the fail-closed undecided-diff marker",
+        "patch_desc": "Neutralise the fail-closed unsupported-AST marker",
     },
 }
 
@@ -94,7 +95,19 @@ def _make_sandbox(tmp_root: Path) -> Path:
     return sandbox
 
 
-def _apply_mutation(sandbox: Path, spec: dict[str, Any]) -> tuple[bool, str]:
+def _is_effective_mutation(original: str, mutated: str) -> bool:
+    """Verifies that the mutation alters the AST and is not comment-only or whitespace-only."""
+    try:
+        orig_ast = ast.dump(ast.parse(original))
+        mut_ast = ast.dump(ast.parse(mutated))
+        return orig_ast != mut_ast
+    except SyntaxError:
+        return True
+
+
+def _apply_mutation(
+    sandbox: Path, spec: dict[str, Any], require_effective: bool = False
+) -> tuple[bool, str]:
     target = sandbox / spec["rel_path"]
     if not target.exists():
         return False, f"target missing: {spec['rel_path']}"
@@ -103,7 +116,10 @@ def _apply_mutation(sandbox: Path, spec: dict[str, Any]) -> tuple[bool, str]:
     occurrences = original.count(search)
     if occurrences != 1:
         return False, f"anchor matched {occurrences} times (expected exactly 1)"
-    target.write_text(original.replace(search, replace, 1), encoding="utf-8")
+    mutated = original.replace(search, replace, 1)
+    if require_effective and not _is_effective_mutation(original, mutated):
+        return False, "ineffective mutation: AST unchanged (comment or whitespace only)"
+    target.write_text(mutated, encoding="utf-8")
     return True, "applied"
 
 
@@ -133,11 +149,15 @@ def _run_probe(sandbox: Path, probe: str, timeout: int = 600) -> bool:
     return proc.returncode == 0
 
 
-def evaluate_mutation(mutation_def: dict[str, Any]) -> dict[str, Any]:
+def evaluate_mutation(
+    mutation_def: dict[str, Any], is_critical: bool = True
+) -> dict[str, Any]:
     """Applies one mutation in an isolated sandbox and classifies the outcome."""
     with tempfile.TemporaryDirectory(prefix="vc2_cap013_") as tmp:
         sandbox = _make_sandbox(Path(tmp))
-        applied, detail = _apply_mutation(sandbox, mutation_def)
+        applied, detail = _apply_mutation(
+            sandbox, mutation_def, require_effective=is_critical
+        )
         if not applied:
             return {
                 "applied": False,
@@ -161,7 +181,7 @@ def run_suite() -> dict[str, Any]:
     """Evaluates every critical mutation plus the equivalent-mutation control."""
     critical: list[dict[str, Any]] = []
     for mut_id, spec in PRODUCTION_MUTATION_MAP.items():
-        result = evaluate_mutation(spec)
+        result = evaluate_mutation(spec, is_critical=True)
         result["id"] = mut_id
         result["patch_desc"] = spec["patch_desc"]
         result["probe"] = spec["probe"]
@@ -169,7 +189,7 @@ def run_suite() -> dict[str, Any]:
 
     equivalent: list[dict[str, Any]] = []
     for mut_id, spec in EQUIVALENT_MUTATION_MAP.items():
-        result = evaluate_mutation(spec)
+        result = evaluate_mutation(spec, is_critical=False)
         result["id"] = mut_id
         result["patch_desc"] = spec["patch_desc"]
         result["probe"] = spec["probe"]
