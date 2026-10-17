@@ -53,13 +53,11 @@ def parse_file_hunks(diff: str) -> tuple[FileHunk, ...]:
         if (old_path or new_path) and spans:
             out.append((old_path, new_path, list(spans)))
     for line in diff.splitlines():
-        rename_match = _RENAME_FROM_RE.match(line)
-        if rename_match:
-            rename_from = _clean(rename_match.group(1))
+        if line.startswith('rename from '):
+            rename_from = _clean(line[12:])
             continue
-        rename_match = _RENAME_TO_RE.match(line)
-        if rename_match:
-            new_path = _clean(rename_match.group(1))
+        if line.startswith('rename to '):
+            new_path = _clean(line[10:])
             if not old_path:
                 old_path = rename_from
             continue
@@ -73,9 +71,10 @@ def parse_file_hunks(diff: str) -> tuple[FileHunk, ...]:
         if line.startswith('+++ '):
             new_path = '' if line[4:].startswith('/dev/null') else _clean(line[4:])
             continue
-        hunk = _HUNK_RE.match(line)
-        if hunk:
-            spans.append(HunkSpan(old_start=int(hunk.group(1)), old_count=int(hunk.group(2) or 1), new_start=int(hunk.group(3)), new_count=int(hunk.group(4) or 1)))
+        if line.startswith('@'):
+            hunk = _HUNK_RE.match(line)
+            if hunk:
+                spans.append(HunkSpan(old_start=int(hunk.group(1)), old_count=int(hunk.group(2) or 1), new_start=int(hunk.group(3)), new_count=int(hunk.group(4) or 1)))
     flush()
     return tuple((FileHunk(old_path=old, new_path=new, spans=tuple(s)) for old, new, s in out))
 

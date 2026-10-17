@@ -120,6 +120,12 @@ def _to_z3_bool(val: Any) -> Any:
 
 def _split_top_level(text: str, sep: str = " ") -> list[str]:
     """Splits `text` by `sep` only at top-level parenthesis/bracket/quote depth."""
+    if not any(c in text for c in ("(", "[", ")", "]", "'", '"')):
+        if sep in text:
+            return [p.strip() for p in text.split(sep) if p.strip()]
+        s = text.strip()
+        return [s] if s else []
+
     parts: list[str] = []
     buf: list[str] = []
     depth = 0
