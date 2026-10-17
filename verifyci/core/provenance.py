@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Protocol, Sequence
 
 from verifyci.contracts.verdict import (
     FindingReason,
@@ -14,6 +14,27 @@ from verifyci.contracts.verdict import (
 from verifyci.core.canonical import content_digest_hex
 from verifyci.core.diff_parser import DiffFileEntry
 
+
+class BaseSourceProvider(Protocol):
+    """Protocol providing access to base revision source content."""
+
+    def get_file_content(self, file_path: str) -> str | None:
+        """Retrieve source text for a path in the base revision."""
+        ...
+
+
+class DictBaseSourceProvider:
+    """In-memory dictionary base source provider."""
+
+    def __init__(self, sources: Mapping[str, str]) -> None:
+        self._sources = dict(sources)
+
+    def get_file_content(self, file_path: str) -> str | None:
+        norm = file_path.replace("\\", "/").strip()
+        while norm.startswith("./"):
+            norm = norm[2:]
+        return self._sources.get(norm)
+
 _GUARD_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^\s*assert\s+"),
     re.compile(r"^\s*if\s+.*\braise\b"),
@@ -21,14 +42,32 @@ _GUARD_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"@(?:login_required|auth_required|permission_required)"),
 )
 
+_POLICY_FILES: tuple[str, ...] = (
+    ".verifyci.toml",
+    "verifyci.toml",
+    ".verifyci/config.json",
+    ".verifyci/policy.json",
+    ".verifyci/waivers.yaml",
+)
+
+
+def is_policy_file(file_path: str) -> bool:
+    """Detect whether file modifies trusted verification policy."""
+    norm = file_path.replace("\\", "/").strip().lower()
+    while norm.startswith("./"):
+        norm = norm[2:]
+    return norm in _POLICY_FILES or norm.startswith(".verifyci/")
+
 
 def verify_removal_provenance(
     entry: DiffFileEntry,
-    base_sources: Mapping[str, str],
+    base_sources: BaseSourceProvider | Mapping[str, str],
+    allow_policy_tampering: bool = False,
 ) -> list[VerificationFinding]:
     """Verify that code removals in the diff accurately reflect the base revision.
 
     Fails closed:
+    - Tampering with policy files without authorization is POLICY_VIOLATION (FAIL).
     - Removals contradicting the base revision are FABRICATED (FAIL).
     - Removals deleting security guards without replacement are POLICY_VIOLATION (FAIL).
     - Net removals without a verifiable base record are UNGROUNDED (INCONCLUSIVE).
@@ -37,11 +76,35 @@ def verify_removal_provenance(
     file_path = entry.file_path
     lookup_path = entry.old_file_path or file_path
 
+    # Policy integrity check: an untrusted diff cannot weaken its own verification policy
+    if not allow_policy_tampering and is_policy_file(file_path):
+        findings.append(
+            VerificationFinding(
+                finding_id=content_digest_hex(f"policy_tamper:{file_path}")[:16],
+                rule_id="VC-POLICY-UNAUTHORIZED-MODIFICATION",
+                severity=Severity.CRITICAL,
+                verdict=VerificationVerdict.FAIL,
+                reason=FindingReason.POLICY_VIOLATION,
+                message=(
+                    f"Diff modifies trusted verification configuration '{file_path}' "
+                    "without independent authorization; rejecting patch."
+                ),
+                file_path=file_path,
+            )
+        )
+        return findings
+
     # Binary files cannot undergo text-line provenance
     if entry.is_binary:
         return findings
 
-    base_source = base_sources.get(lookup_path) or base_sources.get(file_path)
+    provider: BaseSourceProvider
+    if isinstance(base_sources, Mapping):
+        provider = DictBaseSourceProvider(base_sources)
+    else:
+        provider = base_sources
+
+    base_source = provider.get_file_content(lookup_path) or provider.get_file_content(file_path)
 
     # Net deletion without a stored base record
     if not base_source:
@@ -116,9 +179,10 @@ def verify_removal_provenance(
         )
 
     # Check for unreplaced guard deletions
-    added_text = "\n".join(entry.added_lines)
+    head_lines_clean = [ln.strip() for ln in entry.head_source.splitlines()]
     for guard in removed_guard_lines:
-        if guard not in added_text:
+        # Require identical or strict preservation in head
+        if guard not in head_lines_clean:
             findings.append(
                 VerificationFinding(
                     finding_id=content_digest_hex(f"guard_removal:{file_path}:{guard}")[:16],
