@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
+import msgspec
 from pathlib import Path
 import tempfile
 import time
@@ -56,9 +57,6 @@ class OracleScorecard:
     confusion: dict[str, int] = field(default_factory=dict)
     false_accept_count: int = 0
     not_scored_reason: str | None = None
-
-
-import msgspec
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
