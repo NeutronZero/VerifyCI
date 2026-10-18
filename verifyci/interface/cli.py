@@ -9,9 +9,6 @@ import sys
 from typing import Sequence
 
 from verifyci import __version__
-from verifyci.contracts.verdict import VerificationVerdict
-from verifyci.core.diff_parser import DiffFileEntry, parse_unified_diff
-from verifyci.core.engine import VerificationKernel
 
 
 def _format_text_summary(cert) -> str:
@@ -34,6 +31,10 @@ def _format_text_summary(cert) -> str:
 
 def run_verify_diff(args: argparse.Namespace) -> int:
     """Verify a unified diff file against invariants and safety gates."""
+    from verifyci.contracts.verdict import VerificationVerdict
+    from verifyci.core.diff_parser import parse_unified_diff
+    from verifyci.core.engine import VerificationKernel
+
     diff_path = Path(args.diff_file)
     if not diff_path.is_file():
         sys.stderr.write(f"Error: diff file '{args.diff_file}' does not exist\n")
