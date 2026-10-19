@@ -587,37 +587,32 @@ def main() -> int:
         "Executing formal canonical evidence adjudication for CAP-009 through CAP-013..."
     )
     bundle: dict[str, Any] = {}
+    adjudicators = [
+        ("CAP-009", adjudicate_cap009, ROOT / "benchmarks" / "diff_impact_corpus" / "cap009"),
+        ("CAP-010", adjudicate_cap010, ROOT / "benchmarks" / "retrieval_generalization" / "cap010"),
+        ("CAP-011", adjudicate_cap011, ROOT / "benchmarks" / "secret_heldout" / "cap011"),
+        ("CAP-012", adjudicate_cap012, ROOT / "benchmarks" / "repo_perf" / "cap012"),
+        ("CAP-013", adjudicate_cap013, ROOT / "benchmarks" / "robustness" / "cap013"),
+    ]
 
-    try:
-        bundle["CAP-009"] = adjudicate_cap009(
-            ROOT / "benchmarks" / "diff_impact_corpus" / "cap009"
-        )
-        print("CAP-009: ADJUDICATED MEASURED_MET")
-        bundle["CAP-010"] = adjudicate_cap010(
-            ROOT / "benchmarks" / "retrieval_generalization" / "cap010"
-        )
-        print("CAP-010: ADJUDICATED MEASURED_MET")
-        bundle["CAP-011"] = adjudicate_cap011(
-            ROOT / "benchmarks" / "secret_heldout" / "cap011"
-        )
-        print("CAP-011: ADJUDICATED MEASURED_MET")
-        bundle["CAP-012"] = adjudicate_cap012(
-            ROOT / "benchmarks" / "repo_perf" / "cap012"
-        )
-        print("CAP-012: ADJUDICATED MEASURED_MET")
-        bundle["CAP-013"] = adjudicate_cap013(
-            ROOT / "benchmarks" / "robustness" / "cap013"
-        )
-        print("CAP-013: ADJUDICATED MEASURED_MET")
-    except Exception as exc:
-        print(f"ADJUDICATION REJECTED (Fail-Closed): {exc}", file=sys.stderr)
-        return 1
+    for name, fn, path in adjudicators:
+        try:
+            bundle[name] = fn(path)
+            print(f"{name}: ADJUDICATED {bundle[name].get('status', 'MEASURED_MET')}")
+        except Exception as exc:
+            bundle[name] = {
+                "status": "UNESTABLISHED",
+                "evidence_classification": "Unestablished",
+                "reason": str(exc),
+            }
+            print(f"{name}: UNESTABLISHED ({exc})", file=sys.stderr)
 
     out_file = ROOT / "evidence" / "cap-adjudication-bundle.json"
     out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.write_text(json.dumps(bundle, indent=2), encoding="utf-8")
     print(f"All benchmarks canonically adjudicated. Bundle saved to {out_file}")
-    return 0
+    all_met = all(v.get("status") == "MEASURED_MET" for v in bundle.values())
+    return 0 if all_met else 1
 
 
 if __name__ == "__main__":

@@ -25,7 +25,6 @@ import re
 import sys
 import textwrap
 from dataclasses import dataclass, field
-from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
@@ -35,7 +34,6 @@ from verifyci_v2.ingestion.removal_provenance import (
     analyze_removal_provenance,
     entities_from_source,
 )
-from verifyci_v2.ingestion.ssa_lower import lower_module_to_ussa
 from verifyci_v2.ingestion.compile_context import AddedLineRecord, CompiledFilePair, IndexedAST, compile_file_pair
 from verifyci_v2.symbolic.dangerous_calls import scan_dangerous_calls
 from verifyci_v2.symbolic.egglog_engine import EgglogEquivalenceEngine
@@ -877,7 +875,6 @@ class VerificationPipeline:
 
         # Successful content reconstruction and compilation own all downstream input.
         base_src, head_src = compiled.base_source, compiled.head_source
-        base_tree = compiled.base_ast.tree if compiled.base_ast is not None else None
         head_tree = compiled.head_ast.tree if compiled.head_ast is not None else None
         receipt("RECONSTRUCTION_AND_SYNTAX")
 
@@ -896,7 +893,6 @@ class VerificationPipeline:
                         file_path=path,
                     ))
                 if hasattr(self.salsa_engine, "stitcher"):
-                    owner_map = getattr(self.salsa_engine.stitcher, "_qname_to_file", {})
                     affected_callers = set(incremental_plan.type_and_taint_callers_to_reverify) | set(incremental_plan.semantic_value_callers_to_reverify)
                     self._pending_caller_reverify.update(affected_callers)
                     semantic_seeds = {

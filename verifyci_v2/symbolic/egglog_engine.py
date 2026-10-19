@@ -477,7 +477,16 @@ class EgglogEquivalenceEngine:
                         local_vars.add(n.target.id)
             mutation_findings: list[tuple[str, str, int, tuple[str, ...]]] = []
 
-            def inspect_stmt(stmt: ast.stmt, held: tuple[str, ...]) -> None:
+            def inspect_stmt(
+                stmt: ast.stmt,
+                held: tuple[str, ...],
+                _current_fn: ast.FunctionDef | ast.AsyncFunctionDef = fn,
+                _current_fn_name: str = fn_name,
+                _globals: set[str] = declared_globals,
+                _locals: set[str] = local_vars,
+                _params: set[str] = parameter_names,
+                _mutations: list[tuple[str, str, int, tuple[str, ...]]] = mutation_findings,
+            ) -> None:
                 if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                     return
                 if isinstance(stmt, (ast.With, ast.AsyncWith)):
@@ -487,7 +496,7 @@ class EgglogEquivalenceEngine:
                     # source order, so preserve each adjacent acquisition pair.
                     for left, right in zip(combined, combined[1:]):
                         if left != right and left != "<unresolved_lock>" and right != "<unresolved_lock>":
-                            lock_orders.append((fn_name, left, right, getattr(stmt, "lineno", fn.lineno)))
+                            lock_orders.append((_current_fn_name, left, right, getattr(stmt, "lineno", _current_fn.lineno)))
                     for child in stmt.body:
                         inspect_stmt(child, combined)
                     for child in stmt.orelse if hasattr(stmt, "orelse") else ():
@@ -500,20 +509,20 @@ class EgglogEquivalenceEngine:
                 elif isinstance(stmt, (ast.AugAssign, ast.AnnAssign)):
                     targets.append(stmt.target)
                 for target in targets:
-                    classified = classify_target(target, declared_globals, local_vars, parameter_names)
+                    classified = classify_target(target, _globals, _locals, _params)
                     if classified:
                         kind, spelling = classified
-                        mutation_findings.append((kind, spelling, getattr(stmt, "lineno", fn.lineno), held))
+                        _mutations.append((kind, spelling, getattr(stmt, "lineno", _current_fn.lineno), held))
 
                 # Mutating method calls on proven shared containers/objects.
                 for node in walk_current_scope(stmt):
                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                         continue
                     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in mutating_methods:
-                        classified = classify_target(node.func.value, declared_globals, local_vars, parameter_names)
+                        classified = classify_target(node.func.value, _globals, _locals, _params)
                         if classified:
                             kind, spelling = classified
-                            mutation_findings.append((kind, f"{spelling}.{node.func.attr}()", getattr(node, "lineno", fn.lineno), held))
+                            _mutations.append((kind, f"{spelling}.{node.func.attr}()", getattr(node, "lineno", _current_fn.lineno), held))
 
                 for _field, value in ast.iter_fields(stmt):
                     if isinstance(value, list):

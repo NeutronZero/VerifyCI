@@ -13,7 +13,7 @@ from typing import Any, Iterable, Literal, Sequence
 
 import msgspec
 
-from verifyci_v2.contracts.canonical import content_digest_hex, canonical_jcs_bytes, canonical_jcs_str
+from verifyci_v2.contracts.canonical import content_digest_hex, canonical_jcs_bytes
 from verifyci_v2.contracts.ssa_ir import (
     CPGEdge,
     FunctionUSSA,

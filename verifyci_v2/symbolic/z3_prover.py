@@ -1337,10 +1337,14 @@ class _ASTPyValEvaluator:
                         a, b = self._numeric(left, "ordering"), self._numeric(right, "ordering")
                     else:
                         raise _UnsupportedInputDomain("mixed or dynamic ordering is unsupported")
-                    if isinstance(op, ast.Lt): comparisons.append(a < b)
-                    elif isinstance(op, ast.LtE): comparisons.append(a <= b)
-                    elif isinstance(op, ast.Gt): comparisons.append(a > b)
-                    else: comparisons.append(a >= b)
+                    if isinstance(op, ast.Lt):
+                        comparisons.append(a < b)
+                    elif isinstance(op, ast.LtE):
+                        comparisons.append(a <= b)
+                    elif isinstance(op, ast.Gt):
+                        comparisons.append(a > b)
+                    else:
+                        comparisons.append(a >= b)
                 else:
                     raise _UnsupportedSymbolicExpression(f"unsupported comparison {type(op).__name__}")
                 left_node, left = right_node, right
@@ -1411,10 +1415,14 @@ class _ASTPyValEvaluator:
                         "augmented arithmetic requires supported INT/BOOL operands"
                     )
                 a, b = self._numeric(left, "augmented arithmetic"), self._numeric(right, "augmented arithmetic")
-                if isinstance(stmt.op, ast.Add): value = pctx.integer(a + b)
-                elif isinstance(stmt.op, ast.Sub): value = pctx.integer(a - b)
-                elif isinstance(stmt.op, ast.Mult): value = pctx.integer(a * b)
-                else: raise _UnsupportedSymbolicExpression("unsupported augmented operator")
+                if isinstance(stmt.op, ast.Add):
+                    value = pctx.integer(a + b)
+                elif isinstance(stmt.op, ast.Sub):
+                    value = pctx.integer(a - b)
+                elif isinstance(stmt.op, ast.Mult):
+                    value = pctx.integer(a * b)
+                else:
+                    raise _UnsupportedSymbolicExpression("unsupported augmented operator")
                 env[stmt.target.id] = _PyVal(_z3_mod.If(active, value.term, left.term), value.kind)
             elif isinstance(stmt, ast.If):
                 condition = self._truth(self.eval_expr(stmt.test, env), "if statement")
@@ -1423,9 +1431,11 @@ class _ASTPyValEvaluator:
                 then_active = self._exec_block(stmt.body, then_env, _z3_mod.And(active, condition))
                 else_active = self._exec_block(stmt.orelse, else_env, _z3_mod.And(active, _z3_mod.Not(condition))) if stmt.orelse else _z3_mod.And(active, _z3_mod.Not(condition))
                 if pctx.is_false(then_active):
-                    env.clear(); env.update(else_env)
+                    env.clear()
+                    env.update(else_env)
                 elif pctx.is_false(else_active):
-                    env.clear(); env.update(then_env)
+                    env.clear()
+                    env.update(then_env)
                 else:
                     merged: dict[str, _PyVal] = {}
                     for name in set(then_env) | set(else_env) | set(before):
@@ -1434,7 +1444,8 @@ class _ASTPyValEvaluator:
                         if yes is None or no is None:
                             raise _UnsupportedSymbolicExpression(f"conditional assignment to possibly-unbound local {name}")
                         merged[name] = _PyVal(_z3_mod.If(condition, yes.term, no.term), yes.kind if yes.kind == no.kind else None)
-                    env.clear(); env.update(merged)
+                    env.clear()
+                    env.update(merged)
                 active = _z3_mod.Or(then_active, else_active)
             elif isinstance(stmt, ast.Pass):
                 continue

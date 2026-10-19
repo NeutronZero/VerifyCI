@@ -8,8 +8,6 @@ from verifyci_v2.contracts.canonical import canonical_jcs_str
 from verifyci_v2.interface.fastmcp_daemon import VerifyCIFastMCPDaemon
 from verifyci_v2.neural.adapters import DeterministicJudgeAdapter
 from verifyci_v2.contracts.conformal import calibrate_judge_on_dataset
-from verifyci_v2.neural.spec_compiler import IntentToSMTCompiler
-from verifyci_v2.symbolic.egglog_engine import EgglogEquivalenceEngine
 
 
 def build_cli_parser() -> argparse.ArgumentParser:
@@ -194,7 +192,6 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
         import json
 
         from verifyci_v2.pipeline import (
-            VerificationPipeline,
             parse_unified_diff,
         )
         from verifyci_v2.provenance.dsse_intoto import export_sarif_v2

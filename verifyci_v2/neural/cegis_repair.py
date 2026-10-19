@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import difflib
-from typing import Any
 
 from verifyci_v2.contracts.ai_protocol import GenerativeSynthesizerProtocol
 from verifyci_v2.contracts.attestation import CandidateFix, VerificationFinding

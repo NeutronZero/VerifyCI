@@ -6,6 +6,7 @@ import binascii
 import re
 import textwrap
 import urllib.parse
+from typing import Any, Mapping
 
 from verifyci_v2.contracts.ai_protocol import (
     ConformalProfile,
