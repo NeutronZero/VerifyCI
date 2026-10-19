@@ -1068,7 +1068,7 @@ def _extract_model_assignments(
     parameters: tuple[str, ...],
     *,
     default_val: int = 0,
-) -> dict[str, int | str]:
+) -> dict[str, int | str | bool]:
     """Materialize model inputs; never invent fallback values for a witness."""
     if _z3_mod is None:
         return {}
@@ -1100,6 +1100,14 @@ class _PyVal:
 
 class _UnsupportedSymbolicExpression(Exception):
     pass
+
+
+class _UnsupportedInputDomain(_UnsupportedSymbolicExpression):
+    """Raised when proving would require an unstated Python input-domain assumption.
+
+    This exception must not fall through to the legacy integer-only U-SSA prover:
+    that fallback would silently reinterpret arbitrary Python values as integers.
+    """
 
 
 class _Z3ProofContext:
@@ -1201,14 +1209,14 @@ class _ASTPyValEvaluator:
         self._build_parameters()
 
     def _build_parameters(self) -> None:
-        """Represent inputs as unconstrained PyVal terms, not annotation assumptions.
+        """Create shared tagged inputs and record explicit supported type assumptions.
 
-        Python annotations are not runtime-enforced. Constraining ``x: int`` to
-        Z3 Int without a separately verified precondition could prove equivalence
-        only for integers while silently ignoring valid Python calls with other
-        runtime values. Dynamic inputs therefore remain full tagged PyVal terms;
-        operations requiring a narrower domain abstain unless their operands are
-        statically known from the expression itself.
+        Python annotations are not runtime-enforced. This prover therefore uses a
+        recognized scalar annotation as an explicit verification-domain assumption,
+        not as a claim that Python enforces the annotation. Unannotated or otherwise
+        dynamic inputs remain unconstrained PyVal terms; operations requiring a
+        narrower domain must abstain rather than project an arbitrary constructor
+        through an unrelated datatype selector.
         """
         if self.fn.args.vararg is not None or self.fn.args.kwarg is not None:
             raise _UnsupportedSymbolicExpression("variadic function parameters are unsupported")
@@ -1219,18 +1227,39 @@ class _ASTPyValEvaluator:
             raw = _z3_make(_z3_mod.Const, arg.arg, self.pctx.pyval, ctx=self.pctx.ctx)
             self.raw_parameters[arg.arg] = raw
             kind = None
-            if arg.annotation is not None:
-                try:
-                    ann_str = ast.unparse(arg.annotation).strip()
-                    if ann_str in ("int", "float"):
-                        kind = "INT"
-                    elif ann_str == "bool":
-                        kind = "BOOL"
-                    elif ann_str == "str":
-                        kind = "STR"
-                except Exception:
-                    pass
+            if isinstance(arg.annotation, ast.Name):
+                ann_str = arg.annotation.id
+            elif isinstance(arg.annotation, ast.Constant) and isinstance(arg.annotation.value, str):
+                # Also support ``from __future__ import annotations`` for simple
+                # scalar names without evaluating annotation expressions.
+                ann_str = arg.annotation.value.strip()
+            else:
+                ann_str = None
+            if ann_str == "int":
+                kind = "INT"
+            elif ann_str == "bool":
+                kind = "BOOL"
+            elif ann_str == "str":
+                kind = "STR"
+            # Floats deliberately remain unsupported: PyVal has no Real/Float
+            # constructor, so treating them as integers would be unsound.
             self.initial_env[arg.arg] = _PyVal(raw, kind)
+
+    def _numeric(self, value: _PyVal, operation: str) -> Any:
+        if value.kind not in ("INT", "BOOL"):
+            raise _UnsupportedInputDomain(
+                f"{operation} requires a declared INT/BOOL input domain; "
+                "unannotated or mixed-type values are not coerced to integers"
+            )
+        return self.pctx.numeric(value)
+
+    def _truth(self, value: _PyVal, operation: str) -> Any:
+        if value.kind is None:
+            raise _UnsupportedInputDomain(
+                f"{operation} requires a supported scalar input domain; "
+                "dynamic Python truthiness is not modeled"
+            )
+        return self.pctx.truth(value)
 
     def _is_singleton_expr(self, node: ast.AST, value: _PyVal) -> bool:
         # A statically typed bool parameter, like a bool literal, is a Python
@@ -1258,10 +1287,8 @@ class _ASTPyValEvaluator:
         if isinstance(node, ast.UnaryOp):
             value = self.eval_expr(node.operand, env)
             if isinstance(node.op, ast.Not):
-                return pctx.boolean(_z3_mod.Not(pctx.truth(value)))
-            if value.kind in ("NONE", "STR"):
-                raise _UnsupportedSymbolicExpression("unary arithmetic on non-numeric value")
-            n = pctx.numeric(value)
+                return pctx.boolean(_z3_mod.Not(self._truth(value, "not")))
+            n = self._numeric(value, "unary arithmetic")
             if isinstance(node.op, ast.USub):
                 return pctx.integer(-n)
             if isinstance(node.op, ast.UAdd):
@@ -1269,13 +1296,14 @@ class _ASTPyValEvaluator:
             raise _UnsupportedSymbolicExpression(f"unsupported unary operator {type(node.op).__name__}")
         if isinstance(node, ast.BinOp):
             left, right = self.eval_expr(node.left, env), self.eval_expr(node.right, env)
-            if isinstance(node.op, ast.Add) and (left.kind == "STR" or right.kind == "STR"):
-                if left.kind == right.kind == "STR":
-                    return pctx.string(_z3_mod.Concat(pv.str_val(left.term), pv.str_val(right.term)))
-                raise _UnsupportedSymbolicExpression("mixed-type string concatenation is unsupported")
-            if left.kind in ("NONE", "STR") or right.kind in ("NONE", "STR"):
-                raise _UnsupportedSymbolicExpression("mixed/dynamic-type arithmetic is unsupported")
-            a, b = pctx.numeric(left), pctx.numeric(right)
+            if isinstance(node.op, ast.Add) and left.kind == right.kind == "STR":
+                return pctx.string(_z3_mod.Concat(pv.str_val(left.term), pv.str_val(right.term)))
+            if left.kind not in ("INT", "BOOL") or right.kind not in ("INT", "BOOL"):
+                raise _UnsupportedInputDomain(
+                    "arithmetic requires supported INT/BOOL operands; "
+                    "string, None, unannotated, and mixed-type operands abstain"
+                )
+            a, b = self._numeric(left, "arithmetic"), self._numeric(right, "arithmetic")
             if isinstance(node.op, ast.Add):
                 return pctx.integer(a + b)
             if isinstance(node.op, ast.Sub):
@@ -1290,20 +1318,25 @@ class _ASTPyValEvaluator:
             for op, right_node in zip(node.ops, node.comparators):
                 right = self.eval_expr(right_node, env)
                 if isinstance(op, (ast.Eq, ast.NotEq)):
+                    if left.kind is None or right.kind is None:
+                        raise _UnsupportedInputDomain(
+                            "Python equality on an unannotated or mixed-type value "
+                            "requires unsupported runtime object semantics"
+                        )
                     eq = _encode_py_eq(left, right, pctx)
                     comparisons.append(eq if isinstance(op, ast.Eq) else _z3_mod.Not(eq))
                 elif isinstance(op, (ast.Is, ast.IsNot)):
                     if not (self._is_singleton_expr(left_node, left) or self._is_singleton_expr(right_node, right)):
-                        raise _UnsupportedSymbolicExpression("NonSingletonIdentityComparison")
+                        raise _UnsupportedInputDomain("NonSingletonIdentityComparison")
                     ident = left.term == right.term
                     comparisons.append(ident if isinstance(op, ast.Is) else _z3_mod.Not(ident))
                 elif isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE)):
                     if left.kind == right.kind == "STR":
                         a, b = pv.str_val(left.term), pv.str_val(right.term)
-                    elif left.kind not in ("NONE", "STR") and right.kind not in ("NONE", "STR"):
-                        a, b = pctx.numeric(left), pctx.numeric(right)
+                    elif left.kind in ("INT", "BOOL") and right.kind in ("INT", "BOOL"):
+                        a, b = self._numeric(left, "ordering"), self._numeric(right, "ordering")
                     else:
-                        raise _UnsupportedSymbolicExpression("mixed-type ordering is unsupported")
+                        raise _UnsupportedInputDomain("mixed or dynamic ordering is unsupported")
                     if isinstance(op, ast.Lt): comparisons.append(a < b)
                     elif isinstance(op, ast.LtE): comparisons.append(a <= b)
                     elif isinstance(op, ast.Gt): comparisons.append(a > b)
@@ -1318,7 +1351,7 @@ class _ASTPyValEvaluator:
                 raise _UnsupportedSymbolicExpression("empty boolean operation")
             result = values[-1]
             for value in reversed(values[:-1]):
-                cond = pctx.truth(value)
+                cond = self._truth(value, "boolean operation")
                 result = _PyVal(
                     _z3_mod.If(cond, result.term, value.term) if isinstance(node.op, ast.And)
                     else _z3_mod.If(cond, value.term, result.term),
@@ -1326,7 +1359,7 @@ class _ASTPyValEvaluator:
                 )
             return result
         if isinstance(node, ast.IfExp):
-            cond = pctx.truth(self.eval_expr(node.test, env))
+            cond = self._truth(self.eval_expr(node.test, env), "conditional expression")
             yes, no = self.eval_expr(node.body, env), self.eval_expr(node.orelse, env)
             return _PyVal(_z3_mod.If(cond, yes.term, no.term), yes.kind if yes.kind == no.kind else None)
         raise _UnsupportedSymbolicExpression(f"unsupported expression {type(node).__name__}")
@@ -1374,15 +1407,17 @@ class _ASTPyValEvaluator:
                 left = env[stmt.target.id]
                 right = self.eval_expr(stmt.value, env)
                 if left.kind not in ("INT", "BOOL") or right.kind not in ("INT", "BOOL"):
-                    raise _UnsupportedSymbolicExpression("unsupported augmented assignment types")
-                a, b = pctx.numeric(left), pctx.numeric(right)
+                    raise _UnsupportedInputDomain(
+                        "augmented arithmetic requires supported INT/BOOL operands"
+                    )
+                a, b = self._numeric(left, "augmented arithmetic"), self._numeric(right, "augmented arithmetic")
                 if isinstance(stmt.op, ast.Add): value = pctx.integer(a + b)
                 elif isinstance(stmt.op, ast.Sub): value = pctx.integer(a - b)
                 elif isinstance(stmt.op, ast.Mult): value = pctx.integer(a * b)
                 else: raise _UnsupportedSymbolicExpression("unsupported augmented operator")
                 env[stmt.target.id] = _PyVal(_z3_mod.If(active, value.term, left.term), value.kind)
             elif isinstance(stmt, ast.If):
-                condition = pctx.truth(self.eval_expr(stmt.test, env))
+                condition = self._truth(self.eval_expr(stmt.test, env), "if statement")
                 before = dict(env)
                 then_env, else_env = dict(env), dict(env)
                 then_active = self._exec_block(stmt.body, then_env, _z3_mod.And(active, condition))
@@ -1796,7 +1831,9 @@ class Z3SymbolicProver:
             for name, raw in base_eval.raw_parameters.items():
                 k = base_eval.initial_env[name].kind
                 if k == "INT":
-                    solver.add(pctx.pyval.is_mk_int(raw))
+                    # The declared int-domain assumption includes bool, which is
+                    # a Python int subtype and supports the same scalar arithmetic.
+                    solver.add(_z3_mod.Or(pctx.pyval.is_mk_int(raw), pctx.pyval.is_mk_bool(raw)))
                 elif k == "BOOL":
                     solver.add(pctx.pyval.is_mk_bool(raw))
                 elif k == "STR":
@@ -1821,16 +1858,31 @@ class Z3SymbolicProver:
                     assignments[name] = _z3_mod.is_true(bool_value)
                 elif pctx.is_true(pyval.is_mk_int(val)):
                     int_value = model.eval(pyval.int_val(val), model_completion=True)
-                    assignments[name] = int_value.as_long() if hasattr(int_value, "as_long") else 0
+                    if not hasattr(int_value, "as_long"):
+                        return EquivalenceProofResult(
+                            outcome="INCONCLUSIVE_UNKNOWN",
+                            reason=f"SAT model integer for parameter {name!r} could not be materialized",
+                        )
+                    assignments[name] = int_value.as_long()
                 elif pctx.is_true(pyval.is_mk_str(val)):
                     str_value = model.eval(pyval.str_val(val), model_completion=True)
                     try:
                         assignments[name] = str_value.as_string()
                     except Exception:
-                        assignments[name] = ""
+                        return EquivalenceProofResult(
+                            outcome="INCONCLUSIVE_UNKNOWN",
+                            reason=f"SAT model string for parameter {name!r} could not be materialized",
+                        )
                 else:
-                    int_value = model.eval(pyval.int_val(val), model_completion=True)
-                    assignments[name] = int_value.as_long() if hasattr(int_value, "as_long") else 0
+                    return EquivalenceProofResult(
+                        outcome="INCONCLUSIVE_UNKNOWN",
+                        reason=f"SAT model for parameter {name!r} used an unsupported PyVal constructor",
+                    )
+            if set(assignments) != set(base_eval.raw_parameters):
+                return EquivalenceProofResult(
+                    outcome="INCONCLUSIVE_UNKNOWN",
+                    reason="SAT model could not materialize every required parameter binding",
+                )
             base_state = str(model.eval(base_return.term, model_completion=True))
             cand_state = str(model.eval(cand_return.term, model_completion=True))
             witness = CounterexampleWitness(
@@ -1839,6 +1891,14 @@ class Z3SymbolicProver:
                 head_return_state=cand_state, proof_time_ms=round(elapsed, 3),
             )
             return EquivalenceProofResult(outcome="PROVEN_DIVERGENT_SAT", witness=witness, reason="A concrete model distinguishes the return values")
+        except _UnsupportedInputDomain as exc:
+            # Do not run the integer-only U-SSA fallback for an input-domain
+            # mismatch: it could prove a result after silently coercing arbitrary
+            # PyVal inputs to integers.
+            return EquivalenceProofResult(
+                outcome="INCONCLUSIVE_UNSUPPORTED",
+                reason=str(exc) or "Unsupported input domain",
+            )
         except (_UnsupportedSymbolicExpression, ValueError, TypeError, AttributeError):
             pass
         except Exception as exc:
@@ -1846,12 +1906,15 @@ class Z3SymbolicProver:
 
         # Fallback to U-SSA symbolic equivalence check (for calls, complex control flow, etc.)
         try:
-            shared_z3_vars = {p: _z3_mod.Int(p) for p in func_base.parameters}
-            ext_b = _USSASymbolicExtractor(func_base, shared_z3_vars)
-            ext_c = _USSASymbolicExtractor(func_cand, shared_z3_vars)
+            # Keep the fallback isolated from Z3's process-global default context
+            # as well. Every term and solver in this fallback shares this local ctx.
+            fallback_ctx = _z3_mod.Context()
+            shared_z3_vars = {p: _z3_mod.Int(p, ctx=fallback_ctx) for p in func_base.parameters}
+            ext_b = _USSASymbolicExtractor(func_base, shared_z3_vars, ctx=fallback_ctx)
+            ext_c = _USSASymbolicExtractor(func_cand, shared_z3_vars, ctx=fallback_ctx)
             if not ext_b.unsupported_construct and not ext_c.unsupported_construct:
                 if len(ext_b.calls) == len(ext_c.calls) and len(ext_b.returns) == len(ext_c.returns):
-                    s = _z3_mod.Solver()
+                    s = _z3_mod.Solver(ctx=fallback_ctx)
                     s.set("timeout", self.timeout_ms)
                     calls_ok = True
                     for call_b, call_c in zip(ext_b.calls, ext_c.calls):
@@ -1876,6 +1939,11 @@ class Z3SymbolicProver:
                             if st == _z3_mod.sat:
                                 elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
                                 assignments = _extract_model_assignments(s.model(), shared_z3_vars, func_cand.parameters)
+                                if set(assignments) != set(func_cand.parameters):
+                                    return EquivalenceProofResult(
+                                        outcome="INCONCLUSIVE_UNKNOWN",
+                                        reason="SAT call-divergence model could not materialize every parameter",
+                                    )
                                 witness = CounterexampleWitness(
                                     checker_id="VC2-Z3-SEMANTIC-DIVERGENCE", smt_status="SAT",
                                     input_assignments=assignments, base_return_state=call_b.callee,
@@ -1901,6 +1969,11 @@ class Z3SymbolicProver:
                             if st == _z3_mod.sat:
                                 elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
                                 assignments = _extract_model_assignments(s.model(), shared_z3_vars, func_cand.parameters)
+                                if set(assignments) != set(func_cand.parameters):
+                                    return EquivalenceProofResult(
+                                        outcome="INCONCLUSIVE_UNKNOWN",
+                                        reason="SAT guard-divergence model could not materialize every parameter",
+                                    )
                                 witness = CounterexampleWitness(
                                     checker_id="VC2-Z3-SEMANTIC-DIVERGENCE", smt_status="SAT",
                                     input_assignments=assignments, base_return_state=guard_b.norm_cond,
@@ -1928,6 +2001,11 @@ class Z3SymbolicProver:
                                     if st == _z3_mod.sat:
                                         elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
                                         assignments = _extract_model_assignments(s.model(), shared_z3_vars, func_cand.parameters)
+                                        if set(assignments) != set(func_cand.parameters):
+                                            return EquivalenceProofResult(
+                                                outcome="INCONCLUSIVE_UNKNOWN",
+                                                reason="SAT return-divergence model could not materialize every parameter",
+                                            )
                                         witness = CounterexampleWitness(
                                             checker_id="VC2-Z3-SEMANTIC-DIVERGENCE", smt_status="SAT",
                                             input_assignments=assignments, base_return_state="",

@@ -209,3 +209,57 @@ def test_intent_compiler_can_use_preparsed_ast_without_reparsing() -> None:
         assert not finding or all(f.verdict == "INCONCLUSIVE" for f in finding)
     else:
         assert any(f.verdict == "FAIL" for f in finding)
+
+
+def test_unannotated_parameter_arithmetic_abstains_instead_of_integer_fallback() -> None:
+    """Generic Python inputs must not be silently coerced by the legacy U-SSA path."""
+    if z3_prover._z3_mod is None:
+        pytest.skip("z3-solver is not installed")
+
+    prover = z3_prover.Z3SymbolicProver(timeout_ms=1000)
+    base = "def f(x):\n    return x + 1\n"
+    head = "def f(x):\n    return 1 + x\n"
+    compiled = compile_file_pair(DiffFileEntry.from_sources("m.py", base, head))
+    assert compiled.syntax_error is None
+    proof = prover.prove_equivalence(
+        func_base=compiled.base_ussa["m.f"],
+        func_cand=compiled.head_ussa["m.f"],
+        base_fn_node=compiled.base_ast.functions_by_qname["m.f"],
+        cand_fn_node=compiled.head_ast.functions_by_qname["m.f"],
+    )
+    assert proof.outcome == "INCONCLUSIVE_UNSUPPORTED"
+    assert "input domain" in proof.reason or "arithmetic" in proof.reason
+
+
+def test_annotated_integer_parameter_arithmetic_remains_supported() -> None:
+    """The supported numeric annotation contract continues to prove simple rewrites."""
+    if z3_prover._z3_mod is None:
+        pytest.skip("z3-solver is not installed")
+
+    prover = z3_prover.Z3SymbolicProver(timeout_ms=1000)
+    base = "def f(x: int) -> int:\n    return x + 1\n"
+    head = "def f(x: int) -> int:\n    return 1 + x\n"
+    compiled = compile_file_pair(DiffFileEntry.from_sources("m.py", base, head))
+    assert compiled.syntax_error is None
+    proof = prover.prove_equivalence(
+        func_base=compiled.base_ussa["m.f"],
+        func_cand=compiled.head_ussa["m.f"],
+        base_fn_node=compiled.base_ast.functions_by_qname["m.f"],
+        cand_fn_node=compiled.head_ast.functions_by_qname["m.f"],
+    )
+    assert proof.outcome == "PROVEN_EQUIVALENT_UNSAT"
+
+
+def test_z3_constructor_fallback_keeps_explicit_context() -> None:
+    """Z3 constructors with inferred contexts still create terms in the proof context."""
+    if z3_prover._z3_mod is None:
+        pytest.skip("z3-solver is not installed")
+
+    z3 = z3_prover._z3_mod
+    pctx = z3_prover._Z3ProofContext(timeout_ms=1000)
+    constant = z3_prover._z3_make(z3.Const, "ctx_regression", pctx.pyval, ctx=pctx.ctx)
+    int_sort = z3.IntSort(ctx=pctx.ctx)
+    function = z3_prover._z3_make(z3.Function, "ctx_function", int_sort, int_sort, ctx=pctx.ctx)
+    assert constant.ctx == pctx.ctx
+    assert function.domain(0).ctx == pctx.ctx
+    assert function.range().ctx == pctx.ctx
