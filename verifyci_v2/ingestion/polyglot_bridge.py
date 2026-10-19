@@ -45,7 +45,10 @@ class PolyglotBridgeResolver:
             tuple[str, str]
         ] = []  # (ts_caller_qname, normalized_route)
 
-    def scan_file(self, file_path: str, source: str, language: str) -> None:
+    def scan_file(
+        self, file_path: str, source: str, language: str, *,
+        preparsed_tree: ast.Module | None = None,
+    ) -> None:
         mod_prefix = _module_prefix_from_path(file_path)
 
         if language in ("c", "cpp"):
@@ -58,7 +61,7 @@ class PolyglotBridgeResolver:
                 self._c_functions[c_sym] = f"{mod_prefix}.{c_sym}"
 
         elif language == "python":
-            tree = ast.parse(source, filename=file_path)
+            tree = preparsed_tree if preparsed_tree is not None else ast.parse(source, filename=file_path)
             ffi_handles: set[str] = set()
 
             for node in ast.walk(tree):

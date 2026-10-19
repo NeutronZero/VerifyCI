@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import msgspec
-from typing import Literal
+from typing import Iterator, Literal
 
 from verifyci_v2.contracts.canonical import CONTENT_DIGEST_ALGORITHM
 
@@ -10,14 +10,25 @@ SMTStatus = Literal[
 ]
 SeverityLevel = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 VerdictKind = Literal[
-    "PASS",
-    "WARN",
-    "FAIL",
-    "PROVEN_EQUIVALENT",
+    "PASS", "FAIL", "INCONCLUSIVE", "UNGROUNDED",
     "HEURISTIC_EQUIVALENT_CANDIDATE",
-    "UNGROUNDED",
-    "INCONCLUSIVE",
 ]
+GateStatus = Literal[
+    "COMPLETED", "ABSTAINED_RECONSTRUCTION_FAILED", "SKIPPED_CACHE_HIT",
+    "FAILED_CLOSED_ERROR",
+]
+ProofOutcome = Literal[
+    "PROVEN_EQUIVALENT_UNSAT", "PROVEN_DIVERGENT_SAT",
+    "INCONCLUSIVE_UNKNOWN", "INCONCLUSIVE_UNSUPPORTED",
+    "INCONCLUSIVE_SOLVER_UNAVAILABLE",
+]
+
+
+class GateExecutionReceipt(msgspec.Struct, frozen=True, kw_only=True):
+    gate_id: str
+    file_path: str
+    status: GateStatus
+    detail: str = ""
 
 
 class CounterexampleWitness(msgspec.Struct, frozen=True, kw_only=True):
@@ -29,6 +40,41 @@ class CounterexampleWitness(msgspec.Struct, frozen=True, kw_only=True):
     base_return_state: str
     head_return_state: str
     proof_time_ms: float
+
+
+class EquivalenceProofResult(msgspec.Struct, frozen=True, kw_only=True):
+    """Discriminated proof outcome; prevents contradictory bool/status tuples."""
+    outcome: ProofOutcome
+    witness: CounterexampleWitness | None = None
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        if self.outcome == "PROVEN_EQUIVALENT_UNSAT" and self.witness is not None:
+            raise ValueError("PROVEN_EQUIVALENT_UNSAT cannot carry a counterexample witness")
+        if self.outcome == "PROVEN_DIVERGENT_SAT":
+            if self.witness is None:
+                raise ValueError("PROVEN_DIVERGENT_SAT requires a validated counterexample witness")
+            if self.witness.smt_status != "SAT":
+                raise ValueError("PROVEN_DIVERGENT_SAT requires a SAT witness")
+
+    @property
+    def is_equivalent(self) -> bool:
+        return self.outcome == "PROVEN_EQUIVALENT_UNSAT"
+
+    @property
+    def smt_status(self) -> SMTStatus:
+        return {
+            "PROVEN_EQUIVALENT_UNSAT": "UNSAT",
+            "PROVEN_DIVERGENT_SAT": "SAT",
+            "INCONCLUSIVE_UNKNOWN": "UNKNOWN",
+            "INCONCLUSIVE_UNSUPPORTED": "UNKNOWN",
+            "INCONCLUSIVE_SOLVER_UNAVAILABLE": "SOLVER_UNAVAILABLE",
+        }[self.outcome]
+
+    def __iter__(self) -> Iterator[object]:
+        """Temporary compatibility for callers that still unpack the old tuple."""
+        yield self.is_equivalent
+        yield self.smt_status
 
 
 class CandidateFix(msgspec.Struct, frozen=True, kw_only=True):

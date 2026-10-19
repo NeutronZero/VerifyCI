@@ -349,32 +349,33 @@ class TaintTrackedSecretEngine:
         *,
         judge: DiscriminativeJudgeProtocol | None = None,
         conformal_profile: ConformalProfile | None = None,
+        preparsed_tree: ast.Module | None = None,
+        prelowered_funcs: tuple | None = None,
     ) -> tuple[VerificationFinding, ...]:
         is_test_file = is_test_or_fixture_partition(file_path)
 
-        # Unparseable input is not an engine fault. A partial diff hunk may not
-        # be valid Python on its own; the caller's syntax gate owns that case.
-        # Returning empty here keeps a raised SyntaxError from being misread as
-        # a checker failure.
+        # The pipeline supplies its retained parse/lowering artifacts. In that
+        # path the scanner never reparses or relowers the revision.
         parsed_source = source
-        try:
-            tree = ast.parse(source, filename=file_path)
-        except (SyntaxError, ValueError, IndentationError):
-            # A function-level hunk is a uniformly indented fragment. Dedenting
-            # it recovers a parseable module for pattern scanning; scanning a
-            # fragment is strictly better than scanning nothing.
+        if preparsed_tree is not None:
+            tree = preparsed_tree
+        else:
             try:
-                dedented = textwrap.dedent(source)
-            except (ValueError, IndexError):
-                return ()
-            if dedented == source:
-                return ()
-            try:
-                tree = ast.parse(dedented, filename=file_path)
+                tree = ast.parse(source, filename=file_path)
             except (SyntaxError, ValueError, IndentationError):
-                return ()
-            parsed_source = dedented
-        ussa_funcs = lower_file_to_ussa(file_path, parsed_source, language="python")
+                # Compatibility wrapper only: standalone callers may scan an
+                # isolated fragment. The pipeline never uses this repair path.
+                try:
+                    dedented = textwrap.dedent(source)
+                    if dedented == source:
+                        return ()
+                    tree = ast.parse(dedented, filename=file_path)
+                    parsed_source = dedented
+                except (SyntaxError, ValueError, IndentationError):
+                    return ()
+        ussa_funcs = prelowered_funcs
+        if ussa_funcs is None:
+            ussa_funcs = lower_file_to_ussa(file_path, parsed_source, language="python")
 
         findings: list[VerificationFinding] = []
 

@@ -148,22 +148,28 @@ def _entity_records(
     ]
 
 
-def entities_from_source(file_path: str, source: str) -> list[dict[str, Any]]:
-    """Builds provenance records from verbatim source text.
+def entities_from_source(
+    file_path: str,
+    source: str,
+    *,
+    prelowered_funcs: tuple[Any, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Build provenance records from a trusted base source and lowered functions.
 
-    Each lowered function becomes a record whose snippet is the exact text of its
-    line span. This is only meaningful when `source` comes from a stored base
-    revision: deriving it from the diff's own `base_source` would make the check
-    a tautology, because the record would be derived from the claim under test.
+    The pipeline supplies ``prelowered_funcs`` from its ``CompiledFilePair`` so
+    provenance reuses the same base compilation rather than parsing/lowering a
+    revision a second time. Standalone compatibility callers may omit it.
     """
     if not source.strip():
         return []
-    from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
-
-    try:
-        functions = lower_file_to_ussa(file_path, source, language="python")
-    except Exception:
-        return []
+    if prelowered_funcs is None:
+        from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
+        try:
+            functions = lower_file_to_ussa(file_path, source, language="python")
+        except Exception:
+            return []
+    else:
+        functions = prelowered_funcs
 
     lines = source.splitlines()
     entities: list[dict[str, Any]] = []

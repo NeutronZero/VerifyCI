@@ -72,13 +72,16 @@ _DANGEROUS_IMPORTS: dict[str, str] = {
 
 
 def scan_dangerous_calls(
-    file_path: str, source: str
+    file_path: str, source: str, *, preparsed_tree: ast.Module | None = None
 ) -> tuple[VerificationFinding, ...]:
-    """Reports dangerous-call usage. Operates on parsed Python only."""
-    try:
-        tree = ast.parse(source, filename=file_path)
-    except (SyntaxError, ValueError, IndentationError):
-        return ()
+    """Reports dangerous-call usage, reusing a pipeline-owned AST when supplied."""
+    if preparsed_tree is not None:
+        tree = preparsed_tree
+    else:
+        try:
+            tree = ast.parse(source, filename=file_path)
+        except (SyntaxError, ValueError, IndentationError):
+            return ()
 
     findings: list[VerificationFinding] = []
     seen: set[tuple[int, str]] = set()

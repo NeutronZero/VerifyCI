@@ -234,7 +234,19 @@ def _lower_stmt_list(
     current_block_id = block_id
     current_phis = phi_nodes
 
+    def block_is_terminal(candidate_id: str) -> bool:
+        for candidate in reversed(ctx.blocks):
+            if candidate.block_id == candidate_id:
+                return bool(candidate.instructions and candidate.instructions[-1].opcode in {"RETURN", "RAISE"})
+        return bool(instructions and instructions[-1].opcode in {"RETURN", "RAISE"})
+
     for stmt in _strip_docstring(stmts):
+        if instructions and instructions[-1].opcode in {"RETURN", "RAISE"}:
+            break
+        # A parent `if` may have terminated both branches. Do not emit a new
+        # synthetic block or lower subsequent statements as reachable code.
+        if not instructions and block_is_terminal(current_block_id):
+            return current_block_id
         if isinstance(stmt, (ast.Assign, ast.AnnAssign)):
             targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
             val_node = stmt.value
@@ -390,9 +402,30 @@ def _lower_stmt_list(
                     source_line=stmt.lineno,
                 )
             )
-            current_block_id = _lower_stmt_list(stmt.body, ctx, current_block_id)
+            ctx.blocks.append(
+                USSABasicBlock(
+                    block_id=current_block_id,
+                    phi_nodes=current_phis,
+                    instructions=tuple(instructions),
+                    terminator_condition=cond_str,
+                )
+            )
+            instructions = []
+            current_phis = ()
+            loop_body_id = ctx.next_block_id(f"{loop_kind.lower()}_body")
+            after_loop_id = ctx.next_block_id(f"{loop_kind.lower()}_exit")
+            ctx.record_cfg(current_block_id, loop_body_id, label="loop_enter")
+            ctx.record_cfg(current_block_id, after_loop_id, label="loop_exit")
+            body_end_id = _lower_stmt_list(stmt.body, ctx, loop_body_id)
+            if not block_is_terminal(body_end_id):
+                ctx.record_cfg(body_end_id, after_loop_id, label="fallthrough")
             if stmt.orelse:
-                current_block_id = _lower_stmt_list(stmt.orelse, ctx, current_block_id)
+                else_block_id = ctx.next_block_id(f"{loop_kind.lower()}_else")
+                ctx.record_cfg(current_block_id, else_block_id, label="loop_else")
+                else_end_id = _lower_stmt_list(stmt.orelse, ctx, else_block_id)
+                if not block_is_terminal(else_end_id):
+                    ctx.record_cfg(else_end_id, after_loop_id, label="fallthrough")
+            current_block_id = after_loop_id
 
         elif isinstance(stmt, ast.Try):
             instructions.append(
@@ -404,15 +437,39 @@ def _lower_stmt_list(
                     source_line=stmt.lineno,
                 )
             )
-            current_block_id = _lower_stmt_list(stmt.body, ctx, current_block_id)
-            for handler in stmt.handlers:
-                current_block_id = _lower_stmt_list(handler.body, ctx, current_block_id)
-            if stmt.orelse:
-                current_block_id = _lower_stmt_list(stmt.orelse, ctx, current_block_id)
-            if stmt.finalbody:
-                current_block_id = _lower_stmt_list(
-                    stmt.finalbody, ctx, current_block_id
+            ctx.blocks.append(
+                USSABasicBlock(
+                    block_id=current_block_id,
+                    phi_nodes=current_phis,
+                    instructions=tuple(instructions),
+                    terminator_condition=None,
                 )
+            )
+            instructions = []
+            current_phis = ()
+            try_body_id = ctx.next_block_id("try_body")
+            after_try_id = ctx.next_block_id("try_exit")
+            ctx.record_cfg(current_block_id, try_body_id, label="try_enter")
+            body_end_id = _lower_stmt_list(stmt.body, ctx, try_body_id)
+            if not block_is_terminal(body_end_id):
+                ctx.record_cfg(body_end_id, after_try_id, label="fallthrough")
+            for handler in stmt.handlers:
+                exc_id = ctx.next_block_id("except")
+                ctx.record_cfg(current_block_id, exc_id, label="except")
+                h_end_id = _lower_stmt_list(handler.body, ctx, exc_id)
+                if not block_is_terminal(h_end_id):
+                    ctx.record_cfg(h_end_id, after_try_id, label="fallthrough")
+            if stmt.orelse:
+                else_id = ctx.next_block_id("try_else")
+                ctx.record_cfg(current_block_id, else_id, label="try_else")
+                else_end = _lower_stmt_list(stmt.orelse, ctx, else_id)
+                if not block_is_terminal(else_end):
+                    ctx.record_cfg(else_end, after_try_id, label="fallthrough")
+            if stmt.finalbody:
+                finally_id = ctx.next_block_id("finally")
+                ctx.record_cfg(current_block_id, finally_id, label="finally")
+                _lower_stmt_list(stmt.finalbody, ctx, finally_id)
+            current_block_id = after_try_id
 
         elif isinstance(stmt, ast.If):
             cond_str, cond_vars = _expr_to_ssa_operands(stmt.test, ctx)
@@ -444,69 +501,75 @@ def _lower_stmt_list(
             ctx.record_cfg(current_block_id, then_block_id, label=cond_str)
             ctx.record_cfg(current_block_id, else_block_id, label=f"NOT({cond_str})")
 
-            # Lower THEN branch
+            # Lower THEN branch and record an edge to the merge only if it
+            # actually falls through (RETURN/RAISE terminate the branch).
             ctx.current_env = dict(pre_branch_env)
             then_end_id = _lower_stmt_list(stmt.body, ctx, then_block_id)
             then_env = dict(ctx.current_env)
-            ctx.record_cfg(then_end_id, merge_block_id, label="fallthrough")
+            then_falls = not block_is_terminal(then_end_id)
+            if then_falls:
+                ctx.record_cfg(then_end_id, merge_block_id, label="fallthrough")
 
-            # Lower ELSE branch
+            # Lower ELSE branch.
             ctx.current_env = dict(pre_branch_env)
             if stmt.orelse:
                 else_end_id = _lower_stmt_list(stmt.orelse, ctx, else_block_id)
             else:
-                ctx.blocks.append(
-                    USSABasicBlock(
-                        block_id=else_block_id,
-                        phi_nodes=(),
-                        instructions=(),
-                        terminator_condition=None,
-                    )
-                )
+                ctx.blocks.append(USSABasicBlock(
+                    block_id=else_block_id, phi_nodes=(), instructions=(), terminator_condition=None
+                ))
                 else_end_id = else_block_id
             else_env = dict(ctx.current_env)
-            ctx.record_cfg(else_end_id, merge_block_id, label="fallthrough")
+            else_falls = not block_is_terminal(else_end_id)
+            if else_falls:
+                ctx.record_cfg(else_end_id, merge_block_id, label="fallthrough")
 
-            # Insert Phi nodes for any variable mutated in either branch
-            all_vars = sorted(set(then_env.keys()) | set(else_env.keys()))
-            merge_phis: list[PhiNode] = []
-            merged_env: dict[str, str] = {}
-            for var_name in all_vars:
-                v_then = then_env.get(var_name)
-                v_else = else_env.get(var_name)
-                if v_then == v_else and v_then is not None:
-                    merged_env[var_name] = v_then
-                elif v_then is not None and v_else is not None:
-                    phi_ssa = ctx.new_version(var_name)
-                    merged_env[var_name] = phi_ssa
-                    merge_phis.append(
-                        PhiNode(
+            if not then_falls and not else_falls:
+                # No path reaches the merge; do not create a disconnected block.
+                current_block_id = then_end_id
+                current_phis = ()
+                instructions = []
+                ctx.current_env = dict(pre_branch_env)
+                break
+            if then_falls and not else_falls:
+                merged_env = then_env
+                merge_phis = []
+            elif else_falls and not then_falls:
+                merged_env = else_env
+                merge_phis = []
+            else:
+                all_vars = sorted(set(then_env.keys()) | set(else_env.keys()))
+                merge_phis = []
+                merged_env = {}
+                for var_name in all_vars:
+                    v_then = then_env.get(var_name)
+                    v_else = else_env.get(var_name)
+                    if v_then == v_else and v_then is not None:
+                        merged_env[var_name] = v_then
+                    elif v_then is not None and v_else is not None:
+                        phi_ssa = ctx.new_version(var_name)
+                        merged_env[var_name] = phi_ssa
+                        merge_phis.append(PhiNode(
                             target_var=phi_ssa,
-                            incoming_branches=(
-                                (then_end_id, v_then),
-                                (else_end_id, v_else),
-                            ),
-                        )
-                    )
-                    ctx.record_dfg(v_then, phi_ssa)
-                    ctx.record_dfg(v_else, phi_ssa)
-                else:
-                    chosen = v_then or v_else
-                    if chosen is not None:
-                        merged_env[var_name] = chosen
+                            incoming_branches=((then_end_id, v_then), (else_end_id, v_else)),
+                        ))
+                        ctx.record_dfg(v_then, phi_ssa)
+                        ctx.record_dfg(v_else, phi_ssa)
+                    else:
+                        chosen = v_then or v_else
+                        if chosen is not None:
+                            merged_env[var_name] = chosen
 
             ctx.current_env = merged_env
             current_block_id = merge_block_id
             current_phis = tuple(merge_phis)
 
-    ctx.blocks.append(
-        USSABasicBlock(
-            block_id=current_block_id,
-            phi_nodes=current_phis,
-            instructions=tuple(instructions),
-            terminator_condition=None,
-        )
-    )
+    # A block may already have been emitted as a terminal branch end.
+    if not any(block.block_id == current_block_id for block in ctx.blocks):
+        ctx.blocks.append(USSABasicBlock(
+            block_id=current_block_id, phi_nodes=current_phis,
+            instructions=tuple(instructions), terminator_condition=None,
+        ))
     return current_block_id
 
 
@@ -567,13 +630,21 @@ def lower_python_function(
 ) -> FunctionUSSA:
     mod_prefix = _module_prefix_from_path(file_path)
     qname = f"{mod_prefix}.{scope}{stmt.name}"
-    params = tuple(arg.arg for arg in stmt.args.args)
-    param_sigs = [
-        f"{arg.arg}:{ast.unparse(arg.annotation)}" if arg.annotation else arg.arg
-        for arg in stmt.args.args
-    ]
+    ordered_args = [*stmt.args.posonlyargs, *stmt.args.args]
+    if stmt.args.vararg is not None:
+        ordered_args.append(stmt.args.vararg)
+    ordered_args.extend(stmt.args.kwonlyargs)
+    if stmt.args.kwarg is not None:
+        ordered_args.append(stmt.args.kwarg)
+    params = tuple(arg.arg for arg in ordered_args)
     ret_ann = ast.unparse(stmt.returns) if stmt.returns is not None else "Any"
-    canonical_sig = f"def {stmt.name}({', '.join(param_sigs)}) -> {ret_ann}"
+    # The interface digest must change when defaults, parameter kinds, or
+    # annotations change; these affect callers even if the function body does not.
+    try:
+        args_repr = ast.unparse(stmt.args)
+    except Exception:
+        args_repr = ", ".join(params)
+    canonical_sig = f"def {stmt.name}({args_repr}) -> {ret_ann}"
 
     ctx = _SSABuilderContext(qualified_name=qname, parameters=params)
     _lower_stmt_list(stmt.body, ctx, block_id="entry")
@@ -651,28 +722,9 @@ def lower_file_to_ussa(
     """Lowers all functions in a source file into canonical FunctionUSSA representations."""
     if language == "python":
         tree = ast.parse(source, filename=file_path)
-        functions: list[FunctionUSSA] = []
-
-        def _collect(body: list[ast.stmt], scope: str) -> None:
-            for stmt in body:
-                if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    functions.append(
-                        lower_python_function(
-                            stmt,
-                            file_path=file_path,
-                            repo_id=repo_id,
-                            scope=scope,
-                        )
-                    )
-                elif isinstance(stmt, ast.ClassDef):
-                    # Most behaviour in Python lives in methods. Stopping at
-                    # module level left every method unlowered, so a change
-                    # inside a class produced no functions at all and no
-                    # comparison ran.
-                    _collect(stmt.body, f"{scope}{stmt.name}.")
-
-        _collect(tree.body, "")
-        return tuple(functions)
+        return lower_module_to_ussa(
+            file_path, tree, source, language=language, repo_id=repo_id
+        )
 
     # Polyglot lowering for C/C++ and TypeScript/JavaScript
     mod_prefix = _module_prefix_from_path(file_path)
@@ -762,3 +814,39 @@ def lower_file_to_ussa(
             )
         )
     return tuple(results)
+
+
+def lower_module_to_ussa(
+    file_path: str,
+    tree: ast.Module,
+    source: str,
+    *,
+    language: str = "python",
+    repo_id: str = "default-repo",
+) -> tuple[FunctionUSSA, ...]:
+    """Lower an already-parsed Python module without reparsing source text.
+
+    This is the pipeline-owned lowering entry point. `source` is retained for
+    source-sensitive digests and line metadata; `tree` is the exact AST that was
+    parsed and indexed by the compiler.
+    """
+    if language != "python":
+        raise ValueError("lower_module_to_ussa accepts Python ASTs only")
+    functions: list[FunctionUSSA] = []
+
+    def _collect(body: list[ast.stmt], scope: str) -> None:
+        for stmt in body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                functions.append(lower_python_function(stmt, file_path=file_path, repo_id=repo_id, scope=scope))
+                # Nested functions have independent identities; analyze them
+                # separately so their bodies cannot disappear from the diff graph.
+                _collect(stmt.body, f"{scope}{stmt.name}.")
+            elif isinstance(stmt, ast.ClassDef):
+                _collect(stmt.body, f"{scope}{stmt.name}.")
+            else:
+                for child in ast.iter_child_nodes(stmt):
+                    if isinstance(child, ast.stmt):
+                        _collect([child], scope)
+
+    _collect(tree.body, "")
+    return tuple(functions)

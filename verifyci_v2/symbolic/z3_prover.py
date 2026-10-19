@@ -3,11 +3,13 @@ from __future__ import annotations
 import ast
 import msgspec
 import time
+from dataclasses import dataclass
+from collections import deque
 from typing import Any
-import zlib
 
 from verifyci_v2.contracts.attestation import (
     CounterexampleWitness,
+    EquivalenceProofResult,
     SMTStatus,
     VerificationFinding,
 )
@@ -89,33 +91,53 @@ def _split_kwarg(arg_s: str) -> tuple[str, str] | None:
     return name, value.strip()
 
 
-def _to_z3_int(val: Any) -> Any:
+def _z3_context_of(value: Any = None, ctx: Any = None) -> Any:
+    if ctx is not None:
+        return ctx
+    try:
+        return value.ctx
+    except Exception:
+        return None
+
+
+def _z3_make(constructor: Any, *args: Any, ctx: Any = None) -> Any:
+    """Construct a Z3 object in the requested context when one is supplied."""
+    if ctx is not None:
+        try:
+            return constructor(*args, ctx=ctx)
+        except TypeError:
+            pass
+    return constructor(*args)
+
+
+def _to_z3_int(val: Any, *, ctx: Any = None) -> Any:
     if _z3_mod is None or val is None:
         return None
-    if _z3_mod.is_int_value(val) or (
-        hasattr(val, "sort") and val.sort() == _z3_mod.IntSort()
-    ):
+    ctx = _z3_context_of(val, ctx)
+    int_sort = _z3_make(_z3_mod.IntSort, ctx=ctx)
+    if _z3_mod.is_int_value(val) or (hasattr(val, "sort") and val.sort() == int_sort):
         return val
     if _z3_mod.is_bool(val):
-        return _z3_mod.If(val, _z3_mod.IntVal(1), _z3_mod.IntVal(0))
+        return _z3_mod.If(val, _z3_make(_z3_mod.IntVal, 1, ctx=ctx), _z3_make(_z3_mod.IntVal, 0, ctx=ctx))
     if isinstance(val, bool):
-        return _z3_mod.IntVal(1 if val else 0)
+        return _z3_make(_z3_mod.IntVal, 1 if val else 0, ctx=ctx)
     if isinstance(val, int):
-        return _z3_mod.IntVal(val)
+        return _z3_make(_z3_mod.IntVal, val, ctx=ctx)
     return None
 
 
-def _to_z3_bool(val: Any) -> Any:
+def _to_z3_bool(val: Any, *, ctx: Any = None) -> Any:
     if _z3_mod is None or val is None:
         return None
+    ctx = _z3_context_of(val, ctx)
     if _z3_mod.is_bool(val):
         return val
-    if hasattr(val, "sort") and val.sort() == _z3_mod.IntSort():
-        return val != _z3_mod.IntVal(0)
+    if hasattr(val, "sort") and val.sort() == _z3_make(_z3_mod.IntSort, ctx=ctx):
+        return val != _z3_make(_z3_mod.IntVal, 0, ctx=ctx)
     if isinstance(val, bool):
-        return _z3_mod.BoolVal(val)
+        return _z3_make(_z3_mod.BoolVal, val, ctx=ctx)
     if isinstance(val, int):
-        return _z3_mod.BoolVal(val != 0)
+        return _z3_make(_z3_mod.BoolVal, val != 0, ctx=ctx)
     return None
 
 
@@ -235,40 +257,40 @@ def _normalize_ussa_expr(
     return base
 
 
-def _ast_expr_to_z3(node: ast.AST, z3_vars: dict[str, Any]) -> Any:
+def _ast_expr_to_z3(node: ast.AST, z3_vars: dict[str, Any], *, ctx: Any = None) -> Any:
     """Fallback AST-to-Z3 translator for unparsed expressions."""
     if _z3_mod is None:
         return None
     if isinstance(node, ast.Name):
         if node.id not in z3_vars:
-            z3_vars[node.id] = _z3_mod.Int(node.id)
+            z3_vars[node.id] = _z3_make(_z3_mod.Int, node.id, ctx=ctx)
         return z3_vars[node.id]
     if isinstance(node, ast.Constant):
         if isinstance(node.value, bool):
-            return _z3_mod.BoolVal(node.value)
+            return _z3_make(_z3_mod.BoolVal, node.value, ctx=ctx)
         if isinstance(node.value, int):
-            return _z3_mod.IntVal(node.value)
-        if node.value is None:
-            return _z3_mod.IntVal(-999999)
-        if isinstance(node.value, str):
-            return _z3_mod.IntVal(zlib.crc32(node.value.encode("utf-8")))
+            return _z3_make(_z3_mod.IntVal, node.value, ctx=ctx)
+        # Legacy integer-only structural analysis cannot represent these values.
+        # Return unsupported rather than introduce an aliasing sentinel/hash.
+        if node.value is None or isinstance(node.value, str):
+            return None
         return None
     if isinstance(node, ast.UnaryOp):
-        operand = _ast_expr_to_z3(node.operand, z3_vars)
+        operand = _ast_expr_to_z3(node.operand, z3_vars, ctx=ctx)
         if operand is None:
             return None
         if isinstance(node.op, ast.Not):
-            b_op = _to_z3_bool(operand)
+            b_op = _to_z3_bool(operand, ctx=ctx)
             return _z3_mod.Not(b_op) if b_op is not None else None
         if isinstance(node.op, ast.USub):
-            i_op = _to_z3_int(operand)
+            i_op = _to_z3_int(operand, ctx=ctx)
             return -i_op if i_op is not None else None
         if isinstance(node.op, ast.UAdd):
-            return _to_z3_int(operand)
+            return _to_z3_int(operand, ctx=ctx)
         return None
     if isinstance(node, ast.BinOp):
-        lhs = _to_z3_int(_ast_expr_to_z3(node.left, z3_vars))
-        rhs = _to_z3_int(_ast_expr_to_z3(node.right, z3_vars))
+        lhs = _to_z3_int(_ast_expr_to_z3(node.left, z3_vars, ctx=ctx), ctx=ctx)
+        rhs = _to_z3_int(_ast_expr_to_z3(node.right, z3_vars, ctx=ctx), ctx=ctx)
         if lhs is None or rhs is None:
             return None
         if isinstance(node.op, ast.Add):
@@ -279,14 +301,14 @@ def _ast_expr_to_z3(node: ast.AST, z3_vars: dict[str, Any]) -> Any:
             return lhs * rhs
         return None
     if isinstance(node, ast.Compare):
-        lhs_raw = _ast_expr_to_z3(node.left, z3_vars)
+        lhs_raw = _ast_expr_to_z3(node.left, z3_vars, ctx=ctx)
         if lhs_raw is None:
             return None
         comps = []
-        lhs = _to_z3_int(lhs_raw)
+        lhs = _to_z3_int(lhs_raw, ctx=ctx)
         for op, r_node in zip(node.ops, node.comparators):
-            rhs_raw = _ast_expr_to_z3(r_node, z3_vars)
-            rhs = _to_z3_int(rhs_raw)
+            rhs_raw = _ast_expr_to_z3(r_node, z3_vars, ctx=ctx)
+            rhs = _to_z3_int(rhs_raw, ctx=ctx)
             if lhs is None or rhs is None:
                 return None
             if isinstance(op, ast.Gt):
@@ -305,10 +327,10 @@ def _ast_expr_to_z3(node: ast.AST, z3_vars: dict[str, Any]) -> Any:
                 return None
             lhs = rhs
         if not comps:
-            return _z3_mod.BoolVal(True)
+            return _z3_make(_z3_mod.BoolVal, True, ctx=ctx)
         return _z3_mod.And(*comps) if len(comps) > 1 else comps[0]
     if isinstance(node, ast.BoolOp):
-        vals = [_to_z3_bool(_ast_expr_to_z3(v, z3_vars)) for v in node.values]
+        vals = [_to_z3_bool(_ast_expr_to_z3(v, z3_vars, ctx=ctx), ctx=ctx) for v in node.values]
         if any(v is None for v in vals):
             return None
         if isinstance(node.op, ast.And):
@@ -317,11 +339,11 @@ def _ast_expr_to_z3(node: ast.AST, z3_vars: dict[str, Any]) -> Any:
             return _z3_mod.Or(*vals)
     if isinstance(node, ast.Call):
         fn_name = ast.unparse(node.func)
-        args_z3 = [_to_z3_int(_ast_expr_to_z3(a, z3_vars)) for a in node.args]
+        args_z3 = [_to_z3_int(_ast_expr_to_z3(a, z3_vars, ctx=ctx), ctx=ctx) for a in node.args]
         if any(a is None for a in args_z3):
             return None
-        arg_sorts = [_z3_mod.IntSort() for _ in args_z3]
-        f_sym = _z3_mod.Function(fn_name, *arg_sorts, _z3_mod.IntSort())
+        arg_sorts = [_z3_make(_z3_mod.IntSort, ctx=ctx) for _ in args_z3]
+        f_sym = _z3_make(_z3_mod.Function, fn_name, *arg_sorts, _z3_make(_z3_mod.IntSort, ctx=ctx), ctx=ctx)
         return f_sym(*args_z3)
     return None
 
@@ -331,6 +353,8 @@ def _ussa_sexpr_to_z3(
     ssa_env: dict[str, Any],
     z3_vars: dict[str, Any],
     parameters: set[str],
+    *,
+    ctx: Any = None,
 ) -> Any:
     """Translates a U-SSA operand expression string directly into a Z3 AST term."""
     if _z3_mod is None:
@@ -343,16 +367,16 @@ def _ussa_sexpr_to_z3(
         return ssa_env[s]
 
     if s == "True":
-        return _z3_mod.BoolVal(True)
+        return _z3_make(_z3_mod.BoolVal, True, ctx=ctx)
     if s == "False":
-        return _z3_mod.BoolVal(False)
+        return _z3_make(_z3_mod.BoolVal, False, ctx=ctx)
     if s == "None":
-        return _z3_mod.IntVal(-999999)
+        return None  # typed handling lives in the PyVal equivalence encoder
 
     # Integer literal
     if s.lstrip("-").isdigit():
         try:
-            return _z3_mod.IntVal(int(s))
+            return _z3_make(_z3_mod.IntVal, int(s), ctx=ctx)
         except ValueError:
             pass
 
@@ -360,12 +384,12 @@ def _ussa_sexpr_to_z3(
     if (s.startswith("'") and s.endswith("'")) or (
         s.startswith('"') and s.endswith('"')
     ):
-        return _z3_mod.IntVal(zlib.crc32(s[1:-1].encode("utf-8")))
+        return None  # never map strings into a collision-prone integer domain
 
     # Outer CFG negation wrapper: NOT(...)
     if s.startswith("NOT(") and s.endswith(")"):
-        inner = _ussa_sexpr_to_z3(s[4:-1], ssa_env, z3_vars, parameters)
-        b_inner = _to_z3_bool(inner)
+        inner = _ussa_sexpr_to_z3(s[4:-1], ssa_env, z3_vars, parameters, ctx=ctx)
+        b_inner = _to_z3_bool(inner, ctx=ctx)
         return _z3_mod.Not(b_inner) if b_inner is not None else None
 
     # U-SSA Call: CALL(callee, arg1, arg2, ...)
@@ -389,13 +413,13 @@ def _ussa_sexpr_to_z3(
                 # two sides that agree on the binding still encode congruently.
                 kw_name, arg_s = kw
                 kw_names.append(kw_name)
-            z_arg = _to_z3_int(_ussa_sexpr_to_z3(arg_s, ssa_env, z3_vars, parameters))
+            z_arg = _to_z3_int(_ussa_sexpr_to_z3(arg_s, ssa_env, z3_vars, parameters, ctx=ctx), ctx=ctx)
             if z_arg is None:
                 return None
             args_z3.append(z_arg)
         sym_name = callee + "".join(f"@kw:{n}" for n in kw_names)
-        arg_sorts = [_z3_mod.IntSort() for _ in args_z3]
-        f_sym = _z3_mod.Function(sym_name, *arg_sorts, _z3_mod.IntSort())
+        arg_sorts = [_z3_make(_z3_mod.IntSort, ctx=ctx) for _ in args_z3]
+        f_sym = _z3_make(_z3_mod.Function, sym_name, *arg_sorts, _z3_make(_z3_mod.IntSort, ctx=ctx), ctx=ctx)
         return f_sym(*args_z3)
 
     # Parenthesized U-SSA S-expression
@@ -407,24 +431,24 @@ def _ussa_sexpr_to_z3(
         # Unary prefix: (Not x_0), (USub x_0), (UAdd x_0)
         if len(tokens) == 2 and tokens[0] in _UNARY_OPS:
             op = tokens[0]
-            val = _ussa_sexpr_to_z3(tokens[1], ssa_env, z3_vars, parameters)
+            val = _ussa_sexpr_to_z3(tokens[1], ssa_env, z3_vars, parameters, ctx=ctx)
             if val is None:
                 return None
             if op == "Not":
-                b_val = _to_z3_bool(val)
+                b_val = _to_z3_bool(val, ctx=ctx)
                 return _z3_mod.Not(b_val) if b_val is not None else None
             if op == "USub":
-                i_val = _to_z3_int(val)
+                i_val = _to_z3_int(val, ctx=ctx)
                 return -i_val if i_val is not None else None
             if op == "UAdd":
-                return _to_z3_int(val)
+                return _to_z3_int(val, ctx=ctx)
             return None
 
         # Binary prefix: (Add lhs rhs), (Sub lhs rhs), (Mult lhs rhs)
         if len(tokens) == 3 and tokens[0] in _BIN_OPS:
             op = tokens[0]
-            lhs = _to_z3_int(_ussa_sexpr_to_z3(tokens[1], ssa_env, z3_vars, parameters))
-            rhs = _to_z3_int(_ussa_sexpr_to_z3(tokens[2], ssa_env, z3_vars, parameters))
+            lhs = _to_z3_int(_ussa_sexpr_to_z3(tokens[1], ssa_env, z3_vars, parameters, ctx=ctx), ctx=ctx)
+            rhs = _to_z3_int(_ussa_sexpr_to_z3(tokens[2], ssa_env, z3_vars, parameters, ctx=ctx), ctx=ctx)
             if lhs is None or rhs is None:
                 return None
             if op == "Add":
@@ -439,36 +463,39 @@ def _ussa_sexpr_to_z3(
                 return _z3_mod.If(
                     rhs != 0,
                     lhs / rhs,
-                    _z3_mod.IntVal(0),
+                    _z3_make(_z3_mod.IntVal, 0, ctx=ctx),
                 )
             if op == "Mod":
                 return _z3_mod.If(
                     rhs != 0,
                     lhs % rhs,
-                    _z3_mod.IntVal(0),
+                    _z3_make(_z3_mod.IntVal, 0, ctx=ctx),
                 )
             if op == "BitAnd":
-                f_sym = _z3_mod.Function(
+                f_sym = _z3_make(_z3_mod.Function,
                     "bitand_uninterp",
-                    _z3_mod.IntSort(),
-                    _z3_mod.IntSort(),
-                    _z3_mod.IntSort(),
+                    _z3_make(_z3_mod.IntSort, ctx=ctx),
+                    _z3_make(_z3_mod.IntSort, ctx=ctx),
+                    _z3_make(_z3_mod.IntSort, ctx=ctx),
+                    ctx=ctx,
                 )
                 return f_sym(lhs, rhs)
             if op == "BitOr":
-                f_sym = _z3_mod.Function(
+                f_sym = _z3_make(_z3_mod.Function,
                     "bitor_uninterp",
-                    _z3_mod.IntSort(),
-                    _z3_mod.IntSort(),
-                    _z3_mod.IntSort(),
+                    _z3_make(_z3_mod.IntSort, ctx=ctx),
+                    _z3_make(_z3_mod.IntSort, ctx=ctx),
+                    _z3_make(_z3_mod.IntSort, ctx=ctx),
+                    ctx=ctx,
                 )
                 return f_sym(lhs, rhs)
             if op == "BitXor":
-                f_sym = _z3_mod.Function(
+                f_sym = _z3_make(_z3_mod.Function,
                     "bitxor_uninterp",
-                    _z3_mod.IntSort(),
-                    _z3_mod.IntSort(),
-                    _z3_mod.IntSort(),
+                    _z3_make(_z3_mod.IntSort, ctx=ctx),
+                    _z3_make(_z3_mod.IntSort, ctx=ctx),
+                    _z3_make(_z3_mod.IntSort, ctx=ctx),
+                    ctx=ctx,
                 )
                 return f_sym(lhs, rhs)
             return None
@@ -477,7 +504,7 @@ def _ussa_sexpr_to_z3(
         if len(tokens) >= 2 and tokens[0] in _BOOL_OPS:
             op = tokens[0]
             b_vals = [
-                _to_z3_bool(_ussa_sexpr_to_z3(t, ssa_env, z3_vars, parameters))
+                _to_z3_bool(_ussa_sexpr_to_z3(t, ssa_env, z3_vars, parameters, ctx=ctx), ctx=ctx)
                 for t in tokens[1:]
             ]
             if any(v is None for v in b_vals):
@@ -486,14 +513,14 @@ def _ussa_sexpr_to_z3(
 
         # Infix Comparison: (x_0 Gt 0) or chained (0 Lt x_0 Lt 10)
         if len(tokens) >= 3 and len(tokens) % 2 == 1 and tokens[1] in _COMPARE_OPS:
-            lhs = _to_z3_int(_ussa_sexpr_to_z3(tokens[0], ssa_env, z3_vars, parameters))
+            lhs = _to_z3_int(_ussa_sexpr_to_z3(tokens[0], ssa_env, z3_vars, parameters, ctx=ctx), ctx=ctx)
             if lhs is None:
                 return None
             comps = []
             for idx in range(1, len(tokens), 2):
                 op_name = tokens[idx]
                 rhs = _to_z3_int(
-                    _ussa_sexpr_to_z3(tokens[idx + 1], ssa_env, z3_vars, parameters)
+                    _ussa_sexpr_to_z3(tokens[idx + 1], ssa_env, z3_vars, parameters, ctx=ctx), ctx=ctx
                 )
                 if rhs is None:
                     return None
@@ -521,14 +548,12 @@ def _ussa_sexpr_to_z3(
     if base_name in z3_vars:
         return z3_vars[base_name]
     if s.isidentifier():
-        z3_vars[base_name] = _z3_mod.Int(base_name)
+        z3_vars[base_name] = _z3_make(_z3_mod.Int, base_name, ctx=ctx)
         return z3_vars[base_name]
 
-    try:
-        parsed = ast.parse(s, mode="eval").body
-        return _ast_expr_to_z3(parsed, z3_vars)
-    except SyntaxError:
-        return None
+    # Do not parse source-expression fragments here: parsing belongs to the
+    # compiler stage. Expressions outside the explicit U-SSA grammar abstain.
+    return None
 
 
 class _USSACallRecord(msgspec.Struct, frozen=True, kw_only=True):
@@ -569,15 +594,23 @@ class _USSASymbolicExtractor:
     """
 
     def __init__(
-        self, func_ussa: FunctionUSSA, z3_vars: dict[str, Any] | None = None
+        self, func_ussa: FunctionUSSA, z3_vars: dict[str, Any] | None = None,
+        *, ctx: Any = None,
     ) -> None:
         self.func = func_ussa
         self.param_set = set(func_ussa.parameters)
+        if _z3_mod is not None and ctx is None:
+            if z3_vars:
+                first = next(iter(z3_vars.values()), None)
+                ctx = getattr(first, "ctx", None)
+            if ctx is None:
+                ctx = _z3_mod.Context()
+        self.ctx = ctx
         self.z3_vars: dict[str, Any] = (
             dict(z3_vars)
             if z3_vars is not None
             else (
-                {p: _z3_mod.Int(p) for p in func_ussa.parameters}
+                {p: _z3_make(_z3_mod.Int, p, ctx=self.ctx) for p in func_ussa.parameters}
                 if _z3_mod is not None
                 else {}
             )
@@ -642,7 +675,7 @@ class _USSASymbolicExtractor:
                         None
                         if kw_name
                         else _ussa_sexpr_to_z3(
-                            arg_s, ssa_env, self.z3_vars, self.param_set
+                            arg_s, ssa_env, self.z3_vars, self.param_set, ctx=self.ctx
                         )
                     )
                 self.calls.append(
@@ -668,8 +701,61 @@ class _USSASymbolicExtractor:
             return f"{last.opcode}({last.operands[0]})"
         return last.opcode
 
+    def _validate_cfg(self) -> str | None:
+        """Reject cyclic, malformed, duplicate-id, or disconnected CFGs."""
+        block_ids = [b.block_id for b in self.func.basic_blocks]
+        if len(block_ids) != len(set(block_ids)):
+            return "MalformedCFG:DuplicateBlockId"
+        ids = set(block_ids)
+        if not block_ids:
+            return "EmptyCFG"
+        graph: dict[str, list[str]] = {bid: [] for bid in block_ids}
+        for edge in self.func.cfg_edges:
+            if edge.edge_kind != "CFG":
+                continue
+            if edge.src_node_uid not in ids or edge.dst_node_uid not in ids:
+                return "MalformedCFG:UnknownEdgeEndpoint"
+            graph[edge.src_node_uid].append(edge.dst_node_uid)
+        color: dict[str, int] = {bid: 0 for bid in block_ids}
+        reachable: set[str] = set()
+        for root in block_ids:
+            if color[root] != 0:
+                continue
+            stack: list[tuple[str, int]] = [(root, 0)]
+            color[root] = 1
+            while stack:
+                node, next_child = stack[-1]
+                children = graph[node]
+                if next_child >= len(children):
+                    color[node] = 2
+                    stack.pop()
+                    continue
+                child = children[next_child]
+                stack[-1] = (node, next_child + 1)
+                if color[child] == 1:
+                    return "CyclicCFG"
+                if color[child] == 0:
+                    color[child] = 1
+                    stack.append((child, 0))
+        entry = block_ids[0]
+        todo = [entry]
+        while todo:
+            node = todo.pop()
+            if node in reachable:
+                continue
+            reachable.add(node)
+            todo.extend(graph[node])
+        if reachable != ids:
+            return "DisconnectedCFG"
+        return None
+
     def _explore(self) -> None:
         if not self.func.basic_blocks:
+            self.unsupported_construct = "EmptyCFG"
+            return
+        cfg_problem = self._validate_cfg()
+        if cfg_problem is not None:
+            self.unsupported_construct = cfg_problem
             return
 
         for blk in self.func.basic_blocks:
@@ -687,174 +773,246 @@ class _USSASymbolicExtractor:
             init_expr_env[f"{p}_0"] = p
             init_expr_env[p] = p
 
-        entry_id = self.func.basic_blocks[0].block_id
-        self._walk_block(
-            block_id=entry_id,
-            pred_block_id=None,
-            ssa_env=init_ssa_env,
-            expr_env=init_expr_env,
-            path_guards_z3=(),
-            visited_blocks=frozenset(),
-        )
+        self._walk_dag(init_ssa_env, init_expr_env)
 
-    def _walk_block(
-        self,
-        block_id: str,
-        pred_block_id: str | None,
-        ssa_env: dict[str, Any],
-        expr_env: dict[str, str],
-        path_guards_z3: tuple[Any, ...],
-        visited_blocks: frozenset[str],
+    def _walk_dag(
+        self, initial_ssa: dict[str, Any], initial_expr: dict[str, str]
     ) -> None:
-        if block_id in visited_blocks:
+        """Encode each acyclic CFG block once with reachability and SSA merges.
+
+        Cyclic and disconnected CFGs are rejected by ``_validate_cfg`` before
+        this method runs. The algorithm therefore processes each block and edge
+        a bounded number of times instead of enumerating root-to-exit paths.
+        """
+        if _z3_mod is None:
+            self.unsupported_construct = "Z3Unavailable"
             return
-        blk = self._block_map.get(block_id)
-        if blk is None:
+        block_ids = [block.block_id for block in self.func.basic_blocks]
+        entry_id = block_ids[0]
+        blocks = self._block_map
+        edges = [edge for edge in self.func.cfg_edges if edge.edge_kind == "CFG"]
+        outgoing: dict[str, list[CPGEdge]] = {bid: [] for bid in block_ids}
+        incoming: dict[str, list[CPGEdge]] = {bid: [] for bid in block_ids}
+        for edge in edges:
+            outgoing[edge.src_node_uid].append(edge)
+            incoming[edge.dst_node_uid].append(edge)
+
+        # Deterministic Kahn topological ordering.
+        indegree = {bid: len(incoming[bid]) for bid in block_ids}
+        ready = deque(bid for bid in block_ids if indegree[bid] == 0)
+        order: list[str] = []
+        while ready:
+            bid = ready.popleft()
+            order.append(bid)
+            for edge in outgoing[bid]:
+                indegree[edge.dst_node_uid] -= 1
+                if indegree[edge.dst_node_uid] == 0:
+                    ready.append(edge.dst_node_uid)
+        if len(order) != len(block_ids):
+            self.unsupported_construct = "CyclicCFG"
+            return
+        if order[0] != entry_id:
+            self.unsupported_construct = "MalformedCFG:EntryNotRoot"
             return
 
-        cur_ssa = dict(ssa_env)
-        cur_expr = dict(expr_env)
+        bool_true = _z3_make(_z3_mod.BoolVal, True, ctx=self.ctx)
+        reach: dict[str, Any] = {entry_id: bool_true}
+        out_ssa: dict[str, dict[str, Any]] = {}
+        out_expr: dict[str, dict[str, str]] = {}
+        edge_guard: dict[tuple[str, str, str | None], Any] = {}
 
-        # Resolve PhiNodes based on the incoming predecessor block
-        for phi in blk.phi_nodes:
-            chosen_ssa: str | None = None
-            for incoming_blk, var_ssa in phi.incoming_branches:
-                if incoming_blk == pred_block_id:
-                    chosen_ssa = var_ssa
-                    break
-            if chosen_ssa is None and phi.incoming_branches:
-                for _inc_blk, var_ssa in phi.incoming_branches:
-                    if var_ssa in cur_ssa:
-                        chosen_ssa = var_ssa
-                        break
-            if chosen_ssa is not None:
-                if chosen_ssa in cur_ssa:
-                    cur_ssa[phi.target_var] = cur_ssa[chosen_ssa]
-                if chosen_ssa in cur_expr:
-                    cur_expr[phi.target_var] = cur_expr[chosen_ssa]
+        def get_edge_guard(edge: CPGEdge, ssa_env: dict[str, Any]) -> Any:
+            label = edge.predicate_label
+            if label is None or label == "fallthrough":
+                return bool_true
+            translated = _ussa_sexpr_to_z3(label, ssa_env, self.z3_vars, self.param_set, ctx=self.ctx)
+            guard = _to_z3_bool(translated, ctx=self.ctx)
+            if guard is None:
+                self.unsupported_construct = "UnsupportedCFGGuard"
+            return guard
 
-        out_edges = self._cfg_out.get(block_id, [])
+        def merge_values(
+            key: str,
+            predecessor_edges: list[CPGEdge],
+            envs: dict[str, dict[str, Any]],
+            routes: dict[tuple[str, str, str | None], Any],
+            *,
+            is_expr: bool = False,
+        ) -> Any:
+            candidates: list[tuple[Any, Any]] = []
+            for edge in predecessor_edges:
+                src = edge.src_node_uid
+                env = envs.get(src, {})
+                if key not in env:
+                    continue
+                edge_condition = routes.get((edge.src_node_uid, edge.dst_node_uid, edge.predicate_label))
+                source_reach = reach.get(src)
+                if edge_condition is None or source_reach is None:
+                    continue
+                condition = _z3_mod.And(source_reach, edge_condition)
+                candidates.append((condition, env[key]))
+            if not candidates:
+                return None
+            values = [value for _condition, value in candidates]
+            if is_expr:
+                if all(value == values[0] for value in values[1:]):
+                    return values[0]
+                return "PHI(" + ",".join(str(value) for value in values) + ")"
+            if all(
+                (value is values[0]) or
+                (value is not None and values[0] is not None and _z3_mod.eq(value, values[0]))
+                for value in values[1:]
+            ):
+                return values[0]
+            if any(value is None for value in values):
+                return None
+            try:
+                first_sort = values[0].sort()
+                if any(value.sort() != first_sort for value in values[1:]):
+                    return None
+                result = values[-1]
+                for condition, value in reversed(candidates[:-1]):
+                    result = _z3_mod.If(condition, value, result)
+                return result
+            except Exception:
+                return None
 
-        for inst in blk.instructions:
-            if inst.opcode in ("ASSIGN", "BINOP") and inst.target_var and inst.operands:
-                raw_rhs = inst.operands[0]
-                used_ssa = inst.operands[1:]
-                self._extract_calls_from_sexpr(
-                    raw_rhs, cur_ssa, cur_expr, path_guards_z3, inst.source_line
-                )
-                z3_rhs = _ussa_sexpr_to_z3(
-                    raw_rhs, cur_ssa, self.z3_vars, self.param_set
-                )
-                norm_rhs = _normalize_ussa_expr(raw_rhs, cur_expr, self.param_set)
-
-                # Detect unconditional parameter shadow assignment via U-SSA Def-Use
-                base_tgt = _strip_ssa_suffix(inst.target_var, self.param_set)
-                if (
-                    inst.opcode == "ASSIGN"
-                    and base_tgt in self.param_set
-                    and inst.target_var == f"{base_tgt}_1"
-                    and f"{base_tgt}_0" not in used_ssa
-                    and len(path_guards_z3) == 0
-                ):
-                    self.shadowed_params.append(
-                        _USSAShadowRecord(
-                            param_name=base_tgt,
-                            norm_val=norm_rhs,
-                            z3_val=z3_rhs,
-                            source_line=inst.source_line,
-                        )
-                    )
-
-                cur_ssa[inst.target_var] = z3_rhs
-                cur_expr[inst.target_var] = norm_rhs
-                cur_ssa[base_tgt] = z3_rhs
-                cur_expr[base_tgt] = norm_rhs
-
-            elif inst.opcode == "CALL" and inst.operands:
-                self._extract_calls_from_sexpr(
-                    inst.operands[0],
-                    cur_ssa,
-                    cur_expr,
-                    path_guards_z3,
-                    inst.source_line,
-                )
-
-            elif inst.opcode == "BRANCH" and inst.operands:
-                raw_cond = inst.operands[0]
-                norm_cond = _normalize_ussa_expr(raw_cond, cur_expr, self.param_set)
-                z3_cond = _to_z3_bool(
-                    _ussa_sexpr_to_z3(raw_cond, cur_ssa, self.z3_vars, self.param_set)
-                )
-                then_sum = "pass"
-                else_sum = "pass"
-                for edge in out_edges:
-                    if edge.predicate_label == raw_cond:
-                        then_sum = self._summarize_block_terminal(edge.dst_node_uid)
-                    elif edge.predicate_label == f"NOT({raw_cond})":
-                        else_sum = self._summarize_block_terminal(edge.dst_node_uid)
-                self.guards.append(
-                    _USSAGuardRecord(
-                        norm_cond=norm_cond,
-                        z3_cond=z3_cond,
-                        then_summary=then_sum,
-                        else_summary=else_sum,
-                        path_guards_z3=path_guards_z3,
-                        source_line=inst.source_line,
-                    )
-                )
-
-            elif inst.opcode == "RETURN":
-                raw_ret = inst.operands[0] if inst.operands else "None"
-                self._extract_calls_from_sexpr(
-                    raw_ret, cur_ssa, cur_expr, path_guards_z3, inst.source_line
-                )
-                norm_ret = _normalize_ussa_expr(raw_ret, cur_expr, self.param_set)
-                z3_ret = _ussa_sexpr_to_z3(
-                    raw_ret, cur_ssa, self.z3_vars, self.param_set
-                )
-                self.returns.append(
-                    _USSAReturnRecord(
-                        norm_expr=norm_ret,
-                        z3_expr=z3_ret,
-                        path_guards_z3=path_guards_z3,
-                        source_line=inst.source_line,
-                    )
-                )
-                # Execution of this path ends at RETURN; do not traverse fallthrough edges
-                return
-
-            elif inst.opcode == "RAISE":
-                return
-
-        next_visited = visited_blocks | {block_id}
-        for edge in out_edges:
-            lbl = edge.predicate_label
-            if lbl is None or lbl == "fallthrough":
-                self._walk_block(
-                    block_id=edge.dst_node_uid,
-                    pred_block_id=block_id,
-                    ssa_env=cur_ssa,
-                    expr_env=cur_expr,
-                    path_guards_z3=path_guards_z3,
-                    visited_blocks=next_visited,
-                )
+        for bid in order:
+            block = blocks[bid]
+            pred_edges = incoming[bid]
+            if bid == entry_id:
+                block_reach = bool_true
+                cur_ssa = dict(initial_ssa)
+                cur_expr = dict(initial_expr)
             else:
-                z_guard = _to_z3_bool(
-                    _ussa_sexpr_to_z3(lbl, cur_ssa, self.z3_vars, self.param_set)
+                routes: list[Any] = []
+                for edge in pred_edges:
+                    src_reach = reach.get(edge.src_node_uid)
+                    guard = edge_guard.get((edge.src_node_uid, edge.dst_node_uid, edge.predicate_label))
+                    if src_reach is None or guard is None:
+                        self.unsupported_construct = self.unsupported_construct or "MalformedCFG:MissingPredecessorState"
+                        return
+                    routes.append(_z3_mod.And(src_reach, guard))
+                block_reach = _z3_mod.Or(*routes) if routes else None
+                if block_reach is None:
+                    self.unsupported_construct = "DisconnectedCFG"
+                    return
+                reach[bid] = block_reach
+                cur_ssa = {}
+                cur_expr = {}
+                all_ssa_keys = set.intersection(*(set(out_ssa[e.src_node_uid]) for e in pred_edges)) if pred_edges else set()
+                all_expr_keys = set.intersection(*(set(out_expr[e.src_node_uid]) for e in pred_edges)) if pred_edges else set()
+                for key in all_ssa_keys:
+                    value = merge_values(key, pred_edges, out_ssa, edge_guard)
+                    if value is not None:
+                        cur_ssa[key] = value
+                for key in all_expr_keys:
+                    value = merge_values(key, pred_edges, out_expr, edge_guard, is_expr=True)
+                    if value is not None:
+                        cur_expr[key] = value
+
+            # Resolve each SSA phi exactly once from predecessor-specific values.
+            for phi in block.phi_nodes:
+                phi_inputs: list[tuple[Any, Any, str, str]] = []
+                for pred_id, variable in phi.incoming_branches:
+                    matching_edges = [e for e in pred_edges if e.src_node_uid == pred_id]
+                    if len(matching_edges) != 1:
+                        self.unsupported_construct = "MalformedPhiIncoming"
+                        return
+                    edge = matching_edges[0]
+                    pred_env = out_ssa.get(pred_id, {})
+                    if variable not in pred_env:
+                        self.unsupported_construct = "MalformedPhiValue"
+                        return
+                    guard = edge_guard.get((edge.src_node_uid, edge.dst_node_uid, edge.predicate_label))
+                    pred_reach = reach.get(pred_id)
+                    if guard is None or pred_reach is None:
+                        self.unsupported_construct = "MalformedPhiGuard"
+                        return
+                    phi_inputs.append((_z3_mod.And(pred_reach, guard), pred_env[variable], variable, pred_id))
+                actual_preds = {edge.src_node_uid for edge in pred_edges}
+                if {pred for pred, _var in phi.incoming_branches} != actual_preds:
+                    self.unsupported_construct = "MalformedPhiPredecessorSet"
+                    return
+                if not phi_inputs:
+                    self.unsupported_construct = "MalformedPhiIncoming"
+                    return
+                value = phi_inputs[-1][1]
+                for condition, incoming_value, _var, _pred_id in reversed(phi_inputs[:-1]):
+                    try:
+                        if incoming_value.sort() != value.sort():
+                            self.unsupported_construct = "MixedPhiSorts"
+                            return
+                    except Exception:
+                        self.unsupported_construct = "UnsupportedPhiValue"
+                        return
+                    value = _z3_mod.If(condition, incoming_value, value)
+                cur_ssa[phi.target_var] = value
+                base_target = _strip_ssa_suffix(phi.target_var, self.param_set)
+                cur_ssa[base_target] = value
+                normalized_exprs = [out_expr.get(pred_id, {}).get(var) for _cond, _val, var, pred_id in phi_inputs]
+                cur_expr[phi.target_var] = (
+                    normalized_exprs[0]
+                    if normalized_exprs and normalized_exprs[0] is not None and all(x == normalized_exprs[0] for x in normalized_exprs)
+                    else f"PHI({phi.target_var})"
                 )
-                new_guards = (
-                    (*path_guards_z3, z_guard)
-                    if z_guard is not None
-                    else path_guards_z3
-                )
-                self._walk_block(
-                    block_id=edge.dst_node_uid,
-                    pred_block_id=block_id,
-                    ssa_env=cur_ssa,
-                    expr_env=cur_expr,
-                    path_guards_z3=new_guards,
-                    visited_blocks=next_visited,
-                )
+                cur_expr[base_target] = cur_expr[phi.target_var]
+
+            # All records use the block's single reachability predicate, not a
+            # separate record for each root-to-block path.
+            path_guards = (block_reach,)
+            for inst in block.instructions:
+                if inst.opcode in ("ASSIGN", "BINOP") and inst.target_var and inst.operands:
+                    raw_rhs = inst.operands[0]
+                    used_ssa = inst.operands[1:]
+                    self._extract_calls_from_sexpr(raw_rhs, cur_ssa, cur_expr, path_guards, inst.source_line)
+                    z3_rhs = _ussa_sexpr_to_z3(raw_rhs, cur_ssa, self.z3_vars, self.param_set, ctx=self.ctx)
+                    norm_rhs = _normalize_ussa_expr(raw_rhs, cur_expr, self.param_set)
+                    base_tgt = _strip_ssa_suffix(inst.target_var, self.param_set)
+                    unconditional = _z3_mod.is_true(_z3_mod.simplify(block_reach))
+                    if (inst.opcode == "ASSIGN" and base_tgt in self.param_set and
+                        inst.target_var == f"{base_tgt}_1" and f"{base_tgt}_0" not in used_ssa and unconditional):
+                        self.shadowed_params.append(_USSAShadowRecord(param_name=base_tgt, norm_val=norm_rhs, z3_val=z3_rhs, source_line=inst.source_line))
+                    cur_ssa[inst.target_var] = z3_rhs
+                    cur_expr[inst.target_var] = norm_rhs
+                    cur_ssa[base_tgt] = z3_rhs
+                    cur_expr[base_tgt] = norm_rhs
+                elif inst.opcode == "CALL" and inst.operands:
+                    self._extract_calls_from_sexpr(inst.operands[0], cur_ssa, cur_expr, path_guards, inst.source_line)
+                elif inst.opcode == "BRANCH" and inst.operands:
+                    raw_cond = inst.operands[0]
+                    norm_cond = _normalize_ussa_expr(raw_cond, cur_expr, self.param_set)
+                    cond_value = _ussa_sexpr_to_z3(raw_cond, cur_ssa, self.z3_vars, self.param_set, ctx=self.ctx)
+                    z3_cond = _to_z3_bool(cond_value, ctx=self.ctx)
+                    then_sum, else_sum = "pass", "pass"
+                    for edge in outgoing[bid]:
+                        if edge.predicate_label == raw_cond:
+                            then_sum = self._summarize_block_terminal(edge.dst_node_uid)
+                        elif edge.predicate_label == f"NOT({raw_cond})":
+                            else_sum = self._summarize_block_terminal(edge.dst_node_uid)
+                    self.guards.append(_USSAGuardRecord(norm_cond=norm_cond, z3_cond=z3_cond, then_summary=then_sum, else_summary=else_sum, path_guards_z3=path_guards, source_line=inst.source_line))
+                elif inst.opcode == "RETURN":
+                    raw_ret = inst.operands[0] if inst.operands else "None"
+                    self._extract_calls_from_sexpr(raw_ret, cur_ssa, cur_expr, path_guards, inst.source_line)
+                    norm_ret = _normalize_ussa_expr(raw_ret, cur_expr, self.param_set)
+                    z3_ret = _ussa_sexpr_to_z3(raw_ret, cur_ssa, self.z3_vars, self.param_set, ctx=self.ctx)
+                    self.returns.append(_USSAReturnRecord(norm_expr=norm_ret, z3_expr=z3_ret, path_guards_z3=path_guards, source_line=inst.source_line))
+                elif inst.opcode == "RAISE":
+                    # Raised paths do not contribute return values. Exception
+                    # semantics are handled conservatively by the caller.
+                    self.unsupported_construct = self.unsupported_construct or "RaisePathUnsupported"
+                    return
+                elif inst.opcode in _UNSUPPORTED_USSA_OPCODES:
+                    self.unsupported_construct = _UNSUPPORTED_USSA_OPCODES[inst.opcode]
+                    return
+
+            out_ssa[bid] = cur_ssa
+            out_expr[bid] = cur_expr
+            for edge in outgoing[bid]:
+                guard = get_edge_guard(edge, cur_ssa)
+                if guard is None:
+                    return
+                edge_guard[(edge.src_node_uid, edge.dst_node_uid, edge.predicate_label)] = guard
 
     def build_return_ite(self) -> Any:
         """
@@ -866,12 +1024,12 @@ class _USSASymbolicExtractor:
         if any(r.z3_expr is None for r in self.returns):
             return None
 
-        acc = _to_z3_int(self.returns[-1].z3_expr)
+        acc = _to_z3_int(self.returns[-1].z3_expr, ctx=self.ctx)
         if acc is None:
             return None
 
         for ret in reversed(self.returns[:-1]):
-            val = _to_z3_int(ret.z3_expr)
+            val = _to_z3_int(ret.z3_expr, ctx=self.ctx)
             if val is None:
                 return None
             if not ret.path_guards_z3:
@@ -911,15 +1069,346 @@ def _extract_model_assignments(
     *,
     default_val: int = 0,
 ) -> dict[str, int | str]:
-    res: dict[str, int | str] = {}
-    for p in parameters:
-        sym = z3_vars.get(p)
-        v = model[sym] if sym is not None else None
-        if v is not None:
-            res[p] = v.as_long() if hasattr(v, "as_long") else int(str(v))
+    """Materialize model inputs; never invent fallback values for a witness."""
+    if _z3_mod is None:
+        return {}
+    result: dict[str, int | str] = {}
+    for name in parameters:
+        sym = z3_vars.get(name)
+        if sym is None:
+            return {}
+        value = model.eval(sym, model_completion=True)
+        if _z3_mod.is_int_value(value):
+            result[name] = value.as_long()
+        elif _z3_mod.is_string_value(value):
+            try:
+                result[name] = value.as_string()
+            except Exception:
+                return {}
+        elif _z3_mod.is_true(value) or _z3_mod.is_false(value):
+            result[name] = _z3_mod.is_true(value)
         else:
-            res[p] = default_val
-    return res
+            return {}
+    return result
+
+
+@dataclass(frozen=True)
+class _PyVal:
+    term: Any
+    kind: str | None
+
+
+class _UnsupportedSymbolicExpression(Exception):
+    pass
+
+
+class _Z3ProofContext:
+    """Per-proof Z3 context and collision-free tagged Python scalar sort."""
+    def __init__(self, timeout_ms: int = 2000) -> None:
+        if _z3_mod is None:
+            raise RuntimeError("z3-solver is not available")
+        self.ctx = _z3_mod.Context()
+        self.timeout_ms = timeout_ms
+        dt = _z3_mod.Datatype("PyVal", ctx=self.ctx)
+        dt.declare("mk_none")
+        dt.declare("mk_bool", ("bool_val", _z3_mod.BoolSort(self.ctx)))
+        dt.declare("mk_int", ("int_val", _z3_mod.IntSort(self.ctx)))
+        dt.declare("mk_str", ("str_val", _z3_mod.StringSort(self.ctx)))
+        self.pyval = dt.create()
+
+    def none(self) -> _PyVal:
+        # Z3Py exposes zero-arity datatype constructors as a value, unlike
+        # constructors with fields which are called with their payloads.
+        ctor = self.pyval.mk_none
+        term = ctor() if callable(ctor) else ctor
+        return _PyVal(term, "NONE")
+
+    def boolean(self, value: Any) -> _PyVal:
+        term = value if hasattr(value, "ctx") else _z3_mod.BoolVal(value, ctx=self.ctx)
+        return _PyVal(self.pyval.mk_bool(term), "BOOL")
+
+    def integer(self, value: Any) -> _PyVal:
+        term = value if hasattr(value, "ctx") else _z3_mod.IntVal(value, ctx=self.ctx)
+        return _PyVal(self.pyval.mk_int(term), "INT")
+
+    def string(self, value: Any) -> _PyVal:
+        term = value if hasattr(value, "ctx") else _z3_mod.StringVal(value, ctx=self.ctx)
+        return _PyVal(self.pyval.mk_str(term), "STR")
+
+    def solver(self) -> Any:
+        solver = _z3_mod.Solver(ctx=self.ctx)
+        solver.set("timeout", self.timeout_ms)
+        return solver
+
+    def is_true(self, expr: Any) -> bool:
+        return _z3_mod.is_true(_z3_mod.simplify(expr))
+
+    def is_false(self, expr: Any) -> bool:
+        return _z3_mod.is_false(_z3_mod.simplify(expr))
+
+    def truth(self, value: _PyVal) -> Any:
+        pv = self.pyval
+        term = value.term
+        return _z3_mod.If(
+            pv.is_mk_none(term),
+            _z3_mod.BoolVal(False, ctx=self.ctx),
+            _z3_mod.If(
+                pv.is_mk_bool(term), pv.bool_val(term),
+                _z3_mod.If(
+                    pv.is_mk_int(term), pv.int_val(term) != _z3_mod.IntVal(0, ctx=self.ctx),
+                    pv.str_val(term) != _z3_mod.StringVal("", ctx=self.ctx),
+                ),
+            ),
+        )
+
+    def numeric(self, value: _PyVal) -> Any:
+        """Numeric projection for statically supported INT/BOOL terms."""
+        pv = self.pyval
+        return _z3_mod.If(
+            pv.is_mk_bool(value.term),
+            _z3_mod.If(pv.bool_val(value.term), _z3_mod.IntVal(1, ctx=self.ctx), _z3_mod.IntVal(0, ctx=self.ctx)),
+            pv.int_val(value.term),
+        )
+
+    def py_eq(self, lhs: _PyVal, rhs: _PyVal) -> Any:
+        """Python equality over supported scalar constructors, including bool/int coercion."""
+        pv = self.pyval
+        lhs_num = _z3_mod.Or(pv.is_mk_int(lhs.term), pv.is_mk_bool(lhs.term))
+        rhs_num = _z3_mod.Or(pv.is_mk_int(rhs.term), pv.is_mk_bool(rhs.term))
+        both_numeric = _z3_mod.And(lhs_num, rhs_num)
+        numeric_eq = self.numeric(lhs) == self.numeric(rhs)
+        # Datatype equality gives correct string payload equality and None
+        # equality; the numeric branch overrides constructor inequality for
+        # Python's bool/int equality rule.
+        return _z3_mod.If(both_numeric, numeric_eq, lhs.term == rhs.term)
+
+
+def _encode_py_eq(lhs: _PyVal, rhs: _PyVal, pctx: _Z3ProofContext) -> Any:
+    """Canonical tested entry point for Python `==` over supported PyVal types."""
+    return pctx.py_eq(lhs, rhs)
+
+
+class _ASTPyValEvaluator:
+    """Conservative symbolic executor for a side-effect-free scalar AST subset."""
+    def __init__(self, pctx: _Z3ProofContext, fn: ast.FunctionDef | ast.AsyncFunctionDef, parameters: tuple[str, ...]) -> None:
+        self.pctx = pctx
+        self.fn = fn
+        self.parameters = parameters
+        self.return_term = pctx.none().term
+        self.returned = _z3_mod.BoolVal(False, ctx=pctx.ctx)
+        self.raw_parameters: dict[str, Any] = {}
+        self.initial_env: dict[str, _PyVal] = {}
+        self._build_parameters()
+
+    def _build_parameters(self) -> None:
+        """Represent inputs as unconstrained PyVal terms, not annotation assumptions.
+
+        Python annotations are not runtime-enforced. Constraining ``x: int`` to
+        Z3 Int without a separately verified precondition could prove equivalence
+        only for integers while silently ignoring valid Python calls with other
+        runtime values. Dynamic inputs therefore remain full tagged PyVal terms;
+        operations requiring a narrower domain abstain unless their operands are
+        statically known from the expression itself.
+        """
+        if self.fn.args.vararg is not None or self.fn.args.kwarg is not None:
+            raise _UnsupportedSymbolicExpression("variadic function parameters are unsupported")
+        args = [*self.fn.args.posonlyargs, *self.fn.args.args, *self.fn.args.kwonlyargs]
+        if tuple(arg.arg for arg in args) != self.parameters:
+            raise _UnsupportedSymbolicExpression("parameter signatures do not align")
+        for arg in args:
+            raw = _z3_make(_z3_mod.Const, arg.arg, self.pctx.pyval, ctx=self.pctx.ctx)
+            self.raw_parameters[arg.arg] = raw
+            kind = None
+            if arg.annotation is not None:
+                try:
+                    ann_str = ast.unparse(arg.annotation).strip()
+                    if ann_str in ("int", "float"):
+                        kind = "INT"
+                    elif ann_str == "bool":
+                        kind = "BOOL"
+                    elif ann_str == "str":
+                        kind = "STR"
+                except Exception:
+                    pass
+            self.initial_env[arg.arg] = _PyVal(raw, kind)
+
+    def _is_singleton_expr(self, node: ast.AST, value: _PyVal) -> bool:
+        # A statically typed bool parameter, like a bool literal, is a Python
+        # singleton object at runtime; None is likewise a singleton constructor.
+        return value.kind in ("NONE", "BOOL") or (
+            isinstance(node, ast.Constant) and (node.value is None or isinstance(node.value, bool))
+        )
+
+    def eval_expr(self, node: ast.AST, env: dict[str, _PyVal]) -> _PyVal:
+        pctx, pv = self.pctx, self.pctx.pyval
+        if isinstance(node, ast.Constant):
+            if node.value is None:
+                return pctx.none()
+            if isinstance(node.value, bool):
+                return pctx.boolean(node.value)
+            if isinstance(node.value, int):
+                return pctx.integer(node.value)
+            if isinstance(node.value, str):
+                return pctx.string(node.value)
+            raise _UnsupportedSymbolicExpression(f"unsupported literal type {type(node.value).__name__}")
+        if isinstance(node, ast.Name):
+            if node.id not in env:
+                raise _UnsupportedSymbolicExpression(f"unbound or unsupported name {node.id}")
+            return env[node.id]
+        if isinstance(node, ast.UnaryOp):
+            value = self.eval_expr(node.operand, env)
+            if isinstance(node.op, ast.Not):
+                return pctx.boolean(_z3_mod.Not(pctx.truth(value)))
+            if value.kind in ("NONE", "STR"):
+                raise _UnsupportedSymbolicExpression("unary arithmetic on non-numeric value")
+            n = pctx.numeric(value)
+            if isinstance(node.op, ast.USub):
+                return pctx.integer(-n)
+            if isinstance(node.op, ast.UAdd):
+                return pctx.integer(n)
+            raise _UnsupportedSymbolicExpression(f"unsupported unary operator {type(node.op).__name__}")
+        if isinstance(node, ast.BinOp):
+            left, right = self.eval_expr(node.left, env), self.eval_expr(node.right, env)
+            if isinstance(node.op, ast.Add) and (left.kind == "STR" or right.kind == "STR"):
+                if left.kind == right.kind == "STR":
+                    return pctx.string(_z3_mod.Concat(pv.str_val(left.term), pv.str_val(right.term)))
+                raise _UnsupportedSymbolicExpression("mixed-type string concatenation is unsupported")
+            if left.kind in ("NONE", "STR") or right.kind in ("NONE", "STR"):
+                raise _UnsupportedSymbolicExpression("mixed/dynamic-type arithmetic is unsupported")
+            a, b = pctx.numeric(left), pctx.numeric(right)
+            if isinstance(node.op, ast.Add):
+                return pctx.integer(a + b)
+            if isinstance(node.op, ast.Sub):
+                return pctx.integer(a - b)
+            if isinstance(node.op, ast.Mult):
+                return pctx.integer(a * b)
+            raise _UnsupportedSymbolicExpression(f"unsupported binary operator {type(node.op).__name__}")
+        if isinstance(node, ast.Compare):
+            left_node = node.left
+            left = self.eval_expr(left_node, env)
+            comparisons = []
+            for op, right_node in zip(node.ops, node.comparators):
+                right = self.eval_expr(right_node, env)
+                if isinstance(op, (ast.Eq, ast.NotEq)):
+                    eq = _encode_py_eq(left, right, pctx)
+                    comparisons.append(eq if isinstance(op, ast.Eq) else _z3_mod.Not(eq))
+                elif isinstance(op, (ast.Is, ast.IsNot)):
+                    if not (self._is_singleton_expr(left_node, left) or self._is_singleton_expr(right_node, right)):
+                        raise _UnsupportedSymbolicExpression("NonSingletonIdentityComparison")
+                    ident = left.term == right.term
+                    comparisons.append(ident if isinstance(op, ast.Is) else _z3_mod.Not(ident))
+                elif isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE)):
+                    if left.kind == right.kind == "STR":
+                        a, b = pv.str_val(left.term), pv.str_val(right.term)
+                    elif left.kind not in ("NONE", "STR") and right.kind not in ("NONE", "STR"):
+                        a, b = pctx.numeric(left), pctx.numeric(right)
+                    else:
+                        raise _UnsupportedSymbolicExpression("mixed-type ordering is unsupported")
+                    if isinstance(op, ast.Lt): comparisons.append(a < b)
+                    elif isinstance(op, ast.LtE): comparisons.append(a <= b)
+                    elif isinstance(op, ast.Gt): comparisons.append(a > b)
+                    else: comparisons.append(a >= b)
+                else:
+                    raise _UnsupportedSymbolicExpression(f"unsupported comparison {type(op).__name__}")
+                left_node, left = right_node, right
+            return pctx.boolean(_z3_mod.And(*comparisons) if len(comparisons) > 1 else comparisons[0])
+        if isinstance(node, ast.BoolOp):
+            values = [self.eval_expr(v, env) for v in node.values]
+            if not values:
+                raise _UnsupportedSymbolicExpression("empty boolean operation")
+            result = values[-1]
+            for value in reversed(values[:-1]):
+                cond = pctx.truth(value)
+                result = _PyVal(
+                    _z3_mod.If(cond, result.term, value.term) if isinstance(node.op, ast.And)
+                    else _z3_mod.If(cond, value.term, result.term),
+                    result.kind if result.kind == value.kind else None,
+                )
+            return result
+        if isinstance(node, ast.IfExp):
+            cond = pctx.truth(self.eval_expr(node.test, env))
+            yes, no = self.eval_expr(node.body, env), self.eval_expr(node.orelse, env)
+            return _PyVal(_z3_mod.If(cond, yes.term, no.term), yes.kind if yes.kind == no.kind else None)
+        raise _UnsupportedSymbolicExpression(f"unsupported expression {type(node).__name__}")
+
+    def execute(self) -> _PyVal:
+        env = dict(self.initial_env)
+        active = _z3_mod.BoolVal(True, ctx=self.pctx.ctx)
+        active_after = self._exec_block(self.fn.body, env, active)
+        # Python implicitly returns None when execution reaches the end.
+        if not self.pctx.is_false(active_after):
+            self.return_term = _z3_mod.If(active_after, self.pctx.none().term, self.return_term)
+        return _PyVal(self.return_term, None)
+
+    def _exec_block(self, statements: list[ast.stmt], env: dict[str, _PyVal], active: Any) -> Any:
+        pctx = self.pctx
+        for stmt in statements:
+            if pctx.is_false(active):
+                break
+            if isinstance(stmt, ast.Return):
+                value = self.pctx.none() if stmt.value is None else self.eval_expr(stmt.value, env)
+                self.return_term = _z3_mod.If(active, value.term, self.return_term)
+                self.returned = _z3_mod.Or(self.returned, active)
+                active = _z3_mod.BoolVal(False, ctx=pctx.ctx)
+            elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+                value_node = stmt.value
+                if value_node is None:
+                    raise _UnsupportedSymbolicExpression("annotation-only assignment")
+                value = self.eval_expr(value_node, env)
+                targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+                if any(not isinstance(t, ast.Name) for t in targets):
+                    raise _UnsupportedSymbolicExpression("non-local/non-name assignment")
+                for target in targets:
+                    assert isinstance(target, ast.Name)
+                    old = env.get(target.id)
+                    if old is None:
+                        # A value created only under a branch may be unbound on
+                        # other paths. Preserve that uncertainty in its kind;
+                        # subsequent arithmetic on it will abstain.
+                        env[target.id] = _PyVal(_z3_mod.If(active, value.term, self.pctx.none().term), value.kind if pctx.is_true(active) else None)
+                    else:
+                        env[target.id] = _PyVal(_z3_mod.If(active, value.term, old.term), value.kind if value.kind == old.kind else None)
+            elif isinstance(stmt, ast.AugAssign):
+                if not isinstance(stmt.target, ast.Name) or stmt.target.id not in env:
+                    raise _UnsupportedSymbolicExpression("unsupported augmented assignment target")
+                left = env[stmt.target.id]
+                right = self.eval_expr(stmt.value, env)
+                if left.kind not in ("INT", "BOOL") or right.kind not in ("INT", "BOOL"):
+                    raise _UnsupportedSymbolicExpression("unsupported augmented assignment types")
+                a, b = pctx.numeric(left), pctx.numeric(right)
+                if isinstance(stmt.op, ast.Add): value = pctx.integer(a + b)
+                elif isinstance(stmt.op, ast.Sub): value = pctx.integer(a - b)
+                elif isinstance(stmt.op, ast.Mult): value = pctx.integer(a * b)
+                else: raise _UnsupportedSymbolicExpression("unsupported augmented operator")
+                env[stmt.target.id] = _PyVal(_z3_mod.If(active, value.term, left.term), value.kind)
+            elif isinstance(stmt, ast.If):
+                condition = pctx.truth(self.eval_expr(stmt.test, env))
+                before = dict(env)
+                then_env, else_env = dict(env), dict(env)
+                then_active = self._exec_block(stmt.body, then_env, _z3_mod.And(active, condition))
+                else_active = self._exec_block(stmt.orelse, else_env, _z3_mod.And(active, _z3_mod.Not(condition))) if stmt.orelse else _z3_mod.And(active, _z3_mod.Not(condition))
+                if pctx.is_false(then_active):
+                    env.clear(); env.update(else_env)
+                elif pctx.is_false(else_active):
+                    env.clear(); env.update(then_env)
+                else:
+                    merged: dict[str, _PyVal] = {}
+                    for name in set(then_env) | set(else_env) | set(before):
+                        yes = then_env.get(name)
+                        no = else_env.get(name)
+                        if yes is None or no is None:
+                            raise _UnsupportedSymbolicExpression(f"conditional assignment to possibly-unbound local {name}")
+                        merged[name] = _PyVal(_z3_mod.If(condition, yes.term, no.term), yes.kind if yes.kind == no.kind else None)
+                    env.clear(); env.update(merged)
+                active = _z3_mod.Or(then_active, else_active)
+            elif isinstance(stmt, ast.Pass):
+                continue
+            elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
+                # Function docstring: no run-time effect for equivalence here.
+                continue
+            else:
+                raise _UnsupportedSymbolicExpression(f"unsupported statement {type(stmt).__name__}")
+        return active
 
 
 class Z3SymbolicProver:
@@ -950,41 +1439,31 @@ class Z3SymbolicProver:
     ) -> tuple[SMTStatus, dict[str, int | str]]:
         if _z3_mod is None:
             return "SOLVER_UNAVAILABLE", {}
-        s = _z3_mod.Solver()
-        s.set("timeout", self.timeout_ms)
-
-        a_term = (
-            _to_z3_int(z3_a)
-            if z3_a is not None
-            else z3_vars.setdefault(var_a_name, _z3_mod.Int(var_a_name))
-        )
-        b_term = (
-            _to_z3_int(z3_b)
-            if z3_b is not None
-            else z3_vars.setdefault(var_b_name, _z3_mod.Int(var_b_name))
-        )
-
-        for g in path_guards_z3:
-            if g is not None:
-                s.add(g)
-
-        s.add(a_term != b_term)
-
-        status = s.check()
-        if status == _z3_mod.sat:
-            m = s.model()
-            res: dict[str, int | str] = {}
-            for name in all_params:
-                sym = z3_vars.get(name)
-                v = m[sym] if sym is not None else None
-                if v is not None:
-                    res[name] = v.as_long() if hasattr(v, "as_long") else int(str(v))
-                else:
-                    res[name] = 1 if name == var_a_name else 2
-            return "SAT", res
-        if status == _z3_mod.unsat:
-            return "UNSAT", {}
-        return "UNKNOWN", {}
+        if z3_a is None or z3_b is None:
+            return "UNKNOWN", {}
+        try:
+            ctx = getattr(z3_a, "ctx", None)
+            if z3_a.sort() != _z3_make(_z3_mod.IntSort, ctx=ctx) or z3_b.sort() != _z3_make(_z3_mod.IntSort, ctx=ctx):
+                return "UNKNOWN", {}
+            solver = _z3_make(_z3_mod.Solver, ctx=ctx)
+            solver.set("timeout", self.timeout_ms)
+            for guard in path_guards_z3:
+                if guard is not None:
+                    solver.add(guard)
+            solver.add(z3_a != z3_b)
+            status = solver.check()
+            if status == _z3_mod.unsat:
+                return "UNSAT", {}
+            if status != _z3_mod.sat:
+                return "UNKNOWN", {}
+            assignments = _extract_model_assignments(solver.model(), z3_vars, all_params)
+            if all_params and len(assignments) != len(all_params):
+                return "UNKNOWN", {}
+            # The solver has established distinct operands. The model assignments
+            # are concrete when parameters exist; zero-parameter witnesses are valid.
+            return "SAT", assignments
+        except Exception:
+            return "UNKNOWN", {}
 
     def prove_function_diff(
         self,
@@ -994,575 +1473,470 @@ class Z3SymbolicProver:
         head_source: str,
         func_base: FunctionUSSA,
         func_head: FunctionUSSA,
+        base_fn_node: ast.FunctionDef | ast.AsyncFunctionDef | None = None,
+        head_fn_node: ast.FunctionDef | ast.AsyncFunctionDef | None = None,
     ) -> tuple[VerificationFinding, ...]:
+        """Run structural defect checks without letting heuristics establish safety.
+
+        Production callers pass AST nodes from CompiledFilePair. The compatibility
+        path compiles a complete pair through the canonical compiler; this method
+        never directly reparses source text.
+        """
         start_ns = time.perf_counter_ns()
-
-        # Stage 1: Fast egglog equality saturation check (<1ms)
-        eq_res = self.egglog.check_equivalence(func_base, func_head)
-        if eq_res.is_equivalent:
-            elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-            fid = content_digest_hex(
-                f"EQUIV:{func_head.qualified_name}:{eq_res.head_eclass_digest}",
-                domain="verifyci.v2.finding",
-            )[:16]
-            return (
-                VerificationFinding(
-                    finding_id=fid,
-                    # Named for what it proves: return-value equivalence only.
-                    # This is not a safety verdict - a patch can preserve the
-                    # return value while adding a credential or a dangerous
-                    # call. Safety checkers run independently of this finding.
-                    rule_id="VC2-RETURN-VALUE-EQUIVALENT",
-                    severity="LOW",
-                    verdict="HEURISTIC_EQUIVALENT_CANDIDATE",
-                    file_path=file_path,
-                    start_line=func_head.start_line,
-                    end_line=func_head.end_line,
-                    message=(
-                        f"Function '{func_head.qualified_name}' candidate "
-                        f"return-value equivalent via egglog equality saturation "
-                        f"(rewrites: {list(eq_res.applied_rewrites)}). This says "
-                        "nothing about safety."
-                    ),
-                    witness=CounterexampleWitness(
-                        checker_id="VC2-RETURN-VALUE-EQUIVALENT",
-                        smt_status="UNVERIFIED_HEURISTIC",
-                        input_assignments={},
-                        base_return_state=eq_res.base_eclass_digest[:12],
-                        head_return_state=eq_res.head_eclass_digest[:12],
-                        proof_time_ms=round(elapsed_ms, 3),
-                    ),
-                ),
-            )
-
-        # Stage 2: Direct U-SSA Symbolic Path Extraction
-        fn_short = func_head.qualified_name.split(".")[-1]
-        base_fn_node: ast.AST | None = None
-        head_fn_node: ast.AST | None = None
-        try:
-            base_tree = ast.parse(base_source, filename=file_path)
-            head_tree = ast.parse(head_source, filename=file_path)
-            base_fn_node = next(
-                (
-                    n
-                    for n in base_tree.body
-                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and n.name == fn_short
-                ),
-                None,
-            )
-            head_fn_node = next(
-                (
-                    n
-                    for n in head_tree.body
-                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and n.name == fn_short
-                ),
-                None,
-            )
-        except SyntaxError:
+        if base_fn_node is None or head_fn_node is None:
+            try:
+                from verifyci_v2.pipeline import DiffFileEntry
+                from verifyci_v2.ingestion.compile_context import compile_file_pair
+                compiled = compile_file_pair(
+                    DiffFileEntry.from_sources(file_path, base_source, head_source),
+                    repo_id=func_base.repo_id,
+                )
+                if compiled.syntax_error is not None or compiled.base_ast is None or compiled.head_ast is None:
+                    return ()
+                base_fn_node = compiled.base_ast.functions_by_qname.get(func_base.qualified_name)
+                head_fn_node = compiled.head_ast.functions_by_qname.get(func_head.qualified_name)
+            except Exception:
+                return ()
+        if base_fn_node is None or head_fn_node is None:
             return ()
 
-        shared_z3_vars: dict[str, Any] = (
-            {p: _z3_mod.Int(p) for p in func_head.parameters}
-            if _z3_mod is not None
-            else {}
-        )
-        ext_base = _USSASymbolicExtractor(func_base, shared_z3_vars)
-        ext_head = _USSASymbolicExtractor(func_head, shared_z3_vars)
+        # A malformed CFG cannot support structural witness extraction. Keep the
+        # abstention visible; the caller still runs the independent typed prover,
+        # which may discover a decisive counterexample and take precedence.
+        if _z3_mod is None:
+            return ()
+        proof_ctx = _z3_mod.Context()
+        shared_z3_vars: dict[str, Any] = {
+            parameter: _z3_mod.Int(parameter, ctx=proof_ctx) for parameter in func_head.parameters
+        }
+        ext_base = _USSASymbolicExtractor(func_base, shared_z3_vars, ctx=proof_ctx)
+        ext_head = _USSASymbolicExtractor(func_head, shared_z3_vars, ctx=proof_ctx)
+        cfg_problem = ext_base.unsupported_construct or ext_head.unsupported_construct
+        if cfg_problem is not None:
+            elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+            return (VerificationFinding(
+                finding_id=content_digest_hex(f"UNSUPPORTED:{file_path}:{func_head.qualified_name}:{cfg_problem}", domain="verifyci.v2.finding")[:16],
+                rule_id="VC2-Z3-UNSUPPORTED-AST", severity="MEDIUM", verdict="INCONCLUSIVE",
+                file_path=file_path, start_line=func_head.start_line, end_line=func_head.end_line,
+                message=f"Function '{func_head.qualified_name}' has unsupported CFG structure '{cfg_problem}'; proof abstains.",
+                witness=CounterexampleWitness(
+                    checker_id="VC2-Z3-UNSUPPORTED-AST", smt_status="UNKNOWN", input_assignments={},
+                    base_return_state="", head_return_state="", proof_time_ms=round(elapsed, 3),
+                ),
+            ),)
 
         findings: list[VerificationFinding] = []
 
-        # 1. Call-Argument Swap Verification over U-SSA Call Sites
-        for call_b, call_h in zip(ext_base.calls, ext_head.calls):
-            if (
-                call_b.callee == call_h.callee
-                and len(call_b.norm_args) >= 2
+        def guard_key(record: Any) -> tuple[str, ...]:
+            values = []
+            for guard in record.path_guards_z3:
+                try:
+                    values.append(str(_z3_mod.simplify(guard)))
+                except Exception:
+                    values.append(str(guard))
+            return tuple(values)
+
+        # Pair calls only where callee counts and path-guard identities are
+        # unambiguous. Positional zip alignment is deliberately prohibited.
+        base_by_callee: dict[str, list[Any]] = {}
+        head_by_callee: dict[str, list[Any]] = {}
+        for call in ext_base.calls:
+            base_by_callee.setdefault(call.callee, []).append(call)
+        for call in ext_head.calls:
+            head_by_callee.setdefault(call.callee, []).append(call)
+        aligned_calls: list[tuple[Any, Any]] = []
+        for callee in sorted(set(base_by_callee) | set(head_by_callee)):
+            base_calls = sorted(base_by_callee.get(callee, []), key=lambda c: c.source_line)
+            head_calls = sorted(head_by_callee.get(callee, []), key=lambda c: c.source_line)
+            if len(base_calls) != len(head_calls) or not base_calls:
+                continue
+            if len(base_calls) == 1:
+                aligned_calls.append((base_calls[0], head_calls[0]))
+                continue
+            base_keys = [guard_key(c) for c in base_calls]
+            head_keys = [guard_key(c) for c in head_calls]
+            if len(set(base_keys)) != len(base_keys) or len(set(head_keys)) != len(head_keys):
+                continue
+            if set(base_keys) != set(head_keys):
+                continue
+            hmap = {guard_key(c): c for c in head_calls}
+            aligned_calls.extend((b, hmap[guard_key(b)]) for b in base_calls)
+
+        for call_b, call_h in aligned_calls:
+            if not (
+                len(call_b.norm_args) >= 2
                 and len(call_b.norm_args) == len(call_h.norm_args)
                 and call_b.norm_args != call_h.norm_args
                 and sorted(call_b.norm_args) == sorted(call_h.norm_args)
             ):
-                diff_indices = [
-                    i
-                    for i, (ab, ah) in enumerate(
-                        zip(call_b.norm_args, call_h.norm_args)
-                    )
-                    if ab != ah
-                ]
-                idx_a, idx_b = diff_indices[0], diff_indices[1]
-                v_a, v_b = call_b.norm_args[idx_a], call_b.norm_args[idx_b]
-                z3_a = call_b.z3_args[idx_a] if idx_a < len(call_b.z3_args) else None
-                z3_b = call_b.z3_args[idx_b] if idx_b < len(call_b.z3_args) else None
-                combined_guards = (*call_b.path_guards_z3, *call_h.path_guards_z3)
-
-                smt_st, assignments = self._solve_distinct_pair_witness(
-                    z3_a,
-                    z3_b,
-                    v_a,
-                    v_b,
-                    shared_z3_vars,
-                    path_guards_z3=combined_guards,
-                    all_params=func_head.parameters,
-                )
-
-                elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-                witness = CounterexampleWitness(
-                    checker_id="VC2-CAP004-CALL-SWAP",
-                    smt_status=smt_st,
-                    input_assignments=assignments,
-                    base_return_state=(
-                        f"{call_b.callee}({', '.join(str(assignments.get(a, a)) for a in call_b.norm_args)})"
-                    ),
-                    head_return_state=(
-                        f"{call_h.callee}({', '.join(str(assignments.get(a, a)) for a in call_h.norm_args)})"
-                    ),
-                    proof_time_ms=round(elapsed_ms, 3),
-                )
-                fid = content_digest_hex(
-                    f"CALL_SWAP:{file_path}:{call_h.source_line}:{call_h.callee}",
-                    domain="verifyci.v2.finding",
-                )[:16]
-                findings.append(
-                    VerificationFinding(
-                        finding_id=fid,
-                        rule_id="VC2-CAP004-CALL-SWAP",
-                        severity="CRITICAL",
-                        verdict="FAIL",
-                        file_path=file_path,
-                        start_line=call_h.source_line,
-                        end_line=call_h.source_line,
-                        message=(
-                            f"Z3 proven call-argument swap in '{call_h.callee}': "
-                            f"base passed ({', '.join(call_b.norm_args)}) vs head ({', '.join(call_h.norm_args)})."
-                        ),
-                        witness=witness,
-                    )
-                )
-
-        # 2. Return-Value Swap Verification over U-SSA Return Paths
-        if (
-            len(ext_base.returns) >= 2
-            and len(ext_base.returns) == len(ext_head.returns)
-            and [r.norm_expr for r in ext_base.returns]
-            != [r.norm_expr for r in ext_head.returns]
-            and sorted(r.norm_expr for r in ext_base.returns)
-            == sorted(r.norm_expr for r in ext_head.returns)
-        ):
-            ret_b0 = ext_base.returns[0]
-            ret_h0 = ext_head.returns[0]
-            if _z3_mod is None:
-                smt_st = "SOLVER_UNAVAILABLE"
-                assignments = {}
-            else:
-                s = _z3_mod.Solver()
-                s.set("timeout", self.timeout_ms)
-                for g in (*ret_b0.path_guards_z3, *ret_h0.path_guards_z3):
-                    if g is not None:
-                        s.add(g)
-                zb_r0 = _to_z3_int(ret_b0.z3_expr)
-                zh_r0 = _to_z3_int(ret_h0.z3_expr)
-                if zb_r0 is not None and zh_r0 is not None:
-                    s.add(zb_r0 != zh_r0)
-                if s.check() == _z3_mod.sat:
-                    smt_st = "SAT"
-                    assignments = _extract_model_assignments(
-                        s.model(), shared_z3_vars, func_head.parameters, default_val=1
-                    )
-                else:
-                    smt_st = "UNKNOWN"
-                    assignments = {}
-
-            elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+                continue
+            diff_indices = [i for i, (ab, ah) in enumerate(zip(call_b.norm_args, call_h.norm_args)) if ab != ah]
+            if len(diff_indices) < 2:
+                continue
+            ia, ib = diff_indices[:2]
+            if ia >= len(call_b.z3_args) or ib >= len(call_b.z3_args):
+                continue
+            za, zb = call_b.z3_args[ia], call_b.z3_args[ib]
+            # Unsupported arguments or ambiguous call binding are left for the
+            # whole-function prover, not replaced with fresh unconstrained symbols.
+            if za is None or zb is None:
+                continue
+            status, assignments = self._solve_distinct_pair_witness(
+                za, zb, call_b.norm_args[ia], call_b.norm_args[ib], shared_z3_vars,
+                path_guards_z3=(*call_b.path_guards_z3, *call_h.path_guards_z3),
+                all_params=func_head.parameters,
+            )
+            if status != "SAT":
+                continue
+            elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
             witness = CounterexampleWitness(
-                checker_id="VC2-CAP004-RETURN-SWAP",
-                smt_status=smt_st,
-                input_assignments=assignments,
-                base_return_state=str(ret_b0.norm_expr),
-                head_return_state=str(ret_h0.norm_expr),
-                proof_time_ms=round(elapsed_ms, 3),
+                checker_id="VC2-CAP004-CALL-SWAP", smt_status="SAT", input_assignments=assignments,
+                base_return_state=f"{call_b.callee}({', '.join(call_b.norm_args)})",
+                head_return_state=f"{call_h.callee}({', '.join(call_h.norm_args)})",
+                proof_time_ms=round(elapsed, 3),
             )
-            fid = content_digest_hex(
-                f"RET_SWAP:{file_path}:{ret_h0.source_line}",
-                domain="verifyci.v2.finding",
-            )[:16]
-            findings.append(
-                VerificationFinding(
-                    finding_id=fid,
-                    rule_id="VC2-CAP004-RETURN-SWAP",
-                    severity="HIGH",
-                    verdict="FAIL",
-                    file_path=file_path,
-                    start_line=ret_h0.source_line,
-                    end_line=func_head.end_line,
-                    message=(
-                        f"Z3 proven return value swap: base returns '{ret_b0.norm_expr}' "
-                        f"where head returns '{ret_h0.norm_expr}'."
+            findings.append(VerificationFinding(
+                finding_id=content_digest_hex(f"CALL_SWAP:{file_path}:{call_h.source_line}:{call_h.callee}", domain="verifyci.v2.finding")[:16],
+                rule_id="VC2-CAP004-CALL-SWAP", severity="CRITICAL", verdict="FAIL",
+                file_path=file_path, start_line=call_h.source_line, end_line=call_h.source_line,
+                message=f"Z3 found distinct concrete arguments for reordered call '{call_h.callee}'.", witness=witness,
+            ))
+
+        # Return-swap detection is only definitive for terms the legacy structural
+        # encoding represents exactly as Int. Typed return semantics are handled
+        # by prove_equivalence for all supported scalar constructors.
+        if (
+            len(ext_base.returns) >= 2 and len(ext_base.returns) == len(ext_head.returns)
+            and [r.norm_expr for r in ext_base.returns] != [r.norm_expr for r in ext_head.returns]
+            and sorted(r.norm_expr for r in ext_base.returns) == sorted(r.norm_expr for r in ext_head.returns)
+        ):
+            rb, rh = ext_base.returns[0], ext_head.returns[0]
+            try:
+                int_sort = _z3_mod.IntSort(ctx=proof_ctx)
+                if rb.z3_expr is not None and rh.z3_expr is not None and rb.z3_expr.sort() == int_sort and rh.z3_expr.sort() == int_sort:
+                    solver = _z3_mod.Solver(ctx=proof_ctx)
+                    solver.set("timeout", self.timeout_ms)
+                    for guard in (*rb.path_guards_z3, *rh.path_guards_z3):
+                        if guard is not None:
+                            solver.add(guard)
+                    solver.add(rb.z3_expr != rh.z3_expr)
+                    if solver.check() == _z3_mod.sat:
+                        assignments = _extract_model_assignments(solver.model(), shared_z3_vars, func_head.parameters)
+                        if not func_head.parameters or len(assignments) == len(func_head.parameters):
+                            elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+                            findings.append(VerificationFinding(
+                                finding_id=content_digest_hex(f"RET_SWAP:{file_path}:{rh.source_line}", domain="verifyci.v2.finding")[:16],
+                                rule_id="VC2-CAP004-RETURN-SWAP", severity="HIGH", verdict="FAIL",
+                                file_path=file_path, start_line=rh.source_line, end_line=func_head.end_line,
+                                message="Z3 found a concrete counterexample for reordered return values.",
+                                witness=CounterexampleWitness(
+                                    checker_id="VC2-CAP004-RETURN-SWAP", smt_status="SAT", input_assignments=assignments,
+                                    base_return_state=rb.norm_expr, head_return_state=rh.norm_expr,
+                                    proof_time_ms=round(elapsed, 3),
+                                ),
+                            ))
+            except Exception:
+                pass
+
+        # Guard-inversion check: pair only a unique branch-shape signature.
+        def branch_shape(g: Any) -> tuple[str, str, tuple[str, ...]]:
+            return (g.then_summary, g.else_summary, guard_key(g))
+        base_guards: dict[tuple[str, str, tuple[str, ...]], list[Any]] = {}
+        head_guards: dict[tuple[str, str, tuple[str, ...]], list[Any]] = {}
+        for g in ext_base.guards:
+            base_guards.setdefault(branch_shape(g), []).append(g)
+        for g in ext_head.guards:
+            head_guards.setdefault(branch_shape(g), []).append(g)
+        for shape in sorted(set(base_guards) & set(head_guards), key=str):
+            if len(base_guards[shape]) != 1 or len(head_guards[shape]) != 1:
+                continue
+            gb, gh = base_guards[shape][0], head_guards[shape][0]
+            if gb.norm_cond == gh.norm_cond or gb.then_summary == gb.else_summary:
+                continue
+            if gb.z3_cond is None or gh.z3_cond is None:
+                continue
+            try:
+                solver = _z3_mod.Solver(ctx=proof_ctx)
+                solver.set("timeout", self.timeout_ms)
+                for guard in (*gb.path_guards_z3, *gh.path_guards_z3):
+                    if guard is not None:
+                        solver.add(guard)
+                solver.add(gb.z3_cond != gh.z3_cond)
+                if solver.check() != _z3_mod.sat:
+                    continue
+                assignments = _extract_model_assignments(solver.model(), shared_z3_vars, func_head.parameters)
+                if func_head.parameters and len(assignments) != len(func_head.parameters):
+                    continue
+                elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+                findings.append(VerificationFinding(
+                    finding_id=content_digest_hex(f"GUARD_INV:{file_path}:{gh.source_line}", domain="verifyci.v2.finding")[:16],
+                    rule_id="VC2-CAP002-GUARD-INVERSION", severity="CRITICAL", verdict="FAIL",
+                    file_path=file_path, start_line=gh.source_line, end_line=gh.source_line,
+                    message=f"Z3 found a concrete path where guard '{gb.norm_cond}' differs from '{gh.norm_cond}'.",
+                    witness=CounterexampleWitness(
+                        checker_id="VC2-CAP002-GUARD-INVERSION", smt_status="SAT", input_assignments=assignments,
+                        base_return_state=f"if {gb.norm_cond} -> {gb.then_summary}",
+                        head_return_state=f"if {gh.norm_cond} -> {gh.then_summary}", proof_time_ms=round(elapsed, 3),
                     ),
-                    witness=witness,
-                )
+                ))
+            except Exception:
+                continue
+
+        # A syntactic parameter shadow is not itself a proven defect. Emit the
+        # capability-specific rule only when the full supported proof produces
+        # a validated divergent witness.
+        base_shadow = {item.param_name for item in ext_base.shadowed_params}
+        for shadow in ext_head.shadowed_params:
+            if shadow.param_name in base_shadow:
+                continue
+            proof = self.prove_equivalence(
+                func_base=func_base, func_cand=func_head,
+                base_fn_node=base_fn_node, cand_fn_node=head_fn_node,
             )
+            if proof.outcome != "PROVEN_DIVERGENT_SAT" or proof.witness is None:
+                continue
+            findings.append(VerificationFinding(
+                finding_id=content_digest_hex(f"SHADOW:{file_path}:{shadow.source_line}:{shadow.param_name}", domain="verifyci.v2.finding")[:16],
+                rule_id="VC2-CAP002-SHADOW-ASSIGN", severity="HIGH", verdict="FAIL",
+                file_path=file_path, start_line=shadow.source_line, end_line=shadow.source_line,
+                message=f"Parameter '{shadow.param_name}' is shadowed and Z3 validated a concrete semantic divergence.",
+                witness=proof.witness,
+            ))
+            break
 
-        # 3. Branch Guard Inversion Verification over U-SSA BasicBlock Terminators
-        for guard_b, guard_h in zip(ext_base.guards, ext_head.guards):
-            if (
-                guard_b.norm_cond != guard_h.norm_cond
-                and guard_b.then_summary == guard_h.then_summary
-                and guard_b.else_summary == guard_h.else_summary
-            ):
-                if _z3_mod is None:
-                    smt_st = "SOLVER_UNAVAILABLE"
-                    assignments = {}
-                else:
-                    s = _z3_mod.Solver()
-                    s.set("timeout", self.timeout_ms)
-                    for g in (*guard_b.path_guards_z3, *guard_h.path_guards_z3):
-                        if g is not None:
-                            s.add(g)
-                    if guard_b.z3_cond is not None and guard_h.z3_cond is not None:
-                        s.add(guard_b.z3_cond != guard_h.z3_cond)
-                        if s.check() == _z3_mod.sat:
-                            smt_st = "SAT"
-                            assignments = _extract_model_assignments(
-                                s.model(),
-                                shared_z3_vars,
-                                func_head.parameters,
-                                default_val=0,
-                            )
-                        else:
-                            smt_st = "UNKNOWN"
-                            assignments = {}
-                    else:
-                        smt_st = "UNKNOWN"
-                        assignments = {}
-
-                elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-                witness = CounterexampleWitness(
-                    checker_id="VC2-CAP002-GUARD-INVERSION",
-                    smt_status=smt_st,
-                    input_assignments=assignments,
-                    base_return_state=f"if {guard_b.norm_cond} -> {guard_b.then_summary}",
-                    head_return_state=f"if {guard_h.norm_cond} -> {guard_h.else_summary}",
-                    proof_time_ms=round(elapsed_ms, 3),
-                )
-                fid = content_digest_hex(
-                    f"GUARD_INV:{file_path}:{guard_h.source_line}",
-                    domain="verifyci.v2.finding",
-                )[:16]
-                findings.append(
-                    VerificationFinding(
-                        finding_id=fid,
-                        rule_id="VC2-CAP002-GUARD-INVERSION",
-                        severity="CRITICAL",
-                        verdict="FAIL",
-                        file_path=file_path,
-                        start_line=guard_h.source_line,
-                        end_line=guard_h.source_line,
-                        message=(
-                            f"Z3 proven branch guard inversion: '{guard_b.norm_cond}' "
-                            f"mutated to '{guard_h.norm_cond}' without branch swap."
-                        ),
-                        witness=witness,
-                    )
-                )
-
-        # 4. Unconditional Parameter Shadow Assignment over U-SSA Def-Use
-        base_shadow_vars = {s.param_name for s in ext_base.shadowed_params}
-        for sh in ext_head.shadowed_params:
-            if sh.param_name not in base_shadow_vars:
-                chosen_val = 999
-                if _z3_mod is None:
-                    smt_st = "SOLVER_UNAVAILABLE"
-                    assignments = {}
-                else:
-                    s = _z3_mod.Solver()
-                    s.set("timeout", self.timeout_ms)
-                    p_sym = shared_z3_vars.setdefault(
-                        sh.param_name, _z3_mod.Int(sh.param_name)
-                    )
-                    rhs_int = _to_z3_int(sh.z3_val)
-                    if rhs_int is not None:
-                        s.add(p_sym != rhs_int)
-                    s.push()
-                    s.add(p_sym == _z3_mod.IntVal(999))
-                    if s.check() == _z3_mod.sat:
-                        smt_st = "SAT"
-                        chosen_val = 999
-                        assignments = {sh.param_name: chosen_val}
-                    else:
-                        s.pop()
-                        if s.check() == _z3_mod.sat:
-                            smt_st = "SAT"
-                            v = s.model()[p_sym]
-                            chosen_val = (
-                                v.as_long()
-                                if v is not None and hasattr(v, "as_long")
-                                else 999
-                            )
-                            assignments = {sh.param_name: chosen_val}
-                        else:
-                            smt_st = "SAT"
-                            assignments = {sh.param_name: 999}
-
-                elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-                witness = CounterexampleWitness(
-                    checker_id="VC2-CAP002-SHADOW-ASSIGN",
-                    smt_status=smt_st,
-                    input_assignments=assignments,
-                    base_return_state=f"uses parameter {sh.param_name}={chosen_val}",
-                    head_return_state=f"overwrites {sh.param_name}={sh.norm_val}",
-                    proof_time_ms=round(elapsed_ms, 3),
-                )
-                fid = content_digest_hex(
-                    f"SHADOW:{file_path}:{sh.source_line}:{sh.param_name}",
-                    domain="verifyci.v2.finding",
-                )[:16]
-                findings.append(
-                    VerificationFinding(
-                        finding_id=fid,
-                        rule_id="VC2-CAP002-SHADOW-ASSIGN",
-                        severity="HIGH",
-                        verdict="FAIL",
-                        file_path=file_path,
-                        start_line=sh.source_line,
-                        end_line=sh.source_line,
-                        message=(
-                            f"Parameter '{sh.param_name}' is unconditionally shadowed "
-                            f"by '{sh.norm_val}' on line {sh.source_line}."
-                        ),
-                        witness=witness,
-                    )
-                )
-
-        # 5. Unsupported Construct Escalation (Loops, Try, Async, Comprehensions)
-        if not findings and func_base.h_body != func_head.h_body:
-            found_construct = _detect_unsupported_ast_construct(
-                base_fn_node, head_fn_node, ext_base, ext_head
-            )
-            if found_construct:
-                elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-                witness = CounterexampleWitness(
-                    checker_id="VC2-SYMBOLIC-UNSUPPORTED-CONSTRUCT",
-                    smt_status="UNKNOWN",
-                    input_assignments={},
-                    base_return_state="",
-                    head_return_state="",
-                    proof_time_ms=round(elapsed_ms, 3),
-                )
-                fid = content_digest_hex(
-                    f"UNSUPPORTED:{file_path}:{func_head.qualified_name}:{found_construct}",
-                    domain="verifyci.v2.finding",
-                )[:16]
-                findings.append(
-                    VerificationFinding(
-                        finding_id=fid,
-                        rule_id="VC2-Z3-UNSUPPORTED-AST",
-                        severity="MEDIUM",
-                        verdict="INCONCLUSIVE",
-                        file_path=file_path,
-                        start_line=func_head.start_line,
-                        end_line=func_head.end_line,
-                        message=(
-                            f"Function '{fn_short}' contains unsupported AST construct '{found_construct}' "
-                            f"outside linear integer SMT fragment; verification is inconclusive."
-                        ),
-                        witness=witness,
-                    )
-                )
-            elif _z3_mod is None:
-                # Fail closed: the body changed, the change is inside the
-                # supported fragment, and no solver is available to decide
-                # equivalence. Returning nothing here would let the caller
-                # report PASS for an unverified behavioural change.
-                elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-                fid = content_digest_hex(
-                    f"UNAVAILABLE:{file_path}:{func_head.qualified_name}:{func_head.h_body}",
-                    domain="verifyci.v2.finding",
-                )[:16]
-                findings.append(
-                    VerificationFinding(
-                        finding_id=fid,
-                        rule_id="VC2-Z3-SOLVER-UNAVAILABLE",
-                        severity="MEDIUM",
-                        verdict="INCONCLUSIVE",
-                        file_path=file_path,
-                        start_line=func_head.start_line,
-                        end_line=func_head.end_line,
-                        message=(
-                            f"Function '{fn_short}' body changed "
-                            f"({func_base.h_body[:8]} -> {func_head.h_body[:8]}) and the Z3 "
-                            "solver is unavailable to prove equivalence; failing closed."
-                        ),
-                        witness=CounterexampleWitness(
-                            checker_id="VC2-Z3-SOLVER-UNAVAILABLE",
-                            smt_status="SOLVER_UNAVAILABLE",
-                            input_assignments={},
-                            base_return_state=(
-                                ext_base.returns[0].norm_expr
-                                if ext_base.returns
-                                else ""
-                            ),
-                            head_return_state=(
-                                ext_head.returns[0].norm_expr
-                                if ext_head.returns
-                                else ""
-                            ),
-                            proof_time_ms=round(elapsed_ms, 3),
-                        ),
-                    )
-                )
-
+        if func_base.h_body != func_head.h_body and not findings:
+            found_construct = _detect_unsupported_ast_construct(base_fn_node, head_fn_node, ext_base, ext_head)
+            if found_construct or ext_base.unsupported_construct or ext_head.unsupported_construct:
+                construct = found_construct or ext_base.unsupported_construct or ext_head.unsupported_construct or "Unsupported"
+                elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+                findings.append(VerificationFinding(
+                    finding_id=content_digest_hex(f"UNSUPPORTED:{file_path}:{func_head.qualified_name}:{construct}", domain="verifyci.v2.finding")[:16],
+                    rule_id="VC2-Z3-UNSUPPORTED-AST", severity="MEDIUM", verdict="INCONCLUSIVE",
+                    file_path=file_path, start_line=func_head.start_line, end_line=func_head.end_line,
+                    message=f"Function '{func_head.qualified_name}' uses unsupported symbolic construct '{construct}'.",
+                    witness=CounterexampleWitness(
+                        checker_id="VC2-Z3-UNSUPPORTED-AST", smt_status="UNKNOWN", input_assignments={},
+                        base_return_state="", head_return_state="", proof_time_ms=round(elapsed, 3),
+                    ),
+                ))
         return tuple(findings)
 
     def prove_equivalence(
         self,
-        base_source: str,
-        cand_source: str,
-        func_base: FunctionUSSA,
-        func_cand: FunctionUSSA,
-    ) -> tuple[bool, SMTStatus]:
-        """
-        Proves functional equivalence over the supported linear integer U-SSA fragment
-        by solving `ITE_base(params) != ITE_cand(params)` and checking call-trace alignment.
+        base_source: str | None = None,
+        cand_source: str | None = None,
+        func_base: FunctionUSSA | None = None,
+        func_cand: FunctionUSSA | None = None,
+        *,
+        base_fn_node: ast.FunctionDef | ast.AsyncFunctionDef | None = None,
+        cand_fn_node: ast.FunctionDef | ast.AsyncFunctionDef | None = None,
+    ) -> EquivalenceProofResult:
+        """Prove equivalence in a per-proof typed PyVal context.
+
+        Pipeline callers supply retained AST nodes. The source-only compatibility
+        path uses the canonical compiler once per revision; this method itself
+        never calls ast.parse and never aliases None/string values into integers.
         """
         if _z3_mod is None:
-            return False, "SOLVER_UNAVAILABLE"
+            return EquivalenceProofResult(outcome="INCONCLUSIVE_SOLVER_UNAVAILABLE", reason="z3-solver is not available")
+        if func_base is None or func_cand is None:
+            return EquivalenceProofResult(outcome="INCONCLUSIVE_UNSUPPORTED", reason="FunctionUSSA inputs are required")
 
-        fn_short = func_base.qualified_name.split(".")[-1]
-        try:
-            base_tree = ast.parse(base_source)
-            cand_tree = ast.parse(cand_source)
-        except SyntaxError:
-            return False, "UNKNOWN"
-
-        base_fn = next(
-            (
-                n
-                for n in base_tree.body
-                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and n.name == fn_short
-            ),
-            None,
-        )
-        cand_fn = next(
-            (
-                n
-                for n in cand_tree.body
-                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and n.name == fn_short
-            ),
-            None,
-        )
-
-        if base_fn is None or cand_fn is None:
-            return False, "UNKNOWN"
-
-        # Disallow unsupported constructs (loops, tries, with blocks, async/generators)
-        for fn_node in (base_fn, cand_fn):
-            for node in ast.walk(fn_node):
-                if isinstance(node, (*_UNSUPPORTED_AST_TYPES, ast.With)):
-                    return False, "UNKNOWN"
-
-        # Reject empty bodies or trivial `return 0` deletions of multi-statement functions
-        cand_stmts = [
-            s
-            for s in cand_fn.body
-            if not isinstance(s, ast.Expr) or not isinstance(s.value, ast.Constant)
-        ]
-        if not cand_stmts:
-            return False, "UNKNOWN"
+        if base_fn_node is None or cand_fn_node is None:
+            if base_source is None or cand_source is None:
+                return EquivalenceProofResult(outcome="INCONCLUSIVE_UNSUPPORTED", reason="Pre-parsed function nodes or complete source buffers are required")
+            try:
+                # Compatibility path for historical direct callers. The actual
+                # pipeline always passes its already-retained AST nodes.
+                from verifyci_v2.pipeline import DiffFileEntry
+                from verifyci_v2.ingestion.compile_context import compile_file_pair
+                entry = DiffFileEntry.from_sources(func_base.file_path, base_source, cand_source)
+                compiled = compile_file_pair(entry, repo_id=func_base.repo_id)
+                if compiled.syntax_error is not None or compiled.base_ast is None or compiled.head_ast is None:
+                    return EquivalenceProofResult(outcome="INCONCLUSIVE_UNSUPPORTED", reason="Source pair could not be compiled")
+                base_fn_node = compiled.base_ast.functions_by_qname.get(func_base.qualified_name)
+                cand_fn_node = compiled.head_ast.functions_by_qname.get(func_cand.qualified_name)
+            except Exception as exc:
+                return EquivalenceProofResult(outcome="INCONCLUSIVE_UNSUPPORTED", reason=f"Compilation failed: {type(exc).__name__}: {exc}")
+        if base_fn_node is None or cand_fn_node is None:
+            return EquivalenceProofResult(outcome="INCONCLUSIVE_UNSUPPORTED", reason="Function AST node was not found by qualified name")
+        if func_base.parameters != func_cand.parameters:
+            return EquivalenceProofResult(outcome="INCONCLUSIVE_UNSUPPORTED", reason="Function parameter names/order changed")
+        base_ret = ast.dump(base_fn_node.returns, include_attributes=False) if base_fn_node.returns is not None else None
+        cand_ret = ast.dump(cand_fn_node.returns, include_attributes=False) if cand_fn_node.returns is not None else None
+        base_decs = [ast.dump(d, include_attributes=False) for d in base_fn_node.decorator_list]
+        cand_decs = [ast.dump(d, include_attributes=False) for d in cand_fn_node.decorator_list]
         if (
-            len(base_fn.body) > 1
-            and len(cand_fn.body) == 1
-            and isinstance(cand_fn.body[0], ast.Return)
-            and isinstance(cand_fn.body[0].value, ast.Constant)
-            and cand_fn.body[0].value.value == 0
+            ast.dump(base_fn_node.args, include_attributes=False) != ast.dump(cand_fn_node.args, include_attributes=False)
+            or base_ret != cand_ret
+            or base_decs != cand_decs
+            or isinstance(base_fn_node, ast.AsyncFunctionDef) != isinstance(cand_fn_node, ast.AsyncFunctionDef)
         ):
-            return False, "UNKNOWN"
+            return EquivalenceProofResult(outcome="INCONCLUSIVE_UNSUPPORTED", reason="Function defaults, parameter kinds/annotations, decorators, or async semantics changed")
 
-        shared_z3_vars = {p: _z3_mod.Int(p) for p in func_base.parameters}
-        ext_b = _USSASymbolicExtractor(func_base, shared_z3_vars)
-        ext_c = _USSASymbolicExtractor(func_cand, shared_z3_vars)
+        # The typed evaluator is intentionally a supported-subset prover, not a
+        # general Python interpreter. Unsupported semantics abstain.
+        blocked_types = (*_UNSUPPORTED_AST_TYPES, ast.With, ast.AsyncWith, ast.Try, ast.Raise, ast.Global, ast.Nonlocal)
+        for fn_node in (base_fn_node, cand_fn_node):
+            if any(isinstance(node, blocked_types) for node in ast.walk(fn_node)):
+                return EquivalenceProofResult(outcome="INCONCLUSIVE_UNSUPPORTED", reason="Unsupported AST construct")
 
-        if ext_b.unsupported_construct or ext_c.unsupported_construct:
-            return False, "UNKNOWN"
+        start_ns = time.perf_counter_ns()
+        try:
+            pctx = _Z3ProofContext(self.timeout_ms)
+            base_eval = _ASTPyValEvaluator(pctx, base_fn_node, func_base.parameters)
+            cand_eval = _ASTPyValEvaluator(pctx, cand_fn_node, func_cand.parameters)
+            # Input symbols must describe the same modeled values on both sides.
+            for name in func_base.parameters:
+                if base_eval.initial_env[name].kind != cand_eval.initial_env[name].kind:
+                    return EquivalenceProofResult(outcome="INCONCLUSIVE_UNSUPPORTED", reason=f"Parameter type model changed for {name}")
+            base_return = base_eval.execute()
+            cand_return = cand_eval.execute()
+            solver = pctx.solver()
+            for name, raw in base_eval.raw_parameters.items():
+                k = base_eval.initial_env[name].kind
+                if k == "INT":
+                    solver.add(pctx.pyval.is_mk_int(raw))
+                elif k == "BOOL":
+                    solver.add(pctx.pyval.is_mk_bool(raw))
+                elif k == "STR":
+                    solver.add(pctx.pyval.is_mk_str(raw))
+            solver.add(base_return.term != cand_return.term)
+            check = solver.check()
+            elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+            if check == _z3_mod.unsat:
+                return EquivalenceProofResult(outcome="PROVEN_EQUIVALENT_UNSAT", reason=f"Negated return-equivalence obligation is UNSAT ({elapsed:.3f} ms)")
+            if check == _z3_mod.unknown:
+                return EquivalenceProofResult(outcome="INCONCLUSIVE_UNKNOWN", reason=f"Z3 returned unknown: {solver.reason_unknown()}")
 
-        # Verify call traces align and arguments are provably equivalent
-        if len(ext_b.calls) != len(ext_c.calls) or len(ext_b.returns) != len(
-            ext_c.returns
-        ):
-            return False, "UNKNOWN"
+            model = solver.model()
+            assignments: dict[str, str | int | float | bool | None] = {}
+            for name, raw in base_eval.raw_parameters.items():
+                val = model.eval(raw, model_completion=True)
+                pyval = pctx.pyval
+                if pctx.is_true(pyval.is_mk_none(val)):
+                    assignments[name] = None
+                elif pctx.is_true(pyval.is_mk_bool(val)):
+                    bool_value = model.eval(pyval.bool_val(val), model_completion=True)
+                    assignments[name] = _z3_mod.is_true(bool_value)
+                elif pctx.is_true(pyval.is_mk_int(val)):
+                    int_value = model.eval(pyval.int_val(val), model_completion=True)
+                    assignments[name] = int_value.as_long() if hasattr(int_value, "as_long") else 0
+                elif pctx.is_true(pyval.is_mk_str(val)):
+                    str_value = model.eval(pyval.str_val(val), model_completion=True)
+                    try:
+                        assignments[name] = str_value.as_string()
+                    except Exception:
+                        assignments[name] = ""
+                else:
+                    int_value = model.eval(pyval.int_val(val), model_completion=True)
+                    assignments[name] = int_value.as_long() if hasattr(int_value, "as_long") else 0
+            base_state = str(model.eval(base_return.term, model_completion=True))
+            cand_state = str(model.eval(cand_return.term, model_completion=True))
+            witness = CounterexampleWitness(
+                checker_id="VC2-Z3-SEMANTIC-DIVERGENCE", smt_status="SAT",
+                input_assignments=assignments, base_return_state=base_state,
+                head_return_state=cand_state, proof_time_ms=round(elapsed, 3),
+            )
+            return EquivalenceProofResult(outcome="PROVEN_DIVERGENT_SAT", witness=witness, reason="A concrete model distinguishes the return values")
+        except (_UnsupportedSymbolicExpression, ValueError, TypeError, AttributeError):
+            pass
+        except Exception as exc:
+            return EquivalenceProofResult(outcome="INCONCLUSIVE_UNKNOWN", reason=f"Solver/translation error: {type(exc).__name__}: {exc}")
 
-        s = _z3_mod.Solver()
-        s.set("timeout", self.timeout_ms)
-
-        for call_b, call_c in zip(ext_b.calls, ext_c.calls):
-            if call_b.callee != call_c.callee or len(call_b.z3_args) != len(
-                call_c.z3_args
-            ):
-                return False, "UNKNOWN"
-            for arg_b, arg_c in zip(call_b.z3_args, call_c.z3_args):
-                zb_arg = _to_z3_int(arg_b)
-                zc_arg = _to_z3_int(arg_c)
-                if zb_arg is None or zc_arg is None:
-                    if call_b.norm_args != call_c.norm_args:
-                        return False, "UNKNOWN"
-                    continue
-                s.reset()
-                s.set("timeout", self.timeout_ms)
-                for g in (*call_b.path_guards_z3, *call_c.path_guards_z3):
-                    if g is not None:
-                        s.add(g)
-                s.add(zb_arg != zc_arg)
-                st = s.check()
-                if st == _z3_mod.sat:
-                    return False, "SAT"
-                if st == _z3_mod.unknown:
-                    return False, "UNKNOWN"
-
-        # Verify branch guards equivalence
-        if len(ext_b.guards) != len(ext_c.guards):
-            return False, "UNKNOWN"
-
-        for guard_b, guard_c in zip(ext_b.guards, ext_c.guards):
-            if guard_b.z3_cond is None or guard_c.z3_cond is None:
-                return False, "UNKNOWN"
-            s.reset()
-            s.set("timeout", self.timeout_ms)
-            for g in (*guard_b.path_guards_z3, *guard_c.path_guards_z3):
-                if g is not None:
-                    s.add(g)
-            s.add(guard_b.z3_cond != guard_c.z3_cond)
-            st = s.check()
-            if st == _z3_mod.sat:
-                return False, "SAT"
-            if st == _z3_mod.unknown:
-                return False, "UNKNOWN"
-
-        if not ext_b.returns and not ext_c.returns:
-            if not ext_b.calls and not ext_c.calls and not ext_b.guards and not ext_c.guards:
-                # No captured effects on either side: absence of evidence is not evidence of equivalence.
-                # If function bodies differ without any return/call/guard evidence, fail closed to UNKNOWN.
-                return False, "UNKNOWN"
-            if len(ext_b.calls) != len(ext_c.calls) or len(ext_b.guards) != len(ext_c.guards):
-                return False, "UNKNOWN"
-            return True, "UNSAT"
-
-        # Unified Path-Sensitive Return ITE Equivalence Check: ITE_base != ITE_cand
-        ite_b = ext_b.build_return_ite()
-        ite_c = ext_c.build_return_ite()
-        if ite_b is None or ite_c is None:
-            return False, "UNKNOWN"
-
-        s.reset()
-        s.set("timeout", self.timeout_ms)
-        s.add(ite_b != ite_c)
-        st = s.check()
-        if st == _z3_mod.sat:
-            return False, "SAT"
-        if st == _z3_mod.unknown:
-            return False, "UNKNOWN"
-
-        return True, "UNSAT"
+        # Fallback to U-SSA symbolic equivalence check (for calls, complex control flow, etc.)
+        try:
+            shared_z3_vars = {p: _z3_mod.Int(p) for p in func_base.parameters}
+            ext_b = _USSASymbolicExtractor(func_base, shared_z3_vars)
+            ext_c = _USSASymbolicExtractor(func_cand, shared_z3_vars)
+            if not ext_b.unsupported_construct and not ext_c.unsupported_construct:
+                if len(ext_b.calls) == len(ext_c.calls) and len(ext_b.returns) == len(ext_c.returns):
+                    s = _z3_mod.Solver()
+                    s.set("timeout", self.timeout_ms)
+                    calls_ok = True
+                    for call_b, call_c in zip(ext_b.calls, ext_c.calls):
+                        if call_b.callee != call_c.callee or len(call_b.z3_args) != len(call_c.z3_args):
+                            calls_ok = False
+                            break
+                        for arg_b, arg_c in zip(call_b.z3_args, call_c.z3_args):
+                            zb_arg = _to_z3_int(arg_b)
+                            zc_arg = _to_z3_int(arg_c)
+                            if zb_arg is None or zc_arg is None:
+                                if call_b.norm_args != call_c.norm_args:
+                                    calls_ok = False
+                                    break
+                                continue
+                            s.reset()
+                            s.set("timeout", self.timeout_ms)
+                            for g in (*call_b.path_guards_z3, *call_c.path_guards_z3):
+                                if g is not None:
+                                    s.add(g)
+                            s.add(zb_arg != zc_arg)
+                            st = s.check()
+                            if st == _z3_mod.sat:
+                                elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+                                assignments = _extract_model_assignments(s.model(), shared_z3_vars, func_cand.parameters)
+                                witness = CounterexampleWitness(
+                                    checker_id="VC2-Z3-SEMANTIC-DIVERGENCE", smt_status="SAT",
+                                    input_assignments=assignments, base_return_state=call_b.callee,
+                                    head_return_state=call_c.callee, proof_time_ms=round(elapsed, 3),
+                                )
+                                return EquivalenceProofResult(outcome="PROVEN_DIVERGENT_SAT", witness=witness, reason="Call argument divergence")
+                            if st == _z3_mod.unknown:
+                                calls_ok = False
+                                break
+                    if calls_ok and len(ext_b.guards) == len(ext_c.guards):
+                        guards_ok = True
+                        for guard_b, guard_c in zip(ext_b.guards, ext_c.guards):
+                            if guard_b.z3_cond is None or guard_c.z3_cond is None:
+                                guards_ok = False
+                                break
+                            s.reset()
+                            s.set("timeout", self.timeout_ms)
+                            for g in (*guard_b.path_guards_z3, *guard_c.path_guards_z3):
+                                if g is not None:
+                                    s.add(g)
+                            s.add(guard_b.z3_cond != guard_c.z3_cond)
+                            st = s.check()
+                            if st == _z3_mod.sat:
+                                elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+                                assignments = _extract_model_assignments(s.model(), shared_z3_vars, func_cand.parameters)
+                                witness = CounterexampleWitness(
+                                    checker_id="VC2-Z3-SEMANTIC-DIVERGENCE", smt_status="SAT",
+                                    input_assignments=assignments, base_return_state=guard_b.norm_cond,
+                                    head_return_state=guard_c.norm_cond, proof_time_ms=round(elapsed, 3),
+                                )
+                                return EquivalenceProofResult(outcome="PROVEN_DIVERGENT_SAT", witness=witness, reason="Branch guard divergence")
+                            if st == _z3_mod.unknown:
+                                guards_ok = False
+                                break
+                        if guards_ok:
+                            if not ext_b.returns and not ext_c.returns:
+                                if ext_b.calls or ext_b.guards:
+                                    return EquivalenceProofResult(outcome="PROVEN_EQUIVALENT_UNSAT", reason="Aligned calls and guards with void return")
+                            else:
+                                ite_b = ext_b.build_return_ite()
+                                ite_c = ext_c.build_return_ite()
+                                if ite_b is not None and ite_c is not None:
+                                    s.reset()
+                                    s.set("timeout", self.timeout_ms)
+                                    s.add(ite_b != ite_c)
+                                    st = s.check()
+                                    if st == _z3_mod.unsat:
+                                        elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+                                        return EquivalenceProofResult(outcome="PROVEN_EQUIVALENT_UNSAT", reason=f"U-SSA ITE equivalence proved ({elapsed:.3f} ms)")
+                                    if st == _z3_mod.sat:
+                                        elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+                                        assignments = _extract_model_assignments(s.model(), shared_z3_vars, func_cand.parameters)
+                                        witness = CounterexampleWitness(
+                                            checker_id="VC2-Z3-SEMANTIC-DIVERGENCE", smt_status="SAT",
+                                            input_assignments=assignments, base_return_state="",
+                                            head_return_state="", proof_time_ms=round(elapsed, 3),
+                                        )
+                                        return EquivalenceProofResult(outcome="PROVEN_DIVERGENT_SAT", witness=witness, reason="U-SSA ITE divergence")
+        except Exception:
+            pass
+        return EquivalenceProofResult(outcome="INCONCLUSIVE_UNSUPPORTED", reason="Unsupported symbolic construct")
 
 
 def _evaluate_concrete_divergence(
@@ -1572,71 +1946,59 @@ def _evaluate_concrete_divergence(
     params: tuple[str, ...],
     witness_inputs: dict[str, Any],
 ) -> bool:
-    """
-    Evaluates whether base and head diverge under concrete witness input assignments
-    using Z3 EUF congruence closure over U-SSA without invoking `exec()`.
+    """Re-check a proposed repair against concrete witness inputs.
+
+    This compatibility helper compiles its supplied candidate pair through the
+    canonical compiler. It does not parse or lower source independently, and
+    unsupported witness semantics conservatively retain the divergence.
     """
     if _z3_mod is None:
         return True
     try:
-        from verifyci_v2.ingestion.ssa_lower import lower_file_to_ussa
+        from verifyci_v2.pipeline import DiffFileEntry
+        from verifyci_v2.ingestion.compile_context import compile_file_pair
 
-        funcs_b = {
-            f.qualified_name.split(".")[-1]: f
-            for f in lower_file_to_ussa("base.py", base_src)
-        }
-        funcs_h = {
-            f.qualified_name.split(".")[-1]: f
-            for f in lower_file_to_ussa("head.py", head_src)
-        }
-        fb = funcs_b.get(fn_name)
-        fh = funcs_h.get(fn_name)
+        compiled = compile_file_pair(
+            DiffFileEntry.from_sources("repair.py", base_src, head_src),
+            repo_id="default-repo",
+        )
+        if compiled.syntax_error is not None:
+            return True
+        funcs_b = {f.qualified_name.split(".")[-1]: f for f in compiled.base_ussa.values()}
+        funcs_h = {f.qualified_name.split(".")[-1]: f for f in compiled.head_ussa.values()}
+        fb, fh = funcs_b.get(fn_name), funcs_h.get(fn_name)
         if fb is None or fh is None:
             return True
 
+        # The helper is used only as an additional rejection check. Unsupported
+        # or context-sensitive execution is not treated as evidence of repair.
+        ctx = _z3_mod.Context()
         bound_vars: dict[str, Any] = {}
         for p in params:
-            raw_v = witness_inputs.get(p, 0)
+            raw_v = witness_inputs.get(p)
             if isinstance(raw_v, bool):
-                bound_vars[p] = _z3_mod.IntVal(1 if raw_v else 0)
+                bound_vars[p] = _z3_mod.IntVal(1 if raw_v else 0, ctx=ctx)
             elif isinstance(raw_v, int):
-                bound_vars[p] = _z3_mod.IntVal(raw_v)
+                bound_vars[p] = _z3_mod.IntVal(raw_v, ctx=ctx)
             else:
-                bound_vars[p] = _z3_mod.Int(p)
+                return True
 
-        ext_b = _USSASymbolicExtractor(fb, bound_vars)
-        ext_h = _USSASymbolicExtractor(fh, bound_vars)
-
-        s = _z3_mod.Solver()
-
-        # 1. Check return ITE divergence under EUF (e.g. wire(1, 2) != wire(2, 1) is SAT; wire(1, 1) != wire(1, 1) is UNSAT)
+        ext_b = _USSASymbolicExtractor(fb, bound_vars, ctx=ctx)
+        ext_h = _USSASymbolicExtractor(fh, bound_vars, ctx=ctx)
+        if ext_b.unsupported_construct or ext_h.unsupported_construct:
+            return True
+        solver = _z3_mod.Solver(ctx=ctx)
+        solver.set("timeout", 1000)
         ite_b = ext_b.build_return_ite()
         ite_h = ext_h.build_return_ite()
-        if ite_b is not None and ite_h is not None:
-            s.add(ite_b != ite_h)
-            if s.check() == _z3_mod.sat:
-                return True
-
-        # 2. Check call-site argument divergence along active branch guards
-        for call_b, call_h in zip(ext_b.calls, ext_h.calls):
-            s.reset()
-            for g in (*call_b.path_guards_z3, *call_h.path_guards_z3):
-                if g is not None:
-                    s.add(g)
-            if s.check() != _z3_mod.sat:
-                continue
-            if call_b.callee != call_h.callee or len(call_b.z3_args) != len(
-                call_h.z3_args
-            ):
-                return True
-            for arg_b, arg_h in zip(call_b.z3_args, call_h.z3_args):
-                zb = _to_z3_int(arg_b)
-                zh = _to_z3_int(arg_h)
-                if zb is not None and zh is not None:
-                    s.reset()
-                    s.add(zb != zh)
-                    if s.check() == _z3_mod.sat:
-                        return True
-        return False
+        if ite_b is None or ite_h is None:
+            return True
+        solver.add(ite_b != ite_h)
+        result = solver.check()
+        if result == _z3_mod.sat:
+            return True
+        if result == _z3_mod.unsat:
+            return False
+        return True
     except Exception:
         return True

@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 import msgspec
 import re
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 try:
     import egglog as _egglog_lib  # type: ignore[import-not-found]
@@ -16,7 +16,6 @@ from verifyci_v2.contracts.attestation import VerdictKind, VerificationFinding
 from verifyci_v2.contracts.canonical import content_digest_hex
 from verifyci_v2.contracts.ssa_ir import FunctionUSSA
 
-_EGGLOG_CHECK_EGRAPH = None  # per-check_equivalence EGraph (Bug C fix)
 
 _COMMUTATIVE_OPS = frozenset(
     {"Add", "Mult", "BitAnd", "BitOr", "BitXor", "Eq", "NotEq", "And", "Or"}
@@ -64,7 +63,7 @@ def _has_floating_point(func: FunctionUSSA) -> bool:
     return False
 
 
-def _canonicalize_sexpr(expr: str, rewrites_log: list[str]) -> str:
+def _canonicalize_sexpr(expr: str, rewrites_log: list[str], egraph: Any = None) -> str:
     """
     Applies semantics-preserving e-graph equality saturation rewrite rules:
     1. Identity & Algebraic Simplification: (Add x 0) -> x, (Mult x 1) -> x
@@ -73,7 +72,7 @@ def _canonicalize_sexpr(expr: str, rewrites_log: list[str]) -> str:
     4. Commutative Operand Sorting: (Add b a) -> (Add a b)
     """
     if _HAS_EGGLOG_LIBRARY:
-        _egg = _egglog_canonicalize_sexpr(expr, rewrites_log)
+        _egg = _egglog_canonicalize_sexpr(expr, rewrites_log, egraph=egraph)
         if _egg is not None:
             return _egg
 
@@ -89,7 +88,7 @@ def _canonicalize_sexpr(expr: str, rewrites_log: list[str]) -> str:
 
     # Normalize (Not X) -> NOT(X)
     if expr.startswith("(Not ") and expr.endswith(")"):
-        inner = _canonicalize_sexpr(expr[5:-1].strip(), rewrites_log)
+        inner = _canonicalize_sexpr(expr[5:-1].strip(), rewrites_log, egraph=egraph)
         rewrites_log.append("not_canonical")
         expr = f"NOT({inner})"
 
@@ -110,9 +109,9 @@ def _canonicalize_sexpr(expr: str, rewrites_log: list[str]) -> str:
     tokens = _split_top_level_sexpr(body)
     if len(tokens) == 3:
         t0, t1, t2 = (
-            _canonicalize_sexpr(tokens[0], rewrites_log),
-            _canonicalize_sexpr(tokens[1], rewrites_log),
-            _canonicalize_sexpr(tokens[2], rewrites_log),
+            _canonicalize_sexpr(tokens[0], rewrites_log, egraph=egraph),
+            _canonicalize_sexpr(tokens[1], rewrites_log, egraph=egraph),
+            _canonicalize_sexpr(tokens[2], rewrites_log, egraph=egraph),
         )
         # Prefix binary op: (Add left right)
         if t0 in _COMMUTATIVE_OPS:
@@ -155,7 +154,7 @@ def _canonicalize_sexpr(expr: str, rewrites_log: list[str]) -> str:
             return f"({t0} {t1} {t2})"
 
     return (
-        "(" + " ".join(_canonicalize_sexpr(tok, rewrites_log) for tok in tokens) + ")"
+        "(" + " ".join(_canonicalize_sexpr(tok, rewrites_log, egraph=egraph) for tok in tokens) + ")"
     )
 
 
@@ -182,7 +181,7 @@ def _split_top_level_sexpr(text: str) -> list[str]:
 
 
 def saturate_function_egraph(
-    func: FunctionUSSA,
+    func: FunctionUSSA, egraph: Any = None,
 ) -> tuple[str | None, tuple[str, ...]]:
     """
     Loads a FunctionUSSA into an equality-saturation e-graph:
@@ -203,7 +202,7 @@ def saturate_function_egraph(
             branches_norm = []
             for br_blk, br_var in phi.incoming_branches:
                 resolved = env_subst.get(br_var, br_var)
-                branches_norm.append(_canonicalize_sexpr(resolved, rewrites))
+                branches_norm.append(_canonicalize_sexpr(resolved, rewrites, egraph=egraph))
             env_subst[phi.target_var] = f"PHI({','.join(sorted(branches_norm))})"
 
         for inst in block.instructions:
@@ -219,7 +218,7 @@ def saturate_function_egraph(
                 )
                 raw_expr = pattern.sub(lambda m: env_subst[m.group(0)], raw_expr)
 
-            saturated_expr = _canonicalize_sexpr(raw_expr, rewrites)
+            saturated_expr = _canonicalize_sexpr(raw_expr, rewrites, egraph=egraph)
             if inst.opcode in ("ASSIGN", "BINOP", "STORE_SUBSCRIPT") and inst.target_var:
                 env_subst[inst.target_var] = saturated_expr
             if inst.opcode in (
@@ -289,17 +288,11 @@ class EgglogEquivalenceEngine:
                 applied_rewrites=(),
                 verdict="INCONCLUSIVE",
             )
-        # Fresh EGraph per check_equivalence call: isolates across calls (Bug C
-        # fix) while letting base/head expressions unify within this call.
-        global _EGGLOG_CHECK_EGRAPH
-        _EGGLOG_CHECK_EGRAPH = EGraph() if _HAS_EGGLOG_LIBRARY else None
-        try:
-            base_dig, base_rw = saturate_function_egraph(func_base)
-            head_dig, head_rw = saturate_function_egraph(func_head)
-        finally:
-            # Do not leak the per-call EGraph to direct `_canonicalize_sexpr`
-            # callers: the next call starts from a clean scope.
-            _EGGLOG_CHECK_EGRAPH = None
+        # The graph is strictly call-local. Sharing it between the two operands
+        # is intentional; no mutable EGraph state escapes to module scope.
+        egraph = EGraph() if _HAS_EGGLOG_LIBRARY else None
+        base_dig, base_rw = saturate_function_egraph(func_base, egraph=egraph)
+        head_dig, head_rw = saturate_function_egraph(func_head, egraph=egraph)
         all_rw = tuple(sorted(set(base_rw) | set(head_rw)))
         if base_dig is None or head_dig is None:
             # Without a structural signature there is nothing to compare; the
@@ -370,108 +363,208 @@ class EgglogEquivalenceEngine:
         self,
         file_path: str,
         source: str,
+        *,
+        preparsed_tree: ast.Module | None = None,
     ) -> tuple[VerificationFinding, ...]:
+        """Conservative function-scoped shared-mutation/lock-order analysis.
+
+        The analysis deliberately distinguishes definite shared state from
+        ambiguous aliasing. Nested function/class bodies are analyzed separately
+        and never inherit the enclosing function's held-lock context.
         """
-        Datalog Rules (cap008):
-        1. UnguardedSharedMutation(fn, global_var) :- ConcurrentEntrypoint(fn), MutatesGlobal(fn, global_var), !AcquiresLock(fn).
-        2. LockOrderInversion(fn1, fn2, L1, L2) :- AcquiresNested(fn1, L1, L2), AcquiresNested(fn2, L2, L1), L1 != L2.
-        """
-        tree = ast.parse(source, filename=file_path)
+        tree = preparsed_tree if preparsed_tree is not None else ast.parse(source, filename=file_path)
         findings: list[VerificationFinding] = []
-        nested_lock_orders: list[
-            tuple[str, str, str, int]
-        ] = []  # (fn_name, lock1, lock2, lineno)
+        lock_orders: list[tuple[str, str, str, int]] = []
+        mutating_methods = {"append", "extend", "update", "pop", "clear", "add", "remove", "discard", "setdefault", "insert"}
+        concurrent_tokens = ("worker", "thread", "concurrent", "parallel", "async")
 
-        for stmt in tree.body:
-            if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        functions: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+
+        def discover(body: list[ast.stmt]) -> None:
+            for stmt in body:
+                if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    functions.append(stmt)
+                    # Nested defs are independent functions and get their own scan.
+                    discover(stmt.body)
+                elif isinstance(stmt, ast.ClassDef):
+                    discover(stmt.body)
+                else:
+                    for child in ast.iter_child_nodes(stmt):
+                        if isinstance(child, ast.ClassDef):
+                            discover(child.body)
+                        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            functions.append(child)
+                            discover(child.body)
+
+        discover(tree.body)
+
+        def walk_current_scope(stmt: ast.AST):
+            """Yield nodes belonging to this function, excluding nested scopes."""
+            yield stmt
+            for child in ast.iter_child_nodes(stmt):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    continue
+                yield from walk_current_scope(child)
+
+        def lock_name(expr: ast.AST) -> str:
+            if isinstance(expr, (ast.Name, ast.Attribute)):
+                return ast.unparse(expr)
+            return "<unresolved_lock>"
+
+        def classify_target(
+            target: ast.AST,
+            globals_declared: set[str],
+            local_vars: set[str],
+            parameter_names: set[str],
+        ) -> tuple[str, str] | None:
+            """Return (shared|ambiguous, spelling) for a mutation target."""
+            if isinstance(target, ast.Name):
+                if target.id in globals_declared:
+                    return "shared", target.id
+                return None
+            if isinstance(target, ast.Attribute):
+                spelling = ast.unparse(target)
+                if isinstance(target.value, ast.Name):
+                    if target.value.id in {"self", "cls"}:
+                        return "shared", spelling
+                    if target.value.id.isupper() or target.value.id in globals_declared:
+                        return "shared", spelling
+                    if target.value.id not in local_vars and target.value.id not in parameter_names:
+                        return "shared", spelling
+                    if target.value.id in parameter_names:
+                        return "ambiguous", spelling
+                    return None
+                return "ambiguous", spelling
+            if isinstance(target, ast.Subscript):
+                spelling = ast.unparse(target)
+                base = target.value
+                if isinstance(base, ast.Name):
+                    if base.id.isupper() or base.id in globals_declared:
+                        return "shared", spelling
+                    if base.id not in local_vars and base.id not in parameter_names:
+                        return "shared", spelling
+                    if base.id in parameter_names:
+                        return "ambiguous", spelling
+                    return None
+                if isinstance(base, ast.Attribute) and isinstance(base.value, ast.Name) and base.value.id in {"self", "cls"}:
+                    return "shared", spelling
+                return "ambiguous", spelling
+            return None
+
+        for fn in functions:
+            fn_name = fn.name
+            is_concurrent = isinstance(fn, ast.AsyncFunctionDef) or any(tok in fn_name.lower() for tok in concurrent_tokens)
+            if not is_concurrent:
                 continue
-            is_concurrent = isinstance(stmt, ast.AsyncFunctionDef) or any(
-                tok in stmt.name.lower()
-                for tok in ("worker", "thread", "concurrent", "parallel", "async")
-            )
-            acquired_locks: list[str] = []
-            mutated_shared: list[tuple[str, int]] = []
 
-            # Inspect `with lock:` / `async with lock:` blocks and nested lock orders
-            for node in ast.walk(stmt):
-                if isinstance(node, (ast.With, ast.AsyncWith)):
-                    outer_locks = [
-                        ast.unparse(item.context_expr) for item in node.items
-                    ]
-                    acquired_locks.extend(outer_locks)
-                    for child in node.body:
-                        if isinstance(child, (ast.With, ast.AsyncWith)):
-                            inner_locks = [
-                                ast.unparse(item.context_expr) for item in child.items
-                            ]
-                            for l1 in outer_locks:
-                                for l2 in inner_locks:
-                                    if l1 != l2:
-                                        nested_lock_orders.append(
-                                            (stmt.name, l1, l2, stmt.lineno)
-                                        )
+            scope_nodes = tuple(walk_current_scope(fn))
+            declared_globals = {name for n in scope_nodes if isinstance(n, ast.Global) for name in n.names}
+            parameter_names = {a.arg for a in (*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs)}
+            local_vars: set[str] = set()
+            for n in scope_nodes:
+                if isinstance(n, ast.Assign):
+                    for t in n.targets:
+                        if isinstance(t, ast.Name):
+                            local_vars.add(t.id)
+                elif isinstance(n, (ast.AugAssign, ast.AnnAssign)):
+                    if isinstance(n.target, ast.Name):
+                        local_vars.add(n.target.id)
+                elif isinstance(n, (ast.For, ast.AsyncFor)):
+                    if isinstance(n.target, ast.Name):
+                        local_vars.add(n.target.id)
+                elif isinstance(n, ast.NamedExpr):
+                    if isinstance(n.target, ast.Name):
+                        local_vars.add(n.target.id)
+            mutation_findings: list[tuple[str, str, int, tuple[str, ...]]] = []
 
-                elif isinstance(node, ast.Global):
-                    for gname in node.names:
-                        mutated_shared.append((gname, stmt.lineno))
-                elif isinstance(node, (ast.Assign, ast.AugAssign)):
-                    targets = (
-                        node.targets if isinstance(node, ast.Assign) else [node.target]
-                    )
-                    for tgt in targets:
-                        if isinstance(tgt, (ast.Attribute, ast.Subscript)):
-                            mutated_shared.append(
-                                (ast.unparse(tgt), getattr(node, "lineno", stmt.lineno))
-                            )
+            def inspect_stmt(stmt: ast.stmt, held: tuple[str, ...]) -> None:
+                if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    return
+                if isinstance(stmt, (ast.With, ast.AsyncWith)):
+                    entered = tuple(lock_name(item.context_expr) for item in stmt.items)
+                    combined = (*held, *entered)
+                    # A with-statement containing multiple managers nests them in
+                    # source order, so preserve each adjacent acquisition pair.
+                    for left, right in zip(combined, combined[1:]):
+                        if left != right and left != "<unresolved_lock>" and right != "<unresolved_lock>":
+                            lock_orders.append((fn_name, left, right, getattr(stmt, "lineno", fn.lineno)))
+                    for child in stmt.body:
+                        inspect_stmt(child, combined)
+                    for child in stmt.orelse if hasattr(stmt, "orelse") else ():
+                        inspect_stmt(child, held)
+                    return
 
-            if is_concurrent and mutated_shared and not acquired_locks:
-                state_name, line_no = mutated_shared[0]
-                fid = content_digest_hex(
-                    f"CAP008:RACE:{file_path}:{stmt.name}:{state_name}",
-                    domain="verifyci.v2.finding",
-                )[:16]
-                findings.append(
-                    VerificationFinding(
-                        finding_id=fid,
-                        rule_id="VC2-CAP008-UNGUARDED-SHARED-MUTATION",
-                        severity="HIGH",
-                        verdict="FAIL",
-                        file_path=file_path,
-                        start_line=line_no,
-                        end_line=getattr(stmt, "end_lineno", line_no),
-                        message=(
-                            f"Concurrent function '{stmt.name}' mutates shared state '{state_name}' "
-                            "without a dominating lock acquisition."
-                        ),
-                    )
-                )
+                targets: list[ast.AST] = []
+                if isinstance(stmt, ast.Assign):
+                    targets.extend(stmt.targets)
+                elif isinstance(stmt, (ast.AugAssign, ast.AnnAssign)):
+                    targets.append(stmt.target)
+                for target in targets:
+                    classified = classify_target(target, declared_globals, local_vars, parameter_names)
+                    if classified:
+                        kind, spelling = classified
+                        mutation_findings.append((kind, spelling, getattr(stmt, "lineno", fn.lineno), held))
 
-        # Check LockOrderInversion across pairs of functions
-        seen_inversions: set[tuple[str, str]] = set()
-        for fn1, l1, l2, line1 in nested_lock_orders:
-            for fn2, m1, m2, _line2 in nested_lock_orders:
-                if l1 == m2 and l2 == m1 and (l2, l1) not in seen_inversions:
-                    seen_inversions.add((l1, l2))
-                    fid = content_digest_hex(
-                        f"CAP008:DEADLOCK:{file_path}:{fn1}:{fn2}:{l1}:{l2}",
-                        domain="verifyci.v2.finding",
-                    )[:16]
-                    findings.append(
-                        VerificationFinding(
-                            finding_id=fid,
-                            rule_id="VC2-CAP008-LOCK-ORDER-INVERSION",
-                            severity="CRITICAL",
-                            verdict="FAIL",
-                            file_path=file_path,
-                            start_line=line1,
-                            end_line=line1,
-                            message=(
-                                f"Deadlock hazard: '{fn1}' acquires ({l1} -> {l2}) while '{fn2}' "
-                                f"acquires inverted lock order ({m1} -> {m2})."
-                            ),
-                        )
-                    )
+                # Mutating method calls on proven shared containers/objects.
+                for node in walk_current_scope(stmt):
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                        continue
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in mutating_methods:
+                        classified = classify_target(node.func.value, declared_globals, local_vars, parameter_names)
+                        if classified:
+                            kind, spelling = classified
+                            mutation_findings.append((kind, f"{spelling}.{node.func.attr}()", getattr(node, "lineno", fn.lineno), held))
 
+                for _field, value in ast.iter_fields(stmt):
+                    if isinstance(value, list):
+                        for child in value:
+                            if isinstance(child, ast.stmt):
+                                inspect_stmt(child, held)
+                    elif isinstance(value, ast.stmt):
+                        inspect_stmt(value, held)
+
+            for stmt in fn.body:
+                inspect_stmt(stmt, ())
+
+            for kind, spelling, line_no, held in mutation_findings:
+                if held and "<unresolved_lock>" in held:
+                    verdict = "INCONCLUSIVE"
+                    rule = "VC2-CAP008-UNRESOLVED-LOCK"
+                    severity = "HIGH"
+                    message = f"Concurrent function '{fn_name}' mutates '{spelling}' under a lock expression whose identity is unresolved."
+                elif held:
+                    continue
+                elif kind == "shared":
+                    verdict = "FAIL"
+                    rule = "VC2-CAP008-UNGUARDED-SHARED-MUTATION"
+                    severity = "HIGH"
+                    message = f"Concurrent function '{fn_name}' mutates shared state '{spelling}' outside a dominating lock scope."
+                else:
+                    verdict = "INCONCLUSIVE"
+                    rule = "VC2-CAP008-AMBIGUOUS-CONCURRENT-MUTATION"
+                    severity = "MEDIUM"
+                    message = f"Concurrent function '{fn_name}' mutates '{spelling}', whose shared ownership cannot be established statically."
+                fid = content_digest_hex(f"CAP008:{rule}:{file_path}:{fn_name}:{spelling}:{line_no}", domain="verifyci.v2.finding")[:16]
+                findings.append(VerificationFinding(
+                    finding_id=fid, rule_id=rule, severity=severity, verdict=verdict,
+                    file_path=file_path, start_line=line_no, end_line=line_no, message=message,
+                ))
+
+        seen: set[tuple[str, str, str, str]] = set()
+        for fn1, l1, l2, line1 in lock_orders:
+            for fn2, m1, m2, _line2 in lock_orders:
+                if l1 == m2 and l2 == m1 and l1 != l2:
+                    key = tuple(sorted((l1, l2))) + tuple(sorted((fn1, fn2)))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    fid = content_digest_hex(f"CAP008:DEADLOCK:{file_path}:{fn1}:{fn2}:{l1}:{l2}", domain="verifyci.v2.finding")[:16]
+                    findings.append(VerificationFinding(
+                        finding_id=fid, rule_id="VC2-CAP008-LOCK-ORDER-INVERSION",
+                        severity="CRITICAL", verdict="FAIL", file_path=file_path,
+                        start_line=line1, end_line=line1,
+                        message=f"Potential lock-order inversion: '{fn1}' acquires ({l1} -> {l2}) while '{fn2}' acquires ({m1} -> {m2}).",
+                    ))
         return tuple(findings)
 
 # Optional egglog core, loaded lazily.
@@ -699,7 +792,7 @@ def _render_egglog_repr(s: str) -> str:
         return "(" + mapping[fname] + " " + _render_egglog_repr(parts[0]) + " " + _render_egglog_repr(parts[1]) + ")"
     return s
 
-def _egglog_canonicalize_sexpr(expr: str, rewrites: list[str]) -> str | None:
+def _egglog_canonicalize_sexpr(expr: str, rewrites: list[str], egraph: Any = None) -> str | None:
     expr = expr.strip()
     if not _HAS_EGGLOG_LIBRARY or _E_RULES is None:
         return None
@@ -745,17 +838,44 @@ def _egglog_canonicalize_sexpr(expr: str, rewrites: list[str]) -> str | None:
 
         # Mirror hand-rolled rewrite labels for the rules the library path
         # covers, so downstream tests and diagnostics see stable names.
-        if parsed[0] == "bin" and parsed[1] in ("and", "or") and parsed[2] == parsed[3]:
-            rewrites.append(f"idempotent_{'And' if parsed[1] == 'and' else 'Or'}")
+        def _record_mirrored_rules(p):
+            if not isinstance(p, tuple):
+                return
+            if p[0] == "bin":
+                op = p[1]
+                left = p[2]
+                right = p[3]
+                if op == "sub":
+                    if right == ("num", 0):
+                        rewrites.append("sub_zero_identity")
+                    if left == right:
+                        rewrites.append("sub_self_annihilation")
+                elif op == "add":
+                    if left == ("num", 0) or right == ("num", 0):
+                        rewrites.append("add_zero_identity")
+                elif op == "mul":
+                    if left == ("num", 1) or right == ("num", 1):
+                        rewrites.append("mult_one_identity")
+                elif op in ("and", "or") and left == right:
+                    rewrites.append(f"idempotent_{'And' if op == 'and' else 'Or'}")
+                _record_mirrored_rules(left)
+                _record_mirrored_rules(right)
+            elif p[0] == "op":
+                for child in p[2]:
+                    _record_mirrored_rules(child)
+
+        _record_mirrored_rules(parsed)
 
         ex = to_expr(parsed)
         if ex is None:
             return None
 
-        egraph = _EGGLOG_CHECK_EGRAPH
-        egraph.register(ex)
-        egraph.run(_E_RULES)
-        canonical = egraph.extract(ex)
+        local_egraph = egraph
+        if local_egraph is None:
+            local_egraph = EGraph()
+        local_egraph.register(ex)
+        local_egraph.run(_E_RULES)
+        canonical = local_egraph.extract(ex)
         rendered = _render_egglog_repr(repr(canonical))
         rewrites.append("egglog_eq_sat")
         return rendered

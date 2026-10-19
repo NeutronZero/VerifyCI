@@ -58,7 +58,8 @@ def _strip_comments_and_strings(src: str) -> str:
 
 
 def build_file_stack_graph(
-    file_path: str, source: str, language: str = "python"
+    file_path: str, source: str, language: str = "python", *,
+    preparsed_tree: ast.Module | None = None,
 ) -> FileStackGraph:
     """Computes a per-file scope graph with PUSH_SYMBOL and POP_SYMBOL nodes in isolation."""
     file_xxh3 = fingerprint_hex(source)
@@ -82,7 +83,7 @@ def build_file_stack_graph(
     imports: list[tuple[str, str]] = []
 
     if language == "python":
-        tree = ast.parse(source, filename=file_path)
+        tree = preparsed_tree if preparsed_tree is not None else ast.parse(source, filename=file_path)
         explicit_exports: set[str] | None = None
         for stmt in tree.body:
             if isinstance(stmt, ast.Assign):
@@ -305,7 +306,8 @@ class StackGraphStitcher:
         self._unresolved_references: list[dict[str, Any]] = []
 
     def upsert_file(
-        self, file_path: str, source: str, language: str = "python"
+        self, file_path: str, source: str, language: str = "python", *,
+        preparsed_tree: ast.Module | None = None,
     ) -> bool:
         """Updates a file's stack graph only if its XXH3 digest changed. Returns True if recomputed."""
         new_xxh3 = fingerprint_hex(source)
@@ -313,7 +315,7 @@ class StackGraphStitcher:
         if existing is not None and existing.file_xxh3 == new_xxh3:
             return False
 
-        fsg = build_file_stack_graph(file_path, source, language)
+        fsg = build_file_stack_graph(file_path, source, language, preparsed_tree=preparsed_tree)
         self._file_graphs[file_path] = fsg
         self._rebuild_indices()
         return True

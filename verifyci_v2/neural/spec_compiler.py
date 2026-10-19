@@ -26,88 +26,161 @@ class _InlineAssignTransformer(ast.NodeTransformer):
         return node
 
 
-def _ast_to_z3_val(node: ast.AST, z3_vars: dict[str, Any], z3_mod: Any) -> Any:
+def _ast_to_z3_val(
+    node: ast.AST,
+    z3_vars: dict[str, Any],
+    z3_mod: Any,
+    pctx: Any | None = None,
+) -> Any:
+    """Translate a supported scalar expression into the canonical ``PyVal`` sort.
+
+    The optional ``pctx`` is supplied by the caller and owns the Z3 context and
+    datatype. Unsupported or dynamically typed operations return ``None`` so
+    intent analysis abstains rather than coercing unrelated Python values into
+    integers or Booleans.
+    """
     if z3_mod is None:
         return None
+    try:
+        from verifyci_v2.symbolic.z3_prover import (
+            _PyVal,
+            _Z3ProofContext,
+            _encode_py_eq,
+        )
+        if pctx is None:
+            pctx = _Z3ProofContext(timeout_ms=2000)
+    except Exception:
+        return None
+
+    pv = pctx.pyval
     if isinstance(node, ast.Name):
-        if node.id not in z3_vars:
-            z3_vars[node.id] = z3_mod.Int(node.id)
-        return z3_vars[node.id]
+        value = z3_vars.get(node.id)
+        if isinstance(value, _PyVal):
+            return value
+        # Parameters are unconstrained runtime Python values. Do not assume an
+        # annotation makes them integers, since Python does not enforce hints.
+        term = z3_mod.Const(node.id, pv)
+        result = _PyVal(term, None)
+        z3_vars[node.id] = result
+        return result
+
     if isinstance(node, ast.Constant):
+        if node.value is None:
+            return pctx.none()
         if isinstance(node.value, bool):
-            return z3_mod.BoolVal(node.value)
+            return pctx.boolean(node.value)
         if isinstance(node.value, int):
-            return z3_mod.IntVal(node.value)
-        return node.value
+            return pctx.integer(node.value)
+        if isinstance(node.value, str):
+            return pctx.string(node.value)
+        return None
+
     if isinstance(node, ast.UnaryOp):
-        operand = _ast_to_z3_val(node.operand, z3_vars, z3_mod)
+        operand = _ast_to_z3_val(node.operand, z3_vars, z3_mod, pctx)
         if operand is None:
             return None
         if isinstance(node.op, ast.Not):
-            return z3_mod.Not(operand)
+            return pctx.boolean(z3_mod.Not(pctx.truth(operand)))
+        if operand.kind not in ("INT", "BOOL"):
+            return None
+        numeric = pctx.numeric(operand)
         if isinstance(node.op, ast.USub):
-            return -operand
-        return operand
+            return pctx.integer(-numeric)
+        if isinstance(node.op, ast.UAdd):
+            return pctx.integer(numeric)
+        return None
+
     if isinstance(node, ast.BinOp):
-        lhs = _ast_to_z3_val(node.left, z3_vars, z3_mod)
-        rhs = _ast_to_z3_val(node.right, z3_vars, z3_mod)
+        lhs = _ast_to_z3_val(node.left, z3_vars, z3_mod, pctx)
+        rhs = _ast_to_z3_val(node.right, z3_vars, z3_mod, pctx)
         if lhs is None or rhs is None:
             return None
+        if isinstance(node.op, ast.Add) and (lhs.kind == "STR" or rhs.kind == "STR"):
+            if lhs.kind == rhs.kind == "STR":
+                return pctx.string(z3_mod.Concat(pv.str_val(lhs.term), pv.str_val(rhs.term)))
+            return None
+        if lhs.kind in ("NONE", "STR") or rhs.kind in ("NONE", "STR"):
+            return None
+        a, b = pctx.numeric(lhs), pctx.numeric(rhs)
         if isinstance(node.op, ast.Add):
-            return lhs + rhs
+            return pctx.integer(a + b)
         if isinstance(node.op, ast.Sub):
-            return lhs - rhs
+            return pctx.integer(a - b)
         if isinstance(node.op, ast.Mult):
-            return lhs * rhs
+            return pctx.integer(a * b)
         return None
+
     if isinstance(node, ast.Compare):
-        lhs = _ast_to_z3_val(node.left, z3_vars, z3_mod)
+        left_node = node.left
+        lhs = _ast_to_z3_val(left_node, z3_vars, z3_mod, pctx)
         if lhs is None:
             return None
-        comps = []
-        for op, r_node in zip(node.ops, node.comparators):
-            rhs = _ast_to_z3_val(r_node, z3_vars, z3_mod)
+        comparisons = []
+        for op, right_node in zip(node.ops, node.comparators):
+            rhs = _ast_to_z3_val(right_node, z3_vars, z3_mod, pctx)
             if rhs is None:
                 return None
-            if isinstance(op, ast.Gt):
-                comps.append(lhs > rhs)
-            elif isinstance(op, ast.GtE):
-                comps.append(lhs >= rhs)
-            elif isinstance(op, ast.Lt):
-                comps.append(lhs < rhs)
-            elif isinstance(op, ast.LtE):
-                comps.append(lhs <= rhs)
-            elif isinstance(op, ast.Eq):
-                comps.append(lhs == rhs)
-            elif isinstance(op, ast.NotEq):
-                comps.append(lhs != rhs)
-            lhs = rhs
-        if not comps:
-            return z3_mod.BoolVal(True)
-        return z3_mod.And(*comps) if len(comps) > 1 else comps[0]
+            if isinstance(op, (ast.Eq, ast.NotEq)):
+                eq = _encode_py_eq(lhs, rhs, pctx)
+                comparisons.append(eq if isinstance(op, ast.Eq) else z3_mod.Not(eq))
+            elif isinstance(op, (ast.Is, ast.IsNot)):
+                left_singleton = lhs.kind in ("NONE", "BOOL") or (
+                    isinstance(left_node, ast.Constant)
+                    and (left_node.value is None or isinstance(left_node.value, bool))
+                )
+                right_singleton = rhs.kind in ("NONE", "BOOL") or (
+                    isinstance(right_node, ast.Constant)
+                    and (right_node.value is None or isinstance(right_node.value, bool))
+                )
+                if not (left_singleton or right_singleton):
+                    return None
+                ident = lhs.term == rhs.term
+                comparisons.append(ident if isinstance(op, ast.Is) else z3_mod.Not(ident))
+            elif isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE)):
+                if lhs.kind == rhs.kind == "STR":
+                    a, b = pv.str_val(lhs.term), pv.str_val(rhs.term)
+                elif lhs.kind not in ("NONE", "STR") and rhs.kind not in ("NONE", "STR"):
+                    a, b = pctx.numeric(lhs), pctx.numeric(rhs)
+                else:
+                    return None
+                if isinstance(op, ast.Lt):
+                    comparisons.append(a < b)
+                elif isinstance(op, ast.LtE):
+                    comparisons.append(a <= b)
+                elif isinstance(op, ast.Gt):
+                    comparisons.append(a > b)
+                else:
+                    comparisons.append(a >= b)
+            else:
+                return None
+            lhs, left_node = rhs, right_node
+        if not comparisons:
+            return pctx.boolean(True)
+        result = z3_mod.And(*comparisons) if len(comparisons) > 1 else comparisons[0]
+        return pctx.boolean(result)
+
     if isinstance(node, ast.BoolOp):
-        vals = [_ast_to_z3_val(v, z3_vars, z3_mod) for v in node.values]
-        if any(v is None for v in vals):
+        vals = [_ast_to_z3_val(v, z3_vars, z3_mod, pctx) for v in node.values]
+        if any(value is None for value in vals):
             return None
+        conditions = [pctx.truth(value) for value in vals]
         if isinstance(node.op, ast.And):
-            return z3_mod.And(*vals)
+            return pctx.boolean(z3_mod.And(*conditions))
         if isinstance(node.op, ast.Or):
-            return z3_mod.Or(*vals)
+            return pctx.boolean(z3_mod.Or(*conditions))
+        return None
+
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-        if node.func.id == "max" and len(node.args) == 2:
-            a0 = _ast_to_z3_val(node.args[0], z3_vars, z3_mod)
-            a1 = _ast_to_z3_val(node.args[1], z3_vars, z3_mod)
-            if a0 is not None and a1 is not None:
-                return z3_mod.If(a0 >= a1, a0, a1)
-        elif node.func.id == "min" and len(node.args) == 2:
-            a0 = _ast_to_z3_val(node.args[0], z3_vars, z3_mod)
-            a1 = _ast_to_z3_val(node.args[1], z3_vars, z3_mod)
-            if a0 is not None and a1 is not None:
-                return z3_mod.If(a0 <= a1, a0, a1)
-        elif node.func.id == "abs" and len(node.args) == 1:
-            a0 = _ast_to_z3_val(node.args[0], z3_vars, z3_mod)
-            if a0 is not None:
-                return z3_mod.If(a0 >= 0, a0, -a0)
+        args = [_ast_to_z3_val(arg, z3_vars, z3_mod, pctx) for arg in node.args]
+        if any(arg is None for arg in args):
+            return None
+        if node.func.id == "abs" and len(args) == 1 and args[0].kind in ("INT", "BOOL"):
+            value = pctx.numeric(args[0])
+            return pctx.integer(z3_mod.If(value >= 0, value, -value))
+        if node.func.id in ("max", "min") and len(args) == 2 and all(a.kind in ("INT", "BOOL") for a in args):
+            left, right = pctx.numeric(args[0]), pctx.numeric(args[1])
+            condition = left >= right if node.func.id == "max" else left <= right
+            return pctx.integer(z3_mod.If(condition, left, right))
     return None
 
 
@@ -188,138 +261,260 @@ class IntentToSMTCompiler:
         file_path: str,
         source: str,
         intent_text: str,
+        preparsed_tree: ast.Module | None = None,
     ) -> tuple[VerificationFinding, ...]:
+        """Check supported intent postconditions against a retained AST.
+
+        ``preparsed_tree`` is the compilation-owner path. The source-only parse
+        remains for compatibility with external callers, but a unified pipeline
+        must always provide the pre-parsed tree.
+        """
         spec = self.compile_intent(intent_text)
         if spec is None:
             return ()
 
         start_ns = time.perf_counter_ns()
-        tree = ast.parse(source, filename=file_path)
+        try:
+            tree = preparsed_tree if preparsed_tree is not None else ast.parse(source, filename=file_path)
+        except (SyntaxError, ValueError, IndentationError) as exc:
+            fid = content_digest_hex(
+                f"INTENT_SYNTAX:{file_path}:{type(exc).__name__}:{exc}",
+                domain="verifyci.v2.finding",
+            )[:16]
+            return (VerificationFinding(
+                finding_id=fid,
+                rule_id="VC2-INTENT-SYNTAX-ERROR",
+                severity="HIGH",
+                verdict="INCONCLUSIVE",
+                file_path=file_path,
+                start_line=getattr(exc, "lineno", None) or 1,
+                end_line=getattr(exc, "lineno", None) or 1,
+                message=f"Intent checker could not parse complete source for '{file_path}': {exc}",
+            ),)
+
         findings: list[VerificationFinding] = []
+        functions = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        if not functions:
+            return ()
 
-        for stmt in tree.body:
-            if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        try:
+            from verifyci_v2.symbolic.z3_prover import _PyVal, _Z3ProofContext
+        except Exception as exc:
+            return (self._intent_inconclusive(
+                file_path, "<module>", 1, spec,
+                f"Typed symbolic context is unavailable: {type(exc).__name__}: {exc}",
+                start_ns,
+            ),)
+
+        for stmt in functions:
+            params = [a.arg for a in (*stmt.args.posonlyargs, *stmt.args.args, *stmt.args.kwonlyargs)]
+            if stmt.args.vararg is not None or stmt.args.kwarg is not None:
+                findings.append(self._intent_inconclusive(
+                    file_path, stmt.name, stmt.lineno, spec,
+                    "Variadic parameters are unsupported by the intent prover.", start_ns,
+                ))
                 continue
-
-            params = [a.arg for a in stmt.args.args]
             paths = self._collect_paths(stmt.body, incoming_guards=[], local_env={})
             if not paths:
                 continue
 
-            s = _z3_mod.Solver() if _z3_mod is not None else None
-            if s is not None:
-                s.set("timeout", 2000)
-
-            for guards, ret_expr, line_no in paths:
-                elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-
-                if _z3_mod is None or s is None:
-                    # R2-1: When solver is unavailable, NEVER fabricate SAT
+            if _z3_mod is None:
+                for _guards, ret_expr, line_no in paths:
                     if self._can_produce_violation(ret_expr, params, spec):
-                        fid = content_digest_hex(
-                            f"INTENT:{file_path}:{stmt.name}:{line_no}:{spec.smt_lib_expr}",
-                            domain="verifyci.v2.finding",
-                        )[:16]
-                        findings.append(
-                            VerificationFinding(
-                                finding_id=fid,
-                                rule_id="VC2-INTENT-POSTCONDITION-VIOLATION",
-                                severity="HIGH",
-                                verdict="INCONCLUSIVE",
-                                file_path=file_path,
-                                start_line=line_no,
-                                end_line=line_no,
-                                message=(
-                                    f"Function '{stmt.name}' line {line_no} may violate intent "
-                                    f"{spec.smt_lib_expr}, but Z3 solver is unavailable to verify."
-                                ),
-                                witness=CounterexampleWitness(
-                                    checker_id="VC2-INTENT-POSTCONDITION-VIOLATION",
-                                    smt_status="SOLVER_UNAVAILABLE",
-                                    input_assignments={},
-                                    base_return_state=spec.smt_lib_expr,
-                                    head_return_state="solver_unavailable",
-                                    proof_time_ms=round(elapsed_ms, 3),
-                                ),
-                            )
-                        )
-                    continue
-
-                # Z3 is available: encode full execution path and negate postcondition
-                s.reset()
-                z3_vars: dict[str, Any] = {p: _z3_mod.Int(p) for p in params}
-
-                can_encode = True
-                for guard_ast, branch_bool in guards:
-                    zg = _ast_to_z3_val(guard_ast, z3_vars, _z3_mod)
-                    if zg is None:
-                        can_encode = False
-                        break
-                    s.add(zg if branch_bool else _z3_mod.Not(zg))
-
-                if not can_encode:
-                    continue
-
-                z_ret = _ast_to_z3_val(ret_expr, z3_vars, _z3_mod)
-                if z_ret is None:
-                    continue
-
-                if spec.constraint_kind == "NON_NEGATIVE_RETURN":
-                    s.add(z_ret < spec.bound_value)
-                elif spec.constraint_kind == "STRICT_POSITIVE_RETURN":
-                    s.add(z_ret <= spec.bound_value)
-                elif spec.constraint_kind == "UPPER_BOUND_RETURN":
-                    s.add(z_ret > spec.bound_value)
-
-                st = s.check()
-                if st == _z3_mod.sat:
-                    m = s.model()
-                    witness_inputs = {
-                        p: m[z3_vars[p]].as_long() if m[z3_vars[p]] is not None else 0
-                        for p in params
-                    }
-
-                    # Concretely evaluate function on witness to confirm violation
-                    if not self._evaluate_func_violates(
-                        stmt, witness_inputs, spec.bound_value, spec.constraint_kind
-                    ):
-                        continue
-
-                    fid = content_digest_hex(
-                        f"INTENT:{file_path}:{stmt.name}:{line_no}:{spec.smt_lib_expr}",
-                        domain="verifyci.v2.finding",
-                    )[:16]
-                    findings.append(
-                        VerificationFinding(
-                            finding_id=fid,
-                            rule_id="VC2-INTENT-POSTCONDITION-VIOLATION",
-                            severity="HIGH",
-                            verdict="FAIL",
-                            file_path=file_path,
-                            start_line=line_no,
-                            end_line=line_no,
-                            message=(
-                                f"Function '{stmt.name}' violates compiled intent postcondition "
-                                f"{spec.smt_lib_expr} for inputs {witness_inputs}."
-                            ),
+                        findings.append(self._intent_inconclusive(
+                            file_path, stmt.name, line_no, spec,
+                            "Z3 solver is unavailable; intent postcondition was not established.", start_ns,
                             witness=CounterexampleWitness(
                                 checker_id="VC2-INTENT-POSTCONDITION-VIOLATION",
-                                smt_status="SAT",
-                                input_assignments=witness_inputs,
+                                smt_status="SOLVER_UNAVAILABLE", input_assignments={},
                                 base_return_state=spec.smt_lib_expr,
-                                head_return_state=(
-                                    "return_val < 0"
-                                    if spec.bound_value == 0
-                                    else f"return_val < {spec.bound_value}"
-                                    if spec.constraint_kind != "UPPER_BOUND_RETURN"
-                                    else f"return_val > {spec.bound_value}"
-                                ),
-                                proof_time_ms=round(elapsed_ms, 3),
+                                head_return_state="solver_unavailable",
+                                proof_time_ms=round((time.perf_counter_ns() - start_ns) / 1_000_000.0, 3),
                             ),
-                        )
-                    )
+                        ))
+                continue
 
+            try:
+                pctx = _Z3ProofContext(timeout_ms=2000)
+            except Exception as exc:
+                findings.append(self._intent_inconclusive(
+                    file_path, stmt.name, stmt.lineno, spec,
+                    f"Could not initialize an isolated Z3 context: {type(exc).__name__}: {exc}", start_ns,
+                ))
+                continue
+
+            # Python annotations are not runtime-enforced. Model parameters as
+            # general tagged values, and abstain when the supported scalar
+            # fragment cannot prove the input type needed by an operation.
+            param_kinds = {}
+            for a in [*stmt.args.posonlyargs, *stmt.args.args, *stmt.args.kwonlyargs]:
+                if a.annotation is not None:
+                    try:
+                        ann_str = ast.unparse(a.annotation).strip()
+                        if ann_str in ("int", "float"):
+                            param_kinds[a.arg] = "INT"
+                        elif ann_str == "bool":
+                            param_kinds[a.arg] = "BOOL"
+                        elif ann_str == "str":
+                            param_kinds[a.arg] = "STR"
+                    except Exception:
+                        pass
+
+            z3_vars: dict[str, Any] = {
+                p: _PyVal(_z3_mod.Const(p, pctx.pyval), param_kinds.get(p))
+                for p in params
+            }
+            for guards, ret_expr, line_no in paths:
+                solver = pctx.solver()
+                for p, v in z3_vars.items():
+                    if v.kind == "INT":
+                        solver.add(pctx.pyval.is_mk_int(v.term))
+                    elif v.kind == "BOOL":
+                        solver.add(pctx.pyval.is_mk_bool(v.term))
+                    elif v.kind == "STR":
+                        solver.add(pctx.pyval.is_mk_str(v.term))
+                supported = True
+                for guard_ast, branch_bool in guards:
+                    guard = _ast_to_z3_val(guard_ast, z3_vars, _z3_mod, pctx)
+                    if guard is None:
+                        supported = False
+                        break
+                    condition = pctx.truth(guard)
+                    solver.add(condition if branch_bool else _z3_mod.Not(condition))
+                if not supported:
+                    findings.append(self._intent_inconclusive(
+                        file_path, stmt.name, line_no, spec,
+                        "A path guard uses unsupported or dynamically typed semantics.", start_ns,
+                    ))
+                    continue
+
+                z_ret = _ast_to_z3_val(ret_expr, z3_vars, _z3_mod, pctx)
+                if z_ret is None or z_ret.kind not in ("INT", "BOOL"):
+                    findings.append(self._intent_inconclusive(
+                        file_path, stmt.name, line_no, spec,
+                        "The return expression is not proven to be a supported numeric Python value.", start_ns,
+                    ))
+                    continue
+                numeric_return = pctx.numeric(z_ret)
+                if spec.constraint_kind == "NON_NEGATIVE_RETURN":
+                    solver.add(numeric_return < spec.bound_value)
+                elif spec.constraint_kind == "STRICT_POSITIVE_RETURN":
+                    solver.add(numeric_return <= spec.bound_value)
+                elif spec.constraint_kind == "UPPER_BOUND_RETURN":
+                    solver.add(numeric_return > spec.bound_value)
+                else:
+                    findings.append(self._intent_inconclusive(
+                        file_path, stmt.name, line_no, spec,
+                        f"Unsupported postcondition kind: {spec.constraint_kind}", start_ns,
+                    ))
+                    continue
+
+                status = solver.check()
+                elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+                if status == _z3_mod.unknown:
+                    findings.append(self._intent_inconclusive(
+                        file_path, stmt.name, line_no, spec,
+                        f"Z3 returned UNKNOWN for intent postcondition: {solver.reason_unknown()}.", start_ns,
+                    ))
+                    continue
+                if status != _z3_mod.sat:
+                    continue
+
+                model = solver.model()
+                witness_inputs: dict[str, str | int | float | bool | None] = {}
+                witness_ok = True
+                for param_name, symbolic_value in z3_vars.items():
+                    value = model.eval(symbolic_value.term, model_completion=True)
+                    if _z3_mod.is_true(model.eval(pctx.pyval.is_mk_none(value), model_completion=True)):
+                        witness_inputs[param_name] = None
+                    elif _z3_mod.is_true(model.eval(pctx.pyval.is_mk_bool(value), model_completion=True)):
+                        witness_inputs[param_name] = _z3_mod.is_true(
+                            model.eval(pctx.pyval.bool_val(value), model_completion=True)
+                        )
+                    elif _z3_mod.is_true(model.eval(pctx.pyval.is_mk_int(value), model_completion=True)):
+                        raw_int = model.eval(pctx.pyval.int_val(value), model_completion=True)
+                        if not _z3_mod.is_int_value(raw_int):
+                            witness_ok = False
+                            break
+                        witness_inputs[param_name] = raw_int.as_long()
+                    elif _z3_mod.is_true(model.eval(pctx.pyval.is_mk_str(value), model_completion=True)):
+                        raw_str = model.eval(pctx.pyval.str_val(value), model_completion=True)
+                        if not _z3_mod.is_string_value(raw_str):
+                            witness_ok = False
+                            break
+                        try:
+                            witness_inputs[param_name] = raw_str.as_string()
+                        except Exception:
+                            witness_ok = False
+                            break
+                    else:
+                        witness_ok = False
+                        break
+                if not witness_ok:
+                    findings.append(self._intent_inconclusive(
+                        file_path, stmt.name, line_no, spec,
+                        "SAT model could not be materialized into concrete Python inputs.", start_ns,
+                    ))
+                    continue
+
+                if not self._evaluate_func_violates(
+                    stmt, witness_inputs, spec.bound_value, spec.constraint_kind
+                ):
+                    findings.append(self._intent_inconclusive(
+                        file_path, stmt.name, line_no, spec,
+                        "A candidate SAT model failed concrete witness validation.", start_ns,
+                    ))
+                    continue
+
+                fid = content_digest_hex(
+                    f"INTENT:{file_path}:{stmt.name}:{line_no}:{spec.smt_lib_expr}",
+                    domain="verifyci.v2.finding",
+                )[:16]
+                findings.append(VerificationFinding(
+                    finding_id=fid,
+                    rule_id="VC2-INTENT-POSTCONDITION-VIOLATION",
+                    severity="HIGH", verdict="FAIL", file_path=file_path,
+                    start_line=line_no, end_line=line_no,
+                    message=(f"Function '{stmt.name}' violates compiled intent postcondition "
+                             f"{spec.smt_lib_expr} for inputs {witness_inputs}."),
+                    witness=CounterexampleWitness(
+                        checker_id="VC2-INTENT-POSTCONDITION-VIOLATION",
+                        smt_status="SAT", input_assignments=witness_inputs,
+                        base_return_state=spec.smt_lib_expr,
+                        head_return_state=(
+                            "return_val < 0" if spec.bound_value == 0
+                            else f"return_val < {spec.bound_value}"
+                            if spec.constraint_kind != "UPPER_BOUND_RETURN"
+                            else f"return_val > {spec.bound_value}"
+                        ),
+                        proof_time_ms=round(elapsed_ms, 3),
+                    ),
+                ))
         return tuple(findings)
+
+    @staticmethod
+    def _intent_inconclusive(
+        file_path: str,
+        function_name: str,
+        line_no: int,
+        spec: CompiledSMTPostcondition,
+        reason: str,
+        start_ns: int,
+        *,
+        witness: CounterexampleWitness | None = None,
+    ) -> VerificationFinding:
+        fid = content_digest_hex(
+            f"INTENT_INCONCLUSIVE:{file_path}:{function_name}:{line_no}:{spec.smt_lib_expr}:{reason}",
+            domain="verifyci.v2.finding",
+        )[:16]
+        return VerificationFinding(
+            finding_id=fid,
+            rule_id="VC2-INTENT-POSTCONDITION-UNRESOLVED",
+            severity="HIGH", verdict="INCONCLUSIVE", file_path=file_path,
+            start_line=line_no, end_line=line_no,
+            message=f"Cannot establish intent postcondition for '{function_name}': {reason}",
+            witness=witness,
+        )
 
     @classmethod
     def _collect_paths(
@@ -343,7 +538,9 @@ class IntentToSMTCompiler:
             elif isinstance(stmt, ast.Return):
                 if stmt.value is not None:
                     expanded_val = _InlineAssignTransformer(env).visit(stmt.value)
-                    paths.append((list(current_guards), expanded_val, stmt.lineno))
+                else:
+                    expanded_val = ast.copy_location(ast.Constant(value=None), stmt)
+                paths.append((list(current_guards), expanded_val, stmt.lineno))
                 break
             elif isinstance(stmt, ast.If):
                 expanded_test = _InlineAssignTransformer(env).visit(stmt.test)
@@ -390,7 +587,10 @@ class IntentToSMTCompiler:
     def _can_produce_violation(
         ret_expr: ast.AST, params: list[str], spec: CompiledSMTPostcondition
     ) -> bool:
-        if isinstance(ret_expr, (ast.BinOp, ast.Name)):
+        if isinstance(ret_expr, (ast.BinOp, ast.Name, ast.UnaryOp)):
+            # Without Z3, non-literal arithmetic/unary expressions cannot be
+            # proven safe. This includes ``return -1`` and should abstain rather
+            # than disappearing as an empty finding set.
             return True
         if isinstance(ret_expr, ast.Constant) and isinstance(
             ret_expr.value, (int, float)
@@ -407,45 +607,58 @@ class IntentToSMTCompiler:
     def _evaluate_func_violates(
         cls,
         fn_node: ast.FunctionDef | ast.AsyncFunctionDef,
-        witness_inputs: dict[str, int],
+        witness_inputs: dict[str, str | int | float | bool | None],
         bound_val: int,
         constraint_kind: str,
     ) -> bool:
+        """Independently validate a concrete witness using the typed value model."""
         if _z3_mod is None:
             return False
         try:
-            param_names = [a.arg for a in fn_node.args.args]
-            z3_vars = {
-                p: _z3_mod.IntVal(int(witness_inputs.get(p, 0))) for p in param_names
-            }
+            from verifyci_v2.symbolic.z3_prover import _Z3ProofContext
+            pctx = _Z3ProofContext(timeout_ms=1000)
+            param_names = [a.arg for a in (*fn_node.args.posonlyargs, *fn_node.args.args, *fn_node.args.kwonlyargs)]
+            z3_vars: dict[str, Any] = {}
+            for name in param_names:
+                value = witness_inputs.get(name, 0)
+                if value is None:
+                    z3_vars[name] = pctx.none()
+                elif isinstance(value, bool):
+                    z3_vars[name] = pctx.boolean(value)
+                elif isinstance(value, int):
+                    z3_vars[name] = pctx.integer(value)
+                elif isinstance(value, str):
+                    z3_vars[name] = pctx.string(value)
+                else:
+                    return False
             paths = cls._collect_paths(fn_node.body, incoming_guards=[], local_env={})
-            for guards, ret_expr, _ in paths:
-                s = _z3_mod.Solver()
+            for guards, ret_expr, _line in paths:
+                solver = pctx.solver()
                 feasible = True
-                for g_ast, branch_bool in guards:
-                    zg = _ast_to_z3_val(g_ast, z3_vars, _z3_mod)
-                    if zg is None:
+                for guard_ast, branch_bool in guards:
+                    guard = _ast_to_z3_val(guard_ast, z3_vars, _z3_mod, pctx)
+                    if guard is None:
                         feasible = False
                         break
-                    s.add(zg if branch_bool else _z3_mod.Not(zg))
-                if not feasible or s.check() != _z3_mod.sat:
+                    condition = pctx.truth(guard)
+                    solver.add(condition if branch_bool else _z3_mod.Not(condition))
+                if not feasible:
                     continue
-                zr = _ast_to_z3_val(ret_expr, z3_vars, _z3_mod)
-                if zr is None:
+                ret = _ast_to_z3_val(ret_expr, z3_vars, _z3_mod, pctx)
+                if ret is None or ret.kind not in ("INT", "BOOL"):
                     continue
-                s_viol = _z3_mod.Solver()
-                for c in s.assertions():
-                    s_viol.add(c)
+                numeric = pctx.numeric(ret)
                 if constraint_kind == "NON_NEGATIVE_RETURN":
-                    s_viol.add(zr < bound_val)
+                    solver.add(numeric < bound_val)
                 elif constraint_kind == "STRICT_POSITIVE_RETURN":
-                    s_viol.add(zr <= bound_val)
+                    solver.add(numeric <= bound_val)
                 elif constraint_kind == "UPPER_BOUND_RETURN":
-                    s_viol.add(zr > bound_val)
+                    solver.add(numeric > bound_val)
                 else:
                     continue
-                if s_viol.check() == _z3_mod.sat:
+                if solver.check() == _z3_mod.sat:
                     return True
             return False
         except Exception:
             return False
+
