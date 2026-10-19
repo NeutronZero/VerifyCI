@@ -1473,6 +1473,38 @@ class Z3SymbolicProver:
         self.timeout_ms = timeout_ms
         self.egglog = EgglogEquivalenceEngine()
 
+    def _unsupported_ast_finding(
+        self,
+        *,
+        file_path: str,
+        func_head: FunctionUSSA,
+        construct: str,
+        start_ns: int,
+        message: str | None = None,
+    ) -> VerificationFinding:
+        elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+        return VerificationFinding(
+            finding_id=content_digest_hex(
+                f"UNSUPPORTED:{file_path}:{func_head.qualified_name}:{construct}",
+                domain="verifyci.v2.finding",
+            )[:16],
+            rule_id="VC2-Z3-UNSUPPORTED-AST",
+            severity="MEDIUM",
+            verdict="INCONCLUSIVE",
+            file_path=file_path,
+            start_line=func_head.start_line,
+            end_line=func_head.end_line,
+            message=message or f"Function '{func_head.qualified_name}' uses unsupported symbolic construct '{construct}'.",
+            witness=CounterexampleWitness(
+                checker_id="VC2-Z3-UNSUPPORTED-AST",
+                smt_status="UNKNOWN",
+                input_assignments={},
+                base_return_state="",
+                head_return_state="",
+                proof_time_ms=round(elapsed, 3),
+            ),
+        )
+
     def _solve_distinct_pair_witness(
         self,
         z3_a: Any,
@@ -1559,16 +1591,12 @@ class Z3SymbolicProver:
         ext_head = _USSASymbolicExtractor(func_head, shared_z3_vars, ctx=proof_ctx)
         cfg_problem = ext_base.unsupported_construct or ext_head.unsupported_construct
         if cfg_problem is not None:
-            elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-            return (VerificationFinding(
-                finding_id=content_digest_hex(f"UNSUPPORTED:{file_path}:{func_head.qualified_name}:{cfg_problem}", domain="verifyci.v2.finding")[:16],
-                rule_id="VC2-Z3-UNSUPPORTED-AST", severity="MEDIUM", verdict="INCONCLUSIVE",
-                file_path=file_path, start_line=func_head.start_line, end_line=func_head.end_line,
+            return (self._unsupported_ast_finding(
+                file_path=file_path,
+                func_head=func_head,
+                construct=cfg_problem,
+                start_ns=start_ns,
                 message=f"Function '{func_head.qualified_name}' has unsupported CFG structure '{cfg_problem}'; proof abstains.",
-                witness=CounterexampleWitness(
-                    checker_id="VC2-Z3-UNSUPPORTED-AST", smt_status="UNKNOWN", input_assignments={},
-                    base_return_state="", head_return_state="", proof_time_ms=round(elapsed, 3),
-                ),
             ),)
 
         findings: list[VerificationFinding] = []
@@ -1754,16 +1782,11 @@ class Z3SymbolicProver:
             found_construct = _detect_unsupported_ast_construct(base_fn_node, head_fn_node, ext_base, ext_head)
             if found_construct or ext_base.unsupported_construct or ext_head.unsupported_construct:
                 construct = found_construct or ext_base.unsupported_construct or ext_head.unsupported_construct or "Unsupported"
-                elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000.0
-                findings.append(VerificationFinding(
-                    finding_id=content_digest_hex(f"UNSUPPORTED:{file_path}:{func_head.qualified_name}:{construct}", domain="verifyci.v2.finding")[:16],
-                    rule_id="VC2-Z3-UNSUPPORTED-AST", severity="MEDIUM", verdict="INCONCLUSIVE",
-                    file_path=file_path, start_line=func_head.start_line, end_line=func_head.end_line,
-                    message=f"Function '{func_head.qualified_name}' uses unsupported symbolic construct '{construct}'.",
-                    witness=CounterexampleWitness(
-                        checker_id="VC2-Z3-UNSUPPORTED-AST", smt_status="UNKNOWN", input_assignments={},
-                        base_return_state="", head_return_state="", proof_time_ms=round(elapsed, 3),
-                    ),
+                findings.append(self._unsupported_ast_finding(
+                    file_path=file_path,
+                    func_head=func_head,
+                    construct=construct,
+                    start_ns=start_ns,
                 ))
         return tuple(findings)
 
