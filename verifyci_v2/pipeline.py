@@ -30,7 +30,7 @@ from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
 from verifyci_v2.contracts.attestation import GateExecutionReceipt, GateStatus, VerificationFinding
-from verifyci_v2.contracts.canonical import content_digest_hex
+from verifyci_v2.contracts.canonical import content_digest_hex, canonical_jcs_str
 from verifyci_v2.ingestion.removal_provenance import (
     analyze_removal_provenance,
     entities_from_source,
@@ -625,20 +625,126 @@ class VerificationPipeline:
     repo_id: str = "default-repo"
     smt_timeout_ms: int = _DEFAULT_SMT_TIMEOUT_MS
     base_sources: dict[str, str] = field(default_factory=dict)
+    salsa_engine: Any | None = None
+    cpg_store: Any | None = None
+    intent_text: str = ""
+    contracts: tuple[Mapping[str, Any], ...] = ()
+    wasm_sandbox: Any | None = None
+    policy_digest: str = ""
 
     def __post_init__(self) -> None:
         self.prover = Z3SymbolicProver(timeout_ms=self.smt_timeout_ms)
         self.secret_engine = TaintTrackedSecretEngine()
         self.egglog = EgglogEquivalenceEngine()
+        self._pending_caller_reverify: set[str] = set()
+        self._requested_file_paths: set[str] = set()
+        self._last_compiled_by_path: dict[str, CompiledFilePair] = {}
+        if self.salsa_engine is not None and self.cpg_store is not None:
+            self.salsa_engine.store = self.cpg_store
 
-    def verify_files(self, entries: Sequence[DiffFileEntry]) -> PipelineResult:
-        findings: list[VerificationFinding] = []
+    def _active_policy_digest(self) -> str:
+        from verifyci_v2.ingestion.salsa_cutoff import ENGINE_ANALYSIS_VERSION
+        payload = {
+            "engine": ENGINE_ANALYSIS_VERSION,
+            "external_policy_digest": self.policy_digest,
+            "smt_timeout_ms": self.smt_timeout_ms,
+            "intent_text": self.intent_text,
+            "contracts": list(self.contracts),
+            "wasm_plugins": sorted(getattr(self.wasm_sandbox, "registered_plugin_ids", ())) if self.wasm_sandbox else [],
+        }
+        return content_digest_hex(canonical_jcs_str(payload), domain="verifyci.v2.active_policy")
+
+    def verify_files(
+        self,
+        entries: Sequence[DiffFileEntry],
+        *,
+        compiled_overrides: Mapping[str, CompiledFilePair] | None = None,
+    ) -> PipelineResult:
         receipts: list[GateExecutionReceipt] = []
         required: dict[str, tuple[str, ...]] = {}
-        for entry in entries:
-            findings.extend(self._verify_file(entry, gate_receipts=receipts, required_gates_by_file=required))
+        entry_findings: list[list[VerificationFinding]] = [[] for _ in entries]
+        self._requested_file_paths = {entry.file_path for entry in entries}
+        self._pending_caller_reverify = set()
+        self._last_compiled_by_path = {}
+        self._incremental_plans = {}
+        self._semantic_dependency_pairs = set()
+        self._proved_equivalent_qnames = set()
+        path_to_indices: dict[str, list[int]] = {}
+        for index, entry in enumerate(entries):
+            path_to_indices.setdefault(entry.file_path, []).append(index)
+            entry_findings[index] = self._verify_file(
+                entry, gate_receipts=receipts, required_gates_by_file=required,
+                compiled_override=(compiled_overrides or {}).get(entry.file_path),
+            )
+
+        # Callee changes may be discovered after a caller file was visited. Re-run
+        # affected in-request callers after all requested files have been ingested,
+        # reusing CompiledFilePair artifacts and the first-pass incremental plan.
+        if self.salsa_engine is not None and self._pending_caller_reverify:
+            qname_to_file = getattr(getattr(self.salsa_engine, "stitcher", None), "_qname_to_file", {})
+            owner_groups: dict[str, set[str]] = {}
+            for qname in self._pending_caller_reverify:
+                owner = qname_to_file.get(qname)
+                compiled = self._last_compiled_by_path.get(owner or "")
+                if owner in self._requested_file_paths and compiled is not None and qname in compiled.head_ussa:
+                    owner_groups.setdefault(owner, set()).add(qname)
+            for owner_path, qnames in sorted(owner_groups.items()):
+                indices = path_to_indices.get(owner_path, [])
+                if not indices:
+                    continue
+                index = indices[-1]
+                entry = entries[index]
+                compiled = self._last_compiled_by_path.get(owner_path)
+                if compiled is None:
+                    continue
+                receipts[:] = [r for r in receipts if r.file_path != owner_path]
+                entry_findings[index] = self._verify_file(
+                    entry, gate_receipts=receipts, required_gates_by_file=required,
+                    compiled_override=compiled, skip_salsa_ingest=True,
+                )
+                self._pending_caller_reverify.difference_update(qnames)
+
+            for qname in sorted(self._pending_caller_reverify):
+                owner = qname_to_file.get(qname, "unknown.py")
+                findings = self._finding(
+                    "CALLER_REVERIFY", owner, qname,
+                    rule_id="VC2-SALSA-CALLER-REVERIFY-REQUIRED",
+                    severity="HIGH", verdict="INCONCLUSIVE",
+                    message=f"Caller '{qname}' depends on changed verification inputs but its source was not re-verified in this request.",
+                )
+                # Attach the unresolved scheduling requirement to its owner file
+                # where possible so response identity and diagnostics stay stable.
+                target_index = path_to_indices.get(owner, [None])[-1]
+                if target_index is None:
+                    entry_findings.append([findings])
+                else:
+                    entry_findings[target_index].append(findings)
+
+        # Re-running an unchanged caller against the same call expression does not
+        # prove that a changed callee preserves its behavior. Until the changed seed
+        # has a sound equivalence proof, keep the caller's dependency obligation
+        # explicitly inconclusive rather than treating local syntactic equivalence
+        # as interprocedural evidence.
+        for caller, seed in sorted(self._semantic_dependency_pairs):
+            if seed in self._proved_equivalent_qnames:
+                continue
+            if caller in self._pending_caller_reverify:
+                continue  # The generic missing-caller receipt below already abstains.
+            owner = getattr(getattr(self.salsa_engine, "stitcher", None), "_qname_to_file", {}).get(caller, "unknown.py") if self.salsa_engine is not None else "unknown.py"
+            owner_index = path_to_indices.get(owner, [None])[-1]
+            semantic_finding = self._finding(
+                "SEMANTIC_CALLER", owner, caller, seed,
+                rule_id="VC2-SALSA-SEMANTIC-CALLER-UNDECIDED", severity="HIGH",
+                verdict="INCONCLUSIVE",
+                message=f"Caller '{caller}' depends on '{seed}', whose changed behavior has not been proved equivalent; local caller equivalence is not an interprocedural proof.",
+            )
+            if owner_index is None:
+                entry_findings.append([semantic_finding])
+            else:
+                entry_findings[owner_index].append(semantic_finding)
+
+        findings = [finding for group in entry_findings for finding in group]
         if entries and not required:
-            # A missing gate plan is an orchestration defect, not a clean run.
             findings.append(VerificationFinding(
                 finding_id=finding_id("GATE_LEDGER_MISSING", *(e.file_path for e in entries)),
                 rule_id="VC2-MANDATORY-GATE-LEDGER-MISSING",
@@ -647,6 +753,13 @@ class VerificationPipeline:
                 message="No mandatory-gate plan was recorded for a non-empty verification request.",
             ))
         status, rationale = verdict_from_findings(findings, receipts, required)
+        if status == "PASS" and self.salsa_engine is not None:
+            # This is the only point where ingestion fingerprints become reusable
+            # proof-cache entries: all required gates and caller checks passed.
+            self.salsa_engine.mark_compiled_files_verified(
+                tuple(self._last_compiled_by_path.values()),
+                policy_digest=self._active_policy_digest(),
+            )
         return PipelineResult(
             findings=tuple(findings), status=status, rationale=rationale,
             diff_bytes=sum(len(e.diff.encode("utf-8")) for e in entries),
@@ -659,6 +772,8 @@ class VerificationPipeline:
         *,
         gate_receipts: list[GateExecutionReceipt] | None = None,
         required_gates_by_file: dict[str, tuple[str, ...]] | None = None,
+        compiled_override: CompiledFilePair | None = None,
+        skip_salsa_ingest: bool = False,
     ) -> list[VerificationFinding]:
         findings: list[VerificationFinding] = []
         path = entry.file_path
@@ -676,8 +791,16 @@ class VerificationPipeline:
             receipt("NON_PYTHON_SECRET_SCAN")
             return findings
 
+        required_python = list(_REQUIRED_PYTHON_GATES)
+        if self.intent_text:
+            required_python.append("INTENT_POSTCONDITIONS")
+        if self.contracts:
+            required_python.append("CALL_CONTRACTS")
+        if self.wasm_sandbox and getattr(self.wasm_sandbox, "registered_plugin_ids", ()):
+            required_python.append("WASM_SANDBOX")
+        required_python_tuple = tuple(required_python)
         if required_sink is not None:
-            required_sink[path] = _REQUIRED_PYTHON_GATES
+            required_sink[path] = required_python_tuple
 
         added_records = entry.added_line_records or _added_line_records_from_diff(entry.diff)
         added_lines = tuple(r.content for r in added_records) if added_records else entry.added_lines
@@ -703,7 +826,25 @@ class VerificationPipeline:
 
         stored_present = path in self.base_sources
         stored_source = self.base_sources[path] if stored_present else None
-        compiled = compile_file_pair(entry, stored_source=stored_source, repo_id=self.repo_id)
+        compiled = compiled_override or compile_file_pair(entry, stored_source=stored_source, repo_id=self.repo_id)
+        if compiled_override is not None:
+            if (
+                compiled.file_path != path
+                or compiled.head_source != entry.head_source
+                or compiled.base_source != entry.base_source
+                or (stored_source is not None and compiled.base_source != stored_source)
+            ):
+                findings.append(self._finding(
+                    "COMPILED_OVERRIDE_MISMATCH", path,
+                    rule_id="VC2-COMPILED-ARTIFACT-MISMATCH", severity="HIGH",
+                    verdict="INCONCLUSIVE",
+                    message="Precompiled artifact does not match the requested source pair or trusted stored base.",
+                ))
+                receipt("RECONSTRUCTION_AND_SYNTAX", "FAILED_CLOSED_ERROR", "compiled artifact mismatch")
+                for gate_id in required_python_tuple[1:]:
+                    receipt(gate_id, "FAILED_CLOSED_ERROR", "compiled artifact mismatch")
+                return findings
+        self._last_compiled_by_path[path] = compiled
 
         if compiled.reconstruction_failed:
             findings.append(self._finding(
@@ -718,7 +859,7 @@ class VerificationPipeline:
             # cannot suppress a clear danger/secret pattern in an added line.
             findings.extend(self._scan_added_line_secrets(path, added_records or tuple(AddedLineRecord(head_lineno=i, hunk_index=0, content=line) for i, line in enumerate(added_lines, 1))))
             findings.extend(self._scan_diff_local_dangerous(path, added_records or tuple(AddedLineRecord(head_lineno=i, hunk_index=0, content=line) for i, line in enumerate(added_lines, 1))))
-            for gate_id in _REQUIRED_PYTHON_GATES[1:]:
+            for gate_id in required_python_tuple[1:]:
                 receipt(gate_id, "ABSTAINED_RECONSTRUCTION_FAILED", "full-source artifact unavailable")
             return findings
 
@@ -727,7 +868,7 @@ class VerificationPipeline:
             receipt("RECONSTRUCTION_AND_SYNTAX", "COMPLETED")
             # A complete-source syntax error is itself a FAIL. Remaining source
             # dependent gates are explicitly marked incomplete, not silently skipped.
-            for gate_id in _REQUIRED_PYTHON_GATES[1:]:
+            for gate_id in required_python_tuple[1:]:
                 receipt(gate_id, "FAILED_CLOSED_ERROR", "AST/U-SSA artifact unavailable")
             # Diff-local checks still add independent findings for malformed source.
             findings.extend(self._scan_added_line_secrets(path, added_records or tuple(AddedLineRecord(head_lineno=i, hunk_index=0, content=line) for i, line in enumerate(added_lines, 1))))
@@ -739,6 +880,51 @@ class VerificationPipeline:
         base_tree = compiled.base_ast.tree if compiled.base_ast is not None else None
         head_tree = compiled.head_ast.tree if compiled.head_ast is not None else None
         receipt("RECONSTRUCTION_AND_SYNTAX")
+
+        incremental_plan = getattr(self, "_incremental_plans", {}).get(path) if skip_salsa_ingest else None
+        if self.salsa_engine is not None and not skip_salsa_ingest:
+            try:
+                incremental_plan = self.salsa_engine.ingest_compiled_file(
+                    compiled, policy_digest=self._active_policy_digest()
+                )
+                self._incremental_plans[path] = incremental_plan
+                if incremental_plan.removed_qualified_names:
+                    callers_map = dict(incremental_plan.removed_callers)
+                    findings.extend(self.egglog.datalog_unsafe_deletions(
+                        removed_qnames=incremental_plan.removed_qualified_names,
+                        active_callers_map=callers_map,
+                        file_path=path,
+                    ))
+                if hasattr(self.salsa_engine, "stitcher"):
+                    owner_map = getattr(self.salsa_engine.stitcher, "_qname_to_file", {})
+                    affected_callers = set(incremental_plan.type_and_taint_callers_to_reverify) | set(incremental_plan.semantic_value_callers_to_reverify)
+                    self._pending_caller_reverify.update(affected_callers)
+                    semantic_seeds = {
+                        ev.qualified_name for ev in incremental_plan.evaluations
+                        if ev.status in {
+                            "NEW_FUNCTION", "DEPENDENCY_FINGERPRINT_CHANGED",
+                            "CUTOFF_INTERFACE_INVARIANT", "PROPAGATE_INTERFACE_CHANGED",
+                        }
+                    }
+                    stitcher = self.salsa_engine.stitcher
+                    removed_seeds = set(incremental_plan.removed_qualified_names)
+                    for seed in semantic_seeds:
+                        if seed in removed_seeds:
+                            # The deleted node no longer exists in the current graph;
+                            # use caller reachability captured before removal, scoped
+                            # to this exact deleted symbol (not the union for all seeds).
+                            related_callers = set(dict(incremental_plan.removed_transitive_callers).get(seed, ()))
+                        else:
+                            related_callers = set(stitcher.transitive_blast_radius([seed]))
+                        for caller in incremental_plan.semantic_value_callers_to_reverify:
+                            if caller != seed and caller in related_callers:
+                                self._semantic_dependency_pairs.add((caller, seed))
+            except Exception as exc:
+                findings.append(self._finding(
+                    "SALSA_INGEST_ERROR", path, rule_id="VC2-SALSA-INGEST-ERROR",
+                    severity="HIGH", verdict="INCONCLUSIVE",
+                    message=f"Incremental analysis could not ingest compiled artifact for '{path}': {type(exc).__name__}: {exc}",
+                ))
 
         if not base_src.strip():
             findings.append(self._finding(
@@ -777,16 +963,69 @@ class VerificationPipeline:
             findings.extend(self.secret_engine.scan_python_source(
                 path, head_src, preparsed_tree=head_tree,
                 prelowered_funcs=tuple(compiled.head_ussa.values()),
+                ussa_by_qname=(
+                    {fn.qualified_name: fn for fn in self.salsa_engine.all_functions()}
+                    if self.salsa_engine is not None else compiled.head_ussa
+                ),
             ))
         except Exception as exc:
             findings.append(self._finding("SEC_ERR", path, rule_id="VC2-SECRET-ENGINE-ERROR", severity="HIGH", verdict="INCONCLUSIVE", message=f"Secret taint engine failed closed on '{path}': {exc}"))
         receipt("SECRETS_TAINT")
 
-        prove_f = self._prove_functions(path, base_src, head_src, added_lines, compiled=compiled)
+        force_names = set(incremental_plan.semantic_value_callers_to_reverify) if incremental_plan is not None else set()
+        force_names.update(q for q in self._pending_caller_reverify if q in compiled.head_ussa)
+        prove_f = self._prove_functions(path, base_src, head_src, added_lines, compiled=compiled, force_reverify_names=force_names)
         findings.extend(prove_f)
-        receipt("SYMBOLIC_PROVER")
+        self._pending_caller_reverify.difference_update(compiled.head_ussa.keys())
+        cached_qnames = {
+            ev.qualified_name for ev in (incremental_plan.evaluations if incremental_plan is not None else ())
+            if ev.status == "CACHE_HIT_BODY_IDENTICAL"
+        }
+        all_functions_cached = bool(compiled.head_ussa) and set(compiled.head_ussa).issubset(cached_qnames) and not force_names
+        receipt("SYMBOLIC_PROVER", "SKIPPED_CACHE_HIT" if all_functions_cached else "COMPLETED",
+                "previous full-pipeline PASS fingerprint matched" if all_functions_cached else "")
         findings.extend(self._check_concurrency(path, head_src, preparsed_tree=head_tree))
         receipt("CONCURRENCY_DATALOG")
+
+        if self.intent_text:
+            try:
+                from verifyci_v2.neural.spec_compiler import IntentToSMTCompiler
+                intent_findings = IntentToSMTCompiler().verify_function_against_intent(
+                    file_path=path, source=head_src, intent_text=self.intent_text,
+                    preparsed_tree=head_tree,
+                )
+                findings.extend(intent_findings)
+                receipt("INTENT_POSTCONDITIONS")
+            except Exception as exc:
+                findings.append(self._finding(
+                    "INTENT_ERROR", path, rule_id="VC2-INTENT-CHECK-ERROR", severity="HIGH",
+                    verdict="INCONCLUSIVE", message=f"Intent postcondition check failed closed: {type(exc).__name__}: {exc}",
+                ))
+                receipt("INTENT_POSTCONDITIONS", "FAILED_CLOSED_ERROR", type(exc).__name__)
+
+        if self.contracts:
+            try:
+                findings.extend(self._verify_declared_contracts(path, compiled))
+                receipt("CALL_CONTRACTS")
+            except Exception as exc:
+                findings.append(self._finding(
+                    "CONTRACT_ERROR", path, rule_id="VC2-CALL-CONTRACT-ENGINE-ERROR", severity="HIGH",
+                    verdict="INCONCLUSIVE", message=f"Call contract checks failed closed: {type(exc).__name__}: {exc}",
+                ))
+                receipt("CALL_CONTRACTS", "FAILED_CLOSED_ERROR", type(exc).__name__)
+
+        if self.wasm_sandbox and getattr(self.wasm_sandbox, "registered_plugin_ids", ()):
+            try:
+                for plugin_id in tuple(self.wasm_sandbox.registered_plugin_ids):
+                    report = self.wasm_sandbox.execute_plugin(plugin_id, tuple(compiled.head_ussa.values()))
+                    findings.extend(report.findings)
+                receipt("WASM_SANDBOX")
+            except Exception as exc:
+                findings.append(self._finding(
+                    "WASM_ERROR", path, rule_id="VC2-WASM-SANDBOX-ERROR", severity="HIGH",
+                    verdict="INCONCLUSIVE", message=f"Sandbox verification failed closed: {type(exc).__name__}: {exc}",
+                ))
+                receipt("WASM_SANDBOX", "FAILED_CLOSED_ERROR", type(exc).__name__)
 
         # Detect accidental mutation of retained AST nodes by any pass.
         for index in (compiled.base_ast, compiled.head_ast):
@@ -795,6 +1034,36 @@ class VerificationPipeline:
                     "AST_MUTATION", path, rule_id="VC2-AST-ARTIFACT-MUTATED", severity="HIGH",
                     verdict="INCONCLUSIVE", message=f"A verification pass mutated the retained AST for '{path}'.",
                 ))
+        return findings
+
+    def _verify_declared_contracts(self, file_path: str, compiled: CompiledFilePair) -> list[VerificationFinding]:
+        from verifyci_v2.symbolic.contract_checker import verify_ast_call_contract
+        if compiled.head_ast is None:
+            return [self._finding("CONTRACT_NO_AST", file_path, rule_id="VC2-CALL-CONTRACT-NO-AST", severity="HIGH", verdict="INCONCLUSIVE", message="Contract verification requires the compiled AST.")]
+        calls = compiled.head_ast.calls
+        findings: list[VerificationFinding] = []
+        matched = 0
+        for contract_cfg in self.contracts:
+            contract = dict(contract_cfg.get("contract", contract_cfg))
+            callee_name = str(contract.get("callee", ""))
+            if not callee_name:
+                findings.append(self._finding("CONTRACT_MALFORMED", file_path, rule_id="VC2-CALL-CONTRACT-MALFORMED", severity="HIGH", verdict="INCONCLUSIVE", message="Declared call contract is missing its callee name."))
+                continue
+            signature = dict(contract_cfg.get("callee_signature", {}))
+            if not signature:
+                candidates = [fn for fn in compiled.head_ussa.values() if fn.qualified_name.endswith("." + callee_name) or fn.qualified_name == callee_name]
+                if len(candidates) == 1:
+                    signature = {"parameters": list(candidates[0].parameters), "defaults": {}}
+            target_calls = [call for call in calls if (call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", None)) == callee_name]
+            for call in target_calls:
+                matched += 1
+                verdict = verify_ast_call_contract(call, signature, contract)
+                if verdict.verdict == "FAIL":
+                    findings.append(self._finding("CALL_CONTRACT_FAIL", file_path, str(call.lineno), rule_id="VC2-CALL-CONTRACT-VIOLATION", severity="HIGH", verdict="FAIL", start_line=call.lineno, end_line=getattr(call, "end_lineno", call.lineno), message=verdict.reason))
+                elif verdict.verdict != "VERIFIED":
+                    findings.append(self._finding("CALL_CONTRACT_UNDECIDED", file_path, str(call.lineno), rule_id="VC2-CALL-CONTRACT-UNDECIDED", severity="HIGH", verdict="INCONCLUSIVE", start_line=call.lineno, end_line=getattr(call, "end_lineno", call.lineno), message=verdict.reason))
+        if self.contracts and not matched:
+            findings.append(self._finding("CALL_CONTRACT_NOT_EXERCISED", file_path, rule_id="VC2-CALL-CONTRACT-NOT-EXERCISED", severity="MEDIUM", verdict="INCONCLUSIVE", message="Declared call contracts had no matching call site in this file; applicability could not be established."))
         return findings
 
     def _scan_added_line_secrets(self, file_path: str, records: Sequence[AddedLineRecord]) -> list[VerificationFinding]:
@@ -1001,6 +1270,7 @@ class VerificationPipeline:
         added_lines: Sequence[str],
         *,
         compiled: CompiledFilePair | None = None,
+        force_reverify_names: set[str] | None = None,
     ) -> list[VerificationFinding]:
         findings: list[VerificationFinding] = []
         if compiled is None:
@@ -1022,27 +1292,61 @@ class VerificationPipeline:
         funcs_b = dict(compiled.base_ussa)
         funcs_h = dict(compiled.head_ussa)
 
-        if not funcs_h:
-            # The changed lines are an excerpt from inside a scope the hunk never
-            # shows, so no enclosing function could be located and nothing was
-            # analysed. Certifying PASS here would vouch for a change that was
-            # never examined. A column-zero hunk is module-level code, which the
-            # other checks already cover.
-            if any(ln[:1].isspace() for ln in added_lines if ln.strip()):
-                findings.append(
-                    self._finding(
-                        "NOSCOPE",
-                        file_path,
-                        rule_id="VC2-NO-DEFINABLE-SCOPE",
-                        severity="MEDIUM",
-                        verdict="INCONCLUSIVE",
-                        message=(
-                            f"Changed lines in '{file_path}' belong to a scope with "
-                            "no function definition in the hunk, so no enclosing "
-                            "function could be verified. Failing closed."
-                        ),
+        # Module- and class-body executable statements are outside the function
+        # equivalence prover. They must not become PASS merely because all visible
+        # functions are unchanged or no functions exist in the file.
+        added_line_numbers = {r.head_lineno for r in compiled.added_line_records}
+        if compiled.head_ast is not None and added_line_numbers:
+            unverified_scope_lines: set[int] = set()
+            def overlaps_added(node: ast.AST) -> bool:
+                start = getattr(node, "lineno", 0)
+                end = getattr(node, "end_lineno", start)
+                return any(start <= line_no <= end for line_no in added_line_numbers)
+            for top_node in compiled.head_ast.tree.body:
+                if isinstance(top_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if isinstance(top_node, ast.ClassDef):
+                    if top_node.lineno in added_line_numbers:
+                        unverified_scope_lines.add(top_node.lineno)
+                    for class_node in top_node.body:
+                        if isinstance(class_node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                            continue
+                        if overlaps_added(class_node):
+                            unverified_scope_lines.update(
+                                n for n in added_line_numbers
+                                if getattr(class_node, "lineno", 0) <= n <= getattr(class_node, "end_lineno", getattr(class_node, "lineno", 0))
+                            )
+                    continue
+                if overlaps_added(top_node):
+                    unverified_scope_lines.update(
+                        n for n in added_line_numbers
+                        if getattr(top_node, "lineno", 0) <= n <= getattr(top_node, "end_lineno", getattr(top_node, "lineno", 0))
                     )
-                )
+            if unverified_scope_lines:
+                findings.append(self._finding(
+                    "MODULE_SCOPE", file_path, *(str(n) for n in sorted(unverified_scope_lines)),
+                    rule_id="VC2-MODULE-SCOPE-UNVERIFIED", severity="HIGH",
+                    verdict="INCONCLUSIVE",
+                    start_line=min(unverified_scope_lines), end_line=max(unverified_scope_lines),
+                    message=(
+                        f"Changed module/class-body executable statements in '{file_path}' "
+                        "are outside the supported function-level semantic proof."
+                    ),
+                ))
+
+        if not funcs_h:
+            # Indented source excerpts without a parsed enclosing function are
+            # not attributable to a verified scope.
+            if any(ln[:1].isspace() for ln in added_lines if ln.strip()):
+                findings.append(self._finding(
+                    "NOSCOPE", file_path,
+                    rule_id="VC2-NO-DEFINABLE-SCOPE", severity="MEDIUM",
+                    verdict="INCONCLUSIVE",
+                    message=(
+                        f"Changed lines in '{file_path}' belong to a scope with "
+                        "no parsed enclosing function; the change cannot be verified."
+                    ),
+                ))
             return findings
 
         for qname, fh in funcs_h.items():
@@ -1056,7 +1360,7 @@ class VerificationPipeline:
                     message=f"New function '{qname}' has no base revision for equivalence verification.",
                 ))
                 continue
-            if fb.h_body == fh.h_body and fb.h_interface == fh.h_interface:
+            if fb.h_body == fh.h_body and fb.h_interface == fh.h_interface and qname not in (force_reverify_names or set()):
                 continue
             base_node = compiled.base_ast.functions_by_qname.get(qname) if compiled and compiled.base_ast else None
             head_node = compiled.head_ast.functions_by_qname.get(qname) if compiled and compiled.head_ast else None
@@ -1074,6 +1378,7 @@ class VerificationPipeline:
                 base_fn_node=base_node, cand_fn_node=head_node,
             )
             if proof.is_equivalent and proof.smt_status == "UNSAT":
+                self._proved_equivalent_qnames.add(qname)
                 continue
             if proof.smt_status == "SAT" and proof.witness is not None:
                 findings.append(self._finding(

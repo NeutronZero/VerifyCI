@@ -8,6 +8,7 @@ from verifyci_v2.contracts.ssa_ir import (
     CPGEdge,
     FunctionUSSA,
     PhiNode,
+    ParameterSpec,
     TaintSummary,
     USSABasicBlock,
     USSAInstruction,
@@ -637,6 +638,20 @@ def lower_python_function(
     if stmt.args.kwarg is not None:
         ordered_args.append(stmt.args.kwarg)
     params = tuple(arg.arg for arg in ordered_args)
+    positional_defaults = list(stmt.args.defaults)
+    positional_args = [*stmt.args.posonlyargs, *stmt.args.args]
+    default_start = len(positional_args) - len(positional_defaults)
+    param_specs: list[ParameterSpec] = []
+    for index, arg in enumerate(stmt.args.posonlyargs):
+        param_specs.append(ParameterSpec(name=arg.arg, kind="POSONLY", has_default=index >= default_start))
+    for index, arg in enumerate(stmt.args.args, start=len(stmt.args.posonlyargs)):
+        param_specs.append(ParameterSpec(name=arg.arg, kind="POS_OR_KW", has_default=index >= default_start))
+    if stmt.args.vararg is not None:
+        param_specs.append(ParameterSpec(name=stmt.args.vararg.arg, kind="VAR_POSITIONAL", has_default=False))
+    for arg, default in zip(stmt.args.kwonlyargs, stmt.args.kw_defaults):
+        param_specs.append(ParameterSpec(name=arg.arg, kind="KWONLY", has_default=default is not None))
+    if stmt.args.kwarg is not None:
+        param_specs.append(ParameterSpec(name=stmt.args.kwarg.arg, kind="VAR_KEYWORD", has_default=False))
     ret_ann = ast.unparse(stmt.returns) if stmt.returns is not None else "Any"
     # The interface digest must change when defaults, parameter kinds, or
     # annotations change; these affect callers even if the function body does not.
@@ -678,6 +693,7 @@ def lower_python_function(
         dfg_edges=tuple(ctx.dfg_edges),
         call_targets=tuple(sorted(ctx.call_targets)),
         taint_summary=taint_summary,
+        param_specs=tuple(param_specs),
     )
     h_body, h_interface = compute_ussa_digests(draft)
     node_uid = content_digest_hex(
@@ -702,6 +718,7 @@ def lower_python_function(
         taint_summary=draft.taint_summary,
         h_body=h_body,
         h_interface=h_interface,
+        param_specs=draft.param_specs,
     )
 
 

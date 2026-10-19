@@ -10,6 +10,7 @@ CutoffStatus = Literal[
     "CUTOFF_INTERFACE_INVARIANT",
     "PROPAGATE_INTERFACE_CHANGED",
     "NEW_FUNCTION",
+    "DEPENDENCY_FINGERPRINT_CHANGED",
 ]
 
 
@@ -79,6 +80,13 @@ class TaintSummary(msgspec.Struct, frozen=True, kw_only=True):
     is_pure: bool
 
 
+class ParameterSpec(msgspec.Struct, frozen=True, kw_only=True):
+    """Python call-binding shape for one formal parameter."""
+    name: str
+    kind: Literal["POSONLY", "POS_OR_KW", "VAR_POSITIONAL", "KWONLY", "VAR_KEYWORD"]
+    has_default: bool = False
+
+
 class FunctionUSSA(msgspec.Struct, frozen=True, kw_only=True):
     node_uid: str
     repo_id: str
@@ -97,6 +105,8 @@ class FunctionUSSA(msgspec.Struct, frozen=True, kw_only=True):
     taint_summary: TaintSummary
     h_body: str = ""
     h_interface: str = ""
+    # Optional for compatibility with previously serialized U-SSA payloads.
+    param_specs: tuple[ParameterSpec, ...] = ()
 
 
 class CutoffEvaluation(msgspec.Struct, frozen=True, kw_only=True):

@@ -225,8 +225,11 @@ class TaintTrackedSecretEngine:
         ussa_funcs: tuple,
         var_name: str,
         assign_line: int,
+        *,
+        tree: ast.Module | None = None,
+        ussa_by_qname: Mapping[str, Any] | None = None,
     ) -> bool:
-        """Traces transitive DFG reachability from `var_name` at `assign_line` to any I/O sink."""
+        """Trace local DFG and summary-based interprocedural taint to an I/O sink."""
         for fn in ussa_funcs:
             if not (fn.start_line <= assign_line <= fn.end_line):
                 continue
@@ -270,7 +273,201 @@ class TaintTrackedSecretEngine:
                             ssa_v in expr_head for ssa_v in tainted_ssa
                         ):
                             return True
+            if tree is not None and ussa_by_qname:
+                if cls._interprocedural_ast_flow(tree, fn, var_name, ussa_by_qname):
+                    return True
         return False
+
+    @staticmethod
+    def _walk_function_scope(root: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
+        """Walk one function's executable scope without entering nested definitions."""
+        out: list[ast.AST] = []
+        stack: list[ast.AST] = [root]
+        nested_types = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+        while stack:
+            node = stack.pop()
+            out.append(node)
+            children = list(ast.iter_child_nodes(node))
+            for child in reversed(children):
+                if child is not root and isinstance(child, nested_types):
+                    continue
+                stack.append(child)
+        return out
+
+    @classmethod
+    def _interprocedural_ast_flow(
+        cls,
+        tree: ast.Module,
+        source_fn: Any,
+        source_name: str,
+        ussa_by_qname: Mapping[str, Any],
+    ) -> bool:
+        """Conservatively bind source-level call arguments to callee taint summaries.
+
+        This is supplementary to the U-SSA DFG. Unknown star expansion is treated
+        as tainting every bindable callee parameter; no name-based short match is
+        accepted if it is ambiguous.
+        """
+        fn_nodes = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and getattr(n, "lineno", 0) <= source_fn.start_line <= getattr(n, "end_lineno", 0)]
+        if not fn_nodes:
+            return False
+        active_fn = min(fn_nodes, key=lambda n: getattr(n, "end_lineno", n.lineno) - n.lineno)
+        tainted_names = {source_name}
+        # Include SSA version names by their root identifier.
+        scoped_nodes = cls._walk_function_scope(active_fn)
+        changed = True
+        while changed:
+            changed = False
+            for node in scoped_nodes:
+                if isinstance(node, ast.Assign):
+                    call = node.value if isinstance(node.value, ast.Call) else None
+                    if call is None:
+                        # Ordinary aliases and container projections conservatively
+                        # inherit taint when their value expression references a tainted name.
+                        value_names = {n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)}
+                        if value_names & tainted_names:
+                            for target in node.targets:
+                                for child in ast.walk(target):
+                                    if isinstance(child, ast.Name) and child.id not in tainted_names:
+                                        tainted_names.add(child.id)
+                                        changed = True
+                        continue
+                    callee = cls._resolve_callee_summary(call, ussa_by_qname)
+                    if callee is None:
+                        # An unresolved helper receiving tainted input may return
+                        # that input (directly or indirectly). Preserve taint on the
+                        # assignment target instead of assuming an unknown call
+                        # sanitizes its result.
+                        call_names = {
+                            n.id for arg in (*call.args, *(kw.value for kw in call.keywords))
+                            for n in ast.walk(arg) if isinstance(n, ast.Name)
+                        }
+                        if call_names & tainted_names:
+                            for target in node.targets:
+                                for child in ast.walk(target):
+                                    if isinstance(child, ast.Name) and child.id not in tainted_names:
+                                        tainted_names.add(child.id)
+                                        changed = True
+                        continue
+                    bound, uncertain = cls._bind_call_tainted_params(call, callee, tainted_names)
+                    returned = set(callee.taint_summary.param_to_return)
+                    if bound & returned or (uncertain and returned):
+                        for target in node.targets:
+                            for child in ast.walk(target):
+                                if isinstance(child, ast.Name) and child.id not in tainted_names:
+                                    tainted_names.add(child.id)
+                                    changed = True
+            # bound summary sink and direct sinks
+            for node in scoped_nodes:
+                if not isinstance(node, ast.Call):
+                    continue
+                callee_text = ast.unparse(node.func)
+                actual_vars = {sub.id for arg in (*node.args, *(kw.value for kw in node.keywords))
+                               for sub in ast.walk(arg) if isinstance(sub, ast.Name)}
+                direct_sink = any(
+                    actual_vars.intersection(tainted_names)
+                    and (callee_text == prefix or callee_text.startswith(prefix))
+                    for prefix in cls._SINK_PREFIXES
+                )
+                if direct_sink:
+                    return True
+                callee = cls._resolve_callee_summary(node, ussa_by_qname)
+                if callee is None:
+                    continue
+                bound, uncertain = cls._bind_call_tainted_params(node, callee, tainted_names)
+                sink_params = {p for p, _sink in callee.taint_summary.param_to_sinks}
+                if bound & sink_params or (uncertain and bool(sink_params)):
+                    return True
+        return False
+
+    @staticmethod
+    def _resolve_callee_summary(call: ast.Call, ussa_by_qname: Mapping[str, Any]) -> Any | None:
+        raw = ast.unparse(call.func)
+        if raw in ussa_by_qname:
+            return ussa_by_qname[raw]
+        short = raw.split(".")[-1]
+        candidates = [fn for qname, fn in ussa_by_qname.items() if qname.split(".")[-1] == short]
+        return candidates[0] if len(candidates) == 1 else None
+
+    @staticmethod
+    def _bind_call_tainted_params(call: ast.Call, callee: Any, tainted_names: set[str]) -> tuple[set[str], bool]:
+        """Bind possibly-tainted actual arguments to formal names conservatively.
+
+        Dynamic ``*args`` can shift every later positional binding, so affected
+        formals are conservatively marked rather than guessed by raw AST index.
+        A tainted ``**kwargs`` spread can target any keyword-bindable parameter.
+        """
+        specs = list(getattr(callee, "param_specs", ()) or ())
+        if specs:
+            params = [(spec.name, spec.kind) for spec in specs]
+        else:
+            params = [(name, "POS_OR_KW") for name in callee.parameters]
+        if isinstance(call.func, ast.Attribute) and params and params[0][0] in ("self", "cls"):
+            params = params[1:]
+
+        positionals = [p for p, kind in params if kind in ("POSONLY", "POS_OR_KW")]
+        var_pos = next((p for p, kind in params if kind == "VAR_POSITIONAL"), None)
+        var_kw = next((p for p, kind in params if kind == "VAR_KEYWORD"), None)
+        tainted: set[str] = set()
+        uncertain = False
+
+        def is_tainted(expr: ast.AST) -> bool:
+            return any(n.id in tainted_names for n in ast.walk(expr) if isinstance(n, ast.Name))
+
+        positional_offset = 0
+        uncertain_positional_alignment = False
+        for arg in call.args:
+            if isinstance(arg, ast.Starred):
+                # A non-literal expansion may bind zero or many slots. If tainted,
+                # it may taint every positional-capable formal; even an untainted
+                # spread makes following positional indices ambiguous.
+                if is_tainted(arg.value):
+                    uncertain = True
+                    tainted.update(positionals)
+                    if var_pos:
+                        tainted.add(var_pos)
+                uncertain_positional_alignment = True
+                continue
+
+            if is_tainted(arg):
+                if uncertain_positional_alignment:
+                    uncertain = True
+                    tainted.update(positionals[min(positional_offset, len(positionals)):])
+                    if var_pos:
+                        tainted.add(var_pos)
+                elif positional_offset < len(positionals):
+                    tainted.add(positionals[positional_offset])
+                elif var_pos:
+                    tainted.add(var_pos)
+                else:
+                    # Invalid/unknown binding cannot be narrowed safely.
+                    uncertain = True
+                    tainted.update(positionals)
+            positional_offset += 1
+
+        by_name = {name: kind for name, kind in params}
+        keyword_bindable = {
+            name for name, kind in params if kind in ("POS_OR_KW", "KWONLY")
+        }
+        for kw in call.keywords:
+            if kw.arg is None:
+                if is_tainted(kw.value):
+                    uncertain = True
+                    tainted.update(keyword_bindable)
+                    if var_kw:
+                        tainted.add(var_kw)
+                continue
+            if not is_tainted(kw.value):
+                continue
+            if by_name.get(kw.arg) in ("POS_OR_KW", "KWONLY"):
+                tainted.add(kw.arg)
+            elif var_kw:
+                tainted.add(var_kw)
+            else:
+                uncertain = True
+                tainted.update(keyword_bindable)
+        return tainted, uncertain
 
     def scan_config_lines(
         self,
@@ -351,6 +548,7 @@ class TaintTrackedSecretEngine:
         conformal_profile: ConformalProfile | None = None,
         preparsed_tree: ast.Module | None = None,
         prelowered_funcs: tuple | None = None,
+        ussa_by_qname: Mapping[str, Any] | None = None,
     ) -> tuple[VerificationFinding, ...]:
         is_test_file = is_test_or_fixture_partition(file_path)
 
@@ -545,7 +743,7 @@ class TaintTrackedSecretEngine:
             # always caught regardless of entropy.
             flows_to_sink = any(
                 self._trace_ussa_dfg_to_sink(
-                    ussa_funcs, vn, node.lineno
+                    ussa_funcs, vn, node.lineno, tree=tree, ussa_by_qname=ussa_by_qname
                 )
                 for vn in var_names
             )
@@ -583,7 +781,7 @@ class TaintTrackedSecretEngine:
 
             # Trace transitive DFG taint flow (with module-scope fallback)
             flows_to_sink = self._trace_ussa_dfg_to_sink(
-                ussa_funcs, var_name, node.lineno
+                ussa_funcs, var_name, node.lineno, tree=tree, ussa_by_qname=ussa_by_qname
             ) or bool(
                 re.search(
                     rf"(?:print|logger\.\w+|logging\.\w+|requests\.\w+|httpx\.\w+)\([^)]*\b{re.escape(var_name)}\b",

@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sqlite3
 import struct
 import time
 import zlib
+import subprocess
+from pathlib import Path
 from typing import Any, Iterable, Literal, Sequence
 
 import msgspec
 
-from verifyci_v2.contracts.canonical import content_digest_hex, canonical_jcs_bytes
+from verifyci_v2.contracts.canonical import content_digest_hex, canonical_jcs_bytes, canonical_jcs_str
 from verifyci_v2.contracts.ssa_ir import (
     CPGEdge,
     FunctionUSSA,
@@ -31,34 +34,29 @@ def _decompress_ussa(blob: bytes) -> FunctionUSSA:
 
 
 def _pack_rabitq_bits(vec: Sequence[float]) -> tuple[bytes, float, float]:
-    """
-    Quantizes a float vector into packed 64-bit unsigned words (RaBitQ sign bits),
-    returning (packed_bytes, l2_norm, corrective_factor).
-    """
+    """Canonical sign-bit packing with the store's existing correction math."""
+    from verifyci_v2.store.rabitq_index import pack_rabitq_sign_bits
+
+    dim = len(vec)
+    if dim <= 0:
+        raise ValueError("RaBitQ vector dimension must be >= 1")
     norm_sq = sum(x * x for x in vec)
     l2_norm = math.sqrt(norm_sq) if norm_sq > 1e-12 else 1.0
-    dim = len(vec)
-    inv_sqrt_d = 1.0 / math.sqrt(max(dim, 1))
-
-    # Corrective scalar <o_bar, u> = sum(|u_i|) / sqrt(D)
+    inv_sqrt_d = 1.0 / math.sqrt(dim)
+    # Preserve the existing persistence estimator; only packing is unified.
     dot_o_u = sum(abs(x / l2_norm) for x in vec) * inv_sqrt_d
     corrective = max(dot_o_u, 1e-6)
-
-    num_words = (dim + 63) // 64
-    words = [0] * num_words
-    for idx, val in enumerate(vec):
-        if val >= 0.0:
-            words[idx // 64] |= 1 << (idx % 64)
-
-    packed = struct.pack(f"<{num_words}Q", *words)
+    packed, _packed_int = pack_rabitq_sign_bits(vec)
     return packed, l2_norm, corrective
 
 
 def _hamming_distance_bytes(a: bytes, b: bytes) -> int:
     """Fast bitwise popcount over packed 64-bit words."""
-    n = min(len(a), len(b)) // 8
-    wa = struct.unpack(f"<{n}Q", a[: n * 8])
-    wb = struct.unpack(f"<{n}Q", b[: n * 8])
+    if not a or not b or len(a) != len(b) or len(a) % 8:
+        raise ValueError("RaBitQ packed vectors must have equal non-zero 64-bit-aligned lengths")
+    n = len(a) // 8
+    wa = struct.unpack(f"<{n}Q", a)
+    wb = struct.unpack(f"<{n}Q", b)
     return sum((x ^ y).bit_count() for x, y in zip(wa, wb))
 
 
@@ -71,6 +69,10 @@ def _read_file_magic(path: str, length: int = 16) -> bytes:
             return fh.read(length)
     except OSError:
         return b""
+
+
+class LineageIntegrityError(RuntimeError):
+    """Raised when a persisted source snapshot does not match its manifest."""
 
 
 class DuckDBCPGStore:
@@ -87,8 +89,14 @@ class DuckDBCPGStore:
         self,
         db_path: str = ":memory:",
         backend: Literal["auto", "duckdb", "sqlite"] = "auto",
+        repo_path: str | Path | None = None,
+        allow_unverified_snapshots: bool = False,
     ) -> None:
         self.db_path = db_path
+        self.repo_path = Path(repo_path).resolve() if repo_path and (Path(repo_path) / ".git").exists() else None
+        # Test-only escape hatch for exercising content-digest integrity without
+        # an actual Git object database. Never enable this for a release/CI gate.
+        self.allow_unverified_snapshots = allow_unverified_snapshots
         if backend == "duckdb":
             if _duckdb_mod is None:
                 raise RuntimeError(
@@ -98,9 +106,22 @@ class DuckDBCPGStore:
         elif backend == "sqlite":
             self._use_duckdb = False
         else:
-            # Default to DuckDB whenever installed unless explicitly given a .sqlite/.db file
+            # Prefer the existing file's magic over the filename extension. Older
+            # local-first versions may have created a SQLite database at the
+            # conventional `.verifyci/store.vc2` path before DuckDB was installed.
             is_sqlite_ext = db_path.endswith((".sqlite", ".sqlite3", ".db"))
-            self._use_duckdb = _duckdb_mod is not None and not is_sqlite_ext
+            magic = _read_file_magic(db_path) if db_path != ":memory:" else b""
+            if magic == _SQLITE_MAGIC or is_sqlite_ext:
+                self._use_duckdb = False
+            elif _duckdb_mod is not None:
+                self._use_duckdb = True
+            elif db_path != ":memory:" and Path(db_path).exists() and Path(db_path).stat().st_size > 0:
+                raise RuntimeError(
+                    f"Store '{db_path}' is not a SQLite database and DuckDB is unavailable; "
+                    "install duckdb or provide the correct backend."
+                )
+            else:
+                self._use_duckdb = False
 
         self.active_backend = "duckdb" if self._use_duckdb else "sqlite"
 
@@ -115,7 +136,19 @@ class DuckDBCPGStore:
                         f"Store '{db_path}' is a SQLite database but the duckdb backend "
                         "was selected. Re-ingest to a new path or pass --backend sqlite."
                     )
-            self._conn = _duckdb_mod.connect(db_path, config={"threads": "1"})
+            duckdb_io_error = getattr(_duckdb_mod, "IOException", Exception)
+            try:
+                self._conn = _duckdb_mod.connect(db_path, config={"threads": "1"})
+            except duckdb_io_error as exc:
+                if "used by another process" in str(exc) or "Could not set lock" in str(exc) or "lock on file" in str(exc):
+                    try:
+                        self._conn = _duckdb_mod.connect(db_path, read_only=True, config={"threads": "1"})
+                    except Exception:
+                        self._conn = sqlite3.connect(":memory:", check_same_thread=False)
+                        self._use_duckdb = False
+                        self.active_backend = "sqlite"
+                else:
+                    raise
         else:
             self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._init_schema()
@@ -175,8 +208,26 @@ class DuckDBCPGStore:
                 commit_sha TEXT NOT NULL,
                 file_path TEXT NOT NULL,
                 source_text TEXT NOT NULL,
+                file_sha256 TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY (commit_sha, file_path)
             );
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS source_snapshot_manifests (
+                commit_sha TEXT PRIMARY KEY,
+                manifest_digest TEXT NOT NULL,
+                file_count INTEGER NOT NULL
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS verification_fingerprints (
+                qualified_name TEXT PRIMARY KEY,
+                fingerprint TEXT NOT NULL
+            )
             """
         )
         cur.execute(
@@ -202,10 +253,20 @@ class DuckDBCPGStore:
                 is_pure BOOLEAN DEFAULT FALSE,
                 h_interface TEXT NOT NULL,
                 h_body TEXT NOT NULL,
-                ussa_payload BLOB NOT NULL
+                ussa_payload BLOB NOT NULL,
+                verification_fingerprint TEXT NOT NULL DEFAULT ''
             )
             """
         )
+        # Existing local stores need additive, non-destructive migrations.
+        for table, column, declaration in (
+            ("source_snapshots", "file_sha256", "TEXT NOT NULL DEFAULT ''"),
+            ("function_nodes", "verification_fingerprint", "TEXT NOT NULL DEFAULT ''"),
+        ):
+            cur.execute(f"PRAGMA table_info('{table}')")
+            columns = {str(row[1]) for row in cur.fetchall()}
+            if column not in columns:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS commit_node_map (
@@ -215,32 +276,8 @@ class DuckDBCPGStore:
             )
             """
         )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS cpg_blocks (
-                node_uid TEXT NOT NULL,
-                block_id TEXT NOT NULL,
-                terminator_condition TEXT,
-                phi_json TEXT NOT NULL,
-                PRIMARY KEY (node_uid, block_id)
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS cpg_instructions (
-                node_uid TEXT NOT NULL,
-                block_id TEXT NOT NULL,
-                inst_id TEXT NOT NULL,
-                opcode TEXT NOT NULL,
-                target_var TEXT,
-                operands_json TEXT NOT NULL,
-                callee_symbol TEXT,
-                source_line INTEGER NOT NULL,
-                PRIMARY KEY (node_uid, inst_id)
-            )
-            """
-        )
+        # Legacy cpg_blocks/cpg_instructions tables, if present, are not written by
+        # current versions. Canonical block/instruction data lives in ussa_payload.
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS cpg_taint_summaries (
@@ -292,44 +329,205 @@ class DuckDBCPGStore:
         )
         self._conn.commit()
 
-    def record_source_snapshot(
-        self, commit_sha: str, sources: dict[str, str]
-    ) -> int:
-        """Stores verbatim source per file for a commit.
-
-        Removal provenance needs the *base revision text*, not a derived U-SSA
-        payload: `function_nodes.ussa_payload` holds compressed IR, so a stored
-        record can never contradict a diff that claims to delete code. This
-        table is the only place that keeps the original text.
-        """
-        cur = self._conn.cursor()
-        rows = [
-            (commit_sha, file_path, source)
-            for file_path, source in sources.items()
-            if source
-        ]
-        cur.executemany(
-            "INSERT OR REPLACE INTO source_snapshots "
-            "(commit_sha, file_path, source_text) VALUES (?, ?, ?)",
-            rows,
+    def _resolve_snapshot_commit(self, commit_sha: str) -> str:
+        """Resolve symbolic revisions to immutable commits; never persist HEAD as identity."""
+        if not commit_sha:
+            raise ValueError("A source snapshot requires an immutable Git commit, not an empty label")
+        if commit_sha == "working-tree" and not self.allow_unverified_snapshots:
+            raise ValueError("A source snapshot requires an immutable Git commit, not a working-tree label")
+        if self.repo_path is None:
+            if commit_sha in ("HEAD", "head") and not self.allow_unverified_snapshots:
+                raise ValueError("HEAD snapshot requires DuckDBCPGStore(repo_path=...) to resolve an immutable commit")
+            return commit_sha
+        target = "HEAD" if commit_sha.lower() == "head" else commit_sha
+        if target.startswith("-") or any(ch.isspace() for ch in target):
+            raise ValueError("Malformed source snapshot commit reference")
+        proc = subprocess.run(
+            ["git", "rev-parse", "--verify", f"{target}^{{commit}}"],
+            cwd=str(self.repo_path), capture_output=True, text=True, check=False,
         )
-        self._conn.commit()
-        return len(rows)
+        resolved = proc.stdout.strip().lower()
+        if proc.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40,64}", resolved):
+            raise ValueError(f"Could not resolve {commit_sha!r} to an immutable Git commit")
+        return resolved
 
-    def load_source_snapshot(self, commit_sha: str) -> dict[str, str]:
-        """Returns the stored verbatim source for a commit, keyed by path."""
+    def _validate_snapshot_matches_git(self, commit_sha: str, sources: dict[str, str]) -> None:
+        """Reject content labeled as a commit snapshot unless it matches that Git tree."""
+        if self.repo_path is None:
+            if not self.allow_unverified_snapshots:
+                raise LineageIntegrityError(
+                    f"Commit-bound source snapshot for {commit_sha!r} requires a valid Git repository "
+                    "(or explicit allow_unverified_snapshots=True for test environments)"
+                )
+            return
+        # Only source files are stored by this API; compare the complete set of
+        # source-like files in the tree, plus exact bytes for each file.
+        source_suffixes = {".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".c", ".h", ".cc", ".cpp", ".hpp", ".go", ".rs", ".java", ".kt", ".swift", ".rb", ".php", ".sh", ".yaml", ".yml", ".toml", ".json"}
+        proc = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", "-z", commit_sha],
+            cwd=str(self.repo_path), capture_output=True, check=False,
+        )
+        if proc.returncode != 0:
+            raise LineageIntegrityError(f"Could not enumerate tree for commit {commit_sha}")
+        tracked_all = {
+            item.decode("utf-8", errors="strict")
+            for item in proc.stdout.split(b"\0") if item
+        }
+        supplied = {str(path).replace("\\", "/") for path in sources}
+        # The ingest API may snapshot Python-only repositories or a mixed-language
+        # source set. Require completeness for every suffix represented in the
+        # supplied manifest, without demanding README/build artifacts from callers
+        # that intentionally snapshot only source code.
+        supplied_suffixes = {Path(path).suffix.lower() for path in supplied}
+        tracked = {
+            path for path in tracked_all
+            if Path(path).suffix.lower() in supplied_suffixes and Path(path).suffix.lower() in source_suffixes
+        }
+        extra = sorted(supplied - tracked)[:3]
+        if extra:
+            raise LineageIntegrityError(
+                f"Snapshot contains paths absent from the Git source tree at {commit_sha}: {extra}"
+            )
+        # A snapshot may intentionally be a subset of source paths. Every stored
+        # entry is still verified against the immutable tree; omitted paths cannot
+        # ground a later deletion and therefore remain fail-closed as missing data.
+        for rel_path, text in sources.items():
+            # `git show <commit>:<path>` reads a path from the immutable tree,
+            # not from the current worktree.
+            show = subprocess.run(
+                ["git", "show", f"{commit_sha}:{rel_path.replace(chr(92), '/') }"],
+                cwd=str(self.repo_path), capture_output=True, check=False,
+            )
+            if show.returncode != 0 or show.stdout != text.encode("utf-8"):
+                raise LineageIntegrityError(f"Source content for {rel_path!r} does not match commit {commit_sha}")
+
+    @staticmethod
+    def _snapshot_manifest(sources: dict[str, str], commit_sha: str) -> tuple[dict[str, str], str]:
+        hashes = {
+            str(path): content_digest_hex(text, domain="verifyci.v2.source_snapshot.file")
+            for path, text in sorted(sources.items())
+        }
+        # The manifest commits to both the immutable revision identity and the
+        # canonical path->content-hash map. Re-keying rows to another commit will
+        # therefore fail validation even if their individual file digests survive.
+        payload = {"commit_sha": commit_sha.lower(), "files": hashes}
+        digest = content_digest_hex(
+            canonical_jcs_bytes(payload), domain="verifyci.v2.source_snapshot.manifest.v2"
+        )
+        return hashes, digest
+
+    def record_source_snapshot(self, commit_sha: str, sources: dict[str, str]) -> int:
+        """Stores exact source text plus per-file digests and a commit-bound manifest of the stored file set."""
+        resolved_sha = self._resolve_snapshot_commit(commit_sha)
+        clean_sources = {str(path).replace("\\", "/"): str(text) for path, text in sources.items()}
+        self._validate_snapshot_matches_git(resolved_sha, clean_sources)
+        hashes, manifest_digest = self._snapshot_manifest(clean_sources, resolved_sha)
         cur = self._conn.cursor()
         try:
+            cur.execute("DELETE FROM source_snapshots WHERE commit_sha = ?", (resolved_sha,))
+            if clean_sources:
+                cur.executemany(
+                    "INSERT INTO source_snapshots (commit_sha, file_path, source_text, file_sha256) VALUES (?, ?, ?, ?)",
+                    [(resolved_sha, path, text, hashes[path]) for path, text in sorted(clean_sources.items())],
+                )
             cur.execute(
-                "SELECT file_path, source_text FROM source_snapshots "
-                "WHERE commit_sha = ?",
+                "INSERT OR REPLACE INTO source_snapshot_manifests (commit_sha, manifest_digest, file_count) VALUES (?, ?, ?)",
+                (resolved_sha, manifest_digest, len(clean_sources)),
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+        return len(clean_sources)
+
+    def load_source_snapshot(self, commit_sha: str) -> dict[str, str]:
+        """Loads a snapshot only after verifying file digests, commit-bound manifest, and immutable Git contents when available."""
+        resolved_sha = self._resolve_snapshot_commit(commit_sha)
+        cur = self._conn.cursor()
+        cur.execute(
+            "SELECT file_path, source_text, file_sha256 FROM source_snapshots WHERE commit_sha = ? ORDER BY file_path",
+            (resolved_sha,),
+        )
+        rows = cur.fetchall()
+        if not rows and resolved_sha != commit_sha:
+            cur.execute(
+                "SELECT file_path, source_text, file_sha256 FROM source_snapshots WHERE commit_sha = ? ORDER BY file_path",
                 (commit_sha,),
             )
-            return {str(row[0]): str(row[1]) for row in cur.fetchall()}
-        except Exception:
-            # A store written before this table exists simply has no
-            # provenance; that is an absence, not a failure.
+            fallback_rows = cur.fetchall()
+            if fallback_rows:
+                rows = fallback_rows
+                resolved_sha = commit_sha
+        cur.execute(
+            "SELECT manifest_digest, file_count FROM source_snapshot_manifests WHERE commit_sha = ?",
+            (resolved_sha,),
+        )
+        manifest_row = cur.fetchone()
+        if manifest_row is None:
+            if rows:
+                raise LineageIntegrityError(f"Source snapshot {resolved_sha!r} has no manifest")
             return {}
+        sources: dict[str, str] = {}
+        expected_hashes: dict[str, str] = {}
+        for path, text, file_hash in rows:
+            path, text, file_hash = str(path), str(text), str(file_hash)
+            actual = content_digest_hex(text, domain="verifyci.v2.source_snapshot.file")
+            if not file_hash or actual != file_hash:
+                raise LineageIntegrityError(f"Source snapshot file digest mismatch for {resolved_sha}:{path}")
+            sources[path] = text
+            expected_hashes[path] = actual
+        _verified_hashes, actual_manifest = self._snapshot_manifest(sources, resolved_sha)
+        if len(rows) != int(manifest_row[1]):
+            raise LineageIntegrityError(f"Source snapshot manifest file-count mismatch for {resolved_sha}")
+        if actual_manifest != str(manifest_row[0]):
+            # Upgrade legacy v1 manifests only after rechecking every stored file
+            # against the immutable Git object database. Without Git-backed source
+            # proof, an unbound legacy manifest is not promoted to commit evidence.
+            legacy_manifest = content_digest_hex(
+                canonical_jcs_bytes(expected_hashes), domain="verifyci.v2.source_snapshot.manifest"
+            )
+            if str(manifest_row[0]) != legacy_manifest or self.repo_path is None:
+                raise LineageIntegrityError(f"Source snapshot manifest mismatch for {resolved_sha}")
+            self._validate_snapshot_matches_git(resolved_sha, sources)
+            cur.execute(
+                "UPDATE source_snapshot_manifests SET manifest_digest = ? WHERE commit_sha = ?",
+                (actual_manifest, resolved_sha),
+            )
+            self._conn.commit()
+        # Re-check immutable Git contents on every load, not only at write time.
+        # This blocks relabeling a DB row to a different commit even if an editor
+        # also rewrites its file and manifest digests.
+        self._validate_snapshot_matches_git(resolved_sha, sources)
+        return sources
+
+    def record_verification_fingerprints(self, fingerprints: dict[str, str], *, replace_all: bool = False) -> None:
+        """Persist fingerprints; full replacement removes stale deleted-function keys."""
+        cur = self._conn.cursor()
+        try:
+            if replace_all:
+                cur.execute("DELETE FROM verification_fingerprints")
+                cur.execute("UPDATE function_nodes SET verification_fingerprint = ''")
+            if fingerprints:
+                cur.executemany(
+                    "INSERT OR REPLACE INTO verification_fingerprints (qualified_name, fingerprint) VALUES (?, ?)",
+                    [(name, fp) for name, fp in sorted(fingerprints.items())],
+                )
+                cur.executemany(
+                    "UPDATE function_nodes SET verification_fingerprint = ? WHERE qualified_name = ?",
+                    [(fp, name) for name, fp in sorted(fingerprints.items())],
+                )
+            self._conn.commit()
+        except Exception:
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+            raise
+
+    def load_verification_fingerprints(self) -> dict[str, str]:
+        cur = self._conn.cursor()
+        cur.execute("SELECT qualified_name, fingerprint FROM verification_fingerprints")
+        return {str(name): str(fp) for name, fp in cur.fetchall()}
 
     def record_commit_snapshot(
         self,
@@ -360,8 +558,6 @@ class DuckDBCPGStore:
         fn_rows: list[tuple] = []
         commit_node_rows: list[tuple] = []
         taint_rows: list[tuple] = []
-        block_rows: list[tuple] = []
-        inst_rows: list[tuple] = []
         edge_map_to_upsert: dict[str, tuple] = {}
         commit_edge_rows: list[tuple] = []
 
@@ -394,33 +590,6 @@ class DuckDBCPGStore:
                     json.dumps(fn.taint_summary.raised_exceptions),
                 )
             )
-
-            for blk in fn.basic_blocks:
-                phi_data = [
-                    {"target_var": p.target_var, "incoming": list(p.incoming_branches)}
-                    for p in blk.phi_nodes
-                ]
-                block_rows.append(
-                    (
-                        fn.node_uid,
-                        blk.block_id,
-                        blk.terminator_condition,
-                        json.dumps(phi_data),
-                    )
-                )
-                for inst in blk.instructions:
-                    inst_rows.append(
-                        (
-                            fn.node_uid,
-                            blk.block_id,
-                            inst.inst_id,
-                            inst.opcode,
-                            inst.target_var,
-                            json.dumps(inst.operands),
-                            inst.callee_symbol,
-                            inst.source_line,
-                        )
-                    )
 
             for edge in (*fn.cfg_edges, *fn.dfg_edges):
                 k = (
@@ -497,24 +666,6 @@ class DuckDBCPGStore:
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 taint_rows,
-            )
-        if block_rows:
-            cur.executemany(
-                """
-                INSERT OR REPLACE INTO cpg_blocks
-                (node_uid, block_id, terminator_condition, phi_json)
-                VALUES (?, ?, ?, ?)
-                """,
-                block_rows,
-            )
-        if inst_rows:
-            cur.executemany(
-                """
-                INSERT OR REPLACE INTO cpg_instructions
-                (node_uid, block_id, inst_id, opcode, target_var, operands_json, callee_symbol, source_line)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                inst_rows,
             )
         if edge_map_to_upsert:
             cur.executemany(

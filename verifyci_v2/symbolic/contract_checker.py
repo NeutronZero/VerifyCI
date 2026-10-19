@@ -153,14 +153,18 @@ def _binding_names(bindings: dict[str, Any]) -> dict[str, str]:
     return names
 
 def verify_call_contract(call_code: str, callee_signature: dict[str, Any], contract: dict[str, Any]) -> ContractVerdict:
-    """Verifies one call site against a declared contract."""
+    """Compatibility wrapper for source snippets; core pipeline should use AST calls."""
     try:
-        tree = ast.parse(call_code.strip(), mode='eval')
+        tree = ast.parse(call_code.strip(), mode="eval")
     except (SyntaxError, ValueError):
-        return ContractVerdict(verdict='INCONCLUSIVE', reason='call expression is not parseable')
+        return ContractVerdict(verdict="INCONCLUSIVE", reason="call expression is not parseable")
     if not isinstance(tree.body, ast.Call):
-        return ContractVerdict(verdict='INCONCLUSIVE', reason='expression is not a call')
-    call = tree.body
+        return ContractVerdict(verdict="INCONCLUSIVE", reason="expression is not a call")
+    return verify_ast_call_contract(tree.body, callee_signature, contract)
+
+
+def verify_ast_call_contract(call: ast.Call, callee_signature: dict[str, Any], contract: dict[str, Any]) -> ContractVerdict:
+    """Verify a retained AST call without reparsing it."""
     callee = contract.get('callee')
     if callee:
         actual = call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, 'attr', None)

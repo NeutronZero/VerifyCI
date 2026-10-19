@@ -190,6 +190,19 @@ def entities_from_source(
                 },
             }
         )
+    if lines:
+        entities.append(
+            {
+                "file_path": file_path,
+                "line_start": 1,
+                "line_end": len(lines),
+                "type": "FILE_SNIPPET",
+                "metadata": {
+                    "snippet": "\n".join(lines),
+                    "snippet_is_complete": True,
+                },
+            }
+        )
     return entities
 
 

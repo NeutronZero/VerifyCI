@@ -188,17 +188,25 @@ def test_p0_5_ed25519_asymmetric_dsse_and_git_ref_persistence(tmp_path: Path) ->
     tampered_payload[0] ^= 255
     tampered_env = DSSEEnvelope(payloadType=env.payloadType, payload=base64.b64encode(tampered_payload).decode('ascii'), signatures=env.signatures)
     assert verifier_signer.verify_envelope(tampered_env, public_key=pubkey) is False
-    git_dir = tmp_path / '.git'
-    git_dir.mkdir(parents=True, exist_ok=True)
+    # Real Git object identity is required in production. Build a tiny valid
+    # repository instead of using synthetic SHA strings against a fake .git dir.
+    import subprocess
+    subprocess.run(['git', 'init'], cwd=str(tmp_path), check=True, capture_output=True)
+    subprocess.run(['git', 'config', 'user.name', 'Test User'], cwd=str(tmp_path), check=True)
+    subprocess.run(['git', 'config', 'user.email', 'test@verifyci.dev'], cwd=str(tmp_path), check=True)
+    (tmp_path / 'seed.txt').write_text('seed\n', encoding='utf-8')
+    subprocess.run(['git', 'add', '.'], cwd=str(tmp_path), check=True)
+    subprocess.run(['git', 'commit', '-m', 'seed'], cwd=str(tmp_path), check=True, capture_output=True)
+    target_sha = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=str(tmp_path), check=True, capture_output=True, text=True).stdout.strip()
     ledger_1 = GittufRSLLedger(repo_path=tmp_path)
-    e1 = ledger_1.append_reference_entry(ref_name='refs/heads/main', target_commit_sha='commit_111', ussa_merkle_root='root_1', dsse_envelope=env)
-    e2 = ledger_1.append_reference_entry(ref_name='refs/heads/main', target_commit_sha='commit_222', ussa_merkle_root='root_2', dsse_envelope=env)
+    e1 = ledger_1.append_reference_entry(ref_name='refs/heads/main', target_commit_sha=target_sha, ussa_merkle_root='root_1', dsse_envelope=env)
+    e2 = ledger_1.append_reference_entry(ref_name='refs/heads/main', target_commit_sha=target_sha, ussa_merkle_root='root_2', dsse_envelope=env)
     assert e2.parent_entry_id == e1.entry_id
     ledger_2 = GittufRSLLedger(repo_path=tmp_path)
     assert len(ledger_2._rsl_chain) == 2
-    assert ledger_2.verify_rsl_lineage(expected_head_commit='commit_222') is True
+    assert ledger_2.verify_rsl_lineage(expected_head_commit=target_sha) is True
     with pytest.raises(RSLTamperDetectedError):
-        ledger_2.verify_rsl_lineage(expected_head_commit='commit_111')
+        ledger_2.verify_rsl_lineage(expected_head_commit='0' * len(target_sha))
 
 def test_p1_retrieval_reports_scan_mode_and_memory_bytes() -> None:
     index = RaBitQHybridIndex(retain_exact_vectors=True)

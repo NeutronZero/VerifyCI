@@ -4,6 +4,8 @@ import msgspec
 import heapq
 import math
 import re
+import math
+import struct
 from typing import Any, Sequence
 
 from verifyci_v2.store.model2vec_embed import StaticModel2VecEmbedder
@@ -48,6 +50,22 @@ class RaBitQQueryStats(msgspec.Struct, frozen=True, kw_only=True):
     exact_float_bytes: int = 0
 
 
+def pack_rabitq_sign_bits(vec: Sequence[float]) -> tuple[bytes, int]:
+    """Canonical little-endian 64-bit RaBitQ sign-bit packing shared by all stores."""
+    dim = len(vec)
+    if dim <= 0:
+        raise ValueError("RaBitQ vector dimension must be >= 1")
+    if any(not math.isfinite(float(value)) for value in vec):
+        raise ValueError("RaBitQ vector values must be finite")
+    num_words = (dim + 63) // 64
+    words = [0] * num_words
+    for idx, value in enumerate(vec):
+        if value >= 0.0:
+            words[idx // 64] |= 1 << (idx % 64)
+    packed_bytes = struct.pack(f"<{num_words}Q", *words)
+    return packed_bytes, int.from_bytes(packed_bytes, "little")
+
+
 def quantize_unit_vector_rabitq(
     node_uid: str,
     qualified_name: str,
@@ -61,13 +79,14 @@ def quantize_unit_vector_rabitq(
     and precomputes its projection alignment factor and theoretical error bound parameters.
     """
     dim = len(unit_vec)
+    if dim <= 0:
+        raise ValueError("RaBitQ vector dimension must be >= 1")
+    _packed_bytes, packed = pack_rabitq_sign_bits(unit_vec)
     inv_sqrt_d = 1.0 / math.sqrt(dim)
-    packed = 0
     dot_v_vbar = 0.0
 
     for idx, val in enumerate(unit_vec):
         if val >= 0.0:
-            packed |= 1 << idx
             dot_v_vbar += val * inv_sqrt_d
         else:
             dot_v_vbar -= val * inv_sqrt_d
@@ -137,11 +156,11 @@ class RaBitQHybridIndex:
         )
         old_entry = self._entries.get(node_uid)
         if old_entry is not None:
-            self._quantized_bytes -= (old_entry.dimension // 8) + 16
+            self._quantized_bytes -= (((old_entry.dimension + 63) // 64) * 8) + 16
             self._exact_float_bytes -= len(old_entry.exact_vector) * 8
 
         self._entries[node_uid] = entry
-        self._quantized_bytes += (entry.dimension // 8) + 16
+        self._quantized_bytes += (((entry.dimension + 63) // 64) * 8) + 16
         self._exact_float_bytes += len(entry.exact_vector) * 8
 
         # Update BM25 token statistics

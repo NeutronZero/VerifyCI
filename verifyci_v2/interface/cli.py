@@ -35,6 +35,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_prove.add_argument("--file", required=True, help="Target file path")
     p_prove.add_argument("--base-source", required=True, help="Pre-patch source code")
     p_prove.add_argument("--head-source", required=True, help="Post-patch source code")
+    p_prove.add_argument("--base-sha", default="", help="Optional immutable Git base commit SHA")
     p_prove.add_argument(
         "--fix", action="store_true", help="Synthesize Z3-verified CEGIS repair"
     )
@@ -45,6 +46,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_fix.add_argument("--file", required=True, help="Target file path")
     p_fix.add_argument("--base-source", required=True, help="Pre-patch source code")
     p_fix.add_argument("--head-source", required=True, help="Post-patch source code")
+    p_fix.add_argument("--base-sha", default="", help="Optional immutable Git base commit SHA")
 
     p_cal = sub.add_parser(
         "calibrate", help="Calibrate BYO-AI Split Conformal quantile q_hat"
@@ -56,7 +58,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_anchor = sub.add_parser(
         "anchor", help="Emit in-toto DSSE receipt and anchor in gittuf RSL"
     )
-    p_anchor.add_argument("--head-sha", default="abc1234", help="Target commit SHA")
+    p_anchor.add_argument("--head-sha", default="HEAD", help="Target commit SHA or Git revision")
 
     p_mcp = sub.add_parser("mcp", help="Inspect or invoke the unified FastMCP daemon")
     p_mcp.add_argument(
@@ -76,6 +78,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     )
     p_vdiff.add_argument("--diff-file", default="", help="Path to diff file")
     p_vdiff.add_argument("--base-dir", default="", help="Path to base source directory")
+    p_vdiff.add_argument("--base-sha", default="HEAD", help="Immutable Git commit whose source snapshot grounds the diff")
     p_vdiff.add_argument("--db", default="", help="Path to database")
     p_vdiff.add_argument(
         "--format",
@@ -117,33 +120,24 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
     daemon = VerifyCIFastMCPDaemon(repo_id="cli-repo")
 
     if ns.command == "check":
-        egg = EgglogEquivalenceEngine()
-        spec_compiler = IntentToSMTCompiler()
-        sec_resp = daemon.invoke_tool(
-            "vc_triage_secrets",
-            {"file_path": ns.file, "source": ns.source},
+        # `check` is a full-pipeline verification request, not a separate collection
+        # of secret/concurrency/intent calls with weaker verdict semantics.
+        from verifyci_v2.pipeline import DiffFileEntry
+        check_file_path = daemon._normalize_repo_path(str(ns.file))
+        check_sources = daemon._base_sources("HEAD")
+        check_sources.pop(check_file_path, None)
+        pipeline = daemon._pipeline(
+            base_commit_sha="standalone-check", intent_text=ns.intent,
+            base_sources_override=check_sources,
         )
-        conc_findings = [
-            msgspec.to_builtins(f) for f in egg.datalog_concurrency_invariants(ns.file, ns.source)
-        ]
-        intent_findings = (
-            [
-                msgspec.to_builtins(f)
-                for f in spec_compiler.verify_function_against_intent(
-                    file_path=ns.file,
-                    source=ns.source,
-                    intent_text=ns.intent,
-                )
-            ]
-            if ns.intent
-            else []
-        )
-        all_findings = sec_resp["data"]["findings"] + conc_findings + intent_findings
+        result = pipeline.verify_files([DiffFileEntry.from_sources(check_file_path, ns.source, ns.source)])
         return {
-            "status": "ok",
+            "status": result.status,
+            "verdict": {"status": result.status, "rationale": result.rationale},
             "command": "check",
-            "finding_count": len(all_findings),
-            "findings": all_findings,
+            "finding_count": len(result.findings),
+            "findings": [msgspec.to_builtins(f) for f in result.findings],
+            "gate_receipts": [msgspec.to_builtins(r) for r in result.gate_receipts],
         }
 
     if ns.command in ("prove", "fix"):
@@ -155,6 +149,7 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
                 "base_source": ns.base_source,
                 "head_source": ns.head_source,
                 "auto_fix": auto_fix,
+                "base_commit_sha": ns.base_sha or None,
             },
         )
 
@@ -278,12 +273,26 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
             try:
                 from verifyci_v2.store.duckdb_cpg import DuckDBCPGStore
 
-                with DuckDBCPGStore(ns.db) as base_store:
-                    base_sources = base_store.load_source_snapshot("HEAD")
-            except Exception:
+                db_repo = daemon.repo_path if daemon.repo_path and Path(ns.db).resolve().is_relative_to(daemon.repo_path) else None
+                with DuckDBCPGStore(
+                    ns.db,
+                    repo_path=db_repo,
+                    allow_unverified_snapshots=True,
+                ) as base_store:
+                    base_sources = base_store.load_source_snapshot(ns.base_sha)
+            except Exception as exc:
+                # Do not silently replace a tampered snapshot with an empty
+                # baseline. The outer CLI reports the integrity error as INFRA_ERROR.
+                if type(exc).__name__ == "LineageIntegrityError":
+                    raise
                 base_sources = {}
+        else:
+            base_sources = daemon._base_sources(ns.base_sha)
 
-        pipeline = VerificationPipeline(base_sources=base_sources)
+        # Use the same pipeline factory and policy wiring as the daemon. An
+        # explicit --base-dir/--db snapshot overrides the daemon's default base,
+        # but does not introduce an alternate verification implementation.
+        pipeline = daemon._pipeline(base_commit_sha=ns.base_sha, base_sources_override=base_sources)
         result = pipeline.verify_files(entries)
 
         res = {
@@ -341,8 +350,15 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
 
         repo_dir = Path(ns.repo_path)
         db_path = ns.db or str(repo_dir / ".verifyci" / "store.vc2")
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        with DuckDBCPGStore(db_path, backend=getattr(ns, "backend", "auto")) as store:
+        has_git = (repo_dir / ".git").exists()
+        repo_path_for_store = repo_dir if has_git else None
+        allow_unverified = not has_git
+        with DuckDBCPGStore(
+            db_path,
+            backend=getattr(ns, "backend", "auto"),
+            repo_path=repo_path_for_store,
+            allow_unverified_snapshots=allow_unverified,
+        ) as store:
             ingested_count = 0
             failed_files: list[dict[str, str]] = []
             all_funcs = []
@@ -350,15 +366,12 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
                 if any(p.startswith(".") for p in py_file.parts):
                     continue
                 try:
-                    src = py_file.read_text(encoding="utf-8")
+                    src = py_file.read_bytes().decode("utf-8")
                     funcs = lower_file_to_ussa(str(py_file), src)
                     all_funcs.extend(funcs)
                     ingested_count += len(funcs)
                 except Exception as exc:
                     failed_files.append({"file": str(py_file), "error": str(exc)})
-
-            if all_funcs:
-                store.record_commit_snapshot("HEAD", all_funcs)
 
             # Verbatim source per file: the only base record removal provenance
             # can use to contradict a diff that claims to delete code.
@@ -368,13 +381,23 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
                     continue
                 try:
                     rel = str(py_file.relative_to(repo_dir)).replace("\\", "/")
-                    source_snapshot[rel] = py_file.read_text(encoding="utf-8")
+                    source_snapshot[rel] = py_file.read_bytes().decode("utf-8")
                 except (OSError, ValueError):
                     continue
-            recorded_sources = store.record_source_snapshot("HEAD", source_snapshot)
+            snapshot_error = ""
+            try:
+                recorded_sources = store.record_source_snapshot("HEAD", source_snapshot)
+                immutable_sha = store._resolve_snapshot_commit("HEAD")
+                if all_funcs:
+                    store.record_commit_snapshot(immutable_sha, all_funcs)
+            except Exception as exc:
+                recorded_sources = 0
+                snapshot_error = f"Commit-bound snapshot not recorded: {type(exc).__name__}: {exc}"
+                if all_funcs:
+                    store.record_commit_snapshot("working-tree", all_funcs)
             active_backend = store.active_backend
 
-        status = "ok" if not failed_files else "partial_ingest"
+        status = "ok" if not failed_files and not snapshot_error else "partial_ingest"
         return {
             "status": status,
             # Disclose the active backend: DuckDBCPGStore silently falls back to
@@ -383,6 +406,7 @@ def run_cli(argv: Sequence[str]) -> dict[str, Any]:
             "ingested_functions": ingested_count,
             "recorded_source_files": recorded_sources,
             "failed_files": failed_files,
+            "snapshot_error": snapshot_error,
             "db": db_path,
         }
 

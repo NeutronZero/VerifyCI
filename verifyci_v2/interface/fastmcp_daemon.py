@@ -4,7 +4,8 @@ import asyncio
 import msgspec
 import os
 import time
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any, Callable, Mapping, Sequence
 
 from verifyci_v2.contracts.attestation import (
     InTotoVerificationPredicate,
@@ -42,6 +43,7 @@ class VerifyCIFastMCPDaemon:
         repo_id: str = "default-repo",
         budget: IngressBudgetConfig | None = None,
         config: VerifyCIConfig | None = None,
+        repo_path: str | Path | None = None,
     ) -> None:
         # The attested `ai_provider` is read from configuration rather than
         # hardcoded, so the signed predicate describes the provider this daemon
@@ -52,9 +54,22 @@ class VerifyCIFastMCPDaemon:
         self.repo_id = repo_id
         self._judge = None
         self._pipeline_obj: VerificationPipeline | None = None
+        self._pipeline_key: tuple[Any, ...] | None = None
         self.budget = budget or IngressBudgetConfig()
-        self.engine = SalsaIncrementalEngine(repo_id=repo_id)
-        self.cpg_store = DuckDBCPGStore()
+        if repo_path is not None:
+            candidate_repo = Path(repo_path).resolve()
+            has_git = (candidate_repo / ".git").exists()
+            self.repo_path = candidate_repo if has_git else None
+        else:
+            self.repo_path = None
+            has_git = False
+        if self.repo_path is not None:
+            db_path = self.repo_path / ".verifyci" / "store.vc2"
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            self.cpg_store = DuckDBCPGStore(str(db_path), repo_path=self.repo_path)
+        else:
+            self.cpg_store = DuckDBCPGStore()
+        self.engine = SalsaIncrementalEngine(repo_id=repo_id, store=self.cpg_store)
         # Warm up DuckDB cold-start (extensions) so the first ingest tool call
         # stays within the per-query wall-clock budget (spec sec. 3.4).
         try:
@@ -79,7 +94,13 @@ class VerifyCIFastMCPDaemon:
             self.signer_pubkey = loaded_signer.public_key
         else:
             self.signer, self.signer_pubkey = InTotoDSSESigner.generate_ephemeral()
-        self.rsl = GittufRSLLedger()
+        if self.repo_path is not None and has_git:
+            self.rsl = GittufRSLLedger(repo_path=self.repo_path)
+        else:
+            # No Git repository is available: opt into the in-memory adapter
+            # explicitly, keeping production Git-backed ledgers strict.
+            from verifyci_v2.provenance.gittuf_rsl import InMemoryGitPlumbingAdapter
+            self.rsl = GittufRSLLedger(git_adapter=InMemoryGitPlumbingAdapter())
         self._session_findings: list[VerificationFinding] = []
         self._session_findings_by_id: dict[str, list[VerificationFinding]] = {}
         self.rate_limiter = TokenBucketRateLimiter(
@@ -207,21 +228,57 @@ class VerifyCIFastMCPDaemon:
             "data": result,
         }
 
+    def _normalize_repo_path(self, file_path: str) -> str:
+        """Return a stable repo-relative identity for paths inside the repository."""
+        raw = Path(file_path)
+        if raw.is_absolute() and self.repo_path is not None:
+            try:
+                return raw.resolve().relative_to(Path(self.repo_path).resolve()).as_posix()
+            except ValueError:
+                # External paths retain their absolute identity and cannot be
+                # misrepresented as Git-tree source evidence by the store.
+                return raw.as_posix()
+        return Path(file_path).as_posix()
+
     def _tool_ingest_files(self, args: dict[str, Any]) -> dict[str, Any]:
-        files: list[dict[str, str]] = args.get("files", [])
-        commit_sha: str = args.get("commit_sha", "working-tree")
+        raw_files = args.get("files", [])
+        if not isinstance(raw_files, list) or not all(
+            isinstance(item, dict) and "file_path" in item and "source" in item
+            for item in raw_files
+        ):
+            raise ValueError("files must be a list of objects containing file_path and source")
+        files: list[dict[str, Any]] = [
+            dict(item, file_path=self._normalize_repo_path(str(item["file_path"])))
+            for item in raw_files
+        ]
+        commit_sha: str = str(args.get("commit_sha", "working-tree"))
+        snapshot_recorded = False
+        graph_snapshot_key = "working-tree"
+
+        # Validate claimed immutable source identity *before* mutating the graph.
+        # A forged or stale snapshot must not contaminate live symbols or bridges.
+        if commit_sha != "working-tree":
+            source_map = {str(item["file_path"]): str(item["source"]) for item in files}
+            self.cpg_store.record_source_snapshot(commit_sha, source_map)
+            graph_snapshot_key = self.cpg_store._resolve_snapshot_commit(commit_sha)
+            snapshot_recorded = True
+
         plans = []
+        # Ingestion is not a verification request; compute a neutral engine/policy
+        # fingerprint without loading an unrelated HEAD snapshot or cached pipeline.
+        policy_digest = VerificationPipeline(repo_id=self.repo_id, salsa_engine=self.engine, cpg_store=self.cpg_store)._active_policy_digest()
         for item in files:
             plan = self.engine.ingest_file(
-                file_path=item["file_path"],
-                source=item["source"],
-                language=item.get("language", "python"),
+                file_path=str(item["file_path"]),
+                source=str(item["source"]),
+                language=str(item.get("language", "python")),
+                policy_digest=policy_digest,
             )
             plans.append(msgspec.to_builtins(plan))
 
         all_fns = self.engine.all_functions()
         bridges = self.engine.bridge_resolver.resolve_bridges(self.engine.stitcher)
-        self.cpg_store.record_commit_snapshot(commit_sha, all_fns, bridges)
+        self.cpg_store.record_commit_snapshot(graph_snapshot_key, all_fns, bridges)
         for fn in all_fns:
             hdr = build_neighborhood_header(
                 fn,
@@ -230,7 +287,14 @@ class VerifyCIFastMCPDaemon:
             )
             self.rabitq_index.upsert_document(fn.node_uid, fn.qualified_name, hdr)
 
-        return {"ingested_count": len(plans), "plans": plans}
+        self._pipeline_obj = None
+        self._pipeline_key = None
+        return {
+            "ingested_count": len(plans),
+            "plans": plans,
+            "source_snapshot_recorded": snapshot_recorded,
+            "snapshot_commit_sha": graph_snapshot_key if snapshot_recorded else None,
+        }
 
     def _tool_verify_contract(self, args: dict[str, Any]) -> dict[str, Any]:
         """Verifies a call site against a declared contract (`cap004`).
@@ -293,7 +357,7 @@ class VerifyCIFastMCPDaemon:
         }
 
     def _tool_prove_diff(self, args: dict[str, Any]) -> dict[str, Any]:
-        file_path: str = args["file_path"]
+        file_path: str = self._normalize_repo_path(str(args["file_path"]))
         base_source: str = args["base_source"]
         head_source: str = args["head_source"]
         auto_fix: bool = bool(args.get("auto_fix", False))
@@ -302,15 +366,40 @@ class VerifyCIFastMCPDaemon:
         # Same pipeline the CLI gate runs, so an agent driving the daemon gets
         # the same checks, the same rule ids, and the same severities. This
         # method used to reimplement a subset of them.
-        result = self._pipeline().verify_files(
+        requested_base_sha = args.get("base_commit_sha")
+        if requested_base_sha:
+            active_pipeline = self._pipeline(
+                base_commit_sha=str(requested_base_sha),
+                intent_text=str(args.get("intent_text", "")),
+                contracts=tuple(args.get("contracts", ())),
+            )
+        else:
+            # The request carries complete base/head buffers. If the persistent
+            # HEAD snapshot is for a different file revision, do not incorrectly
+            # reinterpret it as the patch base; retain other file records but let
+            # the explicit source pair ground this file. Callers needing immutable
+            # Git provenance should supply base_commit_sha.
+            sources = self._base_sources("HEAD")
+            if file_path in sources and sources[file_path] != base_source:
+                sources.pop(file_path)
+            active_pipeline = self._pipeline(
+                base_commit_sha="explicit-source-pair",
+                intent_text=str(args.get("intent_text", "")),
+                contracts=tuple(args.get("contracts", ())),
+                base_sources_override=sources,
+            )
+        result = active_pipeline.verify_files(
             [DiffFileEntry.from_sources(file_path, base_source, head_source)]
         )
 
         findings = []
+        synthesized_fixes_count = 0
+        fix_verification_flags: list[bool] = []
         for finding in result.findings:
             if auto_fix and finding.verdict == "FAIL":
                 target = self._enclosing_qualified_name(
-                    file_path, head_source, finding.start_line, finding.end_line
+                    file_path, head_source, finding.start_line, finding.end_line,
+                    compiled=active_pipeline._last_compiled_by_path.get(file_path),
                 )
                 if target is not None:
                     finding = self.cegis.repair_finding(
@@ -319,6 +408,13 @@ class VerifyCIFastMCPDaemon:
                         head_source=head_source,
                         finding=finding,
                         target_qualified_name=target,
+                        pipeline=active_pipeline,
+                        compiled_file=active_pipeline._last_compiled_by_path.get(file_path),
+                    )
+                    verified_fixes = [fix for fix in finding.fixes if getattr(fix, "z3_verified_unsat", False)]
+                    synthesized_fixes_count += len(verified_fixes)
+                    fix_verification_flags.extend(
+                        bool(getattr(fix, "z3_verified_unsat", False)) for fix in finding.fixes
                     )
             self._session_findings.append(finding)
             if session_id:
@@ -330,37 +426,63 @@ class VerifyCIFastMCPDaemon:
             "rationale": result.rationale,
             "finding_count": len(findings),
             "findings": findings,
+            "synthesized_fixes_count": synthesized_fixes_count,
+            "all_fixes_z3_verified": (bool(fix_verification_flags) and all(fix_verification_flags)) if auto_fix else None,
         }
 
-    def _base_sources(self) -> dict[str, str]:
-        """Stored base revision, when the daemon has a file-backed store."""
+    def _base_sources(self, commit_sha: str = "HEAD") -> dict[str, str]:
+        """Load only a verified snapshot for the exact requested commit identity."""
         if self.cpg_store.db_path == ":memory:":
             return {}
+        from verifyci_v2.store.duckdb_cpg import LineageIntegrityError
         try:
-            return self.cpg_store.load_source_snapshot("HEAD")
-        except Exception:
+            return self.cpg_store.load_source_snapshot(commit_sha)
+        except LineageIntegrityError:
+            # Integrity errors must propagate; treating a tampered snapshot as an
+            # absent baseline would obscure a provenance violation.
+            raise
+        except ValueError:
+            # Unknown/unresolvable revisions have no usable baseline and therefore
+            # cause deletion checks to abstain.
             return {}
 
-    def _pipeline(self) -> VerificationPipeline:
-        """Long-lived pipeline, so the prover and taint engine are built once."""
-        if self._pipeline_obj is None:
+    def _pipeline(
+        self,
+        *,
+        base_commit_sha: str = "HEAD",
+        intent_text: str = "",
+        contracts: Sequence[Mapping[str, Any]] = (),
+        base_sources_override: Mapping[str, str] | None = None,
+    ) -> VerificationPipeline:
+        """Return a pipeline keyed by immutable base identity and all gate policy inputs."""
+        contract_tuple = tuple(dict(c) for c in contracts)
+        effective_sources = dict(base_sources_override) if base_sources_override is not None else self._base_sources(base_commit_sha)
+        base_digest = canonical_jcs_str({k: effective_sources[k] for k in sorted(effective_sources)})
+        key = (base_commit_sha, intent_text, canonical_jcs_str(list(contract_tuple)), self.repo_id, base_digest)
+        if self._pipeline_obj is None or self._pipeline_key != key:
             self._pipeline_obj = VerificationPipeline(
                 repo_id=self.repo_id,
-                base_sources=self._base_sources(),
+                base_sources=effective_sources,
+                salsa_engine=self.engine,
+                cpg_store=self.cpg_store,
+                intent_text=intent_text,
+                contracts=contract_tuple,
             )
+            self._pipeline_key = key
         return self._pipeline_obj
 
     @staticmethod
     def _enclosing_qualified_name(
-        file_path: str, source: str, start_line: int, end_line: int
+        file_path: str, source: str, start_line: int, end_line: int,
+        *, compiled: Any | None = None,
     ) -> str | None:
-        """Qualified name of the function whose line span contains a finding.
+        """Resolve a finding's function from the retained artifact when available.
 
-        Auto-repair is scoped to one function. A finding that cannot be placed
-        inside one is left unrepaired rather than repaired against a guess.
+        Auto-repair is scoped to one function. The compatibility fallback is only
+        used by older direct callers that do not hold the request compilation.
         """
         try:
-            funcs = lower_file_to_ussa(file_path, source)
+            funcs = tuple(compiled.head_ussa.values()) if compiled is not None and compiled.head_ussa else lower_file_to_ussa(file_path, source)
         except Exception:
             return None
         enclosing = [
@@ -394,9 +516,24 @@ class VerifyCIFastMCPDaemon:
     def _tool_anchor_attestation(self, args: dict[str, Any]) -> dict[str, Any]:
         session_id: str | None = args.get("session_id")
         auto_clear: bool = bool(args.get("auto_clear", True))
-        base_sha: str = args.get("base_commit_sha", "0" * 40)
-        head_sha: str = args.get("head_commit_sha", "1" * 40)
         ref_name: str = args.get("ref_name", "refs/heads/main")
+        head_input = str(args.get("head_commit_sha", "HEAD" if self.repo_path is not None else "1" * 40))
+        try:
+            head_sha = self.rsl.git_adapter.resolve_commit(head_input)
+        except Exception as exc:
+            return {"verdict": "INCONCLUSIVE", "reason": f"Head commit could not be resolved for attestation: {exc}"}
+        if args.get("base_commit_sha"):
+            try:
+                base_sha = self.rsl.git_adapter.resolve_commit(str(args["base_commit_sha"]))
+            except Exception as exc:
+                return {"verdict": "INCONCLUSIVE", "reason": f"Base commit could not be resolved for attestation: {exc}"}
+        elif self.repo_path is not None:
+            try:
+                base_sha = self.rsl.git_adapter.resolve_commit("HEAD^")
+            except Exception:
+                base_sha = head_sha
+        else:
+            base_sha = "0" * 40
         merkle = self.engine.stitcher.graph_merkle_root()
 
         if session_id and session_id in self._session_findings_by_id:
@@ -465,13 +602,15 @@ class VerifyCIFastMCPDaemon:
                 continue
             for fname in sorted(filenames):
                 _, ext = os.path.splitext(fname)
+                ext = ext.lower()
                 if ext in ext_map:
                     full_path = os.path.join(dirpath, fname)
-                    rel_path = os.path.relpath(full_path, root_dir).replace("\\", "/")
-                    with open(full_path, "r", encoding="utf-8") as fh:
-                        content = fh.read()
+                    file_id = self._normalize_repo_path(full_path)
+                    # Decode raw bytes rather than text-mode universal-newline
+                    # conversion so the compiler sees the actual file contents.
+                    content = Path(full_path).read_bytes().decode("utf-8")
                     plan = self.engine.ingest_file(
-                        rel_path, content, language=ext_map[ext]
+                        file_id, content, language=ext_map[ext]
                     )
                     if any(
                         ev.status != "CACHE_HIT_BODY_IDENTICAL"

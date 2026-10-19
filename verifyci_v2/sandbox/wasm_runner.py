@@ -48,6 +48,11 @@ class WasmCheckerSandbox:
         self.config = config or WasmSandboxConfig()
         self._plugins: dict[str, tuple[str, Any]] = {}
 
+    @property
+    def registered_plugin_ids(self) -> tuple[str, ...]:
+        """Stable identifiers for registered plugins, suitable for policy hashing."""
+        return tuple(sorted(self._plugins))
+
     def register_plugin(
         self,
         plugin_id: str,
@@ -211,6 +216,11 @@ class UnconfinedPythonCheckerRunner:
             str,
             tuple[str, Callable[[tuple[FunctionUSSA, ...]], list[VerificationFinding]]],
         ] = {}
+
+    @property
+    def registered_plugin_ids(self) -> tuple[str, ...]:
+        """Stable identifiers for registered plugins, suitable for policy hashing."""
+        return tuple(sorted(self._plugins))
 
     def register_plugin(
         self,
