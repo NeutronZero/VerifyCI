@@ -1,6 +1,6 @@
 # VerifyCI v3 — Demand-Driven Pre-Merge Verification Gate
 
-**Status:** Proposed design for review; implementation not started.
+**Status:** Frozen design (2026-10-20); implementation not started.
 **Date:** 2026-10-20
 **Supersedes:** `docs/architecture_v2.md`, all v1 and v2 architectural claims.
 **Audience:** implementers, reviewers, release engineers.
@@ -13,7 +13,7 @@
 This document is a design specification. It defines the product contract, boundaries,
 failure semantics, and release gates for VerifyCI v3. It is not implementation evidence.
 
-Passing design review does **not** establish that latency, precision, recall, frontend
+Freezing this design does **not** establish that latency, precision, recall, frontend
 fidelity, cache parity, or performance targets have been met. Those claims are established
 only by release-validation artifacts:
 
@@ -49,7 +49,7 @@ The blocking core covers five declared defect families:
    inverted guards, swapped argument/return bindings, and removed protected error paths.
 2. **Provenance and grounding failures**: integrity failures such as inconsistent Git
    identity (`ERROR`), unmapped changes (`INCONCLUSIVE`), and changes prohibited by an
-   explicit policy rule (`FAIL`).
+   explicit `deny_changes` rule (`FAIL`).
 3. **Security regressions**: validated secrets, taint flows to dangerous sinks, and exact
    policy-forbidden calls.
 4. **Caller and contract breakage**: incompatible signatures, exports, visibility, async
@@ -107,7 +107,7 @@ SARIF `properties`:
 ## 3. Normative invariants
 
 1. No PASS with incomplete relevant coverage.
-2. No blocking FAIL without validated evidence of its declared kind.
+2. No blocking finding without validated evidence of its declared kind.
 3. Advisory findings never change the verdict or exit code.
 4. No persistent state is required for correctness.
 5. Completed executions with identical logical inputs, policy, toolchain, and deterministic
@@ -125,7 +125,9 @@ SARIF `properties`:
 12. Checks never call Git, read the working tree, access the network, or share mutable
     semantic state.
 13. The policy used for a run is loaded from the target-base commit, never from the head.
-14. A release manifest exists only after every blocking check has passed its frozen corpus
+14. A validated finding is preserved when its check also faults; the check outcome is `ERROR`
+    and the aggregate verdict is `ERROR`.
+15. A release manifest exists only after every blocking check has passed its frozen corpus
     and the full invariant, fidelity, and performance gates.
 
 ---
@@ -138,7 +140,7 @@ SARIF `properties`:
 | `merge_base_commit` | Verified common ancestor used to define the PR diff. |
 | `head_commit` | Exact PR revision being verified. |
 | Authoritative policy | Policy blob read from `target_base_commit`. |
-| Proposed policy | Policy blob at `head_commit`; validated but never authoritative for the same run. |
+| Proposed policy | Policy blob at `head_commit` when the PR changes the policy path; validated for review but never authoritative for the same run. |
 | Relevant scope | The entities, files, references, and taint paths a check is required to examine for its declared defect set. |
 | Capability | A frontend guarantee such as `signature`, `cfg`, `ssa`, `calls`, `exceptions`, `types`, or `taint`. |
 | Candidate | A potential defect instance produced by a check's declared discovery rules. |
@@ -157,33 +159,43 @@ SARIF `properties`:
 
 | Verdict | Exit | Condition |
 |---|---:|---|
-| `PASS` | 0 | Every registered blocking check has `COMPLETE` coverage and outcome `PASS`, `NOT_APPLICABLE`, or `FAIL` whose findings are all `WAIVED`; no unwaived blocking finding exists; no check is `INCONCLUSIVE` or `ERROR`. |
-| `FAIL` | 1 | At least one independently validated, unwaived blocking finding exists. Other checks may be incomplete. |
-| `INCONCLUSIVE` | 2 | No unwaived blocking finding, but at least one blocking check is `INCONCLUSIVE`, has `PARTIAL`/`UNKNOWN` coverage, or exhausted its deterministic budget/watchdog. |
+| `PASS` | 0 | Every registered blocking check has `COMPLETE` coverage and outcome `PASS`, `NOT_APPLICABLE`, or `FAIL` whose findings are all `WAIVED`; no unwaived blocking finding exists; no check is `INCONCLUSIVE` or `ERROR`; no policy/waiver review condition exists. |
+| `FAIL` | 1 | At least one independently validated, unwaived blocking finding exists, and no blocking check outcome is `ERROR`. Other checks may be incomplete. |
+| `INCONCLUSIVE` | 2 | No unwaived blocking finding and no blocking check outcome `ERROR`, but at least one blocking check is `INCONCLUSIVE`, has `PARTIAL`/`UNKNOWN` coverage, or exhausted its deterministic budget/watchdog. |
 | `REVIEW` | 2 | No higher-precedence condition, but a valid proposed policy/waiver change requires designated review, or a waiver fails authorization/scope/expiry requirements. |
-| `ERROR` | 3 | Invalid authoritative policy, invalid proposed policy, missing/corrupt required Git objects, manifest mismatch, invalid cache location, internal fault, or invalid check result. |
+| `ERROR` | 3 | Invalid authoritative policy, invalid proposed policy, missing/corrupt required Git objects, manifest mismatch, invalid cache location, any blocking check outcome `ERROR`, internal fault, or invalid check result. |
 
 Precedence: `ERROR > FAIL > INCONCLUSIVE > REVIEW > PASS`.
 
 ### 5.2 Verdict rules
 
-- A proven blocking defect establishes `FAIL` even when other relevant scope is unsupported
-  or later exhausts its budget. Incompleteness never erases a proven finding.
+- A proven blocking defect establishes a blocking finding. Absent a higher-precedence
+  `ERROR`, the aggregate verdict is `FAIL`, even when other relevant scope is unsupported or
+  later exhausts its budget. Incompleteness never erases the finding.
+- A check that establishes a finding and then faults records outcome `ERROR`, keeps the
+  finding and its evidence in `findings[]`, and records the fault in `diagnostics[]`. The
+  aggregate verdict is `ERROR`; the finding remains visible and blocking. Any check outcome
+  `ERROR` outranks a `FAIL` elsewhere and is never hidden by it.
 - A check that has `PASS` with `PARTIAL` or `UNKNOWN` coverage is an invalid result; the
-  orchestrator records `ERROR` with reason `invalid_check_result`.
+  orchestrator records `ERROR` with reason `invalid_check_result` and preserves any validated
+  findings.
 - `NOT_APPLICABLE` requires positive applicability evidence. It is never a substitute for
   unsupported analysis.
-- A timeout or watchdog interruption is `INCONCLUSIVE` (`budget_exhausted` or
-  `watchdog_interrupted`). It is never `PASS` and never by itself evidence of a defect.
+- Budget exhaustion, a timeout, or a watchdog interruption leaves coverage `PARTIAL` or
+  `UNKNOWN` and is `INCONCLUSIVE` (`budget_exhausted` or `watchdog_interrupted`) when no
+  finding is established. After a finding, the finding survives and the check outcome is
+  `FAIL`. It is never `PASS` and never by itself evidence of a defect.
 - Advisory findings are annotations. They do not affect verdict, exit code, or coverage.
 
 ### 5.3 Waivers
 
 A waiver changes a finding's `disposition` from `OPEN` to `WAIVED`. It does not remove the
-finding, the check result, or the witness. The check remains `FAIL` because it established
-the defect. Aggregation asks whether any **unwaived** blocking finding remains. Aggregate
-`PASS` is therefore possible with a `FAIL` check result only when every blocking check has
-`COMPLETE` coverage and every blocking finding is `WAIVED`.
+finding, the check result, or the witness. The check retains its highest-precedence outcome:
+`FAIL` when the finding is the highest result, or `ERROR` when the check also faulted.
+Aggregation asks whether any **unwaived** blocking finding remains, but an `ERROR` outcome
+still outranks `FAIL`. Aggregate `PASS` is therefore possible with a `FAIL` check result only
+when every blocking check has `COMPLETE` coverage and every blocking finding is `WAIVED`; a
+check with outcome `ERROR` never permits `PASS`.
 
 A waiver cannot override:
 
@@ -225,7 +237,7 @@ and the check cannot return `PASS`.
 
 ### 6.2 CheckResult
 
-Every registered blocking check receives exactly one record:
+Every registered blocking check receives exactly one top-level record:
 
 ```text
 CheckResult
@@ -241,17 +253,30 @@ CheckResult
   method
   method_version
   reason_codes[]
-  findings[]
-  diagnostics[]        # non-finding error detail, expected/actual object IDs
+  findings[]           # validated findings; allowed with FAIL or ERROR
+  diagnostics[]        # fault detail, expected/actual IDs; required for ERROR
   sub_results[]        # security sub-analyses and other composite checks
   toolchain_fingerprint
 ```
 
-`outcome` and `coverage` are independent. `FAIL` with `PARTIAL` coverage is valid and
-blocking. `PASS` with anything other than `COMPLETE` is invalid. `NOT_APPLICABLE` requires
-`COMPLETE` coverage of the applicability question. `FAIL` requires at least one finding;
-`PASS`, `NOT_APPLICABLE`, `INCONCLUSIVE`, and `ERROR` carry no findings. A proven finding
-always yields `FAIL`; it is never downgraded to `INCONCLUSIVE` or `ERROR`.
+`outcome` and `coverage` are independent. `FAIL` with `PARTIAL` or `UNKNOWN` coverage is valid
+and blocking. `PASS` with anything other than `COMPLETE` is invalid. `NOT_APPLICABLE` requires
+`COMPLETE` coverage of the applicability question.
+
+`FAIL` requires at least one finding. `PASS`, `NOT_APPLICABLE`, and `INCONCLUSIVE` carry no
+findings; a validated finding makes the outcome `FAIL` unless the check also faults, in which
+case it is `ERROR`. `ERROR` requires at least one diagnostic or reason-code entry identifying
+the fault, and may carry zero or more validated findings when findings and a fault coexist
+(for example, a fault after a defect is proven). `diagnostics[]` records the fault and its
+expected/actual evidence. A validated finding is never discarded. If the check that
+established it also faults, the outcome is `ERROR`, the finding remains in `findings[]` with
+its evidence, and the aggregate verdict is `ERROR`. If no higher-precedence error exists, the
+outcome is `FAIL`. A proven finding is never downgraded to `PASS` or `INCONCLUSIVE`.
+
+A fault that prevents analysis of relevant scope must reduce coverage to `PARTIAL` or
+`UNKNOWN`; `ERROR` does not by itself redefine coverage. A check may have `ERROR` with
+`COMPLETE` coverage only when the fault does not prevent the declared relevant scope from
+being analyzed, and it still never yields `PASS`.
 
 Every check record is emitted even when:
 
@@ -269,7 +294,7 @@ Finding
   defect_id
   subject { file, entity, base_span, head_span }
   premises { target_base_commit, merge_base_commit, head_commit,
-             base_blob, head_blob, policy_hash, check_version,
+             base_blob, head_blob, authoritative_policy_hash, check_version,
              toolchain_fingerprint }
   evidence:
     kind: solver | provenance | reference | call_site | taint_path | secret_validation
@@ -280,10 +305,11 @@ Finding
   disposition: OPEN | WAIVED
 ```
 
-A blocking `FAIL` requires validated evidence of its declared kind: a solver witness, exact
+A blocking finding requires validated evidence of its declared kind: a solver witness, exact
 provenance, an exact reference, a call-site mismatch, a taint path, or a validated secret.
 Heuristic suspicion cannot block. Secret evidence is redacted; it must be sufficient to
-reproduce the finding without exposing the credential.
+reproduce the finding without exposing the credential. A finding's canonical identity is the
+waiver fingerprint defined in §8.4; it is stable across rebases and excludes line numbers.
 
 ### 6.4 Evidence bundle
 
@@ -295,7 +321,8 @@ The bundle has two layers:
 schema
 tool { name, version, toolchain_fingerprint }
 inputs { target_base_commit, merge_base_commit, head_commit,
-         policy_blob_hash, files[] { path, base_blob, head_blob, mode } }
+         policy { authoritative_blob_hash, pr_changed, proposed_blob_hash },
+         files[] { path, base_blob, head_blob, mode } }
 manifest { check_specs[], manifest_hash }
 scope { per-check evaluated_scope }
 check_results[]
@@ -325,13 +352,19 @@ The bundle must contain a record for every blocking check, including `NOT_APPLIC
 decisions and the evidence supporting applicability. A bug in scope selection must not be
 able to turn skipped analysis into PASS.
 
-SARIF is a derived rendering of the same result: one result per `Finding`, waived findings
-marked suppressed, check failures as tool notifications, and the aggregate verdict in run
-properties. The canonical payload remains authoritative.
+Findings preserved under an `ERROR` check result remain in `check_results[].findings[]` and
+in the top-level `findings[]`; the fault appears in `diagnostics[]`, and the aggregate verdict
+remains `ERROR`. Composite sub-results may repeat findings for attribution; the top-level
+`findings[]` rollup is deduplicated by canonical finding identity.
+
+SARIF is a derived rendering of the same result: one result per `Finding`, including findings
+preserved under `ERROR`, waived findings marked suppressed, check failures as tool
+notifications, and the aggregate verdict in run properties. The canonical payload remains
+authoritative.
 
 ### 6.5 Witness trust boundary for semantic findings
 
-A semantic `FAIL` requires all three contracts:
+A semantic blocking finding requires all three contracts:
 
 1. **Solver witness** — an input/state assignment demonstrating divergence within the
    declared VFIR semantics.
@@ -356,11 +389,14 @@ semantic check from being released as blocking.
 1. Validate CLI arguments and resolve the requested commit identities.
 2. Verify required Git objects and determine the merge base.
 3. Load and validate the authoritative policy from `target_base_commit`.
-4. Build the authoritative `DiffModel` and resolve changed scope.
+4. Build the authoritative `DiffModel`, resolve changed scope, and detect PR-authored policy
+   changes from the merge-base..head path set. Validate the proposed head policy only when
+   that path set includes the policy file.
 5. Execute checks, aggregate results, and serialize evidence.
 
 Policy loading cannot precede commit/object validation because the policy blob must be read
-from an identified, verified commit.
+from an identified, verified commit. Target-base policy remains authoritative; the diff is
+used only to determine whether the PR itself changed the policy.
 
 ### 7.2 Stages
 
@@ -372,6 +408,7 @@ CLI
  ├─ [2] target-base policy load + validation
  ├─ [3] DiffModel construction (merge-base..head)
  ├─ [4] scope resolution (cheap entity spans, hunk mapping)
+ ├─ [4b] PR policy-change detection + proposed head policy validation
  ├─ [5] demand-driven facts (VFIR, symbols, callers, summaries)
  ├─ [6] checks: grounding, deletion, contract, semantic, security
  ├─ [7] aggregation + waivers
@@ -379,9 +416,9 @@ CLI
 ```
 
 After successful initialization, all five checks run. Grounding runs first and its result is
-retained, but it is not a short-circuit. A proven security or semantic defect still
-establishes aggregate `FAIL` when grounding elsewhere is inconclusive. `ERROR` retains
-highest precedence.
+retained, but it is not a short-circuit. Absent a higher-precedence `ERROR`, a proven security
+or semantic defect still establishes aggregate `FAIL` when grounding elsewhere is
+inconclusive. `ERROR` retains highest precedence.
 
 If an upstream failure prevents a check from executing, that check still receives a record:
 
@@ -441,18 +478,38 @@ fall back to the target tip or the working tree.
 | Condition | Result |
 |---|---|
 | Invalid authoritative policy at target base | `ERROR` |
-| Valid proposed policy change in the PR | `REVIEW`; proposed policy is not authoritative for this run |
-| Invalid proposed policy schema | `ERROR` |
+| PR-authored policy change: `.verifyci/policy.toml` appears in merge-base..head | `REVIEW`; head policy validated but not used |
+| Head policy differs from target base only because the target branch advanced | No policy-change `REVIEW`; target-base policy remains authoritative |
+| Invalid proposed policy schema when the PR changes it | `ERROR` |
+| Proposed deletion: PR removes the policy file | `REVIEW` when the authoritative policy is valid |
 | Structurally valid waiver with invalid authorization, scope, or expiry | `REVIEW` |
 | Valid active waiver from authoritative policy | Finding disposition `WAIVED`; all other gate requirements still apply |
-| New waiver added in the PR | Cannot neutralize a finding in that PR; policy change is `REVIEW` |
+| New waiver added in the PR | Cannot neutralize a finding in that PR; PR policy change is `REVIEW` |
 | Head policy used to govern the same PR | Forbidden |
 
-A PR must not be able to silence its own findings by modifying policy or waivers.
+Policy-change detection uses the merge-base..head change set, not a direct comparison between
+head and target base. The path set is unfiltered by policy path classes; a PR cannot hide a
+policy change by excluding its own path. Target-branch advancement can make the head policy
+older than the target policy without the PR changing it; that difference alone does not
+trigger `REVIEW`.
 
-A missing proposed policy is a proposed deletion: `REVIEW` when the authoritative policy is
-valid. The run still uses the authoritative policy. A missing authoritative policy is
-`ERROR`.
+The detection sequence is:
+
+1. Read and validate the authoritative policy from `target_base_commit`.
+2. From the `DiffModel`, check whether `.verifyci/policy.toml` is in merge-base..head.
+3. If it is not changed, do not validate the head policy for change detection and do not emit
+   a policy-change `REVIEW`. The run uses the authoritative policy.
+4. If it is changed, read the head blob:
+   - missing ⇒ proposed deletion ⇒ `REVIEW`;
+   - malformed ⇒ `ERROR`;
+   - valid ⇒ `REVIEW`, record the proposed policy hash, and never use it for this run.
+5. Waivers are part of the policy blob. A waiver added or changed in the PR is a PR-authored
+   policy change and cannot neutralize the PR's findings. A waiver in the authoritative
+   policy remains effective.
+
+The evidence records `policy.pr_changed` and the proposed hash when one exists. A PR must not
+be able to silence its own findings by modifying policy or waivers. A missing authoritative
+policy is `ERROR`.
 
 ### 8.4 Policy format and safety
 
@@ -461,18 +518,33 @@ Policy is TOML at `.verifyci/policy.toml`, schema-validated. It contains:
 - path classes: generated, vendored, tests, binary rules;
 - entrypoints and public API symbols;
 - protected guards, sources, sinks, forbidden calls;
+- `deny_changes` constraints over protected paths and exact symbols;
 - secret allowlists by path and placeholder form;
 - waivers with check ID, defect ID, finding fingerprint, reason, approver, expiry;
 - review requirements for policy changes.
 
-Policy uses globs and exact qualified names only. It does not support user-supplied regular
-expressions, code, templates, or includes. This avoids ReDoS and code-execution hazards.
-All paths are normalized and confined to the repository; path traversal is an `ERROR`.
+Policy uses globs and exact qualified names only. Symbol strings use dot-separated qualified
+names; `*` is permitted only in fields documented as accepting symbol globs, such as public
+API declarations and sink patterns. It does not support user-supplied regular expressions,
+code, templates, or includes. This avoids ReDoS and code-execution hazards. All paths are
+normalized and confined to the repository; path traversal is an `ERROR`.
+
+`deny_changes` is the only general change-prohibition mechanism. Each entry has a table key
+used as its `id`, optional `paths` globs, optional `symbols` exact qualified names, and a
+`reason`. At least one of `paths` or `symbols` is required. Path rules match any changed
+path whose base or head path matches; symbol rules match only an exactly mapped changed
+entity. There is no regex, code, or allow-override inside a rule. `deny_changes` rules apply
+regardless of path-class exclusions; a denied path or symbol cannot be excluded from
+grounding. Rules are evaluated in canonical table-key order. A change matching multiple rules
+yields one finding with the first matching rule ID as primary and all matched rule IDs recorded
+in evidence. Excluding a non-denied path requires a separate path-class change and the same
+review.
 
 The gate ships versioned built-in patterns for secrets, dangerous calls, taint sources, and
 sinks. Policy may extend these and add scoped allowlists; it cannot disable a blocking check
-or globally suppress a defect family. Path-class exclusions and waivers are the only scoped
-exclusion mechanisms, and changing them is a reviewable policy change.
+or globally suppress a defect family. Path-class exclusions and waivers are the only
+scoped suppression mechanisms; `deny_changes` adds prohibitions. Changing any of them is a
+reviewable policy change.
 
 A waiver is authorized for v3.0 when it is present in the authoritative target-base policy
 and carries a non-empty approver and reason. VerifyCI does not authenticate human identity;
@@ -527,26 +599,27 @@ another proven blocking defect establishes `FAIL`.
 
 | Field | Definition |
 |---|---|
-| Declared defect | `GRD-UNGROUNDED-EDIT`: a mapped change violates an explicit policy rule and the violation is established by exact evidence. A mapping failure alone is not this defect. |
-| Integrity errors | Deleted bytes disagree with the pinned base blob; commit/tree/blob/merge-base identity contradicts pinned inputs; internally generated diff is inconsistent. These are `ERROR`, not findings. |
-| Unmapped changes | A hunk with no supported mapping is unresolved scope (`mapping_unresolved`) and yields `INCONCLUSIVE`. |
-| Relevant scope | Every text hunk in merge-base..head. Binary changes are provenance-only. Policy-excluded files receive explicit not-applicable results with exclusion evidence. |
-| Applicability evidence | At least one changed file or hunk not excluded by authoritative policy. No changes, or all changes excluded, ⇒ `NOT_APPLICABLE` with exclusion evidence. |
-| Supported subset | Language-independent byte/line mapping. No semantic lowering. Binary: exact blob identity only. |
-| Required evidence | Exact policy rule ID, mapped span, base/head blob IDs, and the prohibition evidence. Integrity errors cite expected/actual object IDs in `diagnostics`. |
-| Coverage | `COMPLETE` when every hunk is classified as modified entity, added entity, removed entity, or supported module-level edit, and all provenance checks agree. `PARTIAL` when mapping is ambiguous. Missing objects are `ERROR`. |
-| Failure conditions | Policy-prohibited mapped change ⇒ `FAIL`. Integrity mismatch ⇒ `ERROR`. Ambiguous mapping alone ⇒ `INCONCLUSIVE`. |
-| Frozen corpus | Modified/added/removed entities, module-level edits, boundary hunks, duplicate lines, CRLF/LF, Unicode, renames, binary, generated/vendored paths, policy exclusions, tampered diff models, stale base, wrong merge-base, missing blobs. |
+| Declared defect | `GRD-UNGROUNDED-EDIT`: a changed path or exactly mapped entity matches an active `deny_changes` rule. Path matches are established from the base/head path and changed span or blob identity; symbol matches require exact entity mapping. A mapping failure alone is not this defect. |
+| Integrity errors | Deleted bytes disagree with the pinned base blob; commit/tree/blob/merge-base identity contradicts pinned inputs; internally generated diff is inconsistent. These are recorded as `ERROR` diagnostics, not findings. |
+| Unmapped changes | A hunk with no supported mapping is unresolved scope (`mapping_unresolved`) and yields `INCONCLUSIVE` unless a `deny_changes` path rule independently establishes a violation. |
+| Relevant scope | Every changed path in merge-base..head and every active `deny_changes` rule. Text hunks are mapped to entities; binary changes are path/provenance-only but are still evaluated by path rules. Policy-excluded files receive explicit not-applicable results with exclusion evidence unless a `deny_changes` path or symbol rule applies. |
+| Applicability evidence | At least one changed file or hunk not excluded by authoritative policy, or at least one `deny_changes` rule applicable to the change set. No changes, or all changes excluded with no applicable deny rule, ⇒ `NOT_APPLICABLE` with exclusion evidence. |
+| Supported subset | Language-independent byte/line/path mapping and exact symbol matching. Path rules apply to text and binary; symbol rules require exact entity spans and apply only to text. Symbol rules in unsupported languages are `UNKNOWN`, never `NOT_APPLICABLE`; path rules still apply. Binary changes use exact blob identity; path-only changes use exact path/mode identity. |
+| Required evidence | Exact `deny_changes` rule IDs (primary and all matches), matched path or exact symbol, changed span or path/blob/mode identity, base/head blob IDs, and authoritative policy hash. Integrity errors cite expected/actual object IDs in `diagnostics`. |
+| Coverage | `COMPLETE` when every in-scope changed path is classified as modified entity, added entity, removed entity, supported module-level edit, binary, or path-only; excluded paths have exclusion evidence; every active `deny_changes` rule is evaluated; and all provenance checks agree. `PARTIAL` when a symbol rule cannot be resolved because mapping is ambiguous. Path rules are always resolvable from paths. Missing policy or objects are `ERROR`. |
+| Failure conditions | Path or exact symbol match ⇒ `FAIL`. Integrity mismatch ⇒ `ERROR`. Ambiguous symbol rule alone ⇒ `INCONCLUSIVE`. |
+| Frozen corpus | Modified/added/removed entities, module-level edits, boundary hunks, duplicate lines, CRLF/LF, Unicode, renames, path-only/mode-only changes, generated/vendored paths, policy exclusions, protected-path modification/addition/deletion/rename, protected binary path, protected-symbol modification/deletion, ambiguous protected symbol, path-glob boundaries, no `deny_changes` rules, tampered diff models, stale base, wrong merge-base, missing blobs. |
 | Oracle bar | Precision 1.0, provenance outcomes 100%, coverage classification 100%, zero false `FAIL`. |
 
 Fabricated-removal detection is an integrity error in commit mode. If a future patch-input
 mode is added, the same evidence machinery may classify it as a blocking provenance defect
 under a new `CheckSpec`; v3.0 does not include that mode.
 
-Policy rules cannot convert an unmapped hunk into a proven violation. A rule that says all
-changes must be inside an entity does not make an unmapped hunk a proven defect; the hunk
-remains unresolved scope and yields `INCONCLUSIVE`. `GRD-UNGROUNDED-EDIT` applies only when a
-mapped change itself violates an explicit prohibition.
+A `deny_changes` path rule can establish a violation without entity mapping: the prohibition
+is on the path and the changed span is exact. A symbol rule cannot: a protected symbol that
+cannot be mapped is unresolved scope and yields `INCONCLUSIVE`. A general rule requiring all
+changes to map to an entity is not a `deny_changes` rule and cannot turn mapping failure into
+`FAIL`.
 
 ---
 
@@ -614,12 +687,17 @@ Known assumptions are explicit:
 ### 11.1 Common rules
 
 - `PASS` requires `COMPLETE` coverage.
-- `FAIL` may coexist with `PARTIAL` coverage.
+- `FAIL` may coexist with `PARTIAL` or `UNKNOWN` coverage.
 - `NOT_APPLICABLE` requires positive applicability evidence.
-- No `FAIL` without validated evidence of its declared kind.
-- Budget exhaustion without a witness ⇒ `INCONCLUSIVE`; after a witness, `FAIL` survives.
+- No blocking finding without validated evidence of its declared kind.
+- Budget exhaustion without a witness ⇒ `INCONCLUSIVE`; after a witness, the finding
+  survives.
 - Unsupported relevant language/capability ⇒ `UNKNOWN`, never `NOT_APPLICABLE`.
-- Internal inconsistency or inability to execute ⇒ `ERROR`.
+- Internal inconsistency or an execution fault, other than deterministic budget exhaustion
+  or a watchdog interruption, ⇒ `ERROR`. An `ERROR` may carry validated findings; preserve
+  them and apply aggregate precedence. The failure conditions below describe finding
+  establishment; if the same check also faults, `ERROR` takes precedence and the finding is
+  preserved per §6.2.
 - Each check has a frozen corpus, per-defect thresholds, and replayable witness tests.
 - A blocking check cannot enter the registry without a `CheckSpec` and passing corpus.
 
@@ -654,7 +732,7 @@ Defined in §9.2. It runs first, its result is retained, and it does not suppres
 | Coverage | `COMPLETE` when all relevant callers are resolved and type facts are sufficient. `PARTIAL` on dynamic calls, `*args`/`**kwargs`, unresolved imports, computed properties, or unknown types. `UNKNOWN` for unsupported language scope. |
 | Failure conditions | Proven incompatibility ⇒ `FAIL`. Unresolved relevant callers/types ⇒ `INCONCLUSIVE`. Internal inconsistency ⇒ `ERROR`. |
 | Frozen corpus | Optional parameter addition; removed used parameter; positional reorder; keyword rename; default changes; positional-only parameters; overloads; TS union/structural types; `**kwargs`; dynamic import; public API break; async-to-sync change; caller-only break; external-only consumer. |
-| Oracle bar | Precision 1.0, recall ≥0.95 overall with per-defect thresholds, coverage agreement 1.0. Every `FAIL` cites a concrete call site or public-API policy. |
+| Oracle bar | Precision 1.0, recall ≥0.95 overall with per-defect thresholds, coverage agreement 1.0. Every blocking finding cites a concrete call site or public-API policy. |
 
 ### 11.5 `semantic`
 
@@ -669,7 +747,7 @@ Defined in §9.2. It runs first, its result is retained, and it does not suppres
 | Coverage | `COMPLETE` when every modified entity has required capabilities, candidate discovery is complete for the declared patterns, and every candidate is proven or refuted. `PARTIAL` when any relevant entity is partial/opaque or any candidate is `UNKNOWN`. `UNKNOWN` for unsupported language scope. |
 | Failure conditions | SAT + successful replay + fidelity coverage ⇒ `FAIL`. UNSAT ⇒ no defect for that candidate. `UNKNOWN`, unsupported construct, or budget exhaustion without witness ⇒ `INCONCLUSIVE`. Replay mismatch or evaluator inconsistency ⇒ `ERROR`. |
 | Frozen corpus | Protected guard removed with sink reachable; guard and effect moved; guard strengthened; guard inverted; boundary weakened/strengthened; dead guard removal (UNSAT); argument swap with unchanged callee; swap with callee also swapped; return swap with caller adapted; return swap in public API; protected exception removed; equivalent refactor; decorator opacity; dynamic call; nested guards; short-circuit; try/except; async; solver `UNKNOWN`; budget exhaustion. |
-| Oracle bar | Precision 1.0 on `FAIL`, recall ≥0.95 overall with per-defect thresholds, witness replay 1.0, coverage agreement 1.0. |
+| Oracle bar | Precision 1.0 on blocking findings, recall ≥0.95 overall with per-defect thresholds, witness replay 1.0, coverage agreement 1.0. |
 
 The semantic check does not claim general equivalence. It claims a declared regression
 pattern was disproved, proven with a replayable IR-level witness, or left unresolved.
@@ -679,7 +757,7 @@ pattern was disproved, proven with a replayable IR-level witness, or left unreso
 | Field | Definition |
 |---|---|
 | Declared defects | `SEC-SECRET`: validated credential material introduced in changed text. `SEC-SECRET-TO-SINK`: validated secret flows to a log, network, serialization, or persistence sink. `SEC-TAINT-TO-SINK`: untrusted input reaches a policy-defined dangerous sink. `SEC-DANGEROUS-CALL`: exact policy-forbidden call introduced. |
-| Sub-analyses | Secrets, taint, dangerous calls. Each has its own result, coverage, and applicability. Secret scanning applies to every changed textual file. |
+| Sub-analyses | Secrets, taint, dangerous calls. Each has its own `CheckResult` record with independent outcome, coverage, findings, diagnostics, and applicability. Secret scanning applies to every changed textual file. |
 | Relevant scope | Changed lines, enclosing entities, forward taint closure to sinks, and direct caller/callee summaries needed to connect sources and sinks. |
 | Applicability evidence | Secret scan: every changed text file. If at least one changed text file exists, a clean complete scan is `PASS`; if no changed text exists, the secret sub-analysis is `NOT_APPLICABLE` with evidence. Taint: may be `NOT_APPLICABLE` only when no relevant constructs exist and this is positively established. Dangerous calls: candidates from changed lines. |
 | Supported subset | Python and TS/JS taint through assignments, arguments, returns, string/template construction, simple containers, and common stdlib sinks. Secret scanning is language-independent. Requires `taint`, `calls`, `types` for taint. Dynamic dispatch, reflection, `eval`, encoded blobs, or unknown calls on a relevant path ⇒ `PARTIAL`. Other languages ⇒ `UNKNOWN` for taint; text secrets still scan. |
@@ -688,16 +766,22 @@ pattern was disproved, proven with a replayable IR-level witness, or left unreso
 | Failure conditions | Validated secret, resolved taint path, or exact forbidden call ⇒ `FAIL`. Ambiguous encoded secret or unresolved relevant taint path ⇒ `INCONCLUSIVE`. Unknown call ⇒ `INCONCLUSIVE` only when it can affect a relevant source-to-sink path. Internal scanner fault ⇒ `ERROR`. |
 | Candidate dropping | An ambiguous candidate cannot be dropped merely because it is hard to classify. Dropping requires positive evidence that it is outside the declared defect set or a supported benign case. |
 | Frozen corpus | Provider keys, private keys, JWTs, generic high entropy, base64/hex, placeholders, environment references, test fixtures, allowlisted paths; request→SQL/log/subprocess/file; parameterized query (PASS); sanitizer (PASS); cross-file taint; TS `innerHTML`/`child_process`; dynamic alias; unknown call; budget exhaustion. |
-| Oracle bar | Precision 1.0 on `FAIL`, recall ≥0.95 overall with per-defect thresholds, coverage agreement 1.0, redaction 1.0. Allowlists are authoritative only from target-base policy. |
+| Oracle bar | Precision 1.0 on blocking findings, recall ≥0.95 overall with per-defect thresholds, coverage agreement 1.0, redaction 1.0. Allowlists are authoritative only from target-base policy. |
 
-Security sub-result aggregation: the top-level outcome is `FAIL` if any sub-analysis is
-`FAIL`; otherwise `ERROR` if any sub-analysis is `ERROR`; otherwise `INCONCLUSIVE` if any
-applicable sub-analysis is `INCONCLUSIVE` or incomplete; otherwise `PASS` if every applicable
-sub-analysis is `PASS` with `COMPLETE` coverage; otherwise `NOT_APPLICABLE` only when every
-sub-analysis is positively not applicable. A validated finding in one sub-analysis keeps the
-top level `FAIL` even if another sub-analysis errors. Top-level coverage is the weakest
-coverage among applicable sub-analyses (`UNKNOWN` weaker than `PARTIAL`, `PARTIAL` weaker than
-`COMPLETE`). Findings retain their sub-analysis evidence.
+Security sub-result aggregation: each sub-analysis has its own outcome, coverage, findings,
+and diagnostics. The top-level outcome is the highest-precedence sub-outcome using
+`ERROR > FAIL > INCONCLUSIVE > PASS > NOT_APPLICABLE`. The top-level `findings[]` contains
+every sub-analysis finding exactly once, keyed by the canonical finding identity used for
+waiver fingerprints; the sub-results retain the same findings for attribution, so no finding
+is discarded. The top-level `diagnostics[]`, `reason_codes[]`, and `evaluated_scope` include
+the sub-analysis values and any aggregation-added entries. If one sub-analysis establishes a
+defect and another encounters an internal error, the top-level outcome is `ERROR` and the
+validated finding remains present in both the sub-result and the top-level findings; the
+aggregate verdict is `ERROR`. An invalid sub-result (for example, `PASS` with `PARTIAL`
+coverage or `FAIL` without a finding) is treated as `ERROR` (`invalid_check_result`).
+Top-level coverage is the weakest coverage among applicable
+sub-analyses (`UNKNOWN` weaker than `PARTIAL`, `PARTIAL` weaker than `COMPLETE`); if no
+sub-analysis is applicable, coverage is `COMPLETE` for the not-applicable decision.
 
 ### 11.7 Advisory tier
 
@@ -734,7 +818,7 @@ verifyci/
     git.py                # sole Git authority; commit-pinned object API
   scope/
     classify.py           # path classes, language detection
-    entities.py           # hunk→entity mapping, grounding cases
+    entities.py           # hunk→entity mapping, deny_changes matching support
   frontend/
     protocol.py           # LanguageFrontend, EntitySpan, FileFacts, capabilities
     vfir.py               # normalized IR
@@ -754,7 +838,7 @@ verifyci/
   gate/
     orchestrator.py       # all checks run; no short-circuit
     verdict.py            # aggregation, waivers
-    policy.py             # TOML schema, base binding
+    policy.py             # TOML schema, base binding, PR policy-change detection
   evidence/
     canonical.py  sarif.py  writer.py
   runtime/
@@ -829,6 +913,7 @@ A wall-clock watchdog is an operational safeguard. If it fires:
 
 - an existing validated finding remains `FAIL`;
 - otherwise the affected check is `INCONCLUSIVE` (`watchdog_interrupted`);
+- the affected check's coverage is `PARTIAL` or `UNKNOWN`;
 - it never creates `PASS` and never creates a defect.
 
 Solver random seeds and configuration are pinned and included in the toolchain fingerprint.
@@ -905,7 +990,8 @@ is tested separately and is not part of the parity claim.
 ### 15.1 Contract tests
 
 Frozen models, reason codes, canonical serialization, verdict algebra, coverage invariants,
-waiver matching, policy validation, manifest verification, and cache-location rejection.
+finding preservation under `ERROR`, waiver matching, target-base policy binding, PR
+policy-change detection, `deny_changes`, manifest verification, and cache-location rejection.
 
 ### 15.2 Frontend conformance
 
@@ -928,17 +1014,19 @@ never generated by the engine.
 
 Release thresholds per check:
 
-- blocking precision **1.0** (zero false `FAIL`);
+- blocking precision **1.0** (zero false blocking findings);
 - recall **≥0.95 overall** and per-defect-ID floors;
 - coverage classification agreement **1.0**;
-- witness replay **1.0** for every `FAIL`;
+- witness replay **1.0** for every blocking finding, including one preserved under `ERROR`;
 - deterministic payload across repeated runs and worker counts;
 - secret redaction **1.0**.
 
 ### 15.5 Invariant suite
 
-No PASS with partial coverage; FAIL survives later exhaustion; ERROR precedence; waivers
-preserve findings; target-base policy authority; head policy cannot silence its PR; no
+No PASS with incomplete coverage; a finding survives later exhaustion; `ERROR` precedence; a
+finding survives a later check error and remains in the bundle; waivers preserve findings;
+target-base policy authority; target-branch advancement alone never triggers policy review;
+PR policy changes are detected from merge-base..head; head policy cannot silence its PR; no
 working-tree reads; no network; cache corruption falls back; manifest mismatch fails closed;
 every registered check has a result.
 
@@ -946,8 +1034,9 @@ every registered check has a result.
 
 Tampered Git objects, ambiguous merge bases, binary/Unicode/CRLF files, entity-boundary hunks,
 dynamic dispatch, decorators, async, closures, encoded secrets, solver `UNKNOWN`, watchdog
-firing, malformed policy, path traversal, giant functions, cache poisoning, and PR-controlled
-cache paths.
+firing, check fault after a witness, target-branch policy advancement, protected-path and
+protected-symbol `deny_changes`, malformed policy, path traversal, giant functions, cache
+poisoning, and PR-controlled cache paths.
 
 ### 15.7 Performance suite
 
@@ -958,7 +1047,7 @@ assumed; a design target in this document is not a measurement.
 ### 15.8 End-to-end
 
 GitHub Action on fixture PRs; exit codes; SARIF validation; evidence reproducibility;
-policy-change review; waiver expiry; cache parity.
+PR-authored policy-change review; target-advancement no-review; waiver expiry; cache parity.
 
 ### 15.9 Release validation versus runtime validation
 
@@ -974,12 +1063,12 @@ protects the warm-gate latency target.
 
 | Milestone | Scope | Exit criteria |
 |---|---|---|
-| **M0 Foundations** | Contracts, canonical evidence, policy schema and base binding, Git adapter, CLI skeleton, manifest, delete v1/v2 packages | Contract and invariant tests green; no legacy imports |
-| **M1 Grounding** | Python/TS entity spans, hunk mapping, provenance, policy-prohibited changes | Grounding corpus: precision 1.0, coverage 1.0, integrity cases `ERROR` |
+| **M0 Foundations** | Contracts, canonical evidence, policy schema, base binding, PR policy-change detection, Git adapter, CLI skeleton, manifest, delete v1/v2 packages | Contract and invariant tests green; no legacy imports |
+| **M1 Grounding** | Python/TS entity spans, hunk mapping, provenance, `deny_changes` path/symbol constraints | Grounding corpus: precision 1.0, coverage 1.0, integrity cases `ERROR` |
 | **M2 Deletion** | Symbol facts, reference index, entrypoints/exports, dynamic dispatch | Deletion corpus thresholds; unresolved dynamics `INCONCLUSIVE` |
 | **M3 Contract** | Signatures, exports, call-site compatibility, public API policy | Contract corpus thresholds; no unresolved caller silently passes |
 | **M4 Security** | Secret scanner, dangerous-call policy, taint summaries and paths | Security corpus thresholds; redaction 1.0; clean scans `PASS` |
-| **M5 Semantic** | VFIR, CFG/SSA/guards, candidate detection, Z3 witness, replay, frontend fidelity | Semantic corpus thresholds; fidelity matrix complete; every `FAIL` has three-part evidence |
+| **M5 Semantic** | VFIR, CFG/SSA/guards, candidate detection, Z3 witness, replay, frontend fidelity | Semantic corpus thresholds; fidelity matrix complete; every semantic blocking finding has three-part evidence |
 | **M6 Release** | CAS, 100k LOC benchmark, Action, SARIF, docs, manifest publication | All release gates; p95 ≤10s warm, ≤60s cold; full invariant suite |
 
 Development versus release:
@@ -1020,9 +1109,15 @@ VerifyCI v3.0 is not complete until all of the following are established by arti
       construct used by semantic evidence.
 - [ ] Invariant and adversarial suites pass, including fail-closed, cache, policy, and
       manifest cases.
+- [ ] A finding preserved under a later check error remains visible and aggregates `ERROR`.
+- [ ] Policy-change review triggers only for PR-authored changes; target-branch advancement
+      alone does not trigger review.
+- [ ] `deny_changes` path and symbol rules are defined, evaluated by grounding, and
+      corpus-validated.
 - [ ] Cached and uncached completed runs produce identical canonical payloads.
 - [ ] Cold and warm latency targets are measured on the reference workload, not assumed.
-- [ ] Every `FAIL` bundle contains validated evidence of its declared kind.
+- [ ] Every blocking finding, including one preserved under `ERROR`, contains validated
+      evidence of its declared kind.
 - [ ] Every bundle contains a record for every registered blocking check.
 - [ ] The GitHub Action produces correct exit codes and valid SARIF.
 - [ ] The gate performs no network access and executes no repository code.
@@ -1087,11 +1182,16 @@ vendored = ["vendor/**"]
 tests = ["tests/**"]
 
 [entrypoints]
-symbols = ["app.main:main"]
+symbols = ["app.main.main"]
 globs = ["src/api/**"]
 
 [public_api]
 symbols = ["mypkg.api.*"]
+
+[deny_changes.protected_core]
+paths = ["src/core/**"]
+symbols = ["app.auth.require_user"]
+reason = "Protected change surface; requires security review"
 
 [protected_guards]
 calls = ["auth.require_user", "auth.check_permission"]
@@ -1111,7 +1211,9 @@ expires = "2026-12-31"
 ```
 
 Waivers are valid only when loaded from the target-base policy. A waiver added in the PR is a
-policy change and cannot neutralize that PR's findings.
+policy change and cannot neutralize that PR's findings. `deny_changes` entries are evaluated
+by the grounding check; path rules do not depend on entity mapping, while symbol rules require
+an exact mapped entity.
 
 ---
 
@@ -1133,7 +1235,11 @@ registered check.
     "target_base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "merge_base_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "head_commit": "cccccccccccccccccccccccccccccccccccccccc",
-    "policy_blob_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    "policy": {
+      "authoritative_blob_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "pr_changed": false,
+      "proposed_blob_hash": null
+    }
   },
   "manifest": {
     "manifest_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
