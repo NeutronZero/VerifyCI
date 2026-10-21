@@ -734,7 +734,7 @@ def test_git_submodule_lifecycle(tmp_path: Path) -> None:
 
 
 def test_rename_limit_detection_logic() -> None:
-    """Rename limit threshold counts add/delete candidates, not modifications."""
+    """Rename limit threshold counts add/delete candidates only when candidates exist on both sides."""
     # Case 1: 2005 modifications (M) -> add_candidates=0, del_candidates=0 -> NOT exceeded
     mod_records = [
         ("file_%04d.py" % i, "file_%04d.py" % i, "100644", "100644", "a" * 40, "b" * 40, "M")
@@ -742,23 +742,152 @@ def test_rename_limit_detection_logic() -> None:
     ]
     add_c = sum(1 for r in mod_records if r[6].startswith("A") or not r[4])
     del_c = sum(1 for r in mod_records if r[6].startswith("D") or not r[5])
-    assert add_c + del_c == 0
-    rename_limit_exceeded = (add_c + del_c > 2000) or (add_c > 0 and del_c > 0 and (add_c * del_c > 2000))
+    both = add_c > 0 and del_c > 0
+    rename_limit_exceeded = (
+        (both and (add_c + del_c > 2000))
+        or (both and (add_c * del_c > 2000))
+    )
     assert rename_limit_exceeded is False
 
-    # Case 2: 1500 adds and 600 deletes -> add_candidates=1500, del_candidates=600 -> sum=2100 > 2000 -> EXCEEDED
-    add_records = [
+    # Case 2: 2500 pure additions (0 deletes) -> NOT exceeded (no pairing candidates exist)
+    pure_adds = [
         (None, "new_%04d.py" % i, None, "100644", None, "b" * 40, "A")
-        for i in range(1500)
+        for i in range(2500)
     ]
-    del_records = [
+    add_c = sum(1 for r in pure_adds if r[6].startswith("A") or not r[4])
+    del_c = sum(1 for r in pure_adds if r[6].startswith("D") or not r[5])
+    assert add_c == 2500 and del_c == 0
+    both = add_c > 0 and del_c > 0
+    rename_limit_exceeded = (
+        (both and (add_c + del_c > 2000))
+        or (both and (add_c * del_c > 2000))
+    )
+    assert rename_limit_exceeded is False
+
+    # Case 3: 2500 pure deletions (0 additions) -> NOT exceeded (no pairing candidates exist)
+    pure_dels = [
         ("old_%04d.py" % i, None, "100644", None, "a" * 40, None, "D")
-        for i in range(600)
+        for i in range(2500)
     ]
-    all_records = add_records + del_records
+    add_c = sum(1 for r in pure_dels if r[6].startswith("A") or not r[4])
+    del_c = sum(1 for r in pure_dels if r[6].startswith("D") or not r[5])
+    assert add_c == 0 and del_c == 2500
+    both = add_c > 0 and del_c > 0
+    rename_limit_exceeded = (
+        (both and (add_c + del_c > 2000))
+        or (both and (add_c * del_c > 2000))
+    )
+    assert rename_limit_exceeded is False
+
+    # Case 4: 1500 adds and 600 deletes -> add_candidates=1500, del_candidates=600 -> sum=2100 > 2000 -> EXCEEDED
+    all_records = pure_adds[:1500] + pure_dels[:600]
     add_c = sum(1 for r in all_records if r[6].startswith("A") or not r[4])
     del_c = sum(1 for r in all_records if r[6].startswith("D") or not r[5])
-    rename_limit_exceeded = (add_c + del_c > 2000) or (add_c > 0 and del_c > 0 and (add_c * del_c > 2000))
+    both = add_c > 0 and del_c > 0
+    rename_limit_exceeded = (
+        (both and (add_c + del_c > 2000))
+        or (both and (add_c * del_c > 2000))
+    )
     assert rename_limit_exceeded is True
+
+
+def test_coverage_invariants_and_fail_closed_validation() -> None:
+    """Coverage invariants strictly prevent fail-open COMPLETE promotion."""
+    from verifyci.contracts.model import (
+        CheckResult,
+        Coverage,
+        CoverageGap,
+        Outcome,
+        Tier,
+        Maturity,
+    )
+
+    base_kwargs = {
+        "check_id": "contract",
+        "check_version": 1,
+        "tier": Tier.BLOCKING,
+        "maturity": Maturity.PROVISIONAL,
+        "outcome": Outcome.PASS,
+        "evaluated_scope": {},
+        "applicability_evidence": {},
+        "method": "signature",
+        "method_version": 1,
+    }
+
+    # 1. coverage=COMPLETE with incomplete scope enumeration
+    res_scope = CheckResult(
+        **base_kwargs,
+        coverage=Coverage.COMPLETE,
+        scope_enumeration={"complete": False},
+        candidate_discovery={"complete": True},
+    )
+    assert res_scope.effective_coverage() == Coverage.UNKNOWN
+    errors = res_scope.validate()
+    assert any("COMPLETE coverage requires scope_enumeration.complete == True" in e for e in errors)
+    assert any("PASS requires effective COMPLETE coverage" in e for e in errors)
+
+    # 2. coverage=COMPLETE with incomplete candidate discovery
+    res_cand = CheckResult(
+        **base_kwargs,
+        coverage=Coverage.COMPLETE,
+        scope_enumeration={"complete": True},
+        candidate_discovery={"complete": False},
+    )
+    assert res_cand.effective_coverage() == Coverage.PARTIAL
+    errors = res_cand.validate()
+    assert any("COMPLETE coverage requires candidate_discovery.complete == True" in e for e in errors)
+    assert any("PASS requires effective COMPLETE coverage" in e for e in errors)
+
+    # 3. coverage=COMPLETE with unaccepted gaps
+    unaccepted_gap = CoverageGap(reason_code="dynamic_call_unresolved", subject={"path": "lib.py"}, accepted=False)
+    res_gap = CheckResult(
+        **base_kwargs,
+        coverage=Coverage.COMPLETE,
+        scope_enumeration={"complete": True},
+        candidate_discovery={"complete": True},
+        coverage_gaps=(unaccepted_gap,),
+    )
+    assert res_gap.effective_coverage() == Coverage.PARTIAL
+    errors = res_gap.validate()
+    assert any("COMPLETE coverage cannot carry unaccepted coverage gaps" in e for e in errors)
+    assert any("PASS requires effective COMPLETE coverage" in e for e in errors)
+
+    # 4. Parent result marked complete while child sub-result is incomplete
+    incomplete_sub = CheckResult(
+        check_id="contract.sub",
+        check_version=1,
+        tier=Tier.BLOCKING,
+        maturity=Maturity.PROVISIONAL,
+        outcome=Outcome.INCONCLUSIVE,
+        coverage=Coverage.PARTIAL,
+        evaluated_scope={},
+        scope_enumeration={"complete": True},
+        candidate_discovery={"complete": False},
+        applicability_evidence={},
+        method="sub",
+        method_version=1,
+    )
+    res_parent = CheckResult(
+        **base_kwargs,
+        coverage=Coverage.COMPLETE,
+        scope_enumeration={"complete": True},
+        candidate_discovery={"complete": True},
+        sub_results=(incomplete_sub,),
+    )
+    assert res_parent.effective_coverage() == Coverage.PARTIAL
+    errors = res_parent.validate()
+    assert any("COMPLETE coverage requires all sub_results to have COMPLETE coverage" in e for e in errors)
+    assert any("PASS requires effective COMPLETE coverage" in e for e in errors)
+
+    # 5. NOT_APPLICABLE requires effective COMPLETE coverage
+    res_na_incomplete = CheckResult(
+        **{**base_kwargs, "outcome": Outcome.NOT_APPLICABLE},
+        coverage=Coverage.PARTIAL,
+        scope_enumeration={"complete": True},
+        candidate_discovery={"complete": False},
+    )
+    errors = res_na_incomplete.validate()
+    assert any("NOT_APPLICABLE requires effective COMPLETE coverage" in e for e in errors)
+
 
 

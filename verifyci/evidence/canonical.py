@@ -85,6 +85,11 @@ def canonical_json_bytes(value: Any) -> bytes:
     if isinstance(value, bool):
         return b"true" if value else b"false"
     if isinstance(value, int):
+        if value < -9007199254740991 or value > 9007199254740991:
+            raise ValueError(
+                f"Integer {value} exceeds RFC 8785 safe integer limit [-(2^53 - 1), 2^53 - 1]; "
+                "values requiring higher precision must be encoded as strings."
+            )
         return str(value).encode("ascii")
     if isinstance(value, float):
         return _serialize_float(value)

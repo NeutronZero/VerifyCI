@@ -294,12 +294,21 @@ class CheckResult:
     def validate(self) -> list[str]:
         errors: list[str] = []
         has_findings = bool(self.findings)
-        if self.outcome == Outcome.PASS and self.coverage != Coverage.COMPLETE:
-            errors.append("PASS requires COMPLETE coverage")
+        if self.coverage == Coverage.COMPLETE:
+            if not self.scope_enumeration.get("complete", False):
+                errors.append("COMPLETE coverage requires scope_enumeration.complete == True")
+            if not self.candidate_discovery.get("complete", False):
+                errors.append("COMPLETE coverage requires candidate_discovery.complete == True")
+            if any(not g.accepted for g in self.coverage_gaps):
+                errors.append("COMPLETE coverage cannot carry unaccepted coverage gaps")
+            if self.sub_results and any(sub.effective_coverage() != Coverage.COMPLETE for sub in self.sub_results):
+                errors.append("COMPLETE coverage requires all sub_results to have COMPLETE coverage")
+        if self.outcome == Outcome.PASS and self.effective_coverage() != Coverage.COMPLETE:
+            errors.append("PASS requires effective COMPLETE coverage")
         if self.outcome == Outcome.PASS and has_findings:
             errors.append("PASS carries findings")
-        if self.outcome == Outcome.NOT_APPLICABLE and self.coverage != Coverage.COMPLETE:
-            errors.append("NOT_APPLICABLE requires COMPLETE coverage")
+        if self.outcome == Outcome.NOT_APPLICABLE and self.effective_coverage() != Coverage.COMPLETE:
+            errors.append("NOT_APPLICABLE requires effective COMPLETE coverage")
         if self.outcome == Outcome.NOT_APPLICABLE and has_findings:
             errors.append("NOT_APPLICABLE carries findings")
         if self.outcome == Outcome.INCONCLUSIVE and has_findings:
@@ -321,19 +330,30 @@ class CheckResult:
                     f"invalid evidence kind {finding.evidence.kind.value} "
                     f"for {finding.defect_id}"
                 )
+        for i, sub in enumerate(self.sub_results):
+            for err in sub.validate():
+                errors.append(f"sub_result[{i}]: {err}")
         return errors
 
     def effective_coverage(self) -> Coverage:
         scope_complete = bool(self.scope_enumeration.get("complete", False))
         candidates_complete = bool(self.candidate_discovery.get("complete", False))
-        if not (scope_complete and candidates_complete):
+        has_unaccepted_gaps = any(not g.accepted for g in self.coverage_gaps)
+        sub_incomplete = bool(self.sub_results) and any(
+            sub.effective_coverage() != Coverage.COMPLETE for sub in self.sub_results
+        )
+
+        if (
+            not scope_complete
+            or not candidates_complete
+            or has_unaccepted_gaps
+            or sub_incomplete
+        ):
+            if self.coverage == Coverage.COMPLETE:
+                return Coverage.UNKNOWN if not scope_complete else Coverage.PARTIAL
             return self.coverage
-        if self.sub_results:
-            if not all(sub.effective_coverage() == Coverage.COMPLETE for sub in self.sub_results):
-                return self.coverage
+
         if self.coverage_gaps and all(g.accepted for g in self.coverage_gaps):
-            return Coverage.COMPLETE
-        if not self.coverage_gaps and self.coverage == Coverage.COMPLETE:
             return Coverage.COMPLETE
         return self.coverage
 

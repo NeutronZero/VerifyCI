@@ -252,9 +252,10 @@ class GitRepo:
         add_candidates = sum(1 for r in records if r[6].startswith("A") or not r[4])
         del_candidates = sum(1 for r in records if r[6].startswith("D") or not r[5])
         stderr_text = (raw.stderr + patch.stderr).decode("utf-8", "replace").lower()
+        both_sides_have_candidates = add_candidates > 0 and del_candidates > 0
         rename_limit_exceeded = (
-            (add_candidates + del_candidates > 2000)
-            or (add_candidates > 0 and del_candidates > 0 and (add_candidates * del_candidates > 2000))
+            (both_sides_have_candidates and (add_candidates + del_candidates > 2000))
+            or (both_sides_have_candidates and (add_candidates * del_candidates > 2000))
             or ("inexact rename detection was skipped" in stderr_text)
             or ("too many files" in stderr_text)
         )

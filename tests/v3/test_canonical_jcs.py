@@ -52,6 +52,65 @@ def test_rfc8785_number_edge_cases() -> None:
     assert canonical_json_bytes([1e21, 1e-6]) == b"[1e+21,0.000001]"
 
 
+def test_rfc8785_appendix_b_table_1_vectors() -> None:
+    """Full RFC 8785 Appendix B Table 1 IEEE 754 test vectors."""
+    import struct
+    import pytest
+
+    table = [
+        ("0000000000000000", "0"),
+        ("8000000000000000", "0"),
+        ("0000000000000001", "5e-324"),
+        ("8000000000000001", "-5e-324"),
+        ("7fefffffffffffff", "1.7976931348623157e+308"),
+        ("ffefffffffffffff", "-1.7976931348623157e+308"),
+        ("4340000000000000", "9007199254740992"),
+        ("c340000000000000", "-9007199254740992"),
+        ("4430000000000000", "295147905179352830000"),
+        ("41b3de4355555555", "333333333.3333333"),
+        ("43143ff3c1cb0959", "1424953923781206.2"),
+        ("44b52d02c7e14af5", "9.999999999999997e+22"),
+        ("44b52d02c7e14af6", "1e+23"),
+        ("44b52d02c7e14af7", "1.0000000000000001e+23"),
+    ]
+    for h, expected in table:
+        val = struct.unpack(">d", bytes.fromhex(h))[0]
+        actual = canonical_json_bytes(val).decode("ascii")
+        assert actual == expected, f"Vector {h} failed: expected {expected}, got {actual}"
+
+    # Disallowed non-finite values per RFC 8785 Section 3.2.2.3
+    with pytest.raises(ValueError, match="NaN and Infinity"):
+        canonical_json_bytes(float("nan"))
+    with pytest.raises(ValueError, match="NaN and Infinity"):
+        canonical_json_bytes(float("inf"))
+    with pytest.raises(ValueError, match="NaN and Infinity"):
+        canonical_json_bytes(float("-inf"))
+
+
+def test_rfc8785_integer_safe_range_policy() -> None:
+    """Integers outside [-(2^53 - 1), 2^53 - 1] are rejected per RFC 8785 Section 3.2.2.3."""
+    import pytest
+
+    safe_max = 9007199254740991  # 2^53 - 1
+    safe_min = -9007199254740991
+
+    assert canonical_json_bytes(safe_max) == b"9007199254740991"
+    assert canonical_json_bytes(safe_min) == b"-9007199254740991"
+    assert canonical_json_bytes(0) == b"0"
+
+    with pytest.raises(ValueError, match="exceeds RFC 8785 safe integer limit"):
+        canonical_json_bytes(safe_max + 1)
+
+    with pytest.raises(ValueError, match="exceeds RFC 8785 safe integer limit"):
+        canonical_json_bytes(safe_min - 1)
+
+    with pytest.raises(ValueError, match="exceeds RFC 8785 safe integer limit"):
+        canonical_json_bytes(2**64)
+
+    # High precision integers formatted as string are valid
+    assert canonical_json_bytes(str(2**64)) == f'"{2**64}"'.encode("ascii")
+
+
 def test_rfc8785_parity_with_node() -> None:
     """Verify parity against Node.js JSON.stringify for numerical test cases."""
     cases = [
