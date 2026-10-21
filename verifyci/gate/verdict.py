@@ -216,13 +216,14 @@ def _apply_acceptance_result(
         coverage = Coverage.COMPLETE
         if outcome == Outcome.INCONCLUSIVE:
             outcome = Outcome.PASS
+    elif not scope_complete:
+        coverage = Coverage.UNKNOWN
     elif coverage == Coverage.COMPLETE and (
-        not scope_complete
-        or not candidates_complete
+        not candidates_complete
         or has_unaccepted
         or not sub_complete
     ):
-        coverage = Coverage.UNKNOWN if not scope_complete else Coverage.PARTIAL
+        coverage = Coverage.PARTIAL
     return replace(
         result,
         coverage_gaps=gaps,

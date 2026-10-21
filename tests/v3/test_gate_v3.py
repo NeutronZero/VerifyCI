@@ -639,8 +639,8 @@ def test_accepted_gap_with_incomplete_scope_or_discovery_remains_inconclusive() 
     )
     res = evaluated[0]
     assert res.coverage_gaps[0].accepted is True
-    assert res.coverage == Coverage.PARTIAL
-    assert res.effective_coverage() == Coverage.PARTIAL
+    assert res.coverage == Coverage.UNKNOWN
+    assert res.effective_coverage() == Coverage.UNKNOWN
     assert res.outcome == Outcome.INCONCLUSIVE
 
     # Case 2: candidate_discovery is incomplete
@@ -825,6 +825,15 @@ def test_coverage_invariants_and_fail_closed_validation() -> None:
     errors = res_scope.validate()
     assert any("COMPLETE coverage requires scope_enumeration.complete == True" in e for e in errors)
     assert any("PASS requires effective COMPLETE coverage" in e for e in errors)
+
+    # 1b. coverage=PARTIAL with incomplete scope enumeration yields UNKNOWN
+    res_partial_scope = CheckResult(
+        **{**base_kwargs, "outcome": Outcome.INCONCLUSIVE},
+        coverage=Coverage.PARTIAL,
+        scope_enumeration={"complete": False},
+        candidate_discovery={"complete": True},
+    )
+    assert res_partial_scope.effective_coverage() == Coverage.UNKNOWN
 
     # 2. coverage=COMPLETE with incomplete candidate discovery
     res_cand = CheckResult(

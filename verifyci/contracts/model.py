@@ -343,15 +343,10 @@ class CheckResult:
             sub.effective_coverage() != Coverage.COMPLETE for sub in self.sub_results
         )
 
-        if (
-            not scope_complete
-            or not candidates_complete
-            or has_unaccepted_gaps
-            or sub_incomplete
-        ):
-            if self.coverage == Coverage.COMPLETE:
-                return Coverage.UNKNOWN if not scope_complete else Coverage.PARTIAL
-            return self.coverage
+        if not scope_complete:
+            return Coverage.UNKNOWN
+        if not candidates_complete or has_unaccepted_gaps or sub_incomplete:
+            return Coverage.UNKNOWN if self.coverage == Coverage.UNKNOWN else Coverage.PARTIAL
 
         if self.coverage_gaps and all(g.accepted for g in self.coverage_gaps):
             return Coverage.COMPLETE
