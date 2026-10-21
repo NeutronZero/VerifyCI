@@ -1,6 +1,6 @@
 [project]
 name = "verifyci"
-version = "2.0.0"
+version = "3.1.10"
 description = "Deterministic, local-first neuro-symbolic code verification engine"
 readme = "README.md"
 license = { text = "MIT" }
@@ -46,8 +46,8 @@ otel-semconv = ["opentelemetry-semantic-conventions>=0.40b0"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=4.0", "pytest-xdist>=3.5", "ruff>=0.15", "psutil>=5.9.0"]
 
 [project.scripts]
-verifyci = "verifyci.interface.cli:main"
-vc = "verifyci.interface.cli:main"
+verifyci = "verifyci.cli:main"
+vc = "verifyci.cli:main"
 vc2 = "verifyci_v2.interface.cli:main"
 
 [project.urls]
@@ -64,7 +64,7 @@ build-backend = "hatchling.build"
 packages = ["verifyci", "verifyci_v2"]
 
 [tool.hatch.build.targets.sdist]
-only-include = ["verifyci_v2", "README.md", "pyproject.toml", "CHANGELOG.md"]
+only-include = ["verifyci", "verifyci_v2", "README.md", "pyproject.toml", "CHANGELOG.md"]
 
 [tool.pytest.ini_options]
 addopts = "-n auto -m 'not benchmark and not performance'"
