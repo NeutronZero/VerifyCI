@@ -42,7 +42,13 @@ def main() -> int:
     xml_report_path = evidence_dir / "m0-junit-report.xml"
 
     # Fail-closed git provenance collection
-    commit_sha = os.environ.get("GITHUB_SHA") or _git("rev-parse", "HEAD")
+    git_head = _git("rev-parse", "HEAD")
+    env_sha = os.environ.get("GITHUB_SHA")
+    if env_sha and git_head and env_sha != git_head:
+        raise RuntimeError(
+            f"Commit SHA mismatch: GITHUB_SHA ({env_sha}) does not match HEAD ({git_head})"
+        )
+    commit_sha = env_sha or git_head
     if not commit_sha:
         raise RuntimeError("Failed to resolve commit SHA for evidence provenance")
 
@@ -52,6 +58,11 @@ def main() -> int:
 
     git_status = _git("status", "--porcelain")
     tree_clean = len(git_status) == 0
+    if not tree_clean:
+        raise RuntimeError(
+            f"Working tree is dirty; strict source-to-commit binding requires a clean tree.\n"
+            f"Uncommitted changes:\n{git_status}"
+        )
 
     git_ver = _git("--version")
     if not git_ver:
