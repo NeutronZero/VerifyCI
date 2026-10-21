@@ -377,6 +377,14 @@ def run(context: CheckContext) -> CheckResult:
     else:
         outcome = Outcome.PASS
     coverage = Coverage.COMPLETE if not gaps else Coverage.PARTIAL
+    scope_complete = not any(
+        g.reason_code in ("unsupported_language", "parse_error", "rename_limit_exceeded")
+        for g in gaps
+    )
+    candidate_complete = not any(
+        g.reason_code in ("dynamic_call", "dynamic_target_unresolved")
+        for g in gaps
+    )
     return make_result(
         context=context,
         check_id="contract",
@@ -387,9 +395,12 @@ def run(context: CheckContext) -> CheckResult:
             "candidate_calls": len(all_head_calls),
             "checked_calls": checked_calls,
         },
-        scope_enumeration={"complete": not gaps, "changed_entities": len(changed_qnames)},
+        scope_enumeration={
+            "complete": scope_complete,
+            "changed_entities": len(changed_qnames),
+        },
         candidate_discovery={
-            "complete": not gaps,
+            "complete": candidate_complete,
             "local_calls": len(all_head_calls),
             "checked_calls": checked_calls,
         },

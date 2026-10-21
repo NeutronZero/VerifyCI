@@ -8,9 +8,7 @@ from pathlib import Path
 import sys
 from typing import Sequence
 
-from verifyci.contracts.manifest import TOOL_VERSION
-from verifyci.evidence.sarif import bundle_to_sarif
-from verifyci.gate.orchestrator import GateRequest, run_gate
+from verifyci import __version__ as TOOL_VERSION
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -110,6 +108,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.jobs < 1:
         sys.stderr.write("jobs must be >= 1\n")
         return 2
+
+    from verifyci.evidence.sarif import bundle_to_sarif
+    from verifyci.gate.orchestrator import GateRequest, run_gate
+
     repo = Path(args.repo)
     cache_error = _validate_cache(
         repo,

@@ -171,6 +171,14 @@ class GitRepo:
             raise self._classify(listing)
         if not listing.stdout:
             return None
+        raw = listing.stdout.split(b"\0")[0]
+        try:
+            meta, _ = raw.split(b"\t", 1)
+            mode, obj_type, _ = meta.decode("ascii").split(" ")
+            if mode == "160000" or obj_type == "commit":
+                return None
+        except Exception:
+            pass
         result = self.run(["cat-file", "blob", f"{rev}:{path}"])
         if result.returncode != 0:
             raise self._classify(result)
@@ -241,7 +249,15 @@ class GitRepo:
             raise self._classify(patch)
         hunks_by_path = _parse_patch_hunks(patch.stdout)
         records = _parse_raw(raw.stdout)
-        rename_limit_exceeded = len(records) > 2000
+        add_candidates = sum(1 for r in records if r[6].startswith("A") or not r[4])
+        del_candidates = sum(1 for r in records if r[6].startswith("D") or not r[5])
+        stderr_text = (raw.stderr + patch.stderr).decode("utf-8", "replace").lower()
+        rename_limit_exceeded = (
+            (add_candidates + del_candidates > 2000)
+            or (add_candidates > 0 and del_candidates > 0 and (add_candidates * del_candidates > 2000))
+            or ("inexact rename detection was skipped" in stderr_text)
+            or ("too many files" in stderr_text)
+        )
         entries: list[DiffEntry] = []
         for record in records:
             base_path, head_path, base_mode, head_mode, base_blob, head_blob, status = record
@@ -249,15 +265,21 @@ class GitRepo:
                 raise GitError("path_traversal", f"unsafe path in diff: {base_path!r}")
             if head_path and not is_safe_repo_path(head_path):
                 raise GitError("path_traversal", f"unsafe path in diff: {head_path!r}")
-            base_bytes = self.read_blob(base_blob) if base_blob else b""
-            head_bytes = self.read_blob(head_blob) if head_blob else b""
-            is_binary = b"\0" in base_bytes or b"\0" in head_bytes
-            is_lfs = base_bytes.startswith(_LFS_POINTER) or head_bytes.startswith(_LFS_POINTER)
             is_submodule = base_mode == "160000" or head_mode == "160000"
             is_symlink = base_mode == "120000" or head_mode == "120000"
+            if is_submodule:
+                base_bytes = b""
+                head_bytes = b""
+                is_binary = False
+                is_lfs = False
+            else:
+                base_bytes = self.read_blob(base_blob) if base_blob else b""
+                head_bytes = self.read_blob(head_blob) if head_blob else b""
+                is_binary = b"\0" in base_bytes or b"\0" in head_bytes
+                is_lfs = base_bytes.startswith(_LFS_POINTER) or head_bytes.startswith(_LFS_POINTER)
             key = head_path or base_path
-            hunks = hunks_by_path.get(key, ())
-            if not hunks and base_path != head_path:
+            hunks = () if is_submodule else hunks_by_path.get(key, ())
+            if not is_submodule and not hunks and base_path != head_path:
                 hunks = hunks_by_path.get(base_path, ())
             entries.append(
                 DiffEntry(

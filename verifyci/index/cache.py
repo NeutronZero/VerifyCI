@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-import hmac
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
 from typing import Any
 
+from verifyci.evidence.canonical import canonical_json_bytes
+
 CACHE_SCHEMA_VERSION = 1
-
-
-def canonical_json_bytes(obj: Any) -> bytes:
-    return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
+VALID_CACHE_MODES = frozenset({"none", "local", "authenticated"})
 
 
 def entry_digest(object_type: str, components: dict[str, Any]) -> str:
@@ -21,7 +20,13 @@ def entry_digest(object_type: str, components: dict[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def compute_hmac(key: bytes, key_id: str, object_type: str, components: dict[str, Any], value_digest: str) -> str:
+def compute_hmac(
+    key: bytes,
+    key_id: str,
+    object_type: str,
+    components: dict[str, Any],
+    value_digest: str,
+) -> str:
     message = (
         key_id.encode("utf-8")
         + b"\x00"
@@ -42,6 +47,15 @@ class CacheStore:
         key: bytes | None = None,
         key_id: str = "k1",
     ):
+        if mode not in VALID_CACHE_MODES:
+            raise ValueError(
+                f"Invalid cache mode {mode!r}; expected one of {sorted(VALID_CACHE_MODES)}"
+            )
+        if mode == "authenticated" and not key:
+            raise ValueError(
+                "Cache mode 'authenticated' requires a non-empty cryptographic key"
+            )
+
         self.cache_dir = Path(cache_dir)
         self.mode = mode
         self.key = key
@@ -53,7 +67,9 @@ class CacheStore:
         shard = key_hex[:2]
         return self.cache_dir / shard / f"{key_hex}.json"
 
-    def get(self, object_type: str, components: dict[str, Any]) -> tuple[Any | None, bool]:
+    def get(
+        self, object_type: str, components: dict[str, Any]
+    ) -> tuple[Any | None, bool]:
         """Look up an entry. Returns (value, is_hit)."""
         if self.mode == "none":
             return None, False
@@ -69,6 +85,12 @@ class CacheStore:
         except Exception:
             return None, False
 
+        # Explicitly verify envelope metadata against expected values
+        if record.get("object_type") != object_type:
+            return None, False
+        if record.get("components") != components:
+            return None, False
+
         val = record.get("value")
         val_bytes = canonical_json_bytes(val)
         val_digest = hashlib.sha256(val_bytes).hexdigest()
@@ -79,7 +101,11 @@ class CacheStore:
         if self.mode == "authenticated":
             if not self.key:
                 return None, False
-            expected_hmac = compute_hmac(self.key, self.key_id, object_type, components, val_digest)
+            if record.get("key_id") != self.key_id:
+                return None, False
+            expected_hmac = compute_hmac(
+                self.key, self.key_id, object_type, components, val_digest
+            )
             if not hmac.compare_digest(record.get("hmac", ""), expected_hmac):
                 return None, False
         elif self.mode == "local":
@@ -121,7 +147,9 @@ class CacheStore:
         }
 
         if self.mode == "authenticated" and self.key:
-            record["hmac"] = compute_hmac(self.key, self.key_id, object_type, components, val_digest)
+            record["hmac"] = compute_hmac(
+                self.key, self.key_id, object_type, components, val_digest
+            )
             record["key_id"] = self.key_id
 
         temp_path = path.with_suffix(".tmp")
@@ -134,3 +162,12 @@ class CacheStore:
             if temp_path.exists():
                 temp_path.unlink()
             return False
+
+
+__all__ = [
+    "CACHE_SCHEMA_VERSION",
+    "CacheStore",
+    "VALID_CACHE_MODES",
+    "compute_hmac",
+    "entry_digest",
+]

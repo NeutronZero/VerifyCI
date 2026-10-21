@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import tempfile
+import json
 from pathlib import Path
+import tempfile
+import pytest
 from verifyci.runtime.budget import WorkBudget, DEFAULT_BUDGET
 from verifyci.runtime.diagnostics import format_diagnostic
 from verifyci.runtime.scheduler import run_deterministic_batch
@@ -92,6 +94,41 @@ def test_index_cache_authenticated_mode():
         val2, hit2 = c.get("summary", components)
         assert not hit2
         assert val2 is None
+
+
+def test_index_cache_validation_and_envelope_integrity():
+    with tempfile.TemporaryDirectory() as td:
+        # Invalid cache mode raises ValueError
+        with pytest.raises(ValueError, match="Invalid cache mode"):
+            CacheStore(td, mode="invalid_mode")
+
+        # Authenticated mode without key raises ValueError
+        with pytest.raises(ValueError, match="requires a non-empty cryptographic key"):
+            CacheStore(td, mode="authenticated", key=None)
+
+        # Mismatched envelope metadata fails hit
+        key = b"1" * 32
+        store = CacheStore(td, mode="authenticated", key=key, key_id="key-a")
+        components = {"path": "src/x.py"}
+        store.put("entity_spans", components, {"data": 123})
+        k_hex = entry_digest("entity_spans", components)
+        p = Path(td) / k_hex[:2] / f"{k_hex}.json"
+        assert p.is_file()
+
+        # Different key_id store fails hit
+        other_key_store = CacheStore(td, mode="authenticated", key=key, key_id="key-b")
+        val, hit = other_key_store.get("entity_spans", components)
+        assert not hit
+        assert val is None
+
+        # Corrupted envelope object_type in record fails hit
+        record = json.loads(p.read_text(encoding="utf-8"))
+        record["object_type"] = "other_type"
+        p.write_text(json.dumps(record), encoding="utf-8")
+        val, hit = store.get("entity_spans", components)
+        assert not hit
+        assert val is None
+
 
 
 def test_index_facts_and_symbol_index():

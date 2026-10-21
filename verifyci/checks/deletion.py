@@ -259,6 +259,14 @@ def run(context: CheckContext) -> CheckResult:
     else:
         outcome = Outcome.PASS
     coverage = Coverage.COMPLETE if not gaps else Coverage.PARTIAL
+    scope_complete = not any(
+        g.reason_code in ("unsupported_language", "parse_error", "rename_limit_exceeded")
+        for g in gaps
+    )
+    candidate_complete = not any(
+        g.reason_code in ("dynamic_target_unresolved", "unresolved_scope")
+        for g in gaps
+    )
     return make_result(
         context=context,
         check_id="deletion",
@@ -269,9 +277,12 @@ def run(context: CheckContext) -> CheckResult:
             "head_entities": len(context.scope.head_entities),
             "removed_symbols": sorted(e.qname for e in removed),
         },
-        scope_enumeration={"complete": not gaps, "removed_count": len(removed)},
+        scope_enumeration={
+            "complete": scope_complete,
+            "removed_count": len(removed),
+        },
         candidate_discovery={
-            "complete": not gaps,
+            "complete": candidate_complete,
             "live_references": len(references_found),
             "dynamic_scope_gaps": len(gaps),
         },

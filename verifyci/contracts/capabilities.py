@@ -1,37 +1,101 @@
-"""Capability model and execution status for VerifyCI extensions."""
+"""Canonical capability vocabulary and provider models per VerifyCI v3.1 §10.2."""
 
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
-
-from verifyci.contracts.verdict import (
-    FindingReason,
-    Severity,
-    VerificationFinding,
-    VerificationVerdict,
-)
+from typing import Any, Sequence
 
 
 class Capability(str, Enum):
-    """Core and extension capabilities."""
+    """Canonical v3 capability vocabulary (§10.2)."""
 
-    PURE_AST = "pure_ast"
-    REMOVAL_PROVENANCE = "removal_provenance"
-    SECRET_SCANNING = "secret_scanning"
-    DANGEROUS_CALLS = "dangerous_calls"
-    SYMBOLIC_EQUIVALENCE = "symbolic_equivalence"
-    EQUALITY_SATURATION = "equality_saturation"
-    TEMPORAL_GRAPH = "temporal_graph"
-    WASM_SANDBOX = "wasm_sandbox"
-    CRYPTO_ATTESTATION = "crypto_attestation"
+    ENTITY_SPANS = "entity_spans"
+    SIGNATURE = "signature"
+    CFG = "cfg"
+    SSA = "ssa"
+    CALLS = "calls"
+    EFFECTS = "effects"
+    EXCEPTIONS = "exceptions"
+    TYPES = "types"
+    TAINT = "taint"
+    SYMBOLS = "symbols"
+    REFERENCES = "references"
+    GUARDS = "guards"
+
+
+class ProviderClass(str, Enum):
+    """Normative capability provider classes (§10.2)."""
+
+    FRONTEND = "frontend"
+    INDEX = "index"
+
+
+# Canonical provider mapping per §10.2:
+# Frontend / VFIR lowering: entity_spans, signature, cfg, ssa, calls, effects, exceptions, types, taint, guards
+# Symbol/reference index: symbols, references
+FRONTEND_CAPABILITIES: frozenset[Capability] = frozenset(
+    {
+        Capability.ENTITY_SPANS,
+        Capability.SIGNATURE,
+        Capability.CFG,
+        Capability.SSA,
+        Capability.CALLS,
+        Capability.EFFECTS,
+        Capability.EXCEPTIONS,
+        Capability.TYPES,
+        Capability.TAINT,
+        Capability.GUARDS,
+    }
+)
+
+INDEX_CAPABILITIES: frozenset[Capability] = frozenset(
+    {
+        Capability.SYMBOLS,
+        Capability.REFERENCES,
+    }
+)
+
+CAPABILITY_PROVIDERS: dict[Capability, ProviderClass] = {
+    cap: ProviderClass.FRONTEND for cap in FRONTEND_CAPABILITIES
+}
+CAPABILITY_PROVIDERS.update(
+    {cap: ProviderClass.INDEX for cap in INDEX_CAPABILITIES}
+)
+
+
+def provider_for_capability(capability: Capability | str) -> ProviderClass:
+    cap = Capability(capability)
+    return CAPABILITY_PROVIDERS[cap]
+
+
+def validate_capabilities(
+    capabilities: Sequence[Capability | str],
+    available_providers: Sequence[ProviderClass | str] = (
+        ProviderClass.FRONTEND,
+        ProviderClass.INDEX,
+    ),
+) -> list[str]:
+    """Validate that capabilities are valid and supplied by declared providers."""
+    errors: list[str] = []
+    providers_set = {
+        p.value if isinstance(p, ProviderClass) else p for p in available_providers
+    }
+    for c in capabilities:
+        try:
+            cap = Capability(c)
+        except ValueError:
+            errors.append(f"unknown capability: {c}")
+            continue
+        provider = CAPABILITY_PROVIDERS[cap]
+        if provider.value not in providers_set:
+            errors.append(
+                f"capability {cap.value} requires provider {provider.value}, which is not available"
+            )
+    return errors
 
 
 class ExecutionStatus(str, Enum):
-    """Execution status for capability checks.
-
-    An unexecuted, timed-out, or crashed required capability never yields PASS.
-    """
+    """Execution status for capability checks."""
 
     COMPLETED = "completed"
     TIMED_OUT = "timed_out"
@@ -40,7 +104,7 @@ class ExecutionStatus(str, Enum):
 
 
 class CapabilityDeclaration:
-    """Declaration of a capability requirement and execution outcome (slotted model)."""
+    """Declaration of a capability requirement and execution outcome."""
 
     __slots__ = ("capability", "detail", "required", "status")
 
@@ -59,35 +123,23 @@ class CapabilityDeclaration:
     def __setattr__(self, name: str, value: Any) -> None:
         raise AttributeError("CapabilityDeclaration is immutable")
 
-    def __eq__(self, other: Any) -> bool:
-        if not isinstance(other, CapabilityDeclaration):
-            return False
-        return (
-            self.capability == other.capability
-            and self.required == other.required
-            and self.status == other.status
-            and self.detail == other.detail
-        )
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "capability": self.capability.value,
+            "required": self.required,
+            "status": self.status.value,
+            "detail": self.detail,
+        }
 
-    def evaluate_finding(self, rule_id_prefix: str = "VC-CAP") -> VerificationFinding | None:
-        """Derive an inconclusive finding if a required capability did not complete."""
-        if not self.required or self.status == ExecutionStatus.COMPLETED:
-            return None
 
-        reason = (
-            FindingReason.SMT_TIMEOUT
-            if self.status == ExecutionStatus.TIMED_OUT
-            else FindingReason.CAPABILITY_UNAVAILABLE
-        )
-        return VerificationFinding(
-            finding_id=f"{self.capability.value}:{self.status.value}",
-            rule_id=f"{rule_id_prefix}-{self.capability.value.upper()}",
-            severity=Severity.HIGH,
-            verdict=VerificationVerdict.INCONCLUSIVE,
-            reason=reason,
-            message=(
-                f"Required capability '{self.capability.value}' did not complete "
-                f"(status={self.status.value}): {self.detail or 'Execution blocked; failing closed.'}"
-            ),
-            file_path="<global>",
-        )
+__all__ = [
+    "CAPABILITY_PROVIDERS",
+    "Capability",
+    "CapabilityDeclaration",
+    "ExecutionStatus",
+    "FRONTEND_CAPABILITIES",
+    "INDEX_CAPABILITIES",
+    "ProviderClass",
+    "provider_for_capability",
+    "validate_capabilities",
+]

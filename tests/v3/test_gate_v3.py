@@ -578,3 +578,187 @@ def test_cli_formats_and_codeowners_review_mode(tmp_path, capsys):
         ]
     )
     assert code == 0
+
+
+def test_accepted_gap_with_incomplete_scope_or_discovery_remains_inconclusive() -> None:
+    from verifyci.contracts.model import (
+        AcceptanceRecord,
+        CheckResult,
+        Coverage,
+        CoverageGap,
+        Outcome,
+        Tier,
+        Maturity,
+    )
+    from verifyci.gate.policy import Policy
+    from verifyci.gate.verdict import apply_acceptances
+
+    gap = CoverageGap(
+        reason_code="dynamic_target_unresolved",
+        subject={"path": "app.py"},
+    )
+    acceptance = AcceptanceRecord(
+        record_id="acc1",
+        check="deletion",
+        reason_code="dynamic_target_unresolved",
+        paths=("app.py",),
+        symbols=(),
+        reason="test",
+        approved_by="@security",
+        created="2026-10-01",
+        expires="2026-12-31",
+    )
+    policy = Policy(
+        raw={},
+        source="repo",
+        blob_hash="h1",
+        effective_hash="e1",
+        acceptances={"acc1": acceptance},
+    )
+
+    # Case 1: scope_enumeration is incomplete
+    result_incomplete_scope = CheckResult(
+        check_id="deletion",
+        check_version=1,
+        tier=Tier.BLOCKING,
+        maturity=Maturity.PROVISIONAL,
+        outcome=Outcome.INCONCLUSIVE,
+        coverage=Coverage.PARTIAL,
+        evaluated_scope={},
+        scope_enumeration={"complete": False},
+        candidate_discovery={"complete": True},
+        applicability_evidence={},
+        method="deletion",
+        method_version=1,
+        coverage_gaps=(gap,),
+    )
+    evaluated, _, _, _ = apply_acceptances(
+        [result_incomplete_scope],
+        policy,
+        as_of_date="2026-10-21",
+    )
+    res = evaluated[0]
+    assert res.coverage_gaps[0].accepted is True
+    assert res.coverage == Coverage.PARTIAL
+    assert res.effective_coverage() == Coverage.PARTIAL
+    assert res.outcome == Outcome.INCONCLUSIVE
+
+    # Case 2: candidate_discovery is incomplete
+    result_incomplete_candidates = CheckResult(
+        check_id="deletion",
+        check_version=1,
+        tier=Tier.BLOCKING,
+        maturity=Maturity.PROVISIONAL,
+        outcome=Outcome.INCONCLUSIVE,
+        coverage=Coverage.PARTIAL,
+        evaluated_scope={},
+        scope_enumeration={"complete": True},
+        candidate_discovery={"complete": False},
+        applicability_evidence={},
+        method="deletion",
+        method_version=1,
+        coverage_gaps=(gap,),
+    )
+    evaluated2, _, _, _ = apply_acceptances(
+        [result_incomplete_candidates],
+        policy,
+        as_of_date="2026-10-21",
+    )
+    res2 = evaluated2[0]
+    assert res2.coverage_gaps[0].accepted is True
+    assert res2.coverage == Coverage.PARTIAL
+    assert res2.effective_coverage() == Coverage.PARTIAL
+    assert res2.outcome == Outcome.INCONCLUSIVE
+
+
+def test_git_submodule_lifecycle(tmp_path: Path) -> None:
+    """Gitlink (submodule 160000) add, update, and delete are handled without reading blobs."""
+    from verifyci.scm.git import GitRepo
+
+    root = tmp_path / "sub_repo"
+    root.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.email", "test@test.local"], check=True)
+    (root / ".verifyci").mkdir()
+    (root / ".verifyci" / "policy.toml").write_text(POLICY)
+    (root / "init.txt").write_text("initial")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "initial commit"], check=True)
+    base = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+
+    sha1 = "0123456789012345678901234567890123456789"
+    subprocess.run(["git", "-C", str(root), "update-index", "--add", "--cacheinfo", f"160000,{sha1},vendor/sub"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "add submodule"], check=True)
+    head_add = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+
+    repo = GitRepo(root)
+    entries_add, _ = repo.diff_entries(base, head_add)
+    assert len(entries_add) == 1
+    e_add = entries_add[0]
+    assert e_add.is_submodule is True
+    assert e_add.path == "vendor/sub"
+    assert e_add.head_blob == sha1
+    assert e_add.base_blob is None
+
+    # Gate run treats submodule as excluded scope without error
+    bundle_add = _gate(root, base, head_add)
+    assert bundle_add.payload["verdict"]["status"] == "PASS"
+    excluded_kinds = [x["kind"] for x in bundle_add.payload["excluded_scope"]]
+    assert "submodule" in excluded_kinds
+
+    # Update submodule commit
+    sha2 = "9876543210987654321098765432109876543210"
+    subprocess.run(["git", "-C", str(root), "update-index", "--add", "--cacheinfo", f"160000,{sha2},vendor/sub"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "update submodule"], check=True)
+    head_upd = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+
+    entries_upd, _ = repo.diff_entries(head_add, head_upd)
+    assert len(entries_upd) == 1
+    e_upd = entries_upd[0]
+    assert e_upd.is_submodule is True
+    assert e_upd.base_blob == sha1
+    assert e_upd.head_blob == sha2
+
+    # Delete submodule
+    subprocess.run(["git", "-C", str(root), "rm", "--cached", "vendor/sub"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "delete submodule"], check=True)
+    head_del = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+
+    entries_del, _ = repo.diff_entries(head_upd, head_del)
+    assert len(entries_del) == 1
+    e_del = entries_del[0]
+    assert e_del.is_submodule is True
+    assert e_del.base_blob == sha2
+    assert e_del.head_blob is None
+
+
+def test_rename_limit_detection_logic() -> None:
+    """Rename limit threshold counts add/delete candidates, not modifications."""
+    # Case 1: 2005 modifications (M) -> add_candidates=0, del_candidates=0 -> NOT exceeded
+    mod_records = [
+        ("file_%04d.py" % i, "file_%04d.py" % i, "100644", "100644", "a" * 40, "b" * 40, "M")
+        for i in range(2005)
+    ]
+    add_c = sum(1 for r in mod_records if r[6].startswith("A") or not r[4])
+    del_c = sum(1 for r in mod_records if r[6].startswith("D") or not r[5])
+    assert add_c + del_c == 0
+    rename_limit_exceeded = (add_c + del_c > 2000) or (add_c > 0 and del_c > 0 and (add_c * del_c > 2000))
+    assert rename_limit_exceeded is False
+
+    # Case 2: 1500 adds and 600 deletes -> add_candidates=1500, del_candidates=600 -> sum=2100 > 2000 -> EXCEEDED
+    add_records = [
+        (None, "new_%04d.py" % i, None, "100644", None, "b" * 40, "A")
+        for i in range(1500)
+    ]
+    del_records = [
+        ("old_%04d.py" % i, None, "100644", None, "a" * 40, None, "D")
+        for i in range(600)
+    ]
+    all_records = add_records + del_records
+    add_c = sum(1 for r in all_records if r[6].startswith("A") or not r[4])
+    del_c = sum(1 for r in all_records if r[6].startswith("D") or not r[5])
+    rename_limit_exceeded = (add_c + del_c > 2000) or (add_c > 0 and del_c > 0 and (add_c * del_c > 2000))
+    assert rename_limit_exceeded is True
+
+

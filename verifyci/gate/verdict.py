@@ -185,10 +185,13 @@ def _apply_acceptance_result(
     gaps = tuple(new_gaps)
     coverage = result.coverage
     outcome = result.outcome
+    scope_complete = bool(result.scope_enumeration.get("complete", False))
+    candidates_complete = bool(result.candidate_discovery.get("complete", False))
     if gaps and all(g.accepted for g in gaps) and not result.findings:
-        coverage = Coverage.COMPLETE
-        if outcome == Outcome.INCONCLUSIVE:
-            outcome = Outcome.PASS
+        if scope_complete and candidates_complete:
+            coverage = Coverage.COMPLETE
+            if outcome == Outcome.INCONCLUSIVE:
+                outcome = Outcome.PASS
     sub_results = tuple(
         _apply_acceptance_result(
             sub,

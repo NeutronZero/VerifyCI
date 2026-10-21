@@ -324,7 +324,16 @@ class CheckResult:
         return errors
 
     def effective_coverage(self) -> Coverage:
+        scope_complete = bool(self.scope_enumeration.get("complete", False))
+        candidates_complete = bool(self.candidate_discovery.get("complete", False))
+        if not (scope_complete and candidates_complete):
+            return self.coverage
+        if self.sub_results:
+            if not all(sub.effective_coverage() == Coverage.COMPLETE for sub in self.sub_results):
+                return self.coverage
         if self.coverage_gaps and all(g.accepted for g in self.coverage_gaps):
+            return Coverage.COMPLETE
+        if not self.coverage_gaps and self.coverage == Coverage.COMPLETE:
             return Coverage.COMPLETE
         return self.coverage
 

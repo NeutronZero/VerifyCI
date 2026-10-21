@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from hashlib import sha256
-import json
 from typing import Any, Mapping
 
+from verifyci.contracts.capabilities import Capability, validate_capabilities
 from verifyci.contracts.model import Maturity, Tier
 from verifyci.contracts.reason_codes import DEFECT_REASON_CODES
+from verifyci.evidence.canonical import canonical_json_bytes
 
 
 TOOL_VERSION = "3.1.10"
@@ -33,6 +34,7 @@ class CheckSpec:
     reason_codes: tuple[str, ...]
     evidence_kinds: tuple[str, ...]
     nullable_evidence: tuple[str, ...] = ()
+    required_capabilities: tuple[Capability, ...] = ()
     required_toolchain: Mapping[str, str] = field(default_factory=dict)
     corpus_fingerprint: str = ""
     corpus_result: str = ""
@@ -55,6 +57,7 @@ class CheckSpec:
             "reason_codes": list(self.reason_codes),
             "evidence_kinds": list(self.evidence_kinds),
             "nullable_evidence": list(self.nullable_evidence),
+            "required_capabilities": [c.value for c in self.required_capabilities],
             "required_toolchain": dict(self.required_toolchain),
             "corpus_fingerprint": self.corpus_fingerprint or None,
             "corpus_result": self.corpus_result or None,
@@ -77,6 +80,7 @@ _GROUNDING = CheckSpec(
     defect_ids=("GRD-UNGROUNDED-EDIT",),
     reason_codes=("policy_prohibited",),
     evidence_kinds=("provenance",),
+    required_capabilities=(Capability.ENTITY_SPANS,),
     required_toolchain={"python": ">=3.12", "git": "plumbing", "tree-sitter": ">=0.25"},
     status="provisional",
     limitations=(
@@ -97,6 +101,7 @@ _DELETION = CheckSpec(
     defect_ids=("DEL-REACHABLE-SYMBOL", "DEL-DANGLING-REFERENCE", "DEL-DYNAMIC-REFERENCE"),
     reason_codes=("symbol_live", "dangling_reference", "dynamic_reference_removed"),
     evidence_kinds=("reference",),
+    required_capabilities=(Capability.SYMBOLS, Capability.REFERENCES),
     required_toolchain={"python": ">=3.12", "tree-sitter": ">=0.25"},
     status="provisional",
     limitations=(
@@ -117,6 +122,7 @@ _CONTRACT = CheckSpec(
     defect_ids=("CTR-SIGNATURE-BREAK", "CTR-EXPORT-BREAK", "CTR-CALL-INCOMPATIBLE"),
     reason_codes=("signature_break", "export_break", "call_incompatible"),
     evidence_kinds=("call_site", "reference"),
+    required_capabilities=(Capability.SIGNATURE, Capability.CALLS, Capability.REFERENCES),
     required_toolchain={"python": ">=3.12", "tree-sitter": ">=0.25"},
     status="provisional",
     limitations=(
@@ -149,6 +155,12 @@ _SEMANTIC = CheckSpec(
         "exception_removed",
     ),
     evidence_kinds=("solver",),
+    required_capabilities=(
+        Capability.CFG,
+        Capability.GUARDS,
+        Capability.EFFECTS,
+        Capability.EXCEPTIONS,
+    ),
     required_toolchain={"python": ">=3.12"},
     status="shadow",
     limitations=(
@@ -174,6 +186,7 @@ _SECURITY = CheckSpec(
     ),
     reason_codes=("secret_detected", "secret_to_sink", "taint_to_sink", "dangerous_call"),
     evidence_kinds=("secret_validation", "taint_path", "call_site"),
+    required_capabilities=(Capability.CALLS, Capability.TAINT),
     required_toolchain={"python": ">=3.12"},
     status="provisional",
     limitations=(
@@ -200,13 +213,7 @@ def manifest_payload() -> dict[str, Any]:
 
 
 def manifest_bytes() -> bytes:
-    return json.dumps(
-        manifest_payload(),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
+    return canonical_json_bytes(manifest_payload())
 
 
 def manifest_hash() -> str:
@@ -228,6 +235,9 @@ def validate_manifest() -> list[str]:
             errors.append(f"blocking check {check_id} cannot be shadow")
         if check_id == "semantic" and spec.tier != Tier.ADVISORY:
             errors.append("semantic must be advisory/shadow in v3.1.x")
+        cap_errors = validate_capabilities(spec.required_capabilities)
+        for err in cap_errors:
+            errors.append(f"{check_id}: {err}")
         for defect_id in spec.defect_ids:
             if defect_id not in DEFECT_REASON_CODES:
                 errors.append(f"{check_id}: unknown defect id {defect_id}")
