@@ -52,38 +52,40 @@ def test_rfc8785_number_edge_cases() -> None:
     assert canonical_json_bytes([1e21, 1e-6]) == b"[1e+21,0.000001]"
 
 
+APPENDIX_B_TABLE_1: tuple[tuple[str, str], ...] = (
+    ("0000000000000000", "0"),
+    ("8000000000000000", "0"),
+    ("0000000000000001", "5e-324"),
+    ("8000000000000001", "-5e-324"),
+    ("7fefffffffffffff", "1.7976931348623157e+308"),
+    ("ffefffffffffffff", "-1.7976931348623157e+308"),
+    ("4340000000000000", "9007199254740992"),
+    ("c340000000000000", "-9007199254740992"),
+    ("4430000000000000", "295147905179352830000"),
+    ("44b52d02c7e14af5", "9.999999999999997e+22"),
+    ("44b52d02c7e14af6", "1e+23"),
+    ("44b52d02c7e14af7", "1.0000000000000001e+23"),
+    ("444b1ae4d6e2ef4e", "999999999999999700000"),
+    ("444b1ae4d6e2ef4f", "999999999999999900000"),
+    ("444b1ae4d6e2ef50", "1e+21"),
+    ("3eb0c6f7a0b5ed8c", "9.999999999999997e-7"),
+    ("3eb0c6f7a0b5ed8d", "0.000001"),
+    ("41b3de4355555553", "333333333.3333332"),
+    ("41b3de4355555554", "333333333.33333325"),
+    ("41b3de4355555555", "333333333.3333333"),
+    ("41b3de4355555556", "333333333.3333334"),
+    ("41b3de4355555557", "333333333.33333343"),
+    ("43143ff3c1cb0959", "1424953923781206.2"),
+    ("becbf647612f3696", "-0.0000033333333333333333"),
+)
+
+
 def test_rfc8785_appendix_b_table_1_vectors() -> None:
-    """Full RFC 8785 Appendix B Table 1 IEEE 754 test vectors."""
+    """Full RFC 8785 Appendix B Table 1 IEEE 754 test vectors (all 24 finite vectors)."""
     import struct
     import pytest
 
-    table = [
-        ("0000000000000000", "0"),
-        ("8000000000000000", "0"),
-        ("0000000000000001", "5e-324"),
-        ("8000000000000001", "-5e-324"),
-        ("7fefffffffffffff", "1.7976931348623157e+308"),
-        ("ffefffffffffffff", "-1.7976931348623157e+308"),
-        ("4340000000000000", "9007199254740992"),
-        ("c340000000000000", "-9007199254740992"),
-        ("4430000000000000", "295147905179352830000"),
-        ("44b52d02c7e14af5", "9.999999999999997e+22"),
-        ("44b52d02c7e14af6", "1e+23"),
-        ("44b52d02c7e14af7", "1.0000000000000001e+23"),
-        ("444b1ae4d6e2ef4e", "999999999999999700000"),
-        ("444b1ae4d6e2ef4f", "999999999999999900000"),
-        ("444b1ae4d6e2ef50", "1e+21"),
-        ("3eb0c6f7a0b5ed8c", "9.999999999999997e-7"),
-        ("3eb0c6f7a0b5ed8d", "0.000001"),
-        ("41b3de4355555553", "333333333.3333332"),
-        ("41b3de4355555554", "333333333.33333325"),
-        ("41b3de4355555555", "333333333.3333333"),
-        ("41b3de4355555556", "333333333.3333334"),
-        ("41b3de4355555557", "333333333.33333343"),
-        ("43143ff3c1cb0959", "1424953923781206.2"),
-        ("becbf647612f3696", "-0.0000033333333333333333"),
-    ]
-    for h, expected in table:
+    for h, expected in APPENDIX_B_TABLE_1:
         val = struct.unpack(">d", bytes.fromhex(h))[0]
         actual = canonical_json_bytes(val).decode("ascii")
         assert actual == expected, f"Vector {h} failed: expected {expected}, got {actual}"
@@ -146,24 +148,8 @@ def test_rfc8785_parity_with_node() -> None:
         node_out = subprocess.check_output(["node", "-e", node_script], encoding="utf-8")
         assert actual == node_out
 
-    # Verify bit-pattern parity against Node.js for RFC 8785 Appendix B vectors
-    hex_cases = [
-        "41b3de4355555557",
-        "becbf647612f3696",
-        "0000000000000001",
-        "8000000000000001",
-        "7fefffffffffffff",
-        "ffefffffffffffff",
-        "44b52d02c7e14af5",
-        "44b52d02c7e14af6",
-        "44b52d02c7e14af7",
-        "444b1ae4d6e2ef4e",
-        "444b1ae4d6e2ef4f",
-        "444b1ae4d6e2ef50",
-        "3eb0c6f7a0b5ed8c",
-        "3eb0c6f7a0b5ed8d",
-    ]
-    for h in hex_cases:
+    # Verify bit-pattern parity against Node.js for all 24 RFC 8785 Appendix B Table 1 vectors
+    for h, _ in APPENDIX_B_TABLE_1:
         val = struct.unpack(">d", bytes.fromhex(h))[0]
         actual = canonical_json_bytes(val).decode("utf-8")
         node_script = f"process.stdout.write(JSON.stringify(Buffer.from('{h}', 'hex').readDoubleBE(0)))"
