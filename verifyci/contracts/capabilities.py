@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Sequence
+from typing import Any
 
 from verifyci.contracts.verdict import (
     FindingReason,
