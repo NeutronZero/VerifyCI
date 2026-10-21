@@ -122,7 +122,9 @@ def test_rfc8785_integer_safe_range_policy() -> None:
 
 
 def test_rfc8785_parity_with_node() -> None:
-    """Verify parity against Node.js JSON.stringify for numerical test cases."""
+    """Verify parity against Node.js JSON.stringify for numerical test cases and Appendix B bit patterns."""
+    import struct
+
     cases = [
         0.0,
         -0.0,
@@ -143,3 +145,27 @@ def test_rfc8785_parity_with_node() -> None:
         node_script = f"process.stdout.write(JSON.stringify({actual if isinstance(case, (int, float)) else 'JSON.parse(' + repr(actual) + ')'}))"
         node_out = subprocess.check_output(["node", "-e", node_script], encoding="utf-8")
         assert actual == node_out
+
+    # Verify bit-pattern parity against Node.js for RFC 8785 Appendix B vectors
+    hex_cases = [
+        "41b3de4355555557",
+        "becbf647612f3696",
+        "0000000000000001",
+        "8000000000000001",
+        "7fefffffffffffff",
+        "ffefffffffffffff",
+        "44b52d02c7e14af5",
+        "44b52d02c7e14af6",
+        "44b52d02c7e14af7",
+        "444b1ae4d6e2ef4e",
+        "444b1ae4d6e2ef4f",
+        "444b1ae4d6e2ef50",
+        "3eb0c6f7a0b5ed8c",
+        "3eb0c6f7a0b5ed8d",
+    ]
+    for h in hex_cases:
+        val = struct.unpack(">d", bytes.fromhex(h))[0]
+        actual = canonical_json_bytes(val).decode("utf-8")
+        node_script = f"process.stdout.write(JSON.stringify(Buffer.from('{h}', 'hex').readDoubleBE(0)))"
+        node_out = subprocess.check_output(["node", "-e", node_script], encoding="utf-8")
+        assert actual == node_out, f"{h}: Python produced {actual!r}, Node.js produced {node_out!r}"
