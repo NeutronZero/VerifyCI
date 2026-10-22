@@ -1,6 +1,6 @@
 # VerifyCI v3 — Demand-Driven Pre-Merge Verification Gate
 
-**Status:** Frozen design (2026-10-20); implementation not started.
+**Status:** Frozen design (2026-10-20); Milestone M0 implemented and verified (2026-10-22); Milestone M1 in planning.
 **Date:** 2026-10-20
 **Supersedes:** `docs/architecture_v2.md`, all v1 and v2 architectural claims.
 **Audience:** implementers, reviewers, release engineers.
