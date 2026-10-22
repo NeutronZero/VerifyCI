@@ -521,6 +521,7 @@ def _augment_scope_with_repository(
         rename_limit_exceeded=scope.rename_limit_exceeded,
         mapped_hunks=scope.mapped_hunks,
         mapped_entities=scope.mapped_entities,
+        renames=scope.renames,
     )
 
 

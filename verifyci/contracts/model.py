@@ -573,7 +573,7 @@ def glob_match(pattern: str, value: str, *, kind: str = "path") -> bool:
     """
     import re
 
-    sep = r"/" if kind == "path" else r"[:.]"
+    sep = r"/" if kind == "path" else r"/:\."
     out: list[str] = ["^"]
     i = 0
     while i < len(pattern):

@@ -466,10 +466,17 @@ def test_grounded_mapper_empirical_benchmark():
     tp_hunks = 0
     fp_hunks = 0
     fn_hunks = 0
+    tn_hunks = 0
+
+    tp_ents = 0
+    fp_ents = 0
+    fn_ents = 0
+    tn_ents = 0
 
     outcome_matches = 0
     coverage_matches = 0
     reason_matches = 0
+    findings_matches = 0
     false_fails = 0
 
     per_class_results: dict[str, dict[str, int]] = {}
@@ -541,17 +548,70 @@ def test_grounded_mapper_empirical_benchmark():
             if actual_reasons == exp_reasons:
                 reason_matches += 1
 
-            # 4. Hunks mapping
+            # 4. Hunks mapping and confusion matrix
             if not is_int:
                 exp_hunks = tuple(expected.get("hunks", []))
                 assert actual_hunks == exp_hunks, f"{case_id}: hunk mismatch: {actual_hunks} != {exp_hunks}"
-                for h in actual_hunks:
-                    if h.get("mapped_entity") is not None:
-                        tp_hunks += 1
+                for eh, ah in zip(exp_hunks, actual_hunks):
+                    e_target = eh.get("mapped_entity")
+                    a_target = ah.get("mapped_entity")
+                    if e_target is not None:
+                        if a_target == e_target:
+                            tp_hunks += 1
+                        elif a_target is None:
+                            fn_hunks += 1
+                        else:
+                            fp_hunks += 1
+                    else:
+                        if a_target is None:
+                            tn_hunks += 1
+                        else:
+                            fp_hunks += 1
+
+                # 5. Entities mapping and confusion matrix
                 exp_ents = expected.get("entities", [])
                 assert json.dumps(actual_entities, sort_keys=True) == json.dumps(exp_ents, sort_keys=True), (
                     f"{case_id}: entities mismatch: {actual_entities} != {exp_ents}"
                 )
+                exp_ents_dict = {e["qname"]: e["change"] for e in exp_ents}
+                act_ents_dict = {e["qname"]: e["change"] for e in actual_entities}
+                all_file_ents = set()
+                for f in list(scope.base_facts.values()) + list(scope.head_facts.values()):
+                    for e in f.entities:
+                        all_file_ents.add(e.qname)
+
+                for q, change in exp_ents_dict.items():
+                    if q in act_ents_dict and act_ents_dict[q] == change:
+                        tp_ents += 1
+                    elif q in act_ents_dict and act_ents_dict[q] != change:
+                        fp_ents += 1
+                    else:
+                        fn_ents += 1
+                for q in act_ents_dict:
+                    if q not in exp_ents_dict:
+                        fp_ents += 1
+                for q in all_file_ents:
+                    if q not in exp_ents_dict and q not in act_ents_dict:
+                        tn_ents += 1
+
+                # 6. Findings schema and value equality
+                exp_findings = expected.get("findings", [])
+                assert len(res.findings) == len(exp_findings), (
+                    f"{case_id}: findings count mismatch {len(res.findings)} != {len(exp_findings)}"
+                )
+                for act_f, exp_f in zip(res.findings, exp_findings):
+                    assert act_f.defect_id == exp_f["defect_id"], f"{case_id}: defect_id mismatch"
+                    assert act_f.reason_code == exp_f["reason_code"], f"{case_id}: reason_code mismatch"
+                    assert act_f.tier.value == exp_f["tier"], f"{case_id}: tier mismatch"
+                    assert act_f.witness_level.value == exp_f["witness_level"], f"{case_id}: witness_level mismatch"
+                    assert act_f.defect_semantics_version == exp_f.get("defect_semantics_version", 1), (
+                        f"{case_id}: defect_semantics_version mismatch"
+                    )
+                    for k, v in exp_f["subject"].items():
+                        assert act_f.subject.get(k) == v, f"{case_id}: subject[{k}] mismatch"
+                    for k, v in exp_f["evidence"]["payload"].items():
+                        assert act_f.evidence.payload.get(k) == v, f"{case_id}: payload[{k}] mismatch"
+                findings_matches += 1
 
             case_all_matched = (
                 actual_outcome == exp_outcome
@@ -561,19 +621,35 @@ def test_grounded_mapper_empirical_benchmark():
             if case_all_matched:
                 stats["passed"] += 1
 
-    precision = 1.0 if (tp_hunks + fp_hunks == 0) else tp_hunks / (tp_hunks + fp_hunks)
-    recall = 1.0 if (tp_hunks + fn_hunks == 0) else tp_hunks / (tp_hunks + fn_hunks)
+    hunk_precision = 1.0 if (tp_hunks + fp_hunks == 0) else tp_hunks / (tp_hunks + fp_hunks)
+    hunk_recall = 1.0 if (tp_hunks + fn_hunks == 0) else tp_hunks / (tp_hunks + fn_hunks)
+    hunk_specificity = 1.0 if (tn_hunks + fp_hunks == 0) else tn_hunks / (tn_hunks + fp_hunks)
+
+    ent_precision = 1.0 if (tp_ents + fp_ents == 0) else tp_ents / (tp_ents + fp_ents)
+    ent_recall = 1.0 if (tp_ents + fn_ents == 0) else tp_ents / (tp_ents + fn_ents)
+    ent_specificity = 1.0 if (tn_ents + fp_ents == 0) else tn_ents / (tn_ents + fp_ents)
 
     print("\n" + "=" * 60)
-    print("M1 GROUNDING MAPPER BENCHMARK REPORT")
+    print("M1 GROUNDING MAPPER EMPIRICAL BENCHMARK REPORT")
     print("=" * 60)
-    print(f"Total Cases Evaluated: {len(cases)}")
+    print(f"Total Cases Evaluated:         {len(cases)}")
     print(f"Provenance Outcome Agreement:  {outcome_matches}/{len(cases)} ({(outcome_matches/len(cases))*100:.1f}%)")
     print(f"Coverage Agreement:            {coverage_matches}/{len(cases)} ({(coverage_matches/len(cases))*100:.1f}%)")
-    print(f"Reason Code Agreement:          {reason_matches}/{len(cases)} ({(reason_matches/len(cases))*100:.1f}%)")
-    print(f"Hunk Mapping Precision:        {precision:.4f}")
-    print(f"Hunk Mapping Recall:           {recall:.4f}")
+    print(f"Reason Code Agreement:         {reason_matches}/{len(cases)} ({(reason_matches/len(cases))*100:.1f}%)")
+    print(f"Findings Exact Agreement:      {findings_matches}/23 non-corrupted cases")
     print(f"False FAIL Results:            {false_fails}")
+    print("-" * 60)
+    print("Hunk Confusion Matrix:")
+    print(f"  TP={tp_hunks:<4} FP={fp_hunks:<4} FN={fn_hunks:<4} TN={tn_hunks:<4}")
+    print(f"  Precision:   {hunk_precision:.4f}")
+    print(f"  Recall:      {hunk_recall:.4f}")
+    print(f"  Specificity: {hunk_specificity:.4f}")
+    print("-" * 60)
+    print("Entity Confusion Matrix:")
+    print(f"  TP={tp_ents:<4} FP={fp_ents:<4} FN={fn_ents:<4} TN={tn_ents:<4}")
+    print(f"  Precision:   {ent_precision:.4f}")
+    print(f"  Recall:      {ent_recall:.4f}")
+    print(f"  Specificity: {ent_specificity:.4f}")
     print("-" * 60)
     print("Breakdown by Case Class:")
     for kind, stats in sorted(per_class_results.items()):
@@ -584,8 +660,12 @@ def test_grounded_mapper_empirical_benchmark():
     assert coverage_matches == len(cases), f"Coverage agreement mismatch: {coverage_matches}/{len(cases)}"
     assert reason_matches == len(cases), f"Reason codes agreement mismatch: {reason_matches}/{len(cases)}"
     assert false_fails == 0, f"Encountered {false_fails} false FAIL results"
-    assert precision == 1.0, f"Precision below 1.0: {precision}"
-    assert recall == 1.0, f"Recall below 1.0: {recall}"
+    assert hunk_precision == 1.0, f"Hunk precision below 1.0: {hunk_precision}"
+    assert hunk_recall == 1.0, f"Hunk recall below 1.0: {hunk_recall}"
+    assert fp_hunks == 0 and fn_hunks == 0, f"Hunk mapping errors: FP={fp_hunks}, FN={fn_hunks}"
+    assert ent_precision == 1.0, f"Entity precision below 1.0: {ent_precision}"
+    assert ent_recall == 1.0, f"Entity recall below 1.0: {ent_recall}"
+    assert fp_ents == 0 and fn_ents == 0, f"Entity mapping errors: FP={fp_ents}, FN={fn_ents}"
 
 
 @pytest.mark.invariant

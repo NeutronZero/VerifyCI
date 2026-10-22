@@ -77,6 +77,7 @@ markers = [
     "unit: Fast isolated unit tests without external state",
     "integration: Multi-component end-to-end integration tests",
     "performance: Regression benchmark tests with latency thresholds",
+    "adversarial: Adversarial boundary and edge-case validation suites",
 ]
 filterwarnings = [
     # Third-party import-time noise: typer re-exports click utilities

@@ -675,7 +675,9 @@ def _is_safe_constant_value(node: ast.AST) -> bool:
     return False
 
 
-def is_safe_module_construct(source: str, start_line: int, end_line: int) -> bool:
+def _is_safe_range(source: str, start_line: int, end_line: int) -> bool:
+    if not source:
+        return True
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -699,18 +701,70 @@ def is_safe_module_construct(source: str, start_line: int, end_line: int) -> boo
     return True
 
 
-def find_matching_entity(entities: Sequence[Entity], start_line: int, count: int) -> Entity | None:
+def is_safe_module_construct(
+    base_source: str,
+    old_start: int,
+    old_count: int,
+    head_source: str,
+    new_start: int,
+    new_count: int,
+) -> bool:
+    """Validate that changes outside entities only touch safe module declarations.
+
+    For additions, validates changed head-side statements.
+    For deletions, validates changed base-side statements.
+    For replacements, validates both sides.
+    An empty side must not pass safety validation vacuously if the other side touched unsafe code.
+    """
+    if old_count > 0:
+        if not _is_safe_range(base_source, old_start, old_start + old_count - 1):
+            return False
+    if new_count > 0:
+        if not _is_safe_range(head_source, new_start, new_start + new_count - 1):
+            return False
+    if old_count == 0 and new_count == 0:
+        return False
+    return True
+
+
+def find_matching_entity_detailed(
+    entities: Sequence[Entity], start_line: int, count: int
+) -> tuple[Entity | None, bool]:
+    """Find the matching entity and report whether boundary conflict occurred.
+
+    Returns:
+        (entity, False): unique entity or innermost in strict nesting chain
+        (None, False): no entity overlapping (module-level)
+        (None, True): ambiguous boundary crossing across sibling or disjoint entities
+    """
     if count <= 0:
-        return None
+        return None, False
     end_line = start_line + count - 1
     overlapping = [
         e for e in entities
         if not (end_line < e.start_line or start_line > e.end_line)
     ]
     if not overlapping:
-        return None
-    overlapping.sort(key=lambda e: (e.end_line - e.start_line, -len(e.qname)))
-    return overlapping[0]
+        return None, False
+    if len(overlapping) == 1:
+        return overlapping[0], False
+
+    # Multiple entities overlap. Verify if they form a strict nesting chain.
+    overlapping.sort(key=lambda e: (e.end_line - e.start_line), reverse=True)
+    for i in range(len(overlapping) - 1):
+        outer = overlapping[i]
+        inner = overlapping[i + 1]
+        if not (outer.start_line <= inner.start_line and inner.end_line <= outer.end_line):
+            # Sibling or boundary crossing!
+            return None, True
+
+    return overlapping[-1], False
+
+
+def find_matching_entity(entities: Sequence[Entity], start_line: int, count: int) -> Entity | None:
+    """Find the unique entity that contains or uniquely maps to the line range."""
+    match, _ = find_matching_entity_detailed(entities, start_line, count)
+    return match
 
 
 def extract_entities(source: bytes | str, path: str, source_roots: Sequence[str] = ()) -> tuple[Entity, ...]:
@@ -730,6 +784,7 @@ class ChangedScope:
     rename_limit_exceeded: bool = False
     mapped_hunks: tuple[Mapping[str, Any], ...] = ()
     mapped_entities: tuple[Mapping[str, Any], ...] = ()
+    renames: tuple[Mapping[str, Any], ...] = ()
 
     def entity(self, qname: str) -> Entity | None:
         for facts in self.head_facts.values():
@@ -757,6 +812,7 @@ def build_changed_scope(
     unmapped: list[dict[str, Any]] = []
     mapped_hunks: list[dict[str, Any]] = []
     entity_changes: dict[str, dict[str, Any]] = {}
+    renames: list[dict[str, Any]] = []
 
     for entry in entries:
         if entry.base_path and not entry.is_binary and not entry.is_submodule:
@@ -770,6 +826,27 @@ def build_changed_scope(
 
         if entry.is_binary or entry.is_submodule:
             continue
+
+        if entry.is_renamed and not entry.hunks:
+            renames.append(
+                {
+                    "base_path": entry.base_path,
+                    "head_path": entry.head_path,
+                    "base_blob": entry.base_blob,
+                    "head_blob": entry.head_blob,
+                    "base_mode": entry.base_mode,
+                    "head_mode": entry.head_mode,
+                    "mapping": "file_rename_content_identical",
+                }
+            )
+            bf_rename = base_facts.get(entry.base_path)
+            hf_rename = head_facts.get(entry.head_path)
+            if bf_rename:
+                changed.update(e.qname for e in bf_rename.entities)
+            if hf_rename:
+                changed.update(e.qname for e in hf_rename.entities)
+            continue
+
         if not entry.hunks:
             continue
 
@@ -843,8 +920,28 @@ def build_changed_scope(
         b_by_qname = {e.qname: e for e in b_ents}
 
         for hunk in entry.hunks:
-            m_base = find_matching_entity(b_ents, hunk.old_start, hunk.old_count)
-            m_head = find_matching_entity(h_ents, hunk.new_start, hunk.new_count)
+            m_base, base_conflict = find_matching_entity_detailed(b_ents, hunk.old_start, hunk.old_count)
+            m_head, head_conflict = find_matching_entity_detailed(h_ents, hunk.new_start, hunk.new_count)
+
+            if base_conflict or head_conflict:
+                unmapped.append(
+                    {
+                        "path": path,
+                        "hunk": hunk.to_dict(),
+                        "reason_code": "mapping_unresolved",
+                    }
+                )
+                mapped_hunks.append(
+                    {
+                        "file": path,
+                        "old_start": hunk.old_start,
+                        "old_count": hunk.old_count,
+                        "new_start": hunk.new_start,
+                        "new_count": hunk.new_count,
+                        "mapped_entity": None,
+                    }
+                )
+                continue
 
             if m_base is not None and m_head is not None and m_base.qname == m_head.qname:
                 qname = m_head.qname
@@ -892,7 +989,17 @@ def build_changed_scope(
                     }
                 )
             elif m_base is None and m_head is None:
-                if sfx == "py" and is_safe_module_construct(entry.head_source, hunk.new_start, hunk.new_start + max(hunk.new_count, 1) - 1):
+                if (
+                    sfx == "py"
+                    and is_safe_module_construct(
+                        entry.base_source,
+                        hunk.old_start,
+                        hunk.old_count,
+                        entry.head_source,
+                        hunk.new_start,
+                        hunk.new_count,
+                    )
+                ):
                     mapped_hunks.append(
                         {
                             "file": path,
@@ -970,6 +1077,7 @@ def build_changed_scope(
         rename_limit_exceeded=rename_limit_exceeded,
         mapped_hunks=tuple(mapped_hunks),
         mapped_entities=tuple(entities_out),
+        renames=tuple(renames),
     )
 
 
