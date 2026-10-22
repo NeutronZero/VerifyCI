@@ -451,29 +451,34 @@ def test_grounded_mapper_empirical_benchmark():
     Candidate Universe Definitions & Scope Boundaries:
     1. Diff Hunk Candidate Universe (U_hunks):
        - Defined as the set of all diff hunks generated across touched files in the evaluation set.
+       - Hunks are stably identified and paired by immutable coordinate tuple:
+         (file, old_start, old_count, new_start, new_count).
        - Ground truth positive: hunks with non-null expected mapped_entity (entity qname or other_text).
        - Ground truth negative: hunks with null expected mapped_entity (unresolved / ambiguous boundary).
-       - TP: expected non-null and actual == expected.
-       - FP: expected null but mapped, or mapped to incorrect entity.
-       - FN: expected non-null but actual is null or incorrect entity.
-       - TN: expected null and actual is null.
+       - TP: coordinate present in expected & actual, expected non-null and actual == expected.
+       - FP: coordinate present in actual but not expected, or mapped to incorrect entity label.
+       - FN: coordinate present in expected but missing in actual, or expected non-null but actual is null / wrong label.
+       - TN: coordinate expected null and actual is null.
        - Evaluated metric: Exact hunk label agreement (100%), Precision (1.0), and Recall (1.0).
 
     2. Entity Identification Candidate Universe (U_entities):
-       - Defined as all syntax entities extracted across base and head files in touched files.
+       - Evaluated under two explicitly labeled denominators:
+         a) Sum of per-case candidate qualified names: sum of unique qnames across touched files per fixture.
+         b) Globally deduplicated unique qualified names: union of all unique qnames across all fixtures.
+         Both yield 31 candidate entities (15 changed TP, 16 unchanged TN) due to disjoint fixture qnames.
+       - Also distinguishes total AST entity instances (57 = 29 base + 28 head syntax instances).
        - Ground truth positive: entities declared changed in the frozen oracle (modified, added, removed).
        - Ground truth negative: syntax entities present in touched files that were unchanged.
        - TP: entity expected changed and actual correctly identifies change type.
        - FP: entity reported changed in actual but not in expected (or mismatched change type).
        - FN: entity in expected changed set but missing in actual.
        - TN: syntax entity in candidate universe correctly determined to be unchanged.
-       - Note: True negatives are bounded to the touched files' candidate universe rather than the entire repo.
        - Evaluated metric: Exact entity change-set agreement (100%), Precision (1.0), and Recall (1.0).
 
     3. Production Pipeline Integrity (GRD-INT-001):
        - Exercises orchestrator run_gate() pipeline on a bare repo with tampered pinned object.
        - Asserts live grounding CheckResult yields ERROR outcome, UNKNOWN coverage, provenance_integrity_error,
-         expected diagnostic citing the pinned object hash, and zero blocking findings.
+         expected diagnostic citing the pinned object hash (a4b1e61fc24558e8cad0c3aff1aa86cc933d2b2e), and zero blocking findings.
 
     4. Canonical Finding Verification:
        - Bidirectional key-for-key comparison across core fields, subject, and evidence payload,
@@ -499,7 +504,10 @@ def test_grounded_mapper_empirical_benchmark():
 
     total_base_instances = 0
     total_head_instances = 0
-    total_candidate_qnames = 0
+    total_per_case_candidate_qnames = 0
+    global_candidate_qnames: set[str] = set()
+    global_changed_qnames: set[str] = set()
+    global_act_changed_qnames: set[str] = set()
 
     outcome_matches = 0
     coverage_matches = 0
@@ -604,7 +612,7 @@ def test_grounded_mapper_empirical_benchmark():
             if actual_reasons == exp_reasons:
                 reason_matches += 1
 
-            # 4. Hunk confusion matrix (computed independently without prior assertion)
+            # 4. Hunk confusion matrix paired by immutable coordinate tuple (file, old_start, old_count, new_start, new_count)
             hunks_match = False
             if not is_int:
                 exp_hunks = tuple(expected.get("hunks", []))
@@ -614,32 +622,39 @@ def test_grounded_mapper_empirical_benchmark():
                 else:
                     discrepancies.append(f"{case_id}: hunk mismatch: {actual_hunks} != {exp_hunks}")
 
-                # Score hunk confusion matrix over candidate diff hunks in touched files
-                paired_len = min(len(exp_hunks), len(actual_hunks))
-                for idx in range(paired_len):
-                    eh = exp_hunks[idx]
-                    ah = actual_hunks[idx]
-                    e_target = eh.get("mapped_entity")
-                    a_target = ah.get("mapped_entity")
-                    if e_target is not None:
-                        if a_target == e_target:
-                            tp_hunks += 1
-                        elif a_target is None:
-                            fn_hunks += 1
+                def hunk_coord(h: dict) -> tuple[str, int, int, int, int]:
+                    return (h["file"], h["old_start"], h["old_count"], h["new_start"], h["new_count"])
+
+                exp_hunks_by_coord = {hunk_coord(h): h.get("mapped_entity") for h in exp_hunks}
+                act_hunks_by_coord = {hunk_coord(h): h.get("mapped_entity") for h in actual_hunks}
+                all_hunk_coords = set(exp_hunks_by_coord.keys()) | set(act_hunks_by_coord.keys())
+
+                for coord in all_hunk_coords:
+                    in_exp = coord in exp_hunks_by_coord
+                    in_act = coord in act_hunks_by_coord
+                    if in_exp and in_act:
+                        e_target = exp_hunks_by_coord[coord]
+                        a_target = act_hunks_by_coord[coord]
+                        if e_target is not None:
+                            if a_target == e_target:
+                                tp_hunks += 1
+                            elif a_target is None:
+                                fn_hunks += 1
+                            else:
+                                # Misclassified entity label: FP for wrong label, FN for missed expected label
+                                fp_hunks += 1
+                                fn_hunks += 1
                         else:
-                            # Misclassification: FP for incorrect entity label, FN for missed expected label
-                            fp_hunks += 1
-                            fn_hunks += 1
+                            if a_target is None:
+                                tn_hunks += 1
+                            else:
+                                fp_hunks += 1
+                    elif in_exp and not in_act:
+                        # Expected hunk omitted in actual output
+                        fn_hunks += 1
                     else:
-                        if a_target is None:
-                            tn_hunks += 1
-                        else:
-                            fp_hunks += 1
-                # If hunk count mismatch occurred, record as unmapped/spurious errors
-                if len(actual_hunks) > len(exp_hunks):
-                    fp_hunks += (len(actual_hunks) - len(exp_hunks))
-                elif len(exp_hunks) > len(actual_hunks):
-                    fn_hunks += (len(exp_hunks) - len(actual_hunks))
+                        # Spurious hunk generated in actual output
+                        fp_hunks += 1
 
                 # 5. Entity confusion matrix (computed independently over declared candidate universe)
                 exp_ents = expected.get("entities", [])
@@ -664,7 +679,12 @@ def test_grounded_mapper_empirical_benchmark():
                     for f in list(scope.base_facts.values()) + list(scope.head_facts.values())
                     for e in f.entities
                 } | set(exp_ents_dict.keys()) | set(act_ents_dict.keys())
-                total_candidate_qnames += len(case_qnames)
+                total_per_case_candidate_qnames += len(case_qnames)
+
+                # Global tracking across the corpus
+                global_candidate_qnames.update(case_qnames)
+                global_changed_qnames.update(exp_ents_dict.keys())
+                global_act_changed_qnames.update(act_ents_dict.keys())
 
                 for q in case_qnames:
                     in_exp = q in exp_ents_dict
@@ -777,6 +797,8 @@ def test_grounded_mapper_empirical_benchmark():
     ent_precision = 1.0 if (tp_ents + fp_ents == 0) else tp_ents / (tp_ents + fp_ents)
     ent_recall = 1.0 if (tp_ents + fn_ents == 0) else tp_ents / (tp_ents + fn_ents)
 
+    global_unchanged_qnames = global_candidate_qnames - global_changed_qnames
+
     print("\n" + "=" * 60)
     print("M1 GROUNDING MAPPER EMPIRICAL BENCHMARK REPORT")
     print("=" * 60)
@@ -788,7 +810,7 @@ def test_grounded_mapper_empirical_benchmark():
     print(f"False FAIL Results:            {false_fails}")
     print("-" * 60)
     print("Diff Hunk Mapping Agreement (Candidate Universe U_hunks):")
-    print(f"  Candidate Diff Hunks:        {tp_hunks + tn_hunks + fp_hunks + fn_hunks} hunks across touched files")
+    print(f"  Candidate Diff Hunks:        {tp_hunks + tn_hunks + fp_hunks + fn_hunks} hunks across touched files (paired by coordinate tuple)")
     print(f"  Exact Hunk Label Match:      {exact_hunk_matches}/23 non-corrupted cases (100.0%)")
     print(f"  Hunk Precision:              {hunk_precision:.4f} (TP={tp_hunks}, FP={fp_hunks})")
     print(f"  Hunk Recall:                 {hunk_recall:.4f} (TP={tp_hunks}, FN={fn_hunks})")
@@ -796,7 +818,8 @@ def test_grounded_mapper_empirical_benchmark():
     print("-" * 60)
     print("Entity Set Identification (Candidate Universe U_entities):")
     print(f"  Total AST Entity Instances:  {total_base_instances + total_head_instances} ({total_base_instances} base, {total_head_instances} head)")
-    print(f"  Candidate Unique Qnames:     {total_candidate_qnames} unique qualified names across touched files")
+    print(f"  Per-Case Candidate Qnames:   {total_per_case_candidate_qnames} (sum of unique qnames per case; TP={tp_ents}, TN={tn_ents})")
+    print(f"  Global Unique Qnames:        {len(global_candidate_qnames)} distinct qualified names across corpus (TP={len(global_changed_qnames)}, TN={len(global_unchanged_qnames)})")
     print(f"  Exact Change-Set Agreement:  {exact_entity_matches}/23 non-corrupted cases (100.0%)")
     print(f"  Entity Precision:            {ent_precision:.4f} (TP={tp_ents}, FP={fp_ents})")
     print(f"  Entity Recall:               {ent_recall:.4f} (TP={tp_ents}, FN={fn_ents})")
@@ -832,6 +855,10 @@ def test_grounded_mapper_empirical_benchmark():
     assert ent_precision == 1.0, f"Entity precision below 1.0: {ent_precision}"
     assert ent_recall == 1.0, f"Entity recall below 1.0: {ent_recall}"
     assert fp_ents == 0 and fn_ents == 0, f"Entity mapping errors: FP={fp_ents}, FN={fn_ents}"
+    assert total_per_case_candidate_qnames == 31, f"Expected 31 per-case candidate qnames, got {total_per_case_candidate_qnames}"
+    assert len(global_candidate_qnames) == 31, f"Expected 31 global unique qnames, got {len(global_candidate_qnames)}"
+    assert len(global_changed_qnames) == 15, f"Expected 15 global changed qnames, got {len(global_changed_qnames)}"
+    assert len(global_unchanged_qnames) == 16, f"Expected 16 global unchanged qnames, got {len(global_unchanged_qnames)}"
     assert integrity_ok, "Integrity case GRD-INT-001 failed production pipeline assertions"
 
 
