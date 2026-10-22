@@ -106,6 +106,8 @@ class GitRepo:
             return GitError("ambiguous_merge_base", text or "ambiguous merge base")
         if "not a git repository" in lower:
             return GitError("internal_fault", text or "not a git repository")
+        if "unable to read" in lower or "corrupt" in lower:
+            return GitError("provenance_integrity_error", text or "provenance integrity error")
         if "bad object" in lower or "not a valid object" in lower or "unknown revision" in lower:
             return GitError("missing_git_object", text or "missing git object")
         return GitError("missing_git_object", text or f"git exited {result.returncode}")
