@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-
 from verifyci.checks.base import CheckContext, gap, make_finding, make_result
 from verifyci.contracts.model import (
     CheckResult,
     Coverage,
     EvidenceKind,
     Outcome,
+    WitnessLevel,
 )
 from verifyci.contracts.names import path_matches_any, symbol_matches_any
 
@@ -40,41 +40,43 @@ def run(context: CheckContext) -> CheckResult:
     for path, rule_ids in sorted(path_matches.items()):
         entry = next((e for e in context.entries if path in e.changed_paths), None)
         ordered_rules = sorted(rule_ids)
+        primary_rule_id = ordered_rules[0]
+        is_binary = entry.is_binary if entry else False
+        witness_level = WitnessLevel.NONE if is_binary else WitnessLevel.SOURCE
         payload = {
-            "identity": {
-                "rule_ids": ordered_rules,
-                "path": path,
-                "base_blob": entry.base_blob if entry else None,
-                "head_blob": entry.head_blob if entry else None,
-                "hunks": [h.to_dict() for h in (entry.hunks if entry else ())],
-            },
+            "primary_rule_id": primary_rule_id,
+            "matched_rule_ids": ordered_rules,
             "rule_ids": ordered_rules,
-            "rule_reasons": {rule_id: rules[rule_id].get("reason", "") for rule_id in ordered_rules},
-            "path": path,
+            "matched_subject": path,
+            "matched_kind": "path",
             "base_blob": entry.base_blob if entry else None,
             "head_blob": entry.head_blob if entry else None,
-            "hunks": [h.to_dict() for h in (entry.hunks if entry else ())],
         }
+        message = (
+            f"Changed binary path {path} matches active deny_changes rule {primary_rule_id}"
+            if is_binary
+            else f"Changed path {path} matches active deny_changes rule {primary_rule_id}"
+        )
         findings.append(
             make_finding(
                 context=context,
                 check_id="grounding",
                 defect_id="GRD-UNGROUNDED-EDIT",
                 subject={
+                    "file": path,
                     "path": path,
+                    "kind": "path",
                     "symbol": "",
-                    "hunk": (entry.hunks[0].to_dict() if entry and entry.hunks else None),
+                    "entity": "",
                 },
                 premises={
                     "rule_ids": ordered_rules,
-                    "rule_reasons": payload["rule_reasons"],
+                    "rule_reasons": {rule_id: rules[rule_id].get("reason", "") for rule_id in ordered_rules},
                 },
                 evidence_kind=EvidenceKind.PROVENANCE,
                 evidence_payload=payload,
-                message=(
-                    f"change to {path} is prohibited by deny_changes."
-                    + ", deny_changes.".join(ordered_rules)
-                ),
+                witness_level=witness_level,
+                message=message,
                 remediation=(
                     "Remove this change, or obtain code-owner review and update the "
                     "policy through a separate target-branch policy change."
@@ -83,14 +85,18 @@ def run(context: CheckContext) -> CheckResult:
         )
     for symbol, rule_ids in sorted(symbol_matches.items()):
         entity = context.scope.entity(symbol)
+        file_path = entity.file_path if entity else ""
+        entry = next((e for e in context.entries if file_path in e.changed_paths), None)
         ordered_rules = sorted(rule_ids)
+        primary_rule_id = ordered_rules[0]
         payload = {
-            "identity": {"rule_ids": ordered_rules, "symbol": symbol},
+            "primary_rule_id": primary_rule_id,
+            "matched_rule_ids": ordered_rules,
             "rule_ids": ordered_rules,
-            "rule_reasons": {rule_id: rules[rule_id].get("reason", "") for rule_id in ordered_rules},
-            "symbol": symbol,
-            "path": entity.file_path if entity else "",
-            "blob": None,
+            "matched_subject": symbol,
+            "matched_kind": "symbol",
+            "base_blob": entry.base_blob if entry else None,
+            "head_blob": entry.head_blob if entry else None,
         }
         findings.append(
             make_finding(
@@ -98,20 +104,20 @@ def run(context: CheckContext) -> CheckResult:
                 check_id="grounding",
                 defect_id="GRD-UNGROUNDED-EDIT",
                 subject={
-                    "path": entity.file_path if entity else "",
+                    "file": file_path,
+                    "path": file_path,
+                    "kind": "symbol",
                     "symbol": symbol,
-                    "hunk": None,
+                    "entity": symbol,
                 },
                 premises={
                     "rule_ids": ordered_rules,
-                    "rule_reasons": payload["rule_reasons"],
+                    "rule_reasons": {rule_id: rules[rule_id].get("reason", "") for rule_id in ordered_rules},
                 },
                 evidence_kind=EvidenceKind.PROVENANCE,
                 evidence_payload=payload,
-                message=(
-                    f"change to symbol {symbol} is prohibited by deny_changes."
-                    + ", deny_changes.".join(ordered_rules)
-                ),
+                witness_level=WitnessLevel.SOURCE,
+                message=f"Changed entity {symbol} matches active deny_changes rule {primary_rule_id}",
                 remediation=(
                     "Remove this change, or obtain code-owner review and update the "
                     "policy through a separate target-branch policy change."
@@ -120,42 +126,57 @@ def run(context: CheckContext) -> CheckResult:
         )
 
     gaps = []
-    other_text: list[dict[str, object]] = []
-    symbol_rules = any(rule.get("symbols") for rule in rules.values())
-    if symbol_rules:
-        for item in context.scope.unmapped_hunks:
-            path = str(item.get("path") or "")
-            facts = _fact_for_path(context, path)
-            if (
-                facts is not None
-                and facts.supported
-                and facts.language in {"python", "typescript", "javascript"}
-            ):
-                # Module-level and other non-entity edits are still grounded as
-                # other_text with hunk provenance; they are not symbol edits.
-                other_text.append(dict(item))
-            elif facts is not None and not facts.supported:
-                gaps.append(
-                    gap(
-                        "unsupported_language",
-                        {
-                            "check_id": "grounding",
-                            "path": path,
-                            "language": facts.language,
-                            "parse_error": facts.parse_error,
-                        },
-                    )
-                )
+    for item in context.scope.unmapped_hunks:
+        path = str(item.get("path") or item.get("file") or "")
+        code = str(item.get("reason_code") or "mapping_unresolved")
+        gaps.append(
+            gap(
+                code,
+                {
+                    "check_id": "grounding",
+                    "path": path,
+                    "hunk": item.get("hunk"),
+                },
+            )
+        )
+
+    other_text = [
+        dict(h) for h in context.scope.mapped_hunks if h.get("mapped_entity") == "other_text"
+    ]
+
+    vendored = context.policy.path_classes.get("vendored", ()) if context.policy.path_classes else ()
+    generated = context.policy.path_classes.get("generated", ()) if context.policy.path_classes else ()
+    excluded_classes = tuple(vendored) + tuple(generated)
+    excluded_paths = [
+        p for p in changed_paths
+        if path_matches_any(excluded_classes, p)
+    ]
+    all_excluded = bool(changed_paths and len(excluded_paths) == len(changed_paths))
 
     if findings:
         outcome = Outcome.FAIL
+        coverage = Coverage.COMPLETE
     elif gaps:
         outcome = Outcome.INCONCLUSIVE
-    elif not context.entries:
+        coverage = Coverage.PARTIAL
+    elif not context.entries or (all_excluded and not rules):
         outcome = Outcome.NOT_APPLICABLE
+        coverage = Coverage.COMPLETE
     else:
         outcome = Outcome.PASS
-    coverage = Coverage.COMPLETE if not gaps else Coverage.PARTIAL
+        coverage = Coverage.COMPLETE
+
+    if outcome == Outcome.NOT_APPLICABLE and all_excluded:
+        applicability_evidence = {
+            "applicable_deny_rules": [],
+            "excluded_paths": sorted(excluded_paths),
+        }
+    else:
+        applicability_evidence = {
+            "deny_changes": sorted(rules),
+            "changed_entries": len(context.entries),
+        }
+
     return make_result(
         context=context,
         check_id="grounding",
@@ -169,17 +190,14 @@ def run(context: CheckContext) -> CheckResult:
         },
         scope_enumeration={
             "complete": not gaps,
-            "unmapped_hunks": len(context.scope.unmapped_hunks) if symbol_rules else 0,
+            "unmapped_hunks": len(context.scope.unmapped_hunks),
         },
         candidate_discovery={
             "complete": True,
             "candidate_paths": len(changed_paths),
             "candidate_symbols": len(changed_symbols),
         },
-        applicability_evidence={
-            "deny_changes": sorted(rules),
-            "changed_entries": len(context.entries),
-        },
+        applicability_evidence=applicability_evidence,
         reason_codes=tuple(sorted({g.reason_code for g in gaps})),
         coverage_gaps=gaps,
         findings=findings,
@@ -187,6 +205,9 @@ def run(context: CheckContext) -> CheckResult:
             [{"code": "rename_limit_exceeded"}] if context.rename_limit_exceeded else []
         ),
     )
+
+
+__all__ = ["run"]
 
 
 __all__ = ["run"]

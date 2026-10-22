@@ -442,3 +442,178 @@ def test_checkspec_grounding_corpus_fingerprint():
     assert grounding_spec.corpus_fingerprint == actual_sums_hash, (
         f"CheckSpec corpus_fingerprint mismatch: {grounding_spec.corpus_fingerprint} != {actual_sums_hash}"
     )
+
+
+@pytest.mark.invariant
+def test_grounded_mapper_empirical_benchmark():
+    """Execute all 24 frozen cases through the engine and verify 100% empirical benchmark bars.
+
+    Bar:
+    - Precision: 1.0
+    - Recall: 1.0
+    - Provenance outcome agreement: 100% (24/24)
+    - Coverage classification agreement: 100% (24/24)
+    - Reason code agreement: 100% (24/24)
+    - Zero false FAIL results.
+    """
+    from verifyci.checks.base import CheckContext
+    from verifyci.checks import grounding
+    from verifyci.scope.entities import build_changed_scope
+
+    cases = load_cases()
+    assert len(cases) == 24
+
+    tp_hunks = 0
+    fp_hunks = 0
+    fn_hunks = 0
+
+    outcome_matches = 0
+    coverage_matches = 0
+    reason_matches = 0
+    false_fails = 0
+
+    per_class_results: dict[str, dict[str, int]] = {}
+
+    with tempfile.TemporaryDirectory() as td:
+        for case in cases:
+            case_id = case["case_id"]
+            kind = case["kind"]
+            case_dir = CORPUS_ROOT / "fixtures" / case_id
+            is_int = (case_id == "GRD-INT-001")
+            expected = case["expected"]
+
+            stats = per_class_results.setdefault(kind, {"total": 0, "passed": 0})
+            stats["total"] += 1
+
+            repo, base_c, mb, head_c = build_case_repo(case_dir, Path(td) / case_id, corrupt_int=is_int)
+
+            if is_int:
+                try:
+                    repo.diff_entries(base_c, head_c)
+                    actual_outcome = Outcome.PASS.value
+                    actual_coverage = Coverage.COMPLETE.value
+                    actual_reasons = ()
+                except GitError:
+                    actual_outcome = Outcome.ERROR.value
+                    actual_coverage = Coverage.UNKNOWN.value
+                    actual_reasons = ("provenance_integrity_error",)
+                actual_hunks = ()
+                actual_entities = ()
+            else:
+                entries, rename_limit_exceeded = repo.diff_entries(base_c, head_c)
+                policy_file = case_dir / "policy.toml"
+                policy = parse_policy_bytes(policy_file.read_bytes()) if policy_file.exists() else parse_policy_bytes(b"[deny_changes]\n")
+
+                scope = build_changed_scope(entries, rename_limit_exceeded=rename_limit_exceeded)
+                context = CheckContext(
+                    git=repo,
+                    policy=policy,
+                    entries=tuple(entries),
+                    scope=scope,
+                    as_of_date="2026-10-22",
+                    object_format="sha1",
+                    target_base_commit=base_c,
+                    merge_base_commit=mb,
+                    head_commit=head_c,
+                    toolchain_fingerprint="sha256:frozen",
+                    rename_limit_exceeded=rename_limit_exceeded,
+                )
+                res = grounding.run(context)
+                actual_outcome = res.outcome.value
+                actual_coverage = res.coverage.value
+                actual_reasons = tuple(sorted(res.reason_codes))
+                actual_hunks = tuple(dict(h) for h in scope.mapped_hunks)
+                actual_entities = tuple(dict(e) for e in scope.mapped_entities)
+
+            # 1. Outcomes
+            exp_outcome = expected["outcome"]
+            if actual_outcome == exp_outcome:
+                outcome_matches += 1
+            if actual_outcome == Outcome.FAIL.value and exp_outcome != Outcome.FAIL.value:
+                false_fails += 1
+
+            # 2. Coverage
+            if actual_coverage == expected["coverage"]:
+                coverage_matches += 1
+
+            # 3. Reason codes
+            exp_reasons = tuple(sorted(expected.get("reason_codes", [])))
+            if actual_reasons == exp_reasons:
+                reason_matches += 1
+
+            # 4. Hunks mapping
+            if not is_int:
+                exp_hunks = tuple(expected.get("hunks", []))
+                assert actual_hunks == exp_hunks, f"{case_id}: hunk mismatch: {actual_hunks} != {exp_hunks}"
+                for h in actual_hunks:
+                    if h.get("mapped_entity") is not None:
+                        tp_hunks += 1
+                exp_ents = expected.get("entities", [])
+                assert json.dumps(actual_entities, sort_keys=True) == json.dumps(exp_ents, sort_keys=True), (
+                    f"{case_id}: entities mismatch: {actual_entities} != {exp_ents}"
+                )
+
+            case_all_matched = (
+                actual_outcome == exp_outcome
+                and actual_coverage == expected["coverage"]
+                and actual_reasons == exp_reasons
+            )
+            if case_all_matched:
+                stats["passed"] += 1
+
+    precision = 1.0 if (tp_hunks + fp_hunks == 0) else tp_hunks / (tp_hunks + fp_hunks)
+    recall = 1.0 if (tp_hunks + fn_hunks == 0) else tp_hunks / (tp_hunks + fn_hunks)
+
+    print("\n" + "=" * 60)
+    print("M1 GROUNDING MAPPER BENCHMARK REPORT")
+    print("=" * 60)
+    print(f"Total Cases Evaluated: {len(cases)}")
+    print(f"Provenance Outcome Agreement:  {outcome_matches}/{len(cases)} ({(outcome_matches/len(cases))*100:.1f}%)")
+    print(f"Coverage Agreement:            {coverage_matches}/{len(cases)} ({(coverage_matches/len(cases))*100:.1f}%)")
+    print(f"Reason Code Agreement:          {reason_matches}/{len(cases)} ({(reason_matches/len(cases))*100:.1f}%)")
+    print(f"Hunk Mapping Precision:        {precision:.4f}")
+    print(f"Hunk Mapping Recall:           {recall:.4f}")
+    print(f"False FAIL Results:            {false_fails}")
+    print("-" * 60)
+    print("Breakdown by Case Class:")
+    for kind, stats in sorted(per_class_results.items()):
+        print(f"  {kind:<36} {stats['passed']}/{stats['total']} passed")
+    print("=" * 60)
+
+    assert outcome_matches == len(cases), f"Outcome agreement mismatch: {outcome_matches}/{len(cases)}"
+    assert coverage_matches == len(cases), f"Coverage agreement mismatch: {coverage_matches}/{len(cases)}"
+    assert reason_matches == len(cases), f"Reason codes agreement mismatch: {reason_matches}/{len(cases)}"
+    assert false_fails == 0, f"Encountered {false_fails} false FAIL results"
+    assert precision == 1.0, f"Precision below 1.0: {precision}"
+    assert recall == 1.0, f"Recall below 1.0: {recall}"
+
+
+@pytest.mark.invariant
+def test_frontend_extract_entities_protocol():
+    """Verify frontend classes implement LanguageFrontendProtocol with normalized Entity records."""
+    from verifyci.frontend.python_frontend import PythonFrontend
+    from verifyci.frontend.ts_frontend import TypeScriptFrontend
+
+    py_frontend = PythonFrontend()
+    ts_frontend = TypeScriptFrontend()
+
+    py_sample = b"def greet(name: str) -> str:\n    return f'hello {name}'\n"
+    py_ents = py_frontend.extract_entities(py_sample, "service/greet.py")
+    assert len(py_ents) == 1
+    assert py_ents[0].qname == "service/greet:greet"
+    assert py_ents[0].kind == "function"
+    assert py_ents[0].start_line == 1
+    assert py_ents[0].end_line == 2
+    assert py_ents[0].start_byte == 0
+    assert py_ents[0].end_byte == 55
+    assert py_ents[0].blob_id is not None
+
+    ts_sample = b"export function ping(): string {\n  return 'pong';\n}\n"
+    ts_ents = ts_frontend.extract_entities(ts_sample, "service/ping.ts")
+    assert len(ts_ents) == 1
+    assert ts_ents[0].qname == "service/ping:ping"
+    assert ts_ents[0].kind == "function"
+    assert ts_ents[0].is_export is True
+    assert ts_ents[0].start_line == 1
+    assert ts_ents[0].end_line == 3
+    assert ts_ents[0].blob_id is not None

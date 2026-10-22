@@ -158,7 +158,12 @@ class Entity:
     kind: str
     start_line: int
     end_line: int
-    body_digest: str
+    body_digest: str = ""
+    start_col: int = 0
+    end_col: int = 0
+    start_byte: int = 0
+    end_byte: int = 0
+    blob_id: str | None = None
     is_export: bool = False
     is_async: bool = False
     signature_digest: str = ""
@@ -168,6 +173,17 @@ class Entity:
     def overlaps(self, start: int, end: int) -> bool:
         return self.start_line <= end and start <= self.end_line
 
+    @property
+    def span(self) -> dict[str, int]:
+        return {
+            "start_byte": self.start_byte,
+            "end_byte": self.end_byte,
+            "start_line": self.start_line,
+            "start_col": self.start_col,
+            "end_line": self.end_line,
+            "end_col": self.end_col,
+        }
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "file": self.file_path,
@@ -175,6 +191,11 @@ class Entity:
             "kind": self.kind,
             "start_line": self.start_line,
             "end_line": self.end_line,
+            "start_col": self.start_col,
+            "end_col": self.end_col,
+            "start_byte": self.start_byte,
+            "end_byte": self.end_byte,
+            "blob_id": self.blob_id,
             "is_export": self.is_export,
             "is_async": self.is_async,
         }

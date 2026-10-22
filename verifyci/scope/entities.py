@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
-from hashlib import sha256
+from hashlib import sha1, sha256
 import re
 from typing import Any, Mapping, Sequence
 
 from verifyci.contracts.model import DiffEntry, Entity, Hunk
-from verifyci.contracts.names import normalize_module_name, qualify
+from verifyci.contracts.names import normalize_repo_path, qualify
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +77,39 @@ class SourceFacts:
 
 def _digest(value: str) -> str:
     return "sha256:" + sha256(value.encode("utf-8")).hexdigest()
+
+
+def git_blob_id(data: bytes) -> str:
+    h = sha1()
+    h.update(f"blob {len(data)}\0".encode("utf-8") + data)
+    return h.hexdigest()
+
+
+_PY_PARSER: Any = None
+_PY_PARSER_INITIALIZED: bool = False
+
+
+def _py_language() -> Any:
+    global _PY_PARSER, _PY_PARSER_INITIALIZED
+    if _PY_PARSER_INITIALIZED:
+        return _PY_PARSER
+    _PY_PARSER_INITIALIZED = True
+    try:
+        import tree_sitter_python as tp
+        from tree_sitter import Language, Parser
+
+        fn = getattr(tp, "language", None) or getattr(tp, "language_python", None)
+        if fn is not None:
+            _PY_PARSER = Parser(Language(fn()))
+    except Exception:
+        _PY_PARSER = None
+    return _PY_PARSER
+
+
+def _pos_to_byte(data: bytes, lineno: int, col: int) -> int:
+    lines = data.splitlines(keepends=True)
+    byte_offset = sum(len(line_bytes) for line_bytes in lines[:lineno - 1])
+    return byte_offset + col
 
 
 def _annotation(node: ast.AST | None) -> str:
@@ -198,9 +231,89 @@ def _python_entities(
     tree: ast.Module,
     source_roots: Sequence[str],
 ) -> tuple[Entity, ...]:
-    module = normalize_module_name(path, source_roots)
-    entities: list[Entity] = []
+    source_bytes = source.encode("utf-8")
+    blob_id = git_blob_id(source_bytes)
+    module = normalize_repo_path(path).rsplit(".", 1)[0]
     exports = _collect_all(tree)
+
+    ts_parser = _py_language()
+    if ts_parser is not None:
+        try:
+            ts_tree = ts_parser.parse(source_bytes)
+            ast_nodes: dict[str, Any] = {}
+
+            def map_ast(node: ast.AST, parent_qual: str) -> None:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    qname = f"{parent_qual}.{node.name}" if parent_qual else node.name
+                    ast_nodes[qname] = node
+                    for child in ast.iter_child_nodes(node):
+                        map_ast(child, qname)
+                    return
+                for child in ast.iter_child_nodes(node):
+                    map_ast(child, parent_qual)
+
+            map_ast(tree, "")
+            entities: list[Entity] = []
+
+            def walk_ts(node: Any, parent_qual: str) -> None:
+                name = ""
+                kind = ""
+                if node.type in ("function_definition", "class_definition"):
+                    name_node = next((c for c in node.children if c.type == "identifier"), None)
+                    if name_node:
+                        name = name_node.text.decode("utf-8")
+                        kind = "class" if node.type == "class_definition" else "function"
+                if name and kind:
+                    qname = f"{parent_qual}.{name}" if parent_qual else name
+                    span_node = node.parent if (node.parent and node.parent.type == "decorated_definition") else node
+                    ast_node = ast_nodes.get(qname)
+                    params = _function_params(ast_node) if ast_node and isinstance(ast_node, (ast.FunctionDef, ast.AsyncFunctionDef)) else ()
+                    is_async = any(c.type == "async" for c in node.children) or bool(ast_node and isinstance(ast_node, ast.AsyncFunctionDef))
+                    top_level = "." not in qname
+                    is_export = bool(
+                        (top_level and not name.startswith("_"))
+                        or name in exports
+                        or (top_level and name in exports)
+                    )
+                    body = ast.dump(ast_node, annotate_fields=False, include_attributes=False) if ast_node else ""
+                    signature = {
+                        "params": [p.to_dict() for p in params],
+                        "returns": _annotation(ast_node.returns) if ast_node and not isinstance(ast_node, ast.ClassDef) else "",
+                        "async": is_async,
+                        "decorators": list(_decorator_names(ast_node)) if ast_node else [],
+                    }
+                    entities.append(
+                        Entity(
+                            file_path=path,
+                            qname=qualify(module, qname),
+                            kind=kind,
+                            start_line=span_node.start_point.row + 1,
+                            end_line=span_node.end_point.row + 1,
+                            start_col=span_node.start_point.column,
+                            end_col=span_node.end_point.column,
+                            start_byte=span_node.start_byte,
+                            end_byte=span_node.end_byte,
+                            blob_id=blob_id,
+                            body_digest=_digest(body),
+                            is_export=is_export,
+                            is_async=is_async,
+                            signature_digest=_digest(repr(signature)),
+                            parameters=tuple((p.name, p.kind, p.has_default) for p in params),
+                            returns=_annotation(ast_node.returns) if ast_node and not isinstance(ast_node, ast.ClassDef) else "",
+                        )
+                    )
+                    for child in node.children:
+                        walk_ts(child, qname)
+                    return
+                for child in node.children:
+                    walk_ts(child, parent_qual)
+
+            walk_ts(ts_tree.root_node, "")
+            return tuple(entities)
+        except Exception:
+            pass
+
+    entities = []
 
     def walk(node: ast.AST, parent_qual: str, in_function: bool) -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -227,13 +340,22 @@ def _python_entities(
                 or name in exports
                 or (top_level and name in exports)
             )
+            s_line = getattr(node, "lineno", 1)
+            e_line = getattr(node, "end_lineno", s_line)
+            s_col = getattr(node, "col_offset", 0)
+            e_col = getattr(node, "end_col_offset", 0)
             entities.append(
                 Entity(
                     file_path=path,
                     qname=qualify(module, qname),
                     kind=kind,
-                    start_line=getattr(node, "lineno", 1),
-                    end_line=getattr(node, "end_lineno", getattr(node, "lineno", 1)),
+                    start_line=s_line,
+                    end_line=e_line,
+                    start_col=s_col,
+                    end_col=e_col,
+                    start_byte=_pos_to_byte(source_bytes, s_line, s_col),
+                    end_byte=_pos_to_byte(source_bytes, e_line, e_col),
+                    blob_id=blob_id,
                     body_digest=_digest(body),
                     is_export=is_export,
                     is_async=isinstance(node, ast.AsyncFunctionDef),
@@ -317,15 +439,18 @@ def _ts_language(language: str) -> Any:
         if language == "typescript":
             import tree_sitter_typescript as ts
 
-            capsule = getattr(ts, "language_typescript", ts.language)()
+            fn = getattr(ts, "language_typescript", None) or getattr(ts, "language", None)
+            capsule = fn()
         elif language == "tsx":
             import tree_sitter_typescript as ts
 
-            capsule = getattr(ts, "language_tsx", ts.language)()
+            fn = getattr(ts, "language_tsx", None) or getattr(ts, "language", None)
+            capsule = fn()
         else:
             import tree_sitter_javascript as js
 
-            capsule = js.language()
+            fn = getattr(js, "language", None)
+            capsule = fn()
         from tree_sitter import Language, Parser
 
         result = Parser(Language(capsule))
@@ -380,11 +505,13 @@ def _ts_entities(path: str, source: str) -> tuple[Entity, ...] | None:
     parser = _ts_language(language)
     if parser is None:
         return None
+    source_bytes = source.encode("utf-8")
     try:
-        tree = parser.parse(source.encode("utf-8"))
+        tree = parser.parse(source_bytes)
     except Exception:
         return None
-    module = path.rsplit(".", 1)[0]
+    module = normalize_repo_path(path).rsplit(".", 1)[0]
+    blob_id = git_blob_id(source_bytes)
     entities: list[Entity] = []
 
     def walk(node: Any, parent_class: str = "") -> None:
@@ -392,7 +519,7 @@ def _ts_entities(path: str, source: str) -> tuple[Entity, ...] | None:
         kind = ""
         if node.type in ("function_declaration", "class_declaration", "interface_declaration", "method_definition"):
             name = _ts_name(node)
-            kind = "class" if node.type == "class_declaration" else ("interface" if node.type == "interface_declaration" else "function")
+            kind = "class" if node.type == "class_declaration" else ("interface" if node.type == "interface_declaration" else ("method" if node.type == "method_definition" else "function"))
         elif node.type in ("lexical_declaration", "variable_declaration"):
             # Find the first declarator with a function/arrow initializer.
             for child in node.children:
@@ -404,17 +531,17 @@ def _ts_entities(path: str, source: str) -> tuple[Entity, ...] | None:
                         break
         if name and kind:
             qname = f"{parent_class}.{name}" if parent_class else name
-            start = node.start_point.row + 1
-            end = node.end_point.row + 1
-            is_export = False
-            p = node.parent
-            while p is not None:
-                if p.type == "export_statement":
-                    is_export = True
-                    break
-                p = p.parent
-            text = _node_text(node)
+            is_export = (node.parent and node.parent.type == "export_statement") or name == "default"
+            span_node = node.parent if (node.parent and node.parent.type == "export_statement") else node
+            start = span_node.start_point.row + 1
+            end = span_node.end_point.row + 1
+            start_col = span_node.start_point.column
+            end_col = span_node.end_point.column
+            start_byte = span_node.start_byte
+            end_byte = span_node.end_byte
+            text = _node_text(span_node)
             params = _ts_signature(node)
+            is_async = "async" in text.split("{", 1)[0] if "{" in text else "async" in text
             entities.append(
                 Entity(
                     file_path=path,
@@ -422,9 +549,14 @@ def _ts_entities(path: str, source: str) -> tuple[Entity, ...] | None:
                     kind=kind,
                     start_line=start,
                     end_line=end,
+                    start_col=start_col,
+                    end_col=end_col,
+                    start_byte=start_byte,
+                    end_byte=end_byte,
+                    blob_id=blob_id,
                     body_digest=_digest(text),
-                    is_export=is_export or name == "default",
-                    is_async="async" in text.split("{", 1)[0],
+                    is_export=is_export,
+                    is_async=is_async,
                     signature_digest=_digest(repr(params)),
                     parameters=params,
                 )
@@ -521,6 +653,72 @@ def analyze_source(path: str, source: str, source_roots: Sequence[str] = ()) -> 
     return SourceFacts(path=path, language=suffix or "unknown", supported=False, parse_error="unsupported language frontend")
 
 
+def _is_safe_constant_value(node: ast.AST) -> bool:
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return all(_is_safe_constant_value(elt) for elt in node.elts)
+    if isinstance(node, ast.Dict):
+        return all(
+            (k is None or _is_safe_constant_value(k)) and _is_safe_constant_value(v)
+            for k, v in zip(node.keys, node.values)
+        )
+    if isinstance(node, ast.Call):
+        callee = _callee_name(node.func)
+        if callee in {"Path", "pathlib.Path", "int", "float", "str", "bool", "tuple", "list", "dict", "set", "frozenset"}:
+            return all(_is_safe_constant_value(arg) for arg in node.args)
+        return False
+    if isinstance(node, ast.UnaryOp):
+        return _is_safe_constant_value(node.operand)
+    if isinstance(node, ast.BinOp):
+        return _is_safe_constant_value(node.left) and _is_safe_constant_value(node.right)
+    return False
+
+
+def is_safe_module_construct(source: str, start_line: int, end_line: int) -> bool:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    for stmt in tree.body:
+        s_start = getattr(stmt, "lineno", 1)
+        s_end = getattr(stmt, "end_lineno", s_start)
+        if s_end < start_line or s_start > end_line:
+            continue
+        if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            continue
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(stmt, ast.Assign) and _is_safe_constant_value(stmt.value):
+            continue
+        if isinstance(stmt, ast.AnnAssign) and (stmt.value is None or _is_safe_constant_value(stmt.value)):
+            continue
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+            continue
+        return False
+    return True
+
+
+def find_matching_entity(entities: Sequence[Entity], start_line: int, count: int) -> Entity | None:
+    if count <= 0:
+        return None
+    end_line = start_line + count - 1
+    overlapping = [
+        e for e in entities
+        if not (end_line < e.start_line or start_line > e.end_line)
+    ]
+    if not overlapping:
+        return None
+    overlapping.sort(key=lambda e: (e.end_line - e.start_line, -len(e.qname)))
+    return overlapping[0]
+
+
+def extract_entities(source: bytes | str, path: str, source_roots: Sequence[str] = ()) -> tuple[Entity, ...]:
+    src_str = source.decode("utf-8", "replace") if isinstance(source, bytes) else source
+    facts = analyze_source(path, src_str, source_roots)
+    return facts.entities
+
+
 @dataclass(frozen=True, slots=True)
 class ChangedScope:
     base_facts: Mapping[str, SourceFacts]
@@ -530,6 +728,8 @@ class ChangedScope:
     head_entities: frozenset[str]
     unmapped_hunks: tuple[Mapping[str, Any], ...] = ()
     rename_limit_exceeded: bool = False
+    mapped_hunks: tuple[Mapping[str, Any], ...] = ()
+    mapped_entities: tuple[Mapping[str, Any], ...] = ()
 
     def entity(self, qname: str) -> Entity | None:
         for facts in self.head_facts.values():
@@ -555,6 +755,9 @@ def build_changed_scope(
     base_entities: set[str] = set()
     head_entities: set[str] = set()
     unmapped: list[dict[str, Any]] = []
+    mapped_hunks: list[dict[str, Any]] = []
+    entity_changes: dict[str, dict[str, Any]] = {}
+
     for entry in entries:
         if entry.base_path and not entry.is_binary and not entry.is_submodule:
             bf = analyze_source(entry.base_path, entry.base_source, source_roots)
@@ -564,27 +767,199 @@ def build_changed_scope(
             hf = analyze_source(entry.head_path, entry.head_source, source_roots)
             head_facts[entry.head_path] = hf
             head_entities.update(e.qname for e in hf.entities)
+
         if entry.is_binary or entry.is_submodule:
             continue
         if not entry.hunks:
-            # Rename-only or mode-only changes do not alter entity bodies.
             continue
-        base_map = base_facts.get(entry.base_path)
-        head_map = head_facts.get(entry.head_path)
+
+        path = entry.head_path or entry.base_path
+        bf = base_facts.get(entry.base_path)
+        hf = head_facts.get(entry.head_path)
+
+        # Check for parse errors
+        parse_err = (bf and bf.parse_error) or (hf and hf.parse_error)
+        if parse_err:
+            for hunk in entry.hunks:
+                unmapped.append(
+                    {
+                        "path": path,
+                        "hunk": hunk.to_dict(),
+                        "reason_code": "parse_error",
+                    }
+                )
+                mapped_hunks.append(
+                    {
+                        "file": path,
+                        "old_start": hunk.old_start,
+                        "old_count": hunk.old_count,
+                        "new_start": hunk.new_start,
+                        "new_count": hunk.new_count,
+                        "mapped_entity": None,
+                    }
+                )
+            continue
+
+        # Check for unsupported languages
+        unsupported = (bf and not bf.supported) or (hf and not hf.supported)
+        if unsupported:
+            for hunk in entry.hunks:
+                unmapped.append(
+                    {
+                        "path": path,
+                        "hunk": hunk.to_dict(),
+                        "reason_code": "unsupported_language",
+                    }
+                )
+                mapped_hunks.append(
+                    {
+                        "file": path,
+                        "old_start": hunk.old_start,
+                        "old_count": hunk.old_count,
+                        "new_start": hunk.new_start,
+                        "new_count": hunk.new_count,
+                        "mapped_entity": None,
+                    }
+                )
+            continue
+
+        sfx = path.rsplit(".", 1)[-1].lower()
+        if sfx not in ("py", "ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"):
+            for hunk in entry.hunks:
+                mapped_hunks.append(
+                    {
+                        "file": path,
+                        "old_start": hunk.old_start,
+                        "old_count": hunk.old_count,
+                        "new_start": hunk.new_start,
+                        "new_count": hunk.new_count,
+                        "mapped_entity": path,
+                    }
+                )
+            continue
+
+        b_ents = bf.entities if bf else ()
+        h_ents = hf.entities if hf else ()
+        b_by_qname = {e.qname: e for e in b_ents}
+
         for hunk in entry.hunks:
-            matched_base = _overlapping(base_map, hunk.old_start, hunk.old_end()) if base_map else []
-            matched_head = _overlapping(head_map, hunk.new_start, hunk.new_end()) if head_map else []
-            matched = set(matched_base) | set(matched_head)
-            if matched:
-                changed.update(matched)
+            m_base = find_matching_entity(b_ents, hunk.old_start, hunk.old_count)
+            m_head = find_matching_entity(h_ents, hunk.new_start, hunk.new_count)
+
+            if m_base is not None and m_head is not None and m_base.qname == m_head.qname:
+                qname = m_head.qname
+                changed.add(qname)
+                entity_changes[qname] = {"change": "modified", "base_e": m_base, "head_e": m_head}
+                mapped_hunks.append(
+                    {
+                        "file": path,
+                        "old_start": hunk.old_start,
+                        "old_count": hunk.old_count,
+                        "new_start": hunk.new_start,
+                        "new_count": hunk.new_count,
+                        "mapped_entity": qname,
+                    }
+                )
+            elif m_base is None and m_head is not None:
+                qname = m_head.qname
+                changed.add(qname)
+                if qname in b_by_qname:
+                    entity_changes[qname] = {"change": "modified", "base_e": b_by_qname[qname], "head_e": m_head}
+                else:
+                    entity_changes[qname] = {"change": "added", "base_e": None, "head_e": m_head}
+                mapped_hunks.append(
+                    {
+                        "file": path,
+                        "old_start": hunk.old_start,
+                        "old_count": hunk.old_count,
+                        "new_start": hunk.new_start,
+                        "new_count": hunk.new_count,
+                        "mapped_entity": qname,
+                    }
+                )
+            elif m_base is not None and m_head is None:
+                qname = m_base.qname
+                changed.add(qname)
+                entity_changes[qname] = {"change": "removed", "base_e": m_base, "head_e": None}
+                mapped_hunks.append(
+                    {
+                        "file": path,
+                        "old_start": hunk.old_start,
+                        "old_count": hunk.old_count,
+                        "new_start": hunk.new_start,
+                        "new_count": hunk.new_count,
+                        "mapped_entity": qname,
+                    }
+                )
+            elif m_base is None and m_head is None:
+                if sfx == "py" and is_safe_module_construct(entry.head_source, hunk.new_start, hunk.new_start + max(hunk.new_count, 1) - 1):
+                    mapped_hunks.append(
+                        {
+                            "file": path,
+                            "old_start": hunk.old_start,
+                            "old_count": hunk.old_count,
+                            "new_start": hunk.new_start,
+                            "new_count": hunk.new_count,
+                            "mapped_entity": "other_text",
+                        }
+                    )
+                else:
+                    unmapped.append(
+                        {
+                            "path": path,
+                            "hunk": hunk.to_dict(),
+                            "reason_code": "mapping_unresolved",
+                        }
+                    )
+                    mapped_hunks.append(
+                        {
+                            "file": path,
+                            "old_start": hunk.old_start,
+                            "old_count": hunk.old_count,
+                            "new_start": hunk.new_start,
+                            "new_count": hunk.new_count,
+                            "mapped_entity": None,
+                        }
+                    )
             else:
                 unmapped.append(
                     {
-                        "path": entry.head_path or entry.base_path,
+                        "path": path,
                         "hunk": hunk.to_dict(),
                         "reason_code": "mapping_unresolved",
                     }
                 )
+                mapped_hunks.append(
+                    {
+                        "file": path,
+                        "old_start": hunk.old_start,
+                        "old_count": hunk.old_count,
+                        "new_start": hunk.new_start,
+                        "new_count": hunk.new_count,
+                        "mapped_entity": None,
+                    }
+                )
+
+    entities_out = []
+    for qname, info in sorted(entity_changes.items()):
+        be = info["base_e"]
+        he = info["head_e"]
+        ent_ref = he or be
+        item = {
+            "base_blob": be.blob_id if be else None,
+            "base_span": be.span if be else None,
+            "change": info["change"],
+            "head_blob": he.blob_id if he else None,
+            "head_span": he.span if he else None,
+            "kind": ent_ref.kind,
+            "qname": qname,
+        }
+        if ent_ref.is_async:
+            item["is_async"] = True
+        if ent_ref.is_export and not ent_ref.file_path.endswith(".py"):
+            item["is_export"] = True
+        entities_out.append(item)
+
     return ChangedScope(
         base_facts=base_facts,
         head_facts=head_facts,
@@ -593,6 +968,8 @@ def build_changed_scope(
         head_entities=frozenset(head_entities),
         unmapped_hunks=tuple(unmapped),
         rename_limit_exceeded=rename_limit_exceeded,
+        mapped_hunks=tuple(mapped_hunks),
+        mapped_entities=tuple(entities_out),
     )
 
 
@@ -617,4 +994,8 @@ __all__ = [
     "analyze_typescript",
     "build_changed_scope",
     "changed_hunks",
+    "extract_entities",
+    "find_matching_entity",
+    "git_blob_id",
+    "is_safe_module_construct",
 ]
