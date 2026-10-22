@@ -1,0 +1,3 @@
+[deny_changes.protected_settings]
+paths = ["config/**", "sample.txt"]
+reason = "Configuration changes require a separate policy review."
