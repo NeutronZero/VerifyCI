@@ -210,7 +210,7 @@ def _fatal_bundle(
         target_drift=target_drift,
     )
     results = [
-        error_result(context=context, check_id=check_id, detail=detail, reason_code=code)
+        error_result(context=context, check_id=check_id, detail=detail, reason_code=code, diagnostic_code=code)
         for check_id in CHECK_ORDER
     ]
     verdict = aggregate(
@@ -519,6 +519,9 @@ def _augment_scope_with_repository(
         head_entities=head_entities,
         unmapped_hunks=scope.unmapped_hunks,
         rename_limit_exceeded=scope.rename_limit_exceeded,
+        mapped_hunks=scope.mapped_hunks,
+        mapped_entities=scope.mapped_entities,
+        renames=scope.renames,
     )
 
 

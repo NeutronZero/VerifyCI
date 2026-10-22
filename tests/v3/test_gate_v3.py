@@ -346,7 +346,7 @@ def test_accepted_coverage_gap_does_not_block(tmp_path):
         + 'created = "2026-10-01"\n'
         + 'expires = "2026-12-31"\n'
     )
-    root, base = _repo(tmp_path, {"app.py": "def f(a):\n    return a\n"}, policy=policy)
+    root, base = _repo(tmp_path, {"app.py": "def deco(fn):\n    return fn\n\ndef f(a):\n    return a\n"}, policy=policy)
     head = _commit(
         root,
         {"app.py": "def deco(fn):\n    return fn\n\n@deco\ndef f(a):\n    return a\n"},

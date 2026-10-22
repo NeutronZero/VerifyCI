@@ -82,6 +82,7 @@ _GROUNDING = CheckSpec(
     evidence_kinds=("provenance",),
     required_capabilities=(Capability.ENTITY_SPANS,),
     required_toolchain={"python": ">=3.12", "git": "plumbing", "tree-sitter": ">=0.25"},
+    corpus_fingerprint="sha256:6f3983639e641c3ac97a711844150b9ee530047db1f641bb6b4ea3926bf08f32",
     status="provisional",
     limitations=(
         "Python and TS/JS entity spans are enumerated; an unmapped hunk is an explicit coverage gap.",
