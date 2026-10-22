@@ -1,4 +1,4 @@
-5fef605f39232e0d7213231ec8cc817e7bf3243a87b7ed002ad64351b89b00d5  cases.jsonl
+b8fd75843271f427d7b228aeee268f2975e85e46273363745d128028945add20  cases.jsonl
 08bb5e5d6eaac1049ede0893d30ed022b1a4d9b5b48db414871f51c9cb35283d  fixtures/GRD-BIN-001/base/image.bin
 20b372210d5dbdc16965669cfd25d577d79576d5d6c8101f7663dc2ab8e0311e  fixtures/GRD-BIN-001/head/image.bin
 b480d9cbf2303e6c702c5d362a8ad6c80497d515df858c85f5014d0bd2a0e58d  fixtures/GRD-BIN-001/policy.toml
@@ -8,6 +8,9 @@ ac5b22486f8ffed8cea11143e151dedd8153414c893c0a1c168cb9e8bff9c5a4  fixtures/GRD-C
 cec5e78e7261fd02728a562f06df558949e4cbc5914f063301aae96b5d272581  fixtures/GRD-EXCL-001/base/vendor/sample.py
 acf37cbf93bcb7df84bf7f7f23ab368483b9b86d4e401442f63274b8d27640ce  fixtures/GRD-EXCL-001/head/vendor/sample.py
 0c32e065880fd0c3c3a302a1d89f3409dec3d86d6437573bd5e3ae3236a377a8  fixtures/GRD-EXCL-001/policy.toml
+085a46b71aeb2af919b0296028136263bb317844941744aeddbdd1493b0bf5a4  fixtures/GRD-INT-001/base/sample.py
+554673ea200a0767a0222be152ba51e80d69afc9246c90c4b6b6d74a4ab75843  fixtures/GRD-INT-001/head/sample.py
+b480d9cbf2303e6c702c5d362a8ad6c80497d515df858c85f5014d0bd2a0e58d  fixtures/GRD-INT-001/policy.toml
 f0a1960ab0716d9ca29e806fa88d3a6d6b3e9483b3737f7f05d82960e110dfea  fixtures/GRD-MAP-001/base/sample.py
 1dc4a99b25a9634d47bcfe5a37bb6fab245ab22455008abb53bccb789e57e562  fixtures/GRD-MAP-001/head/sample.py
 b480d9cbf2303e6c702c5d362a8ad6c80497d515df858c85f5014d0bd2a0e58d  fixtures/GRD-MAP-001/policy.toml
@@ -68,5 +71,5 @@ ac5b22486f8ffed8cea11143e151dedd8153414c893c0a1c168cb9e8bff9c5a4  fixtures/GRD-U
 71252aafd55f8de64c716835b2f40f6a32d132f4f6b442a6a1d7304e8de7a88f  fixtures/GRD-UNMAPPED-001/base/sample.py
 3db3a1f03a0455b647ee5576d797badf4d1a2e7bf58c26169d9f160dea92c3ad  fixtures/GRD-UNMAPPED-001/head/sample.py
 b480d9cbf2303e6c702c5d362a8ad6c80497d515df858c85f5014d0bd2a0e58d  fixtures/GRD-UNMAPPED-001/policy.toml
-7b18decd7570b4432947abd60646983ab57b3dc924c58a8f34bd99a8cfbe44b2  ORACLE_REVIEW.md
+12c67558e761c848fae93d3ae0b4bf6508091b1ed24f671a1a58f8cc4a979e47  ORACLE_REVIEW.md
 c0ab7d5fb3af341e5357ed5fc9e20894e92fc3a14d92d72d8a7dbd3c920d693d  README.md

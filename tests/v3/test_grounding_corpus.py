@@ -1,7 +1,16 @@
 """Corpus-first grounding test suite and independent oracle validator.
 
-Enforces zero hash drift, unique IDs, reason code bijection, span integrity,
-git blob identity, and fail-closed grounding invariants.
+Enforces:
+1. Zero hash drift across the entire corpus.
+2. Unique, valid case IDs and normative model schema.
+3. Strict Finding model conformance (tier enum, integer semantics version, mapping subject).
+4. Exact coordinate integrity: line/col positions derived directly from fixture bytes
+   match recorded span coordinates and contain the declared entity symbols.
+5. Entity-to-hunk line overlap validation.
+6. Git plumbing blob identity matching `git hash-object --no-filters`.
+7. Reproducible small Git repository construction and diff matching across all 24 fixtures.
+8. True Git integrity fault reproduction for GRD-INT-001.
+9. Normative fail-closed grounding invariants (§9.2, §15).
 """
 
 from __future__ import annotations
@@ -9,22 +18,30 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import subprocess
+import tempfile
 
 import pytest
 
-from verifyci.contracts.model import Coverage, Outcome
+from tests.v3.grounding_harness import build_case_repo
+from verifyci.contracts.model import (
+    Coverage,
+    Disposition,
+    Evidence,
+    EvidenceKind,
+    Finding,
+    Outcome,
+    Tier,
+    WitnessLevel,
+)
 from verifyci.contracts.reason_codes import ALL_CODES, validate_finding_triple
 from verifyci.gate.policy import parse_policy_bytes
+from verifyci.scm.git import GitError
 
 
 CORPUS_ROOT = Path("corpora/grounding")
 CASES_FILE = CORPUS_ROOT / "cases.jsonl"
 SUMS_FILE = CORPUS_ROOT / "SHA256SUMS"
-
-
-def _git_hash_object(data: bytes) -> str:
-    header = f"blob {len(data)}\0".encode("ascii")
-    return hashlib.sha1(header + data).hexdigest()
 
 
 def load_cases() -> list[dict]:
@@ -36,6 +53,22 @@ def load_cases() -> list[dict]:
             if line:
                 cases.append(json.loads(line))
     return cases
+
+
+def derive_line_col_at_byte(data: bytes, byte_pos: int) -> tuple[int, int]:
+    """Compute (1-indexed line, 0-indexed UTF-8 byte column) for a byte offset."""
+    lines = data.splitlines(keepends=True)
+    current = 0
+    for line_idx, line_bytes in enumerate(lines, start=1):
+        line_len = len(line_bytes)
+        if current <= byte_pos < current + line_len:
+            return (line_idx, byte_pos - current)
+        current += line_len
+    if lines:
+        last = lines[-1]
+        content_len = len(last.rstrip(b"\r\n"))
+        return (len(lines), content_len)
+    return (1, 0)
 
 
 @pytest.mark.invariant
@@ -67,7 +100,7 @@ def test_corpus_checksum_inventory():
 def test_case_ids_unique_and_frozen():
     """Verify all case IDs are unique, validly formatted, and marked frozen."""
     cases = load_cases()
-    assert len(cases) >= 20, f"Expected at least 20 cases, found {len(cases)}"
+    assert len(cases) == 24, f"Expected exactly 24 cases, found {len(cases)}"
     seen_ids = set()
     for case in cases:
         case_id = case["case_id"]
@@ -94,7 +127,6 @@ def test_cases_schema_and_enums():
         assert outcome in valid_outcomes, f"{case_id}: unknown outcome {outcome}"
         assert coverage in valid_coverages, f"{case_id}: unknown coverage {coverage}"
 
-        # Spec Invariant 1: No PASS with incomplete relevant coverage
         if outcome == Outcome.PASS.value:
             assert coverage == Coverage.COMPLETE.value, (
                 f"{case_id}: PASS requires COMPLETE coverage, got {coverage}"
@@ -112,29 +144,70 @@ def test_reason_codes_are_valid():
 
 @pytest.mark.invariant
 def test_findings_conform_to_contract():
-    """Verify findings conform to GRD-UNGROUNDED-EDIT and pass validate_finding_triple."""
+    """Verify findings conform strictly to the Finding model and contract."""
     for case in load_cases():
         case_id = case["case_id"]
         findings = case["expected"].get("findings", [])
         if case["expected"]["outcome"] == Outcome.FAIL.value:
             assert len(findings) > 0, f"{case_id}: FAIL outcome must record blocking finding"
-            for finding in findings:
-                assert finding["tier"] == "tier1_blocking"
-                assert finding["defect_id"] == "GRD-UNGROUNDED-EDIT"
-                assert finding["reason_code"] == "policy_prohibited"
-                assert finding["defect_semantics_version"] == "3.1.10"
-                assert "subject" in finding
-                evidence = finding["evidence"]
-                assert evidence["kind"] == "provenance"
+            for f_dict in findings:
+                # 1. Tier enum validation
+                assert f_dict["tier"] == Tier.BLOCKING.value, (
+                    f"{case_id}: expected tier 'blocking', got {f_dict['tier']}"
+                )
+                assert f_dict["defect_id"] == "GRD-UNGROUNDED-EDIT"
+                assert f_dict["reason_code"] == "policy_prohibited"
+
+                # 2. Integer semantics version
+                assert isinstance(f_dict["defect_semantics_version"], int), (
+                    f"{case_id}: defect_semantics_version must be int, got {type(f_dict['defect_semantics_version'])}"
+                )
+                assert f_dict["defect_semantics_version"] == 1
+
+                # 3. Mapping-valued subject
+                assert isinstance(f_dict["subject"], dict), (
+                    f"{case_id}: subject must be dict, got {type(f_dict['subject'])}"
+                )
+                assert "file" in f_dict["subject"]
+                assert "path" in f_dict["subject"]
+                assert "kind" in f_dict["subject"]
+
+                # 4. Evidence kind and structure
+                evidence = f_dict["evidence"]
+                assert evidence["kind"] == EvidenceKind.PROVENANCE.value
                 payload = evidence["payload"]
                 assert "primary_rule_id" in payload
                 assert "matched_rule_ids" in payload
                 assert payload["primary_rule_id"] in payload["matched_rule_ids"]
+
+                # 5. Witness level & disposition
+                assert f_dict["witness_level"] in {w.value for w in WitnessLevel}
+                assert f_dict["disposition"] == Disposition.OPEN.value
+
+                # 6. Contract triple validation
                 assert validate_finding_triple(
-                    finding["defect_id"],
-                    finding["reason_code"],
+                    f_dict["defect_id"],
+                    f_dict["reason_code"],
                     evidence["kind"],
                 )
+
+                # 7. Model instantiation compatibility
+                model_finding = Finding(
+                    tier=Tier(f_dict["tier"]),
+                    defect_id=f_dict["defect_id"],
+                    reason_code=f_dict["reason_code"],
+                    defect_semantics_version=f_dict["defect_semantics_version"],
+                    subject=f_dict["subject"],
+                    premises={},
+                    evidence=Evidence(
+                        kind=EvidenceKind(evidence["kind"]),
+                        payload=dict(payload),
+                    ),
+                    witness_level=WitnessLevel(f_dict["witness_level"]),
+                    message=f_dict.get("message", "prohibited change"),
+                    disposition=Disposition(f_dict["disposition"]),
+                )
+                assert model_finding.tier == Tier.BLOCKING
         else:
             assert len(findings) == 0, f"{case_id}: non-FAIL outcome must have no findings"
 
@@ -154,58 +227,163 @@ def test_fixture_policy_schema_conformance():
 
 
 @pytest.mark.invariant
-def test_span_slice_integrity():
-    """Verify exact byte offsets match file length and slice cleanly."""
+def test_exact_coordinate_and_span_integrity():
+    """Derive line/col positions from fixture bytes and verify exact agreement with recorded spans."""
     for case in load_cases():
         case_id = case["case_id"]
         expected = case["expected"]
         entities = expected.get("entities", [])
         for ent in entities:
             qname = ent["qname"]
-            # Check base span
+            symbol_name = qname.split(":")[-1].split(".")[-1]
+
+            # Base span verification
             if ent.get("base_span") is not None and case.get("base_files"):
                 base_file = CORPUS_ROOT / case["base_files"][0]
                 base_bytes = base_file.read_bytes()
                 span = ent["base_span"]
+
+                # Bounds
                 assert 0 <= span["start_byte"] < span["end_byte"] <= len(base_bytes), (
                     f"{case_id} {qname}: invalid base byte bounds"
                 )
-                slice_bytes = base_bytes[span["start_byte"]:span["end_byte"]]
-                assert slice_bytes.decode("utf-8", "replace"), (
-                    f"{case_id} {qname}: base slice is empty or invalid"
+
+                # Derive exact line and column coordinates from raw bytes
+                derived_start = derive_line_col_at_byte(base_bytes, span["start_byte"])
+                derived_end = derive_line_col_at_byte(base_bytes, span["end_byte"])
+                assert (span["start_line"], span["start_col"]) == derived_start, (
+                    f"{case_id} {qname} base start mismatch: recorded ({span['start_line']}, {span['start_col']}) != derived {derived_start}"
+                )
+                assert (span["end_line"], span["end_col"]) == derived_end, (
+                    f"{case_id} {qname} base end mismatch: recorded ({span['end_line']}, {span['end_col']}) != derived {derived_end}"
                 )
 
-            # Check head span
+                # Confirm entity symbol is present in sliced content
+                slice_text = base_bytes[span["start_byte"]:span["end_byte"]].decode("utf-8", "replace")
+                assert symbol_name in slice_text, (
+                    f"{case_id} {qname}: base slice does not contain symbol '{symbol_name}': {slice_text!r}"
+                )
+
+            # Head span verification
             if ent.get("head_span") is not None and case.get("head_files"):
                 head_file = CORPUS_ROOT / case["head_files"][0]
                 head_bytes = head_file.read_bytes()
                 span = ent["head_span"]
+
+                # Bounds
                 assert 0 <= span["start_byte"] < span["end_byte"] <= len(head_bytes), (
                     f"{case_id} {qname}: invalid head byte bounds"
                 )
-                slice_bytes = head_bytes[span["start_byte"]:span["end_byte"]]
-                assert slice_bytes.decode("utf-8", "replace"), (
-                    f"{case_id} {qname}: head slice is empty or invalid"
+
+                # Derive exact line and column coordinates from raw bytes
+                derived_start = derive_line_col_at_byte(head_bytes, span["start_byte"])
+                derived_end = derive_line_col_at_byte(head_bytes, span["end_byte"])
+                assert (span["start_line"], span["start_col"]) == derived_start, (
+                    f"{case_id} {qname} head start mismatch: recorded ({span['start_line']}, {span['start_col']}) != derived {derived_start}"
+                )
+                assert (span["end_line"], span["end_col"]) == derived_end, (
+                    f"{case_id} {qname} head end mismatch: recorded ({span['end_line']}, {span['end_col']}) != derived {derived_end}"
+                )
+
+                # Confirm entity symbol is present in sliced content
+                slice_text = head_bytes[span["start_byte"]:span["end_byte"]].decode("utf-8", "replace")
+                assert symbol_name in slice_text, (
+                    f"{case_id} {qname}: head slice does not contain symbol '{symbol_name}': {slice_text!r}"
                 )
 
 
 @pytest.mark.invariant
+def test_hunk_entity_associations():
+    """Verify that every changed hunk's line range associates cleanly with its mapped entity."""
+    for case in load_cases():
+        case_id = case["case_id"]
+        expected = case["expected"]
+        entities_by_qname = {e["qname"]: e for e in expected.get("entities", [])}
+        for hunk in expected.get("hunks", []):
+            mapped_qname = hunk.get("mapped_entity")
+            if not mapped_qname or mapped_qname == "other_text" or mapped_qname.endswith(".txt"):
+                continue
+            assert mapped_qname in entities_by_qname, (
+                f"{case_id}: hunk maps to unknown entity {mapped_qname}"
+            )
+            ent = entities_by_qname[mapped_qname]
+            span = ent.get("head_span") or ent.get("base_span")
+            assert span is not None
+            # Check line overlap between hunk and entity span
+            hunk_start = hunk["new_start"] if ent.get("head_span") else hunk["old_start"]
+            hunk_count = hunk["new_count"] if ent.get("head_span") else hunk["old_count"]
+            hunk_end = hunk_start + max(0, hunk_count - 1)
+            assert not (hunk_end < span["start_line"] or hunk_start > span["end_line"]), (
+                f"{case_id}: hunk lines {hunk_start}..{hunk_end} do not overlap entity {mapped_qname} lines {span['start_line']}..{span['end_line']}"
+            )
+
+
+@pytest.mark.invariant
 def test_git_blob_identity_accuracy():
-    """Verify git blob IDs in oracle match git plumbing calculation."""
+    """Verify git blob IDs in oracle match git plumbing calculation via git hash-object --no-filters."""
     for case in load_cases():
         case_id = case["case_id"]
         for ent in case["expected"].get("entities", []):
             if ent.get("base_blob") and case.get("base_files"):
-                base_bytes = (CORPUS_ROOT / case["base_files"][0]).read_bytes()
-                expected_blob = _git_hash_object(base_bytes)
+                base_path = CORPUS_ROOT / case["base_files"][0]
+                res = subprocess.run(
+                    ["git", "hash-object", "--no-filters", str(base_path)],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                expected_blob = res.stdout.strip()
                 assert ent["base_blob"] == expected_blob, (
                     f"{case_id} {ent['qname']}: base_blob mismatch: {ent['base_blob']} != {expected_blob}"
                 )
             if ent.get("head_blob") and case.get("head_files"):
-                head_bytes = (CORPUS_ROOT / case["head_files"][0]).read_bytes()
-                expected_blob = _git_hash_object(head_bytes)
+                head_path = CORPUS_ROOT / case["head_files"][0]
+                res = subprocess.run(
+                    ["git", "hash-object", "--no-filters", str(head_path)],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                expected_blob = res.stdout.strip()
                 assert ent["head_blob"] == expected_blob, (
                     f"{case_id} {ent['qname']}: head_blob mismatch: {ent['head_blob']} != {expected_blob}"
+                )
+
+
+@pytest.mark.invariant
+def test_reproducible_git_harness_and_diffs():
+    """Build a real Git repository for every fixture and verify diff entries and hunks."""
+    with tempfile.TemporaryDirectory() as td:
+        for case in load_cases():
+            case_id = case["case_id"]
+            case_dir = CORPUS_ROOT / "fixtures" / case_id
+            target_dir = Path(td) / case_id
+            is_int = (case_id == "GRD-INT-001")
+
+            repo, base_c, mb, head_c = build_case_repo(case_dir, target_dir, corrupt_int=is_int)
+            assert repo is not None
+            assert len(base_c) == 40
+            assert len(head_c) == 40
+            assert mb == base_c
+
+            if is_int:
+                # GRD-INT-001 must produce Git integrity fault on tampered object
+                with pytest.raises(GitError) as exc_info:
+                    repo.diff_entries(base_c, head_c)
+                assert exc_info.value.code in ("missing_git_object", "provenance_integrity_error")
+            else:
+                entries, _ = repo.diff_entries(base_c, head_c)
+                expected_hunks = case["expected"].get("hunks", [])
+                actual_hunks = []
+                for e in entries:
+                    for h in e.hunks:
+                        actual_hunks.append((h.old_start, h.old_count, h.new_start, h.new_count))
+                expected_hunk_tuples = [
+                    (h["old_start"], h["old_count"], h["new_start"], h["new_count"])
+                    for h in expected_hunks
+                ]
+                assert actual_hunks == expected_hunk_tuples, (
+                    f"{case_id}: hunk mismatch: actual {actual_hunks} != expected {expected_hunk_tuples}"
                 )
 
 
@@ -219,6 +397,7 @@ def test_fail_closed_grounding_invariants():
     assert parse_case["expected"]["outcome"] == Outcome.INCONCLUSIVE.value
     assert parse_case["expected"]["coverage"] == Coverage.PARTIAL.value
     assert "parse_error" in parse_case["expected"]["reason_codes"]
+    assert len(parse_case["expected"]["hunks"]) == 1
 
     # 2. Unmapped change produces INCONCLUSIVE (mapping_unresolved), NOT ERROR or PASS
     unmapped_case = cases_by_id["GRD-UNMAPPED-001"]
