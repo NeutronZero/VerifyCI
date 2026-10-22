@@ -1,32 +1,32 @@
 # Deletion Oracle Review Record
 
-**Status: FROZEN FOR PRE-IMPLEMENTATION M2 WORK.**
+**Status: FROZEN FOR PRE-IMPLEMENTATION M2 WORK (Remediated with Unified Reference Model and AST Parsing).**
 
 ## Freeze record
 
 - Governing topic: VerifyCI v3.1.10 design §11.3 and §16, including the M2 scenario list and stated defect/outcome semantics.
-- Scope of this contribution: corpus data, schema/consistency validator, and digest inventory only.
+- Scope of this contribution: corpus data, schema/AST validator, and digest inventory only.
 - Cases: 18, with unique IDs and explicit base/head source snapshots.
 - Production implementation used to generate labels: **No**.
 - Runtime oracle extraction used to generate labels: **No**.
-- Validator dependencies: Python standard library only; no import from `verifyci`.
+- Validator dependencies: Python standard library only (`ast`, `hashlib`, `json`, `re`, `pathlib`) + `pytest`; no import from `verifyci`.
 - Release qualification: **Not established.**
 
-## Reviewed contracts
+## Reviewed contracts & remediation details
 
-- [x] All three defect IDs have their normative reason-code pairing.
-- [x] Unused private removal and rename-with-updated-references are clean controls.
-- [x] Test-only references count as live.
-- [x] `__all__`, entrypoints/public API, Python re-exports and TypeScript default/barrel exports are represented.
-- [x] Deleted module and multi-file package cases exercise import/re-export edges.
-- [x] Proven literal dynamic lookup is a blocking dynamic-reference finding.
-- [x] Computed/string-key dispatch without a proven target is INCONCLUSIVE/PARTIAL, not PASS.
-- [x] Excluded generated-path removal and no-removal cases establish NOT_APPLICABLE controls.
-- [x] Unsupported relevant language yields INCONCLUSIVE/UNKNOWN.
-- [x] Source-level witness coordinates and removed-symbol declaration coordinates are validated independently of the product code.
-- [x] SHA256SUMS inventory covers all corpus-owned files other than SHA256SUMS itself.
-- [x] No M0 files and no frozen M1 corpus files are modified by this corpus-only change.
+- [x] **Unified reference taxonomy**: Finding witnesses and references use the standard reference kinds (`import`, `reexport`, `export`, `__all__`, `entrypoint`, `public_api`, `dynamic`).
+- [x] **Test-only reference model**: `DEL-PY-006` uses standard reference kind `import`. Tests count as live by default; importing a removed symbol in a test file is a head reference to a missing definition (`DEL-DANGLING-REFERENCE` / `dangling_reference`), consistent with ordinary module imports.
+- [x] **Semantic `__all__` export validation**: `DEL-PY-007` distinguishes the removed function definition from the export list. The validator parses the Python AST to confirm that `create_session` is absent from head function declarations while present as a string constant within `__all__ = ["create_session"]` in head AST.
+- [x] **Accurate declaration validation**: Python fixtures are verified using `ast.parse` for `FunctionDef`, `AsyncFunctionDef`, and `ClassDef` at the declared base lines and their absence in head ASTs. Non-Python fixtures (TypeScript, Go) are documented and verified via lexical declaration-pattern matching.
+- [x] **All three defect IDs have normative reason-code pairing**:
+  - `DEL-REACHABLE-SYMBOL` $\leftrightarrow$ `symbol_live`
+  - `DEL-DANGLING-REFERENCE` $\leftrightarrow$ `dangling_reference`
+  - `DEL-DYNAMIC-REFERENCE` $\leftrightarrow$ `dynamic_reference_removed`
+- [x] **Coverage limitations**: `dynamic_target_unresolved` yields `INCONCLUSIVE` / `Coverage.PARTIAL` with 0 false findings.
+- [x] **Controls**: Unused private removal and rename-with-updated-references are clean controls (`PASS`, `COMPLETE`). Excluded generated path and no-removal cases establish `NOT_APPLICABLE`. Unsupported Go syntax yields `INCONCLUSIVE` / `Coverage.UNKNOWN`.
+- [x] **SHA256SUMS inventory**: Covers `cases.jsonl`, `CORPUS_SPEC.md`, and `ORACLE_REVIEW.md`.
+- [x] **Isolation**: No M0 files and no frozen M1 corpus files are modified.
 
-## Interpretation and follow-up
+## Validator boundaries and manual oracle review
 
-The independent validator establishes corpus integrity and internal oracle consistency; it is not a substitute for independent semantic review or later check-level benchmark. The candidate is frozen before M2 index/check implementation, and expected labels must not be changed merely to match implementation behavior. Any oracle change requires an explicit review record and a new digest.
+The independent validator establishes corpus integrity, AST declaration consistency in Python, lexical coordinate token existence, and internal oracle schema consistency. It does not perform whole-program reference index construction or cross-file type resolution (which are the responsibilities of the M2 production check). Full semantic reference resolution and reachability claims were verified via manual oracle review against §11.3 before freeze. Any future oracle modification requires a revised review record and new SHA256 digests.

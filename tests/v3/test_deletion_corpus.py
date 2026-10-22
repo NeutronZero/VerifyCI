@@ -8,6 +8,7 @@ structure and source witnesses, not mapper output.
 
 from __future__ import annotations
 
+import ast
 import fnmatch
 import hashlib
 import json
@@ -25,6 +26,15 @@ DEFECT_REASON = {
     "DEL-REACHABLE-SYMBOL": "symbol_live",
     "DEL-DANGLING-REFERENCE": "dangling_reference",
     "DEL-DYNAMIC-REFERENCE": "dynamic_reference_removed",
+}
+ALLOWED_REFERENCE_KINDS = {
+    "import",
+    "reexport",
+    "export",
+    "__all__",
+    "entrypoint",
+    "public_api",
+    "dynamic",
 }
 REQUIRED_KINDS = {
     "unused_private_symbol",
@@ -71,7 +81,48 @@ def _valid_repo_path(value: str) -> bool:
     )
 
 
+def _python_ast_declarations(source: str) -> dict[str, tuple[int, str]]:
+    """Extract declared function/class/method names and their 1-indexed lines from Python AST."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return {}
+    decls: dict[str, tuple[int, str]] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            decls[node.name] = (node.lineno, "function")
+        elif isinstance(node, ast.ClassDef):
+            decls[node.name] = (node.lineno, "class")
+            for child in node.body:
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    decls[f"{node.name}.{child.name}"] = (child.lineno, "method")
+                    decls[child.name] = (child.lineno, "method")
+    return decls
+
+
+def _python_ast_all_exports(source: str) -> list[str] | None:
+    """Extract names exported in an __all__ assignment using Python AST."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "__all__":
+                    if isinstance(node.value, (ast.List, ast.Tuple)):
+                        names: list[str] = []
+                        for elt in node.value.elts:
+                            if isinstance(elt, ast.Constant) and isinstance(
+                                elt.value, str
+                            ):
+                                names.append(elt.value)
+                        return names
+    return None
+
+
 def _declaration_pattern(name: str) -> re.Pattern[str]:
+    """Lexical declaration pattern for non-Python fixtures (TypeScript, Go)."""
     quoted = re.escape(name)
     patterns = (
         rf"^\s*(?:async\s+)?def\s+{quoted}\b",
@@ -81,7 +132,7 @@ def _declaration_pattern(name: str) -> re.Pattern[str]:
     return re.compile("|".join(f"(?:{p})" for p in patterns))
 
 
-def _declared_in_files(files: dict, name: str) -> bool:
+def _declared_in_files_lexical(files: dict, name: str) -> bool:
     pat = _declaration_pattern(name)
     return any(
         pat.search(line) for source in files.values() for line in source.splitlines()
@@ -188,16 +239,35 @@ def test_case_paths_and_removed_symbol_ground_truth():
             assert isinstance(qname, str) and qname and qname not in seen_removed
             seen_removed.add(qname)
             assert path in base_files, f"{case_id}: missing base source for {qname}"
-            lines = base_files[path].splitlines()
-            assert isinstance(line, int) and 1 <= line <= len(lines), (
-                f"{case_id}: bad base_line for {qname}"
-            )
-            assert _declaration_pattern(name).search(lines[line - 1]), (
-                f"{case_id}: expected removed declaration {name!r} absent at {path}:{line}"
-            )
-            assert not _declared_in_files(head_files, name), (
-                f"{case_id}: removed declaration {name!r} still defined in head"
-            )
+
+            if path.endswith(".py"):
+                # Semantic declaration check using Python standard library AST
+                py_decls = _python_ast_declarations(base_files[path])
+                assert name in py_decls, (
+                    f"{case_id}: expected removed Python AST declaration {name!r} absent in {path}"
+                )
+                ast_line, _kind = py_decls[name]
+                assert ast_line == line, (
+                    f"{case_id}: AST line {ast_line} != expected base_line {line} for {qname}"
+                )
+                for hp, hsrc in head_files.items():
+                    if hp.endswith(".py"):
+                        h_decls = _python_ast_declarations(hsrc)
+                        assert name not in h_decls, (
+                            f"{case_id}: removed symbol {name!r} still declared in head AST ({hp})"
+                        )
+            else:
+                # Lexical declaration pattern for non-Python fixtures (TypeScript, Go)
+                lines = base_files[path].splitlines()
+                assert isinstance(line, int) and 1 <= line <= len(lines), (
+                    f"{case_id}: bad base_line for {qname}"
+                )
+                assert _declaration_pattern(name).search(lines[line - 1]), (
+                    f"{case_id}: expected removed declaration {name!r} absent at {path}:{line}"
+                )
+                assert not _declared_in_files_lexical(head_files, name), (
+                    f"{case_id}: removed declaration {name!r} still defined in head"
+                )
 
         for finding in expected.get("findings", []):
             assert finding.get("defect_id") in DEFECT_REASON
@@ -212,9 +282,16 @@ def test_case_paths_and_removed_symbol_ground_truth():
             )
             witness = finding.get("witness", {})
             _check_source_coordinate(case, witness, "finding witness")
+            witness_kind = witness.get("kind")
+            assert witness_kind in ALLOWED_REFERENCE_KINDS, (
+                f"{case_id}: unallowed witness reference kind {witness_kind!r}"
+            )
             payload = finding["evidence"]["payload"]
             assert payload.get("removed", {}).get("qname") == subject_symbol
             ref = payload.get("reference", {})
+            assert ref.get("kind") in ALLOWED_REFERENCE_KINDS, (
+                f"{case_id}: unallowed payload reference kind {ref.get('kind')!r}"
+            )
             for key in ("kind", "path", "line", "token"):
                 assert ref.get(key) == witness.get(key), (
                     f"{case_id}: evidence reference mismatch on {key}"
@@ -222,6 +299,27 @@ def test_case_paths_and_removed_symbol_ground_truth():
 
         for witness in expected.get("gap_witnesses", []):
             _check_source_coordinate(case, witness, "coverage-gap witness")
+
+    # Specific semantic oracle assertions for key cases
+    by_id = {c["case_id"]: c for c in load_cases()}
+
+    # DEL-PY-006: test reference uses standard "import" reference kind (live by default)
+    c006_finding = by_id["DEL-PY-006"]["expected"]["findings"][0]
+    assert c006_finding["witness"]["kind"] == "import"
+    assert c006_finding["defect_id"] == "DEL-DANGLING-REFERENCE"
+
+    # DEL-PY-007: stale __all__ validated via Python AST export list
+    c007 = by_id["DEL-PY-007"]
+    c007_finding = c007["expected"]["findings"][0]
+    assert c007_finding["witness"]["kind"] == "__all__"
+    assert c007_finding["defect_id"] == "DEL-REACHABLE-SYMBOL"
+    all_exports = _python_ast_all_exports(c007["head_files"]["src/api.py"])
+    assert all_exports is not None and "create_session" in all_exports, (
+        "DEL-PY-007: head AST __all__ must explicitly contain 'create_session'"
+    )
+    assert not _python_ast_declarations(c007["head_files"]["src/api.py"]), (
+        "DEL-PY-007: head must contain no function/class definitions"
+    )
 
 
 @pytest.mark.invariant
