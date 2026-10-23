@@ -297,15 +297,13 @@ def run(context: CheckContext) -> CheckResult:
                 submodule = f"{resolved}.{name}"
                 sub_files = [p for p in context.scope.base_facts if _module_name(p) == submodule]
                 if sub_files:
-                    sub_removed = any(
-                        entity.qname not in context.scope.head_entities
-                        for p in sub_files
-                        for entity in context.scope.base_facts[p].entities
-                    )
                     sub_survives = any(
                         _module_name(p) == submodule for p in context.scope.head_facts
                     )
-                    if sub_removed or not sub_survives:
+                    # A submodule import is dangling only when the module
+                    # itself disappeared.  Internal symbol removals are
+                    # handled as separate symbol findings.
+                    if not sub_survives:
                         emitted_dangling.add((path, name))
                         findings.append(
                             make_finding(
