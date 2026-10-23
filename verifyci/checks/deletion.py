@@ -31,7 +31,32 @@ def _public_policy_match(context: CheckContext, entity) -> bool:
 
 
 def _module_name(path: str) -> str:
-    return path.rsplit(".", 1)[0].replace("/", ".").replace("\\", ".")
+    mod = path.rsplit(".", 1)[0].replace("/", ".").replace("\\", ".")
+    # Normalize package __init__ modules to their package name.
+    if mod.endswith(".__init__"):
+        mod = mod[: -len(".__init__")]
+    return mod
+
+
+def _resolve_module(imp_module: str, importing_path: str) -> str | None:
+    if not imp_module:
+        return None
+    if not imp_module.startswith("."):
+        return imp_module
+    dots = len(imp_module) - len(imp_module.lstrip("."))
+    rest = imp_module.lstrip(".")
+    base_mod = _module_name(importing_path)
+    if dots == 1:
+        pkg = base_mod.rsplit(".", 1)[0] if "." in base_mod else ""
+    else:
+        parts = base_mod.split(".")
+        # Go up (dots-1) levels.
+        if dots - 1 >= len(parts):
+            return None
+        pkg = ".".join(parts[: len(parts) - (dots - 1)])
+    if rest:
+        return f"{pkg}.{rest}" if pkg else rest
+    return pkg or None
 
 
 def _head_references(context: CheckContext, entity: Any) -> list[dict[str, Any]]:
@@ -39,16 +64,12 @@ def _head_references(context: CheckContext, entity: Any) -> list[dict[str, Any]]
     entity_module = _module_name(entity.file_path)
     references: list[dict[str, Any]] = []
     for path, facts in context.scope.head_facts.items():
-        # Only collect references that can plausibly resolve to this exact
-        # removed entity: same module, or a module that imports the symbol
-        # from the entity's module.
         same_module = path == entity.file_path
         imports_symbol = False
         for imp in facts.imports:
             if simple not in imp.names:
                 continue
-            mod = (imp.module or "").lstrip(".")
-            if mod == "" or mod.endswith(entity_module.rsplit(".", 1)[-1]) or entity_module.endswith(mod) or mod in entity_module:
+            if _resolve_module(imp.module or "", path) == entity_module:
                 imports_symbol = True
                 break
         if not same_module and not imports_symbol:
@@ -76,13 +97,25 @@ def _head_references(context: CheckContext, entity: Any) -> list[dict[str, Any]]
     return references
 
 
-def _dynamic_references(context: CheckContext, simple: str) -> list[dict[str, Any]]:
+def _dynamic_references(context: CheckContext, entity: Any) -> list[dict[str, Any]]:
+    simple = _simple_name(entity.qname)
+    entity_module = _module_name(entity.file_path)
     pattern = re.compile(
         rf"(?:getattr\s*\([^,\n]+,\s*['\"]{re.escape(simple)}['\"]|\[['\"]{re.escape(simple)}['\"]\])"
     )
     out: list[dict[str, Any]] = []
-    for entry in context.entries:
-        if not entry.head_source:
+    for path, facts in context.scope.head_facts.items():
+        # Only attribute a dynamic lookup to this entity when the file is the
+        # same module or imports the symbol from this entity's module.
+        same_module = path == entity.file_path
+        imports_symbol = any(
+            simple in imp.names and _resolve_module(imp.module or "", path) == entity_module
+            for imp in facts.imports
+        )
+        if not same_module and not imports_symbol:
+            continue
+        entry = next((e for e in context.entries if e.head_path == path), None)
+        if entry is None or not entry.head_source:
             continue
         for line_number, line in enumerate(entry.head_source.splitlines(), start=1):
             if "__all__" in line:
@@ -90,7 +123,7 @@ def _dynamic_references(context: CheckContext, simple: str) -> list[dict[str, An
             if pattern.search(line):
                 out.append(
                     {
-                        "path": entry.head_path,
+                        "path": path,
                         "line": line_number,
                         "kind": "dynamic",
                         "symbol": simple,
@@ -121,7 +154,7 @@ def run(context: CheckContext) -> CheckResult:
     for entity in removed:
         simple = _simple_name(entity.qname)
         refs = _head_references(context, entity)
-        dynamic_refs = _dynamic_references(context, simple)
+        dynamic_refs = _dynamic_references(context, entity)
         facts = context.scope.base_facts.get(entity.file_path)
         is_exported = False
         if entity.file_path.endswith(".py"):
@@ -224,6 +257,7 @@ def run(context: CheckContext) -> CheckResult:
     # reachable-symbol finding and are not separately reported as dangling.
     removed_simple_names = {_simple_name(entity.qname) for entity in removed}
     emitted_dangling: set[tuple[str, str]] = set()
+    unresolved_import_paths: set[str] = set()
     for path, facts in context.scope.head_facts.items():
         if path.endswith("__init__.py"):
             continue
@@ -231,14 +265,21 @@ def run(context: CheckContext) -> CheckResult:
             for name in imp.names:
                 if not name or name == "*":
                     continue
-                matching_base = [
-                    e for e in context.scope.base_entities if e.endswith(f":{name}") or e.endswith(f".{name}")
+                # Use exact qualified-name identity: the import is dangling
+                # only when a base definition with that identity no longer
+                # exists in head.  A same-named survivor in another module
+                # does not mask a removed symbol.
+                base_matches = [
+                    entity
+                    for facts in context.scope.base_facts.values()
+                    for entity in facts.entities
+                    if _simple_name(entity.qname) == name
                 ]
-                if not matching_base:
+                removed_matches = [e for e in base_matches if e.qname not in context.scope.head_entities]
+                if not removed_matches:
                     continue
-                if not any(e.endswith(f":{name}") or e.endswith(f".{name}") for e in context.scope.head_entities):
-                    emitted_dangling.add((path, name))
-                    findings.append(
+                emitted_dangling.add((path, name))
+                findings.append(
                         make_finding(
                             context=context,
                             check_id="deletion",
@@ -323,6 +364,18 @@ def run(context: CheckContext) -> CheckResult:
                     remediation="Restore the definition or update the call.",
                 )
             )
+
+    if removed and unresolved_import_paths:
+        gaps.append(
+            gap(
+                "mapping_unresolved",
+                {
+                    "check_id": "deletion",
+                    "paths": sorted(unresolved_import_paths),
+                    "reason": "unresolved_import_module",
+                },
+            )
+        )
 
     # Unsupported or dynamic scope is only a gap when deletion was relevant.
     if removed:
