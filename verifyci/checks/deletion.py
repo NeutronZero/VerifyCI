@@ -46,7 +46,10 @@ def _resolve_module(imp_module: str, importing_path: str) -> str | None:
     dots = len(imp_module) - len(imp_module.lstrip("."))
     rest = imp_module.lstrip(".")
     base_mod = _module_name(importing_path)
-    if dots == 1:
+    if importing_path.endswith("__init__.py"):
+        # The module name is already the package name.
+        pkg = base_mod
+    elif dots == 1:
         pkg = base_mod.rsplit(".", 1)[0] if "." in base_mod else ""
     else:
         parts = base_mod.split(".")
@@ -284,17 +287,45 @@ def run(context: CheckContext) -> CheckResult:
                     for entity in context.scope.base_facts[p].entities
                     if _simple_name(entity.qname) == name
                 ]
-                # Fall back to package-level resolution for re-exported
-                # symbols defined in a submodule.  Keep the fallback scoped
-                # to the same package to avoid same-named cross-module matches.
+                # Fall back only for a package re-export boundary: when the
+                # imported module is a package (__init__), resolve the name
+                # through the modules that the package itself imports it from.
+                # Do not fall back for an ordinary module.
                 if not base_matches:
-                    pkg = resolved.rsplit(".", 1)[0] if "." in resolved else resolved
+                    package_init = next(
+                        (
+                            p
+                            for p in context.scope.base_facts
+                            if _module_name(p) == resolved and p.endswith("__init__.py")
+                        ),
+                        None,
+                    )
+                    if package_init is None:
+                        continue
+                    candidate_modules: set[str] = set()
+                    for imp in context.scope.base_facts[package_init].imports:
+                        if name not in (imp.names or ()):
+                            continue
+                        mod = (imp.module or "").strip()
+                        if not mod:
+                            continue
+                        # Relative imports lose their leading dots in the
+                        # frontend, so resolve against the package first.
+                        candidates = {
+                            f"{resolved}.{mod}",
+                            mod,
+                        }
+                        for cand in candidates:
+                            if any(_module_name(p) == cand for p in context.scope.base_facts):
+                                candidate_modules.add(cand)
+                    if not candidate_modules:
+                        continue
                     base_matches = [
                         entity
-                        for facts in context.scope.base_facts.values()
-                        for entity in facts.entities
+                        for p in context.scope.base_facts
+                        if _module_name(p) in candidate_modules
+                        for entity in context.scope.base_facts[p].entities
                         if _simple_name(entity.qname) == name
-                        and _module_name(entity.file_path).rsplit(".", 1)[0] == pkg
                     ]
                 if not base_matches:
                     continue
