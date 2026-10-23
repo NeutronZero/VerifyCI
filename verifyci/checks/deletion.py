@@ -86,7 +86,7 @@ def run(context: CheckContext) -> CheckResult:
     excluded_patterns = tuple(excluded_patterns)
 
     removed: list[Any] = []
-    reachable_simple_names: set[str] = set()
+    reachable_removed: set[tuple[str, str]] = set()
     for path, facts in context.scope.base_facts.items():
         for entity in facts.entities:
             if entity.qname not in context.scope.head_entities:
@@ -115,7 +115,7 @@ def run(context: CheckContext) -> CheckResult:
             is_exported = bool(entity.is_export)
         is_public = is_exported or _public_policy_match(context, entity)
         if is_public:
-            reachable_simple_names.add(simple)
+            reachable_removed.add((entity.file_path, simple))
         if refs and is_public:
             references_found.extend(refs)
             primary = refs[0]
@@ -259,7 +259,7 @@ def run(context: CheckContext) -> CheckResult:
             simple = call.callee.split(".")[-1]
             if not simple or simple not in removed_simple_names:
                 continue
-            if simple in reachable_simple_names:
+            if (path, simple) in reachable_removed:
                 continue
             # Only treat a call as dangling when a removed entity with that
             # name existed in the same file as the call.  A same-named symbol
