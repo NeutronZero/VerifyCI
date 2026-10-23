@@ -290,6 +290,55 @@ def run(context: CheckContext) -> CheckResult:
                     for entity in context.scope.base_facts[p].entities
                     if _simple_name(entity.qname) == name
                 ]
+                # An imported name may itself be a submodule of the resolved
+                # module (for example ``from . import helper`` or
+                # ``from pkg import helper``).  Check that submodule identity
+                # before treating the import as unresolved.
+                submodule = f"{resolved}.{name}"
+                sub_files = [p for p in context.scope.base_facts if _module_name(p) == submodule]
+                if sub_files:
+                    sub_removed = any(
+                        entity.qname not in context.scope.head_entities
+                        for p in sub_files
+                        for entity in context.scope.base_facts[p].entities
+                    )
+                    sub_survives = any(
+                        _module_name(p) == submodule for p in context.scope.head_facts
+                    )
+                    if sub_removed or not sub_survives:
+                        emitted_dangling.add((path, name))
+                        findings.append(
+                            make_finding(
+                                context=context,
+                                check_id="deletion",
+                                defect_id="DEL-DANGLING-REFERENCE",
+                                subject={"path": path, "symbol": name},
+                                premises={
+                                    "imported_name": name,
+                                    "module": imp.module,
+                                    "head_line": imp.line,
+                                },
+                                evidence_kind=EvidenceKind.REFERENCE,
+                                evidence_payload={
+                                    "identity": {
+                                        "path": path,
+                                        "line": imp.line,
+                                        "module": imp.module,
+                                        "name": name,
+                                    },
+                                    "reference": {
+                                        "kind": "import",
+                                        "path": path,
+                                        "line": imp.line,
+                                        "module": imp.module,
+                                        "name": name,
+                                    },
+                                },
+                                message=f"head imports {name!r} from {imp.module!r}, but no head definition exists",
+                                remediation="Restore the definition or update the import.",
+                            )
+                        )
+                    continue
                 # Fall back only for a package re-export boundary: when the
                 # imported module is a package (__init__), resolve the name
                 # through the modules that the package itself imports it from.
