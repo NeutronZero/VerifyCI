@@ -86,6 +86,7 @@ def run(context: CheckContext) -> CheckResult:
     excluded_patterns = tuple(excluded_patterns)
 
     removed: list[Any] = []
+    reachable_simple_names: set[str] = set()
     for path, facts in context.scope.base_facts.items():
         for entity in facts.entities:
             if entity.qname not in context.scope.head_entities:
@@ -113,6 +114,8 @@ def run(context: CheckContext) -> CheckResult:
         else:
             is_exported = bool(entity.is_export)
         is_public = is_exported or _public_policy_match(context, entity)
+        if is_public:
+            reachable_simple_names.add(simple)
         if refs and is_public:
             references_found.extend(refs)
             primary = refs[0]
@@ -199,6 +202,9 @@ def run(context: CheckContext) -> CheckResult:
     # dangling reference even when the removed definition was not exported.
     # Re-export imports in package __init__ files are covered by the
     # reachable-symbol finding and are not separately reported as dangling.
+    removed_simple_names = {_simple_name(entity.qname) for entity in removed}
+    head_simple_names = {_simple_name(qname) for qname in context.scope.head_entities}
+    emitted_dangling: set[tuple[str, str]] = set()
     for path, facts in context.scope.head_facts.items():
         if path.endswith("__init__.py"):
             continue
@@ -212,6 +218,7 @@ def run(context: CheckContext) -> CheckResult:
                 if not matching_base:
                     continue
                 if not any(e.endswith(f":{name}") or e.endswith(f".{name}") for e in context.scope.head_entities):
+                    emitted_dangling.add((path, name))
                     findings.append(
                         make_finding(
                             context=context,
@@ -243,6 +250,54 @@ def run(context: CheckContext) -> CheckResult:
                             remediation="Restore the definition or update the import.",
                         )
                     )
+
+    # Direct calls to a removed symbol with no head definition are also
+    # dangling references, including calls to private helpers.
+    for path, facts in context.scope.head_facts.items():
+        if path.endswith("__init__.py"):
+            continue
+        for call in facts.calls:
+            simple = call.callee.split(".")[-1]
+            if not simple or simple not in removed_simple_names:
+                continue
+            if simple in head_simple_names:
+                continue
+            if simple in reachable_simple_names:
+                continue
+            if (path, simple) in emitted_dangling:
+                continue
+            emitted_dangling.add((path, simple))
+            findings.append(
+                make_finding(
+                    context=context,
+                    check_id="deletion",
+                    defect_id="DEL-DANGLING-REFERENCE",
+                    subject={"path": path, "symbol": simple},
+                    premises={
+                        "called_name": simple,
+                        "callee": call.callee,
+                        "head_line": call.line,
+                    },
+                    evidence_kind=EvidenceKind.REFERENCE,
+                    evidence_payload={
+                        "identity": {
+                            "path": path,
+                            "line": call.line,
+                            "callee": call.callee,
+                            "name": simple,
+                        },
+                        "reference": {
+                            "kind": "call",
+                            "path": path,
+                            "line": call.line,
+                            "callee": call.callee,
+                            "name": simple,
+                        },
+                    },
+                    message=f"head calls {simple!r}, but no head definition exists",
+                    remediation="Restore the definition or update the call.",
+                )
+            )
 
     # Unsupported or dynamic scope is only a gap when deletion was relevant.
     if removed:
