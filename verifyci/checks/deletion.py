@@ -203,7 +203,6 @@ def run(context: CheckContext) -> CheckResult:
     # Re-export imports in package __init__ files are covered by the
     # reachable-symbol finding and are not separately reported as dangling.
     removed_simple_names = {_simple_name(entity.qname) for entity in removed}
-    head_simple_names = {_simple_name(qname) for qname in context.scope.head_entities}
     emitted_dangling: set[tuple[str, str]] = set()
     for path, facts in context.scope.head_facts.items():
         if path.endswith("__init__.py"):
@@ -260,9 +259,15 @@ def run(context: CheckContext) -> CheckResult:
             simple = call.callee.split(".")[-1]
             if not simple or simple not in removed_simple_names:
                 continue
-            if simple in head_simple_names:
-                continue
             if simple in reachable_simple_names:
+                continue
+            # Only treat a call as dangling when a removed entity with that
+            # name existed in the same file as the call.  A same-named symbol
+            # in an unrelated scope does not make the call safe.
+            if not any(
+                _simple_name(entity.qname) == simple and entity.file_path == path
+                for entity in removed
+            ):
                 continue
             if (path, simple) in emitted_dangling:
                 continue
