@@ -206,7 +206,7 @@ def test_deletion_finds_live_reference_in_unchanged_file(tmp_path):
     bundle = _gate(root, base, head)
     result = _assert_check_results(bundle)["deletion"]
     assert result["outcome"] == "FAIL"
-    finding = next(f for f in result["findings"] if f["defect_id"] == "DEL-REACHABLE-SYMBOL")
+    finding = next(f for f in result["findings"] if f["defect_id"] == "DEL-DANGLING-REFERENCE")
     assert finding["evidence"]["payload"]["reference"]["path"] == "main.py"
     assert bundle.payload["verdict"]["status"] == "FAIL"
 

@@ -13,7 +13,7 @@ from verifyci.checks.base import (
     unsupported_scope_gaps,
 )
 from verifyci.contracts.model import CheckResult, Coverage, EvidenceKind, Outcome
-from verifyci.contracts.names import symbol_matches_any
+from verifyci.contracts.names import path_matches_any, symbol_matches_any
 
 
 def _simple_name(qname: str) -> str:
@@ -65,6 +65,8 @@ def _dynamic_references(context: CheckContext, simple: str) -> list[dict[str, An
         if not entry.head_source:
             continue
         for line_number, line in enumerate(entry.head_source.splitlines(), start=1):
+            if "__all__" in line:
+                continue
             if pattern.search(line):
                 out.append(
                     {
@@ -78,21 +80,40 @@ def _dynamic_references(context: CheckContext, simple: str) -> list[dict[str, An
 
 
 def run(context: CheckContext) -> CheckResult:
+    excluded_patterns = []
+    for key in ("generated", "vendored"):
+        excluded_patterns.extend(context.policy.path_classes.get(key, ()))
+    excluded_patterns = tuple(excluded_patterns)
+
     removed: list[Any] = []
     for path, facts in context.scope.base_facts.items():
         for entity in facts.entities:
             if entity.qname not in context.scope.head_entities:
+                if excluded_patterns and path_matches_any(excluded_patterns, entity.file_path):
+                    continue
                 removed.append(entity)
 
     findings = []
     gaps = unsupported_scope_gaps(context, "deletion")
     references_found: list[dict[str, Any]] = []
+    proven_dynamic_paths: set[str] = set()
     for entity in removed:
         simple = _simple_name(entity.qname)
         refs = _head_references(context, simple)
         dynamic_refs = _dynamic_references(context, simple)
-        is_public = entity.is_export or _public_policy_match(context, entity)
-        if refs:
+        facts = context.scope.base_facts.get(entity.file_path)
+        is_exported = False
+        if entity.file_path.endswith(".py"):
+            if facts is not None and simple in facts.exports:
+                is_exported = True
+            for p, hf in context.scope.head_facts.items():
+                if p.endswith("__init__.py"):
+                    if any(simple in imp.names for imp in hf.imports):
+                        is_exported = True
+        else:
+            is_exported = bool(entity.is_export)
+        is_public = is_exported or _public_policy_match(context, entity)
+        if refs and is_public:
             references_found.extend(refs)
             primary = refs[0]
             findings.append(
@@ -152,6 +173,7 @@ def run(context: CheckContext) -> CheckResult:
             )
         if dynamic_refs:
             for ref in dynamic_refs:
+                proven_dynamic_paths.add(str(ref.get("path")))
                 findings.append(
                     make_finding(
                         context=context,
@@ -175,7 +197,11 @@ def run(context: CheckContext) -> CheckResult:
 
     # A head import of a base symbol that no longer exists in head is a
     # dangling reference even when the removed definition was not exported.
+    # Re-export imports in package __init__ files are covered by the
+    # reachable-symbol finding and are not separately reported as dangling.
     for path, facts in context.scope.head_facts.items():
+        if path.endswith("__init__.py"):
+            continue
         for imp in facts.imports:
             for name in imp.names:
                 if not name or name == "*":
@@ -221,7 +247,9 @@ def run(context: CheckContext) -> CheckResult:
     # Unsupported or dynamic scope is only a gap when deletion was relevant.
     if removed:
         dynamic_paths = sorted(
-            path for path, facts in context.scope.head_facts.items() if facts.has_dynamic_dispatch
+            path
+            for path, facts in context.scope.head_facts.items()
+            if facts.has_dynamic_dispatch and path not in proven_dynamic_paths
         )
         if dynamic_paths:
             gaps.append(
@@ -258,7 +286,10 @@ def run(context: CheckContext) -> CheckResult:
         outcome = Outcome.NOT_APPLICABLE
     else:
         outcome = Outcome.PASS
-    coverage = Coverage.COMPLETE if not gaps else Coverage.PARTIAL
+    if any(g.reason_code in ("unsupported_language", "parse_error") for g in gaps):
+        coverage = Coverage.UNKNOWN
+    else:
+        coverage = Coverage.COMPLETE if not gaps else Coverage.PARTIAL
     scope_complete = not any(
         g.reason_code in ("unsupported_language", "parse_error", "rename_limit_exceeded")
         for g in gaps

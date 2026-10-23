@@ -157,6 +157,8 @@ class _CallVisitor(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         callee = _callee_name(node.func)
+        if isinstance(node.func, ast.Subscript):
+            self.dynamic = True
         if callee:
             if callee in {"getattr", "setattr", "eval", "exec", "__import__", "compile"}:
                 self.dynamic = True
