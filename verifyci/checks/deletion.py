@@ -30,9 +30,29 @@ def _public_policy_match(context: CheckContext, entity) -> bool:
     )
 
 
-def _head_references(context: CheckContext, simple: str) -> list[dict[str, Any]]:
+def _module_name(path: str) -> str:
+    return path.rsplit(".", 1)[0].replace("/", ".").replace("\\", ".")
+
+
+def _head_references(context: CheckContext, entity: Any) -> list[dict[str, Any]]:
+    simple = _simple_name(entity.qname)
+    entity_module = _module_name(entity.file_path)
     references: list[dict[str, Any]] = []
     for path, facts in context.scope.head_facts.items():
+        # Only collect references that can plausibly resolve to this exact
+        # removed entity: same module, or a module that imports the symbol
+        # from the entity's module.
+        same_module = path == entity.file_path
+        imports_symbol = False
+        for imp in facts.imports:
+            if simple not in imp.names:
+                continue
+            mod = (imp.module or "").lstrip(".")
+            if mod == "" or mod.endswith(entity_module.rsplit(".", 1)[-1]) or entity_module.endswith(mod) or mod in entity_module:
+                imports_symbol = True
+                break
+        if not same_module and not imports_symbol:
+            continue
         for call in facts.calls:
             if call.callee == simple or call.callee.endswith(f".{simple}"):
                 references.append(
@@ -100,7 +120,7 @@ def run(context: CheckContext) -> CheckResult:
     proven_dynamic_paths: set[str] = set()
     for entity in removed:
         simple = _simple_name(entity.qname)
-        refs = _head_references(context, simple)
+        refs = _head_references(context, entity)
         dynamic_refs = _dynamic_references(context, simple)
         facts = context.scope.base_facts.get(entity.file_path)
         is_exported = False
