@@ -265,16 +265,39 @@ def run(context: CheckContext) -> CheckResult:
             for name in imp.names:
                 if not name or name == "*":
                     continue
-                # Use exact qualified-name identity: the import is dangling
-                # only when a base definition with that identity no longer
-                # exists in head.  A same-named survivor in another module
-                # does not mask a removed symbol.
+                resolved = _resolve_module(imp.module or "", path)
+                if resolved is None:
+                    if path not in unresolved_import_paths:
+                        unresolved_import_paths.add(path)
+                    continue
+                base_files = [p for p in context.scope.base_facts if _module_name(p) == resolved]
+                if not base_files:
+                    # The imported module cannot be resolved against the base
+                    # repository; report incomplete coverage instead of a
+                    # possibly wrong finding.
+                    if path not in unresolved_import_paths:
+                        unresolved_import_paths.add(path)
+                    continue
                 base_matches = [
                     entity
-                    for facts in context.scope.base_facts.values()
-                    for entity in facts.entities
+                    for p in base_files
+                    for entity in context.scope.base_facts[p].entities
                     if _simple_name(entity.qname) == name
                 ]
+                # Fall back to package-level resolution for re-exported
+                # symbols defined in a submodule.  Keep the fallback scoped
+                # to the same package to avoid same-named cross-module matches.
+                if not base_matches:
+                    pkg = resolved.rsplit(".", 1)[0] if "." in resolved else resolved
+                    base_matches = [
+                        entity
+                        for facts in context.scope.base_facts.values()
+                        for entity in facts.entities
+                        if _simple_name(entity.qname) == name
+                        and _module_name(entity.file_path).rsplit(".", 1)[0] == pkg
+                    ]
+                if not base_matches:
+                    continue
                 removed_matches = [e for e in base_matches if e.qname not in context.scope.head_entities]
                 if not removed_matches:
                     continue
