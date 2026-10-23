@@ -38,28 +38,31 @@ def _module_name(path: str) -> str:
     return mod
 
 
-def _resolve_module(imp_module: str, importing_path: str) -> str | None:
+def _resolve_module(imp_module: str, importing_path: str, level: int = 0) -> str | None:
+    imp_module = (imp_module or "").strip()
+    # Legacy/relative-dot form.
+    if imp_module.startswith("."):
+        dots = len(imp_module) - len(imp_module.lstrip("."))
+        level = level or dots
+        imp_module = imp_module.lstrip(".")
+    if level and level > 0:
+        base_mod = _module_name(importing_path)
+        if importing_path.endswith("__init__.py"):
+            pkg = base_mod
+        else:
+            pkg = base_mod.rsplit(".", 1)[0] if "." in base_mod else ""
+        parts = pkg.split(".") if pkg else []
+        if level > 1:
+            if level - 1 >= len(parts):
+                return None
+            parts = parts[: len(parts) - (level - 1)]
+            pkg = ".".join(parts)
+        if imp_module:
+            return f"{pkg}.{imp_module}" if pkg else imp_module
+        return pkg or None
     if not imp_module:
         return None
-    if not imp_module.startswith("."):
-        return imp_module
-    dots = len(imp_module) - len(imp_module.lstrip("."))
-    rest = imp_module.lstrip(".")
-    base_mod = _module_name(importing_path)
-    if importing_path.endswith("__init__.py"):
-        # The module name is already the package name.
-        pkg = base_mod
-    elif dots == 1:
-        pkg = base_mod.rsplit(".", 1)[0] if "." in base_mod else ""
-    else:
-        parts = base_mod.split(".")
-        # Go up (dots-1) levels.
-        if dots - 1 >= len(parts):
-            return None
-        pkg = ".".join(parts[: len(parts) - (dots - 1)])
-    if rest:
-        return f"{pkg}.{rest}" if pkg else rest
-    return pkg or None
+    return imp_module
 
 
 def _head_references(context: CheckContext, entity: Any) -> list[dict[str, Any]]:
@@ -72,7 +75,7 @@ def _head_references(context: CheckContext, entity: Any) -> list[dict[str, Any]]
         for imp in facts.imports:
             if simple not in imp.names:
                 continue
-            if _resolve_module(imp.module or "", path) == entity_module:
+            if _resolve_module(imp.module or "", path, getattr(imp, "level", 0)) == entity_module:
                 imports_symbol = True
                 break
         if not same_module and not imports_symbol:
@@ -112,7 +115,7 @@ def _dynamic_references(context: CheckContext, entity: Any) -> list[dict[str, An
         # same module or imports the symbol from this entity's module.
         same_module = path == entity.file_path
         imports_symbol = any(
-            simple in imp.names and _resolve_module(imp.module or "", path) == entity_module
+            simple in imp.names and _resolve_module(imp.module or "", path, getattr(imp, "level", 0)) == entity_module
             for imp in facts.imports
         )
         if not same_module and not imports_symbol:
@@ -268,7 +271,7 @@ def run(context: CheckContext) -> CheckResult:
             for name in imp.names:
                 if not name or name == "*":
                     continue
-                resolved = _resolve_module(imp.module or "", path)
+                resolved = _resolve_module(imp.module or "", path, getattr(imp, "level", 0))
                 if resolved is None:
                     if path not in unresolved_import_paths:
                         unresolved_import_paths.add(path)
@@ -306,18 +309,9 @@ def run(context: CheckContext) -> CheckResult:
                     for imp in context.scope.base_facts[package_init].imports:
                         if name not in (imp.names or ()):
                             continue
-                        mod = (imp.module or "").strip()
-                        if not mod:
-                            continue
-                        # Relative imports lose their leading dots in the
-                        # frontend, so resolve against the package first.
-                        candidates = {
-                            f"{resolved}.{mod}",
-                            mod,
-                        }
-                        for cand in candidates:
-                            if any(_module_name(p) == cand for p in context.scope.base_facts):
-                                candidate_modules.add(cand)
+                        cand = _resolve_module(imp.module or "", package_init, getattr(imp, "level", 0))
+                        if cand and any(_module_name(p) == cand for p in context.scope.base_facts):
+                            candidate_modules.add(cand)
                     if not candidate_modules:
                         continue
                     base_matches = [

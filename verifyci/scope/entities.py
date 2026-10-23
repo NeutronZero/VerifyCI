@@ -52,6 +52,7 @@ class ImportFact:
     module: str
     names: tuple[str, ...]
     line: int
+    level: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -393,13 +394,14 @@ def analyze_python(path: str, source: str, source_roots: Sequence[str] = ()) -> 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                imports.append(ImportFact(alias.name, (alias.asname or alias.name,), node.lineno))
+                imports.append(ImportFact(alias.name, (alias.asname or alias.name,), node.lineno, 0))
         elif isinstance(node, ast.ImportFrom):
             imports.append(
                 ImportFact(
                     node.module or "",
                     tuple(alias.name for alias in node.names),
                     node.lineno,
+                    node.level,
                 )
             )
     entities = _python_entities(path, source, tree, source_roots)
@@ -618,7 +620,7 @@ def analyze_typescript(path: str, source: str) -> SourceFacts:
             text = _node_text(node)
             m = re.search(r"from\s+['\"]([^'\"]+)['\"]", text)
             if m:
-                imports.append(ImportFact(m.group(1), (), node.start_point.row + 1))
+                imports.append(ImportFact(m.group(1), (), node.start_point.row + 1, 0))
         elif node.type in ("identifier", "property_identifier"):
             loads.add(_node_text(node))
         for child in node.children:
