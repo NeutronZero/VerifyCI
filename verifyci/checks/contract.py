@@ -179,8 +179,11 @@ def run(context: CheckContext) -> CheckResult:
         if base is not None and head is not None:
             old_sig = _sig(base)
             new_sig = _sig(head)
-            if old_sig.params != new_sig.params:
+            async_changed = base.is_async != head.is_async
+            if old_sig.params != new_sig.params or async_changed:
                 problems: list[str] = []
+                if async_changed:
+                    problems.append("async_changed")
                 if new_sig.required_positional > old_sig.required_positional:
                     problems.append("required_positional_parameters_added")
                 if old_sig.has_vararg and not new_sig.has_vararg:
@@ -194,7 +197,6 @@ def run(context: CheckContext) -> CheckResult:
                     for path, facts, call in all_head_calls
                     if _matches_callee(call.callee, _simple(qname))
                 ]
-                async_changed = base.is_async != head.is_async
                 public = _public_api(context, head)
                 if public or (not callers and problems):
                     problems = problems or ["declared_public_api"]
@@ -376,7 +378,10 @@ def run(context: CheckContext) -> CheckResult:
         outcome = Outcome.NOT_APPLICABLE
     else:
         outcome = Outcome.PASS
-    coverage = Coverage.COMPLETE if not gaps else Coverage.PARTIAL
+    if any(g.reason_code in ("unsupported_language", "parse_error") for g in gaps):
+        coverage = Coverage.UNKNOWN
+    else:
+        coverage = Coverage.COMPLETE if not gaps else Coverage.PARTIAL
     scope_complete = not any(
         g.reason_code in ("unsupported_language", "parse_error", "rename_limit_exceeded")
         for g in gaps
