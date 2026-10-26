@@ -13,6 +13,7 @@ Addresses audit findings M4-1 through M4-5:
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 from pathlib import Path
 import shutil
@@ -23,8 +24,11 @@ import z3
 
 from verifyci.checks.base import CheckContext
 from verifyci.checks.semantic import (
+    collect_target_sites,
     replay_witness,
     run as run_semantic,
+    SymbolicContext,
+    UnsupportedControlFlowError,
 )
 from verifyci.contracts.model import Coverage, Outcome
 from verifyci.gate.orchestrator import _augment_scope_with_repository
@@ -713,98 +717,74 @@ def test_transparent_decorator_policy_respected(tmp_path: Path):
     assert "unknown_decorator" not in result.reason_codes
 
 
+@pytest.mark.parametrize(
+    "label,generator",
+    [
+        ("Assert", lambda: ast.parse("assert user.is_active").body),
+        ("AsyncFor", lambda: ast.parse("async def f():\n    async for x in it: pass").body[0].body),
+        ("AsyncFunctionDef", lambda: ast.parse("async def f(): pass").body),
+        ("AsyncWith", lambda: ast.parse("async def f():\n    async with lock: pass").body[0].body),
+        ("Break", lambda: ast.parse("while True: break").body[0].body),
+        ("ClassDef", lambda: ast.parse("class C: pass").body),
+        ("Continue", lambda: ast.parse("while True: continue").body[0].body),
+        ("Delete", lambda: ast.parse("del x").body),
+        ("For", lambda: ast.parse("for x in it: pass").body),
+        ("FunctionDef", lambda: ast.parse("def f(): pass").body),
+        ("Global", lambda: ast.parse("global x").body),
+        ("Import", lambda: ast.parse("import os").body),
+        ("ImportFrom", lambda: ast.parse("from os import path").body),
+        ("Match", lambda: ast.parse("match x:\n    case _: pass").body),
+        ("Nonlocal", lambda: ast.parse("def f():\n    x = 1\n    def g(): nonlocal x").body[0].body[1].body),
+        ("Try", lambda: ast.parse("try:\n    pass\nexcept: pass").body),
+        ("While", lambda: ast.parse("while True: pass").body),
+        ("With", lambda: ast.parse("with lock: pass").body),
+        ("Yield (Expr)", lambda: ast.parse("def f(): yield 1").body[0].body),
+        ("YieldFrom (Expr)", lambda: ast.parse("def f(): yield from xs").body[0].body),
+        *(
+            [("TryStar", lambda: ast.parse("try:\n    pass\nexcept* ValueError: pass").body)]
+            if hasattr(ast, "TryStar")
+            else []
+        ),
+        *(
+            [("TypeAlias", lambda: ast.parse("type X = int").body)]
+            if hasattr(ast, "TypeAlias")
+            else []
+        ),
+    ],
+)
 @pytest.mark.invariant
-def test_unmodeled_assert_statement_fails_closed(tmp_path: Path):
-    """Unmodeled assert statement must fail closed to INCONCLUSIVE with Coverage.PARTIAL."""
-    base_src = "def process(user, item):\n    assert user.is_active\n    delete_item(item)\n"
-    head_src = "def process(user, item):\n    delete_item(item)\n"
+def test_systematic_unsupported_statement_types_raise_error(label: str, generator):
+    """Systematically verify every unmodeled statement raises UnsupportedControlFlowError."""
+    stmts = generator()
+    ctx = SymbolicContext()
+    with pytest.raises(UnsupportedControlFlowError) as exc_info:
+        collect_target_sites(stmts, ctx)
+    assert exc_info.value.lineno > 0
+
+
+@pytest.mark.parametrize(
+    "case_label,base_stmt",
+    [
+        ("assert", "assert user.is_active"),
+        ("match", "match mode:\n        case 'admin': pass"),
+        ("delete", "del item.temp"),
+        ("for", "for x in items: pass"),
+        ("while", "while count > 0: count -= 1"),
+        ("with", "with lock: pass"),
+        ("try", "try:\n        pass\n    except Exception:\n        pass"),
+        ("global", "global shared_state"),
+        ("yield", "yield item"),
+    ],
+)
+@pytest.mark.invariant
+def test_systematic_unmodeled_statements_fail_closed_at_gate(tmp_path: Path, case_label: str, base_stmt: str):
+    """Systematically verify representative unmodeled statement types fail closed at gate level."""
+    base_src = f"def process(user, item, mode='user', items=(), count=0, shared_state=None):\n    {base_stmt}\n    delete_item(item)\n"
+    head_src = "def process(user, item, mode='user', items=(), count=0, shared_state=None):\n    delete_item(item)\n"
     repo, base, mb, head = _build_repo(
         {"src/action.py": base_src},
         {"src/action.py": head_src},
-        tmp_path / "repo8",
-    )
-    entries, _ = repo.diff_entries(base, head)
-    scope = build_changed_scope(entries)
-    scope = _augment_scope_with_repository(scope, git=repo, base_rev=base, head_rev=head, source_roots=())
-
-    base_policy = parse_policy_bytes(b"")
-    policy = dataclasses.replace(
-        base_policy,
-        protected_guards={"del_rule": {"effects": ["delete_item"], "paths": ["src/**.py"]}},
-    )
-    ctx = CheckContext(
-        git=repo,
-        policy=policy,
-        entries=tuple(entries),
-        scope=scope,
-        as_of_date="2026-10-21",
-        target_base_commit=base,
-        merge_base_commit=mb,
-        head_commit=head,
-        object_format="sha1",
-        toolchain_fingerprint="test",
-        source_roots=(),
-    )
-    result = run_semantic(ctx)
-    assert result.outcome == Outcome.INCONCLUSIVE
-    assert result.coverage == Coverage.PARTIAL
-    assert "semantic_alignment_unresolved" in result.reason_codes
-    assert any(g.reason_code == "semantic_alignment_unresolved" for g in result.coverage_gaps)
-
-
-@pytest.mark.invariant
-def test_unmodeled_match_statement_fails_closed(tmp_path: Path):
-    """Unmodeled match statement must fail closed to INCONCLUSIVE with Coverage.PARTIAL."""
-    base_src = (
-        "def process(mode, item):\n"
-        "    match mode:\n"
-        "        case 'admin':\n"
-        "            delete_item(item)\n"
-    )
-    head_src = "def process(mode, item):\n    delete_item(item)\n"
-    repo, base, mb, head = _build_repo(
-        {"src/action.py": base_src},
-        {"src/action.py": head_src},
-        tmp_path / "repo9",
-    )
-    entries, _ = repo.diff_entries(base, head)
-    scope = build_changed_scope(entries)
-    scope = _augment_scope_with_repository(scope, git=repo, base_rev=base, head_rev=head, source_roots=())
-
-    base_policy = parse_policy_bytes(b"")
-    policy = dataclasses.replace(
-        base_policy,
-        protected_guards={"del_rule": {"effects": ["delete_item"], "paths": ["src/**.py"]}},
-    )
-    ctx = CheckContext(
-        git=repo,
-        policy=policy,
-        entries=tuple(entries),
-        scope=scope,
-        as_of_date="2026-10-21",
-        target_base_commit=base,
-        merge_base_commit=mb,
-        head_commit=head,
-        object_format="sha1",
-        toolchain_fingerprint="test",
-        source_roots=(),
-    )
-    result = run_semantic(ctx)
-    assert result.outcome == Outcome.INCONCLUSIVE
-    assert result.coverage == Coverage.PARTIAL
-    assert "semantic_alignment_unresolved" in result.reason_codes
-    assert any(g.reason_code == "semantic_alignment_unresolved" for g in result.coverage_gaps)
-
-
-@pytest.mark.invariant
-def test_unmodeled_delete_statement_fails_closed(tmp_path: Path):
-    """Unmodeled del statement must fail closed to INCONCLUSIVE with Coverage.PARTIAL."""
-    base_src = "def process(item):\n    del item.temp\n    delete_item(item)\n"
-    head_src = "def process(item):\n    delete_item(item)\n"
-    repo, base, mb, head = _build_repo(
-        {"src/action.py": base_src},
-        {"src/action.py": head_src},
-        tmp_path / "repo10",
+        tmp_path / f"repo_gate_{case_label}",
     )
     entries, _ = repo.diff_entries(base, head)
     scope = build_changed_scope(entries)
