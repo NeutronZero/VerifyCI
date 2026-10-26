@@ -185,3 +185,79 @@ def test_unsupported_language_taint_unknown_coverage(tmp_path: Path):
     assert res.coverage == Coverage.UNKNOWN
     assert "unsupported_language" in res.reason_codes
     assert not res.findings
+
+
+@pytest.mark.invariant
+def test_multiline_dangerous_call(tmp_path: Path):
+    """Multiline dangerous call split across lines is detected syntax-aware."""
+    base = {"src/runner.py": "def run(): pass\n"}
+    head = {
+        "src/runner.py": (
+            "def run(cmd):\n"
+            "    eval(\n"
+            "        cmd\n"
+            "    )\n"
+        )
+    }
+    res = _build_and_run("multiline_call", base, head, "", tmp_path)
+    assert res.outcome == Outcome.FAIL
+    assert any(f.defect_id == "SEC-DANGEROUS-CALL" and f.subject.get("symbol") == "eval" for f in res.findings)
+
+
+@pytest.mark.invariant
+def test_aliased_dangerous_call(tmp_path: Path):
+    """Import-aliased dangerous call is resolved to its underlying forbidden symbol."""
+    base = {"src/exec.py": "def execute(): pass\n"}
+    head = {
+        "src/exec.py": (
+            "from os import system as sys_exec\n"
+            "def execute(cmd):\n"
+            "    return sys_exec(cmd)\n"
+        )
+    }
+    res = _build_and_run("alias_call", base, head, "", tmp_path)
+    assert res.outcome == Outcome.FAIL
+    assert any(f.defect_id == "SEC-DANGEROUS-CALL" for f in res.findings)
+
+
+@pytest.mark.invariant
+def test_dynamic_dangerous_call_fails_closed_inconclusive(tmp_path: Path):
+    """Dynamic callee expression (e.g. getattr dispatch) cannot be verified safe and returns INCONCLUSIVE with dynamic_call gap."""
+    base = {"src/dispatch.py": "def run(): pass\n"}
+    head = {
+        "src/dispatch.py": (
+            "import os\n"
+            "def run(cmd):\n"
+            "    getattr(os, 'system')(cmd)\n"
+        )
+    }
+    res = _build_and_run("dynamic_call_gap", base, head, "", tmp_path)
+    assert res.outcome == Outcome.INCONCLUSIVE
+    assert res.coverage == Coverage.PARTIAL
+    assert "dynamic_call" in res.reason_codes
+    assert not res.findings
+
+
+@pytest.mark.invariant
+def test_taint_sink_only_fails_closed_inconclusive(tmp_path: Path):
+    """Sink alone on changed line without resolved source produces INCONCLUSIVE with taint_path_unresolved."""
+    base = {"src/db.py": "def run(): pass\n"}
+    head = {
+        "src/db.py": (
+            "def run(cursor, query):\n"
+            "    cursor.execute(query)\n"
+        )
+    }
+    policy = (
+        "[taint]\n"
+        "sources = [\"request.args\"]\n"
+        "[taint.sinks.db]\n"
+        "symbols = [\"cursor:execute\"]\n"
+        "kind = \"sql\"\n"
+    )
+    res = _build_and_run("sink_only_gap", base, head, policy, tmp_path)
+    assert res.outcome == Outcome.INCONCLUSIVE
+    assert res.coverage == Coverage.PARTIAL
+    assert "taint_path_unresolved" in res.reason_codes
+    assert not res.findings
+
