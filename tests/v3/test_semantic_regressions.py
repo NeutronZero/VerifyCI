@@ -233,7 +233,7 @@ def test_independent_replay_execution_confirms_divergence():
     phi_base = z3.Int("account.balance") >= z3.Int("amount") + 10
     phi_head = z3.Int("account.balance") >= z3.Int("amount")
 
-    confirmed, obs = replay_witness(
+    replay_res = replay_witness(
         base_src=base_src,
         head_src=head_src,
         fn_name="charge",
@@ -244,8 +244,9 @@ def test_independent_replay_execution_confirms_divergence():
         phi_head=phi_head,
         solver_model=None,
     )
-    assert confirmed is True
-    assert "head called execute_charge" in obs
+    assert replay_res.confirmed is True
+    assert "execute_charge" in replay_res.reason
+    assert "calls" in replay_res.head_observation
 
 
 @pytest.mark.invariant
@@ -253,7 +254,7 @@ def test_replay_mismatch_fails_closed():
     """If candidate witness does not reproduce divergence, replay fails and finding is prevented."""
     src = "def process(x):\n    call_sink(x)\n"
     # Both base and head are identical
-    confirmed, obs = replay_witness(
+    replay_res = replay_witness(
         base_src=src,
         head_src=src,
         fn_name="process",
@@ -262,7 +263,189 @@ def test_replay_mismatch_fails_closed():
         model_values={"x": 10},
     )
     # Both called call_sink, so head_called and not base_called is FALSE
-    assert confirmed is False
+    assert replay_res.confirmed is False
+    assert "divergence not observed" in replay_res.reason
+
+
+@pytest.mark.invariant
+def test_nested_early_return_reachability_defect(tmp_path: Path):
+    """Nested early return removal allows non-admin path to reach protected effect."""
+    base_src = (
+        "def check(user, doc_id):\n"
+        "    if user.role != 'admin':\n"
+        "        if user.is_guest:\n"
+        "            return\n"
+        "        else:\n"
+        "            return\n"
+        "    delete_doc(doc_id)\n"
+    )
+    head_src = (
+        "def check(user, doc_id):\n"
+        "    if user.role != 'admin':\n"
+        "        if user.is_guest:\n"
+        "            return\n"
+        "        # else branch removed: non-guest non-admins now fall through to delete_doc!\n"
+        "    delete_doc(doc_id)\n"
+    )
+    repo, base, mb, head = _build_repo(
+        {"src/nested.py": base_src},
+        {"src/nested.py": head_src},
+        tmp_path / "repo_nested",
+    )
+    entries, _ = repo.diff_entries(base, head)
+    scope = build_changed_scope(entries)
+    scope = _augment_scope_with_repository(scope, git=repo, base_rev=base, head_rev=head, source_roots=())
+
+    base_policy = parse_policy_bytes(b"")
+    policy = dataclasses.replace(
+        base_policy,
+        protected_guards={"doc_rule": {"effects": ["delete_doc"], "paths": ["src/**.py"]}},
+    )
+    ctx = CheckContext(
+        git=repo,
+        policy=policy,
+        entries=tuple(entries),
+        scope=scope,
+        as_of_date="2026-10-21",
+        target_base_commit=base,
+        merge_base_commit=mb,
+        head_commit=head,
+        object_format="sha1",
+        toolchain_fingerprint="test",
+        source_roots=(),
+    )
+    result = run_semantic(ctx)
+    assert result.outcome == Outcome.FAIL
+    assert len(result.findings) == 1
+    assert result.findings[0].defect_id == "SEM-GUARD-REMOVED"
+    finding = result.findings[0]
+    assert finding.evidence.payload["replay_confirmed"] is True
+    assert "replay_result" in finding.evidence.payload
+    replay_dict = finding.evidence.payload["replay_result"]
+    assert replay_dict["confirmed"] is True
+    assert "input_model" in replay_dict
+    assert "base_observation" in replay_dict
+    assert "head_observation" in replay_dict
+
+
+@pytest.mark.invariant
+def test_unsupported_expression_in_guard_fails_closed(tmp_path: Path):
+    """Unsupported expression (& bitwise operator) in analyzed guard fails closed with Coverage.PARTIAL."""
+    base_src = (
+        "def auth_check(user):\n"
+        "    if user.perms & 0x04:\n"
+        "        disburse_funds(user)\n"
+    )
+    head_src = (
+        "def auth_check(user):\n"
+        "    if user.perms & 0x08:\n"
+        "        disburse_funds(user)\n"
+    )
+    repo, base, mb, head = _build_repo(
+        {"src/bitwise.py": base_src},
+        {"src/bitwise.py": head_src},
+        tmp_path / "repo_bitwise",
+    )
+    entries, _ = repo.diff_entries(base, head)
+    scope = build_changed_scope(entries)
+    scope = _augment_scope_with_repository(scope, git=repo, base_rev=base, head_rev=head, source_roots=())
+
+    base_policy = parse_policy_bytes(b"")
+    policy = dataclasses.replace(
+        base_policy,
+        protected_guards={"fund_rule": {"effects": ["disburse_funds"], "paths": ["src/**.py"]}},
+    )
+    ctx = CheckContext(
+        git=repo,
+        policy=policy,
+        entries=tuple(entries),
+        scope=scope,
+        as_of_date="2026-10-21",
+        target_base_commit=base,
+        merge_base_commit=mb,
+        head_commit=head,
+        object_format="sha1",
+        toolchain_fingerprint="test",
+        source_roots=(),
+    )
+    result = run_semantic(ctx)
+    assert result.outcome == Outcome.INCONCLUSIVE
+    assert result.coverage == Coverage.PARTIAL
+    assert "unsupported_syntax_version" in result.reason_codes
+    assert any(g.reason_code == "unsupported_syntax_version" for g in result.coverage_gaps)
+
+
+@pytest.mark.invariant
+def test_unsupported_control_flow_in_guard_fails_closed(tmp_path: Path):
+    """Unsupported control flow (while loop) in analyzed guard fails closed with Coverage.PARTIAL."""
+    base_src = (
+        "def sync_data(user):\n"
+        "    while not user.is_ready:\n"
+        "        pass\n"
+        "    disburse_funds(user)\n"
+    )
+    head_src = (
+        "def sync_data(user):\n"
+        "    disburse_funds(user)\n"
+    )
+    repo, base, mb, head = _build_repo(
+        {"src/loop.py": base_src},
+        {"src/loop.py": head_src},
+        tmp_path / "repo_loop",
+    )
+    entries, _ = repo.diff_entries(base, head)
+    scope = build_changed_scope(entries)
+    scope = _augment_scope_with_repository(scope, git=repo, base_rev=base, head_rev=head, source_roots=())
+
+    base_policy = parse_policy_bytes(b"")
+    policy = dataclasses.replace(
+        base_policy,
+        protected_guards={"fund_rule": {"effects": ["disburse_funds"], "paths": ["src/**.py"]}},
+    )
+    ctx = CheckContext(
+        git=repo,
+        policy=policy,
+        entries=tuple(entries),
+        scope=scope,
+        as_of_date="2026-10-21",
+        target_base_commit=base,
+        merge_base_commit=mb,
+        head_commit=head,
+        object_format="sha1",
+        toolchain_fingerprint="test",
+        source_roots=(),
+    )
+    result = run_semantic(ctx)
+    assert result.outcome == Outcome.INCONCLUSIVE
+    assert result.coverage == Coverage.PARTIAL
+    assert "semantic_alignment_unresolved" in result.reason_codes
+    assert any(g.reason_code == "semantic_alignment_unresolved" for g in result.coverage_gaps)
+
+
+@pytest.mark.invariant
+def test_replay_sandbox_security_isolation():
+    """Replay runner rejects source code attempting unsafe operations like import os."""
+    unsafe_src = (
+        "def attack():\n"
+        "    import os\n"
+        "    os.system('echo compromised')\n"
+        "    do_effect()\n"
+    )
+    safe_src = (
+        "def attack():\n"
+        "    do_effect()\n"
+    )
+    replay_res = replay_witness(
+        base_src=safe_src,
+        head_src=unsafe_src,
+        fn_name="attack",
+        defect_family="SEM-GUARD-REMOVED",
+        target="do_effect",
+        model_values={},
+    )
+    assert replay_res.confirmed is False
+    assert "safety violation" in replay_res.reason
+
 
 
 @pytest.mark.invariant

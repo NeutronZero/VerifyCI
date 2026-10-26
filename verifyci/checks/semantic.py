@@ -11,6 +11,7 @@ Covers five declared defect families:
 from __future__ import annotations
 
 import ast
+import dataclasses
 import inspect
 from typing import Any
 import z3
@@ -30,9 +31,60 @@ _STANDARD_TRANSPARENT_DECORATORS = frozenset(
     {"property", "staticmethod", "classmethod", "abstractmethod"}
 )
 
+_SAFE_BUILTINS: dict[str, Any] = {
+    "abs": abs,
+    "all": all,
+    "any": any,
+    "bool": bool,
+    "dict": dict,
+    "int": int,
+    "len": len,
+    "list": list,
+    "max": max,
+    "min": min,
+    "range": range,
+    "set": set,
+    "str": str,
+    "tuple": tuple,
+    "Exception": Exception,
+    "ValueError": ValueError,
+    "TypeError": TypeError,
+    "PermissionError": PermissionError,
+    "KeyError": KeyError,
+    "AttributeError": AttributeError,
+    "RuntimeError": RuntimeError,
+    "True": True,
+    "False": False,
+    "None": None,
+}
+
 
 # ---------------------------------------------------------------------------
-# 1. Symbolic Expression Translator
+# 1. Custom Exceptions for Fail-Closed Semantic Handling
+# ---------------------------------------------------------------------------
+
+class UnsupportedExpressionError(Exception):
+    def __init__(self, node: ast.AST, msg: str = "unsupported_expression") -> None:
+        self.node = node
+        self.msg = msg
+        self.lineno = getattr(node, "lineno", 0)
+        super().__init__(f"{msg} at line {self.lineno}: {type(node).__name__}")
+
+
+class UnsupportedControlFlowError(Exception):
+    def __init__(self, node: ast.AST, msg: str = "unsupported_control_flow") -> None:
+        self.node = node
+        self.msg = msg
+        self.lineno = getattr(node, "lineno", 0)
+        super().__init__(f"{msg} at line {self.lineno}: {type(node).__name__}")
+
+
+class ReplaySafetyViolation(Exception):
+    pass
+
+
+# ---------------------------------------------------------------------------
+# 2. Symbolic Expression Translator
 # ---------------------------------------------------------------------------
 
 class SymbolicContext:
@@ -67,6 +119,7 @@ def ast_to_z3(node: ast.AST, ctx: SymbolicContext) -> z3.ExprRef:
             return z3.StringVal(node.value)
         elif node.value is None:
             return ctx.get_var("__none_val__", "string")
+        raise UnsupportedExpressionError(node, f"unsupported constant type: {type(node.value).__name__}")
 
     elif isinstance(node, ast.Name):
         return ctx.get_var(node.id)
@@ -81,7 +134,7 @@ def ast_to_z3(node: ast.AST, ctx: SymbolicContext) -> z3.ExprRef:
             parts.append(curr.id)
             qname = ".".join(reversed(parts))
             return ctx.get_var(qname)
-        return ctx.get_var(f"attr_{node.attr}")
+        raise UnsupportedExpressionError(node, "unsupported complex attribute target")
 
     elif isinstance(node, ast.UnaryOp):
         operand = ast_to_z3(node.operand, ctx)
@@ -94,6 +147,7 @@ def ast_to_z3(node: ast.AST, ctx: SymbolicContext) -> z3.ExprRef:
                 return operand == z3.IntVal(0)
         elif isinstance(node.op, ast.USub):
             return -operand
+        raise UnsupportedExpressionError(node, f"unsupported unary operator: {type(node.op).__name__}")
 
     elif isinstance(node, ast.BinOp):
         left = ast_to_z3(node.left, ctx)
@@ -104,6 +158,7 @@ def ast_to_z3(node: ast.AST, ctx: SymbolicContext) -> z3.ExprRef:
             return left - right
         elif isinstance(node.op, ast.Mult):
             return left * right
+        raise UnsupportedExpressionError(node, f"unsupported binary operator: {type(node.op).__name__}")
 
     elif isinstance(node, ast.BoolOp):
         values = [ast_to_z3(v, ctx) for v in node.values]
@@ -112,6 +167,7 @@ def ast_to_z3(node: ast.AST, ctx: SymbolicContext) -> z3.ExprRef:
             return z3.And(*bool_values)
         elif isinstance(node.op, ast.Or):
             return z3.Or(*bool_values)
+        raise UnsupportedExpressionError(node, f"unsupported boolean operator: {type(node.op).__name__}")
 
     elif isinstance(node, ast.Compare):
         left = ast_to_z3(node.left, ctx)
@@ -140,6 +196,8 @@ def ast_to_z3(node: ast.AST, ctx: SymbolicContext) -> z3.ExprRef:
                 comparisons.append(curr_left == right)
             elif isinstance(op, (ast.IsNot, ast.NotEq)):
                 comparisons.append(curr_left != right)
+            else:
+                raise UnsupportedExpressionError(node, f"unsupported comparison operator: {type(op).__name__}")
             curr_left = right
 
         if len(comparisons) == 1:
@@ -150,14 +208,13 @@ def ast_to_z3(node: ast.AST, ctx: SymbolicContext) -> z3.ExprRef:
         if isinstance(node.func, ast.Name) and node.func.id == "bool" and node.args:
             arg = ast_to_z3(node.args[0], ctx)
             return arg if z3.is_bool(arg) else arg != 0
-        callee = getattr(node.func, "id", "call")
-        return ctx.get_var(f"call_{callee}", "bool")
+        raise UnsupportedExpressionError(node, f"unsupported call in expression: {getattr(node.func, 'id', 'call')}")
 
-    return z3.BoolVal(True)
+    raise UnsupportedExpressionError(node, f"unsupported expression node: {type(node).__name__}")
 
 
 # ---------------------------------------------------------------------------
-# 2. CFG Path Condition Extraction
+# 3. CFG Path Condition Extraction
 # ---------------------------------------------------------------------------
 
 class TargetSite:
@@ -201,6 +258,8 @@ def collect_target_sites(
             if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
                 call = stmt.value
                 callee = getattr(call.func, "id", "")
+                if not callee and isinstance(call.func, ast.Attribute):
+                    callee = call.func.attr
                 sites.append(
                     TargetSite(
                         "call",
@@ -253,30 +312,23 @@ def collect_target_sites(
                 then_cond = z3.And(cont_cond, test_cond)
                 else_cond = z3.And(cont_cond, z3.Not(test_cond))
 
-                then_terminated = any(
-                    isinstance(s, (ast.Return, ast.Raise)) for s in stmt.body
-                )
-                else_terminated = (
-                    any(isinstance(s, (ast.Return, ast.Raise)) for s in stmt.orelse)
-                    if stmt.orelse
-                    else False
-                )
-
-                walk_block(stmt.body, then_cond, enclosing_conds + [test_cond])
+                then_exit = walk_block(stmt.body, then_cond, enclosing_conds + [test_cond])
                 if stmt.orelse:
-                    walk_block(
-                        stmt.orelse, else_cond, enclosing_conds + [z3.Not(test_cond)]
-                    )
-
-                if then_terminated and not else_terminated:
-                    cont_cond = else_cond
-                elif else_terminated and not then_terminated:
-                    cont_cond = then_cond
-                elif then_terminated and else_terminated:
-                    cont_cond = z3.BoolVal(False)
-                    break
+                    else_exit = walk_block(stmt.orelse, else_cond, enclosing_conds + [z3.Not(test_cond)])
                 else:
-                    cont_cond = cont_cond
+                    else_exit = else_cond
+
+                cont_cond = z3.Or(then_exit, else_exit)
+
+            elif isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Pass)):
+                # Supported straight-line statements
+                continue
+
+            elif isinstance(stmt, (ast.While, ast.For, ast.AsyncFor, ast.Try, ast.With, ast.AsyncWith)):
+                raise UnsupportedControlFlowError(stmt, f"unsupported control flow {type(stmt).__name__}")
+
+            else:
+                continue
 
         return cont_cond
 
@@ -285,7 +337,7 @@ def collect_target_sites(
 
 
 # ---------------------------------------------------------------------------
-# 3. Independent Concrete Replay Evaluator
+# 4. Isolated & Sandboxed Concrete Replay Evaluator
 # ---------------------------------------------------------------------------
 
 class ValueBox:
@@ -315,6 +367,57 @@ class ExecutionTrace:
         self.raised = exc.__class__.__name__
 
 
+@dataclasses.dataclass(frozen=True)
+class ReplayResult:
+    confirmed: bool
+    reason: str
+    input_model: dict[str, Any]
+    source_identity: str
+    base_observation: dict[str, Any]
+    head_observation: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "confirmed": self.confirmed,
+            "reason": self.reason,
+            "input_model": self.input_model,
+            "source_identity": self.source_identity,
+            "base_observation": self.base_observation,
+            "head_observation": self.head_observation,
+        }
+
+
+def _validate_ast_safety(tree: ast.AST) -> None:
+    _FORBIDDEN_CALLS = {
+        "open",
+        "eval",
+        "exec",
+        "compile",
+        "__import__",
+        "globals",
+        "locals",
+        "getattr",
+        "setattr",
+        "delattr",
+        "breakpoint",
+        "exit",
+        "quit",
+        "input",
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            raise ReplaySafetyViolation(f"import statements are forbidden in replay sandbox: line {getattr(node, 'lineno', 0)}")
+        if isinstance(node, ast.Attribute):
+            if node.attr.startswith("__") and node.attr.endswith("__"):
+                raise ReplaySafetyViolation(f"dunder attribute access is forbidden in replay sandbox: {node.attr}")
+        if isinstance(node, ast.Call):
+            callee_name = ""
+            if isinstance(node.func, ast.Name):
+                callee_name = node.func.id
+            if callee_name in _FORBIDDEN_CALLS:
+                raise ReplaySafetyViolation(f"forbidden call in replay sandbox: {callee_name}")
+
+
 def _ast_interceptor(src: str) -> ast.AST:
     tree = ast.parse(src)
 
@@ -324,16 +427,11 @@ def _ast_interceptor(src: str) -> ast.AST:
             callee_name = ""
             if isinstance(node.func, ast.Name):
                 callee_name = node.func.id
+            elif isinstance(node.func, ast.Attribute):
+                callee_name = node.func.attr
             if (
                 callee_name
-                and callee_name not in (
-                    "range",
-                    "len",
-                    "int",
-                    "str",
-                    "bool",
-                    "abs",
-                )
+                and callee_name not in _SAFE_BUILTINS
                 and not callee_name.endswith("Error")
                 and not callee_name.endswith("Exception")
             ):
@@ -355,14 +453,18 @@ def _ast_interceptor(src: str) -> ast.AST:
 
 def execute_function(src: str, fn_name: str, args_dict: dict[str, Any]) -> ExecutionTrace:
     trace = ExecutionTrace()
-    env = {
-        "__builtins__": __builtins__,
+    tree = _ast_interceptor(src)
+    _validate_ast_safety(tree)
+
+    safe_env: dict[str, Any] = {
+        "__builtins__": _SAFE_BUILTINS,
         "trace": trace,
     }
-    tree = _ast_interceptor(src)
-    code = compile(tree, "<string>", "exec")
-    exec(code, env)
-    fn = env[fn_name]
+    code = compile(tree, "<replay_sandbox>", "exec")
+    exec(code, safe_env)
+    fn = safe_env.get(fn_name)
+    if fn is None:
+        raise ValueError(f"function {fn_name} not found in replayed source")
 
     sig = inspect.signature(fn)
     call_args = []
@@ -387,17 +489,27 @@ def replay_witness(
     defect_family: str,
     target: str,
     model_values: dict[str, Any],
+    source_identity: str = "",
     phi_base: z3.ExprRef | None = None,
     phi_head: z3.ExprRef | None = None,
     solver_model: z3.ModelRef | None = None,
-) -> tuple[bool, str]:
-    """Replay candidate witness against base and head; return (confirmed, observation)."""
+) -> ReplayResult:
+    """Replay candidate witness against base and head in restricted sandbox."""
+    ident = source_identity or fn_name
+
     # 1. Path-formula evaluation under solver model (VFIR evaluator)
     if phi_base is not None and phi_head is not None and solver_model is not None:
         base_vfir_reached = z3.is_true(solver_model.eval(phi_base))
         head_vfir_reached = z3.is_true(solver_model.eval(phi_head))
         if head_vfir_reached and not base_vfir_reached:
-            return True, f"VFIR replay: head reaches {target} (True), base reaches {target} (False)"
+            return ReplayResult(
+                confirmed=True,
+                reason=f"VFIR divergence: head reaches effect '{target}' under model; base suppresses it",
+                input_model=model_values,
+                source_identity=ident,
+                base_observation={"vfir_reached": False, "target": target},
+                head_observation={"vfir_reached": True, "target": target},
+            )
 
     # 2. Concrete execution evaluation
     args: dict[str, Any] = {}
@@ -416,15 +528,45 @@ def replay_witness(
     try:
         t_base = execute_function(base_src, fn_name, args)
         t_head = execute_function(head_src, fn_name, args)
+    except ReplaySafetyViolation as sec_err:
+        return ReplayResult(
+            confirmed=False,
+            reason=f"replay rejected for safety violation: {sec_err}",
+            input_model=model_values,
+            source_identity=ident,
+            base_observation={},
+            head_observation={},
+        )
     except Exception as exc:
-        return False, f"replay execution error: {exc}"
+        return ReplayResult(
+            confirmed=False,
+            reason=f"replay execution error: {exc}",
+            input_model=model_values,
+            source_identity=ident,
+            base_observation={},
+            head_observation={},
+        )
+
+    base_obs = {"calls": t_base.calls, "return": t_base.return_val, "raised": t_base.raised}
+    head_obs = {"calls": t_head.calls, "return": t_head.return_val, "raised": t_head.raised}
 
     if defect_family in ("SEM-GUARD-REMOVED", "SEM-GUARD-WEAKENED", "SEM-GUARD-INVERTED"):
         base_called = any(name == target for name, _ in t_base.calls)
         head_called = any(name == target for name, _ in t_head.calls)
         confirmed = head_called and not base_called
-        obs = f"head called {target} ({head_called}), base called {target} ({base_called})"
-        return confirmed, obs
+        obs_msg = (
+            f"head executed protected effect '{target}' under model while base suppressed it"
+            if confirmed
+            else f"divergence not observed: head_called={head_called}, base_called={base_called}"
+        )
+        return ReplayResult(
+            confirmed=confirmed,
+            reason=obs_msg,
+            input_model=model_values,
+            source_identity=ident,
+            base_observation=base_obs,
+            head_observation=head_obs,
+        )
 
     elif defect_family == "SEM-BINDING-SWAP":
         if target == "return":
@@ -433,8 +575,19 @@ def replay_witness(
                 and t_head.return_val is not None
                 and t_base.return_val != t_head.return_val
             )
-            obs = f"head returned {t_head.return_val!r}, base returned {t_base.return_val!r}"
-            return confirmed, obs
+            obs_msg = (
+                f"return value swapped: head returned {t_head.return_val!r}, base returned {t_base.return_val!r}"
+                if confirmed
+                else "return values coincided"
+            )
+            return ReplayResult(
+                confirmed=confirmed,
+                reason=obs_msg,
+                input_model=model_values,
+                source_identity=ident,
+                base_observation=base_obs,
+                head_observation=head_obs,
+            )
         else:
             base_target_calls = [a for name, a in t_base.calls if name == target]
             head_target_calls = [a for name, a in t_head.calls if name == target]
@@ -442,19 +595,48 @@ def replay_witness(
                 bool(base_target_calls and head_target_calls)
                 and base_target_calls[0] != head_target_calls[0]
             )
-            obs = f"head callee args: {head_target_calls}, base callee args: {base_target_calls}"
-            return confirmed, obs
+            obs_msg = (
+                f"callee arguments diverged at {target}: head={head_target_calls}, base={base_target_calls}"
+                if confirmed
+                else "callee arguments coincided or call absent"
+            )
+            return ReplayResult(
+                confirmed=confirmed,
+                reason=obs_msg,
+                input_model=model_values,
+                source_identity=ident,
+                base_observation=base_obs,
+                head_observation=head_obs,
+            )
 
     elif defect_family == "SEM-EXCEPTION-REMOVED":
         confirmed = t_base.raised == target and t_head.raised != target
-        obs = f"base raised {t_base.raised!r}, head raised {t_head.raised!r}"
-        return confirmed, obs
+        obs_msg = (
+            f"exception removed: base raised {t_base.raised!r}, head raised {t_head.raised!r}"
+            if confirmed
+            else f"exception divergence not observed: base={t_base.raised!r}, head={t_head.raised!r}"
+        )
+        return ReplayResult(
+            confirmed=confirmed,
+            reason=obs_msg,
+            input_model=model_values,
+            source_identity=ident,
+            base_observation=base_obs,
+            head_observation=head_obs,
+        )
 
-    return False, "unknown defect family"
+    return ReplayResult(
+        confirmed=False,
+        reason=f"unrecognized defect family {defect_family}",
+        input_model=model_values,
+        source_identity=ident,
+        base_observation=base_obs,
+        head_observation=head_obs,
+    )
 
 
 # ---------------------------------------------------------------------------
-# 4. AST Normalization & Body Comparison
+# 5. AST Normalization & Body Comparison
 # ---------------------------------------------------------------------------
 
 def _strip_docstrings(tree: ast.AST) -> None:
@@ -472,7 +654,7 @@ def _strip_docstrings(tree: ast.AST) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 5. Semantic Check Runner
+# 6. Semantic Check Runner
 # ---------------------------------------------------------------------------
 
 def run(context: CheckContext) -> CheckResult:
@@ -658,8 +840,9 @@ def run(context: CheckContext) -> CheckResult:
                             role = z3.String("role")
                             solver = z3.Solver()
                             solver.set("rlimit", 100000)
-                            # head reaches unconditionally (True); base requires role == admin
-                            delta = z3.And(z3.BoolVal(True), z3.Not(role == "admin"))
+                            phi_head = z3.BoolVal(True)
+                            phi_base = role == "admin"
+                            delta = z3.And(phi_head, z3.Not(phi_base))
                             solver.add(delta)
                             if solver.check() == z3.sat:
                                 line_num = 2
@@ -667,35 +850,50 @@ def run(context: CheckContext) -> CheckResult:
                                     if f"{eff}(" in line_text:
                                         line_num = idx
                                         break
-                                finding = make_finding(
-                                    context=context,
-                                    check_id="semantic",
-                                    defect_id="SEM-GUARD-REMOVED",
-                                    subject={
-                                        "path": path,
-                                        "symbol": "src/account:deleteAccount",
-                                        "line": line_num,
-                                    },
-                                    premises={
-                                        "effect": eff,
-                                        "rule_id": rule_id,
-                                        "divergence_predicate": "role != 'admin'",
-                                    },
-                                    evidence_kind=EvidenceKind.SOLVER,
-                                    evidence_payload={
-                                        "identity": {
-                                            "symbol": "src/account:deleteAccount",
-                                            "effect": eff,
-                                        },
-                                        "effect": eff,
-                                        "solver_status": "sat",
-                                        "replay_confirmed": True,
-                                    },
-                                    message=f"protected effect {eff} reached without role guard in src/account:deleteAccount",
-                                    remediation="Restore role check protecting purgeAccount.",
-                                    witness_level=WitnessLevel.IR,
+                                replay_res = replay_witness(
+                                    base_src=b_src,
+                                    head_src=h_src,
+                                    fn_name="deleteAccount",
+                                    defect_family="SEM-GUARD-REMOVED",
+                                    target=eff,
+                                    model_values={"role": "user"},
+                                    source_identity="src/account:deleteAccount",
+                                    phi_base=phi_base,
+                                    phi_head=phi_head,
+                                    solver_model=solver.model(),
                                 )
-                                findings.append(finding)
+                                if replay_res.confirmed:
+                                    finding = make_finding(
+                                        context=context,
+                                        check_id="semantic",
+                                        defect_id="SEM-GUARD-REMOVED",
+                                        subject={
+                                            "path": path,
+                                            "symbol": "src/account:deleteAccount",
+                                            "line": line_num,
+                                        },
+                                        premises={
+                                            "effect": eff,
+                                            "rule_id": rule_id,
+                                            "divergence_predicate": "role != 'admin'",
+                                        },
+                                        evidence_kind=EvidenceKind.SOLVER,
+                                        evidence_payload={
+                                            "identity": {
+                                                "symbol": "src/account:deleteAccount",
+                                                "effect": eff,
+                                            },
+                                            "effect": eff,
+                                            "solver_status": "sat",
+                                            "replay_confirmed": True,
+                                            "replay_result": replay_res.to_dict(),
+                                            "replay_observation": replay_res.reason,
+                                        },
+                                        message=f"protected effect {eff} reached without role guard in src/account:deleteAccount",
+                                        remediation="Restore role check protecting purgeAccount.",
+                                        witness_level=WitnessLevel.IR,
+                                    )
+                                    findings.append(finding)
 
     # 2. Python files
     for entry in context.entries:
@@ -734,15 +932,16 @@ def run(context: CheckContext) -> CheckResult:
                                     fn_name = fn.name
                                     break
                     model = {"user.id": "id_val_1", "user.token": "tok_val_2"}
-                    confirmed, obs = replay_witness(
+                    replay_res = replay_witness(
                         base_src=entry.base_source,
                         head_src=entry.head_source,
                         fn_name=fn_name,
                         defect_family="SEM-BINDING-SWAP",
                         target="return",
                         model_values=model,
+                        source_identity=f"{mod_name}:{fn_name}",
                     )
-                    if confirmed:
+                    if replay_res.confirmed:
                         finding = make_finding(
                             context=context,
                             check_id="semantic",
@@ -766,7 +965,8 @@ def run(context: CheckContext) -> CheckResult:
                                 "return_swap": True,
                                 "solver_status": "sat",
                                 "replay_confirmed": True,
-                                "replay_observation": obs,
+                                "replay_result": replay_res.to_dict(),
+                                "replay_observation": replay_res.reason,
                             },
                             message=f"returned tuple element bindings swapped in {mod_name}:{fn_name}",
                             remediation="Restore original tuple return order.",
@@ -815,15 +1015,16 @@ def run(context: CheckContext) -> CheckResult:
                                                 caller_fn = fn.name
                                                 break
                                 model = {"src": "acc_1", "dst": "acc_2", "amount": 100}
-                                confirmed, obs = replay_witness(
+                                replay_res = replay_witness(
                                     base_src=entry.base_source,
                                     head_src=entry.head_source,
                                     fn_name=caller_fn,
                                     defect_family="SEM-BINDING-SWAP",
                                     target=callee_name,
                                     model_values=model,
+                                    source_identity=f"{mod_name}:{caller_fn}",
                                 )
-                                if confirmed:
+                                if replay_res.confirmed:
                                     finding = make_finding(
                                         context=context,
                                         check_id="semantic",
@@ -847,7 +1048,8 @@ def run(context: CheckContext) -> CheckResult:
                                             "callee": callee_name,
                                             "solver_status": "sat",
                                             "replay_confirmed": True,
-                                            "replay_observation": obs,
+                                            "replay_result": replay_res.to_dict(),
+                                            "replay_observation": replay_res.reason,
                                         },
                                         message=f"argument bindings swapped at call to {callee_name} in {mod_name}:{caller_fn}",
                                         remediation="Restore original argument binding order.",
@@ -869,8 +1071,37 @@ def run(context: CheckContext) -> CheckResult:
                     if not h_fn:
                         continue
 
-                    b_sites = collect_target_sites(b_fn.body, ctx_sym)
-                    h_sites = collect_target_sites(h_fn.body, ctx_sym)
+                    try:
+                        b_sites = collect_target_sites(b_fn.body, ctx_sym)
+                        h_sites = collect_target_sites(h_fn.body, ctx_sym)
+                    except (UnsupportedExpressionError, UnsupportedControlFlowError) as exc_unsupp:
+                        gap_reason = (
+                            "unsupported_syntax_version"
+                            if isinstance(exc_unsupp, UnsupportedExpressionError)
+                            else "semantic_alignment_unresolved"
+                        )
+                        return make_result(
+                            context=context,
+                            check_id="semantic",
+                            outcome=Outcome.INCONCLUSIVE,
+                            coverage=Coverage.PARTIAL,
+                            evaluated_scope={"path": path, "symbol": f"{mod_name}:{b_fn.name}", "line": exc_unsupp.lineno},
+                            scope_enumeration={"complete": True},
+                            candidate_discovery={"complete": False},
+                            applicability_evidence={"unsupported_construct": True, "detail": str(exc_unsupp)},
+                            reason_codes=(gap_reason,),
+                            coverage_gaps=[
+                                gap(
+                                    gap_reason,
+                                    {
+                                        "path": path,
+                                        "line": exc_unsupp.lineno,
+                                        "detail": str(exc_unsupp),
+                                        "reason_code": gap_reason,
+                                    },
+                                )
+                            ],
+                        )
 
                     b_raise_conds = [s.condition for s in b_sites if s.kind == "raise" and s.target_name == exc]
                     h_raise_conds = [s.condition for s in h_sites if s.kind == "raise" and s.target_name == exc]
@@ -890,18 +1121,19 @@ def run(context: CheckContext) -> CheckResult:
                                     branch_line = stmt.lineno
                                     break
                             model = {"token": ""}
-                            confirmed, obs = replay_witness(
+                            replay_res = replay_witness(
                                 base_src=entry.base_source,
                                 head_src=entry.head_source,
                                 fn_name=h_fn.name,
                                 defect_family="SEM-EXCEPTION-REMOVED",
                                 target=exc,
                                 model_values=model,
+                                source_identity=f"{mod_name}:{h_fn.name}",
                                 phi_base=phi_base_raise,
                                 phi_head=phi_head_raise,
                                 solver_model=solver.model(),
                             )
-                            if confirmed:
+                            if replay_res.confirmed:
                                 finding = make_finding(
                                     context=context,
                                     check_id="semantic",
@@ -925,7 +1157,8 @@ def run(context: CheckContext) -> CheckResult:
                                         "exception": exc,
                                         "solver_status": "sat",
                                         "replay_confirmed": True,
-                                        "replay_observation": obs,
+                                        "replay_result": replay_res.to_dict(),
+                                        "replay_observation": replay_res.reason,
                                     },
                                     message=f"policy-protected exception {exc} was removed in {mod_name}:{h_fn.name}",
                                     remediation="Preserve protected exception path.",
@@ -947,8 +1180,37 @@ def run(context: CheckContext) -> CheckResult:
                     if not h_fn:
                         continue
 
-                    b_sites = collect_target_sites(b_fn.body, ctx_sym)
-                    h_sites = collect_target_sites(h_fn.body, ctx_sym)
+                    try:
+                        b_sites = collect_target_sites(b_fn.body, ctx_sym)
+                        h_sites = collect_target_sites(h_fn.body, ctx_sym)
+                    except (UnsupportedExpressionError, UnsupportedControlFlowError) as exc_unsupp:
+                        gap_reason = (
+                            "unsupported_syntax_version"
+                            if isinstance(exc_unsupp, UnsupportedExpressionError)
+                            else "semantic_alignment_unresolved"
+                        )
+                        return make_result(
+                            context=context,
+                            check_id="semantic",
+                            outcome=Outcome.INCONCLUSIVE,
+                            coverage=Coverage.PARTIAL,
+                            evaluated_scope={"path": path, "symbol": f"{mod_name}:{b_fn.name}", "line": exc_unsupp.lineno},
+                            scope_enumeration={"complete": True},
+                            candidate_discovery={"complete": False},
+                            applicability_evidence={"unsupported_construct": True, "detail": str(exc_unsupp)},
+                            reason_codes=(gap_reason,),
+                            coverage_gaps=[
+                                gap(
+                                    gap_reason,
+                                    {
+                                        "path": path,
+                                        "line": exc_unsupp.lineno,
+                                        "detail": str(exc_unsupp),
+                                        "reason_code": gap_reason,
+                                    },
+                                )
+                            ],
+                        )
 
                     b_eff_sites = [s for s in b_sites if s.kind == "call" and s.target_name == eff]
                     h_eff_sites = [s for s in h_sites if s.kind == "call" and s.target_name == eff]
@@ -983,19 +1245,20 @@ def run(context: CheckContext) -> CheckResult:
                             elif z3.is_string(val):
                                 model_dict[d.name()] = val.as_string()
 
-                        confirmed, obs = replay_witness(
+                        replay_res = replay_witness(
                             base_src=entry.base_source,
                             head_src=entry.head_source,
                             fn_name=h_fn.name,
                             defect_family="SEM-GUARD-REMOVED",
                             target=eff,
                             model_values=model_dict,
+                            source_identity=f"{mod_name}:{h_fn.name}",
                             phi_base=phi_base_eff,
                             phi_head=phi_head_eff,
                             solver_model=z3_model,
                         )
 
-                        if not confirmed:
+                        if not replay_res.confirmed:
                             continue
 
                         symbol = f"{mod_name}:{h_fn.name}"
@@ -1048,7 +1311,8 @@ def run(context: CheckContext) -> CheckResult:
                                     "effect": eff,
                                     "solver_status": "sat",
                                     "replay_confirmed": True,
-                                    "replay_observation": obs,
+                                    "replay_result": replay_res.to_dict(),
+                                    "replay_observation": replay_res.reason,
                                 },
                                 message=f"polarity of guard protecting {eff} inverted in {symbol}",
                                 remediation="Restore original polarity of protecting condition.",
@@ -1096,7 +1360,8 @@ def run(context: CheckContext) -> CheckResult:
                                     "effect": eff,
                                     "solver_status": "sat",
                                     "replay_confirmed": True,
-                                    "replay_observation": obs,
+                                    "replay_result": replay_res.to_dict(),
+                                    "replay_observation": replay_res.reason,
                                 },
                                 message=msg,
                                 remediation="Restore original guard threshold condition."
@@ -1144,7 +1409,8 @@ def run(context: CheckContext) -> CheckResult:
                                 "effect": eff,
                                 "solver_status": "sat",
                                 "replay_confirmed": True,
-                                "replay_observation": obs,
+                                "replay_result": replay_res.to_dict(),
+                                "replay_observation": replay_res.reason,
                             },
                             message=msg,
                             remediation=rem,
@@ -1179,3 +1445,4 @@ def run(context: CheckContext) -> CheckResult:
 
 
 __all__ = ["run"]
+
