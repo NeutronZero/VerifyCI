@@ -90,6 +90,17 @@ class ReplaySafetyViolation(Exception):
 # ---------------------------------------------------------------------------
 
 class SymbolicContext:
+    """Symbolic execution variable tracking context.
+
+    Note on soundness boundary:
+    The type inference in get_var() (inferring Bool vs String vs Int from identifier naming
+    patterns) is an abstract interpretation heuristic for candidate witness generation and
+    path constraint derivation. It does not constitute a sound static type system. All candidate
+    witnesses derived by Z3 using these symbolic variables are subject to mandatory concrete
+    replay execution in an isolated subprocess before any finding is emitted. Any unconfirmed
+    witness fails closed to Outcome.INCONCLUSIVE with Coverage.PARTIAL.
+    """
+
     def __init__(self) -> None:
         self.vars: dict[str, z3.ExprRef] = {}
 
@@ -326,11 +337,34 @@ def collect_target_sites(
                 # Supported straight-line statements
                 continue
 
-            elif isinstance(stmt, (ast.While, ast.For, ast.AsyncFor, ast.Try, ast.With, ast.AsyncWith)):
+            elif isinstance(stmt, ast.Expr):
+                # An expression statement that is not a Call
+                # Docstrings and constant literals do not alter execution control flow
+                if isinstance(stmt.value, ast.Constant):
+                    continue
+                raise UnsupportedControlFlowError(
+                    stmt, f"unsupported expression statement {type(stmt.value).__name__}"
+                )
+
+            elif isinstance(
+                stmt,
+                (
+                    ast.While,
+                    ast.For,
+                    ast.AsyncFor,
+                    ast.Try,
+                    *([ast.TryStar] if hasattr(ast, "TryStar") else []),
+                    ast.With,
+                    ast.AsyncWith,
+                ),
+            ):
                 raise UnsupportedControlFlowError(stmt, f"unsupported control flow {type(stmt).__name__}")
 
             else:
-                continue
+                # Any unmodeled statement (e.g. ast.Assert, ast.Match, ast.Break, ast.Continue,
+                # ast.Delete, ast.Global, ast.Nonlocal, nested ast.FunctionDef, ast.ClassDef, etc.)
+                # must fail closed to prevent silent pass or unsound divergence estimation.
+                raise UnsupportedControlFlowError(stmt, f"unsupported statement {type(stmt).__name__}")
 
         return cont_cond
 
@@ -616,6 +650,12 @@ if __name__ == "__main__":
 def execute_function_isolated(
     src: str, fn_name: str, args_dict: dict[str, Any], timeout: float = 2.0
 ) -> ExecutionTrace:
+    """Execute target function in a dedicated Python subprocess (`sys.executable -I`).
+
+    Provides isolated namespace execution and an execution timeout boundary.
+    Note: Subprocess execution provides namespace isolation and an execution timeout;
+    it is not equivalent to an OS container boundary (cgroups, hard memory caps, or CPU bandwidth quotas).
+    """
     # Pre-parse and validate safety in parent process
     tree = ast.parse(src)
     _validate_ast_safety(tree)
@@ -634,7 +674,7 @@ def execute_function_isolated(
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        raise TimeoutError(f"replay process timed out after {timeout}s (resource limit exceeded)")
+        raise TimeoutError(f"replay process timed out after {timeout}s (execution timeout exceeded)")
 
     if proc.returncode != 0:
         raise RuntimeError(f"replay process exited with code {proc.returncode}: {proc.stderr.strip()}")
@@ -660,6 +700,12 @@ def execute_function_isolated(
 def execute_ts_function_isolated(
     b_src: str, h_src: str, fn_name: str, target: str, model_values: dict[str, Any], timeout: float = 2.0
 ) -> tuple[bool, str]:
+    """Execute base and head TypeScript functions in an isolated Node.js subprocess.
+
+    Provides lexical block scoping and an execution timeout boundary.
+    Note: Node.js subprocess execution provides namespace isolation and an execution timeout;
+    it is not equivalent to an OS container boundary (cgroups, hard memory caps, or CPU bandwidth quotas).
+    """
     import shutil
     node_bin = shutil.which("node")
     if not node_bin:

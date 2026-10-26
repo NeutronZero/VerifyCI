@@ -711,3 +711,125 @@ def test_transparent_decorator_policy_respected(tmp_path: Path):
     assert result.outcome in (Outcome.PASS, Outcome.NOT_APPLICABLE)
     assert result.coverage == Coverage.COMPLETE
     assert "unknown_decorator" not in result.reason_codes
+
+
+@pytest.mark.invariant
+def test_unmodeled_assert_statement_fails_closed(tmp_path: Path):
+    """Unmodeled assert statement must fail closed to INCONCLUSIVE with Coverage.PARTIAL."""
+    base_src = "def process(user, item):\n    assert user.is_active\n    delete_item(item)\n"
+    head_src = "def process(user, item):\n    delete_item(item)\n"
+    repo, base, mb, head = _build_repo(
+        {"src/action.py": base_src},
+        {"src/action.py": head_src},
+        tmp_path / "repo8",
+    )
+    entries, _ = repo.diff_entries(base, head)
+    scope = build_changed_scope(entries)
+    scope = _augment_scope_with_repository(scope, git=repo, base_rev=base, head_rev=head, source_roots=())
+
+    base_policy = parse_policy_bytes(b"")
+    policy = dataclasses.replace(
+        base_policy,
+        protected_guards={"del_rule": {"effects": ["delete_item"], "paths": ["src/**.py"]}},
+    )
+    ctx = CheckContext(
+        git=repo,
+        policy=policy,
+        entries=tuple(entries),
+        scope=scope,
+        as_of_date="2026-10-21",
+        target_base_commit=base,
+        merge_base_commit=mb,
+        head_commit=head,
+        object_format="sha1",
+        toolchain_fingerprint="test",
+        source_roots=(),
+    )
+    result = run_semantic(ctx)
+    assert result.outcome == Outcome.INCONCLUSIVE
+    assert result.coverage == Coverage.PARTIAL
+    assert "semantic_alignment_unresolved" in result.reason_codes
+    assert any(g.reason_code == "semantic_alignment_unresolved" for g in result.coverage_gaps)
+
+
+@pytest.mark.invariant
+def test_unmodeled_match_statement_fails_closed(tmp_path: Path):
+    """Unmodeled match statement must fail closed to INCONCLUSIVE with Coverage.PARTIAL."""
+    base_src = (
+        "def process(mode, item):\n"
+        "    match mode:\n"
+        "        case 'admin':\n"
+        "            delete_item(item)\n"
+    )
+    head_src = "def process(mode, item):\n    delete_item(item)\n"
+    repo, base, mb, head = _build_repo(
+        {"src/action.py": base_src},
+        {"src/action.py": head_src},
+        tmp_path / "repo9",
+    )
+    entries, _ = repo.diff_entries(base, head)
+    scope = build_changed_scope(entries)
+    scope = _augment_scope_with_repository(scope, git=repo, base_rev=base, head_rev=head, source_roots=())
+
+    base_policy = parse_policy_bytes(b"")
+    policy = dataclasses.replace(
+        base_policy,
+        protected_guards={"del_rule": {"effects": ["delete_item"], "paths": ["src/**.py"]}},
+    )
+    ctx = CheckContext(
+        git=repo,
+        policy=policy,
+        entries=tuple(entries),
+        scope=scope,
+        as_of_date="2026-10-21",
+        target_base_commit=base,
+        merge_base_commit=mb,
+        head_commit=head,
+        object_format="sha1",
+        toolchain_fingerprint="test",
+        source_roots=(),
+    )
+    result = run_semantic(ctx)
+    assert result.outcome == Outcome.INCONCLUSIVE
+    assert result.coverage == Coverage.PARTIAL
+    assert "semantic_alignment_unresolved" in result.reason_codes
+    assert any(g.reason_code == "semantic_alignment_unresolved" for g in result.coverage_gaps)
+
+
+@pytest.mark.invariant
+def test_unmodeled_delete_statement_fails_closed(tmp_path: Path):
+    """Unmodeled del statement must fail closed to INCONCLUSIVE with Coverage.PARTIAL."""
+    base_src = "def process(item):\n    del item.temp\n    delete_item(item)\n"
+    head_src = "def process(item):\n    delete_item(item)\n"
+    repo, base, mb, head = _build_repo(
+        {"src/action.py": base_src},
+        {"src/action.py": head_src},
+        tmp_path / "repo10",
+    )
+    entries, _ = repo.diff_entries(base, head)
+    scope = build_changed_scope(entries)
+    scope = _augment_scope_with_repository(scope, git=repo, base_rev=base, head_rev=head, source_roots=())
+
+    base_policy = parse_policy_bytes(b"")
+    policy = dataclasses.replace(
+        base_policy,
+        protected_guards={"del_rule": {"effects": ["delete_item"], "paths": ["src/**.py"]}},
+    )
+    ctx = CheckContext(
+        git=repo,
+        policy=policy,
+        entries=tuple(entries),
+        scope=scope,
+        as_of_date="2026-10-21",
+        target_base_commit=base,
+        merge_base_commit=mb,
+        head_commit=head,
+        object_format="sha1",
+        toolchain_fingerprint="test",
+        source_roots=(),
+    )
+    result = run_semantic(ctx)
+    assert result.outcome == Outcome.INCONCLUSIVE
+    assert result.coverage == Coverage.PARTIAL
+    assert "semantic_alignment_unresolved" in result.reason_codes
+    assert any(g.reason_code == "semantic_alignment_unresolved" for g in result.coverage_gaps)
