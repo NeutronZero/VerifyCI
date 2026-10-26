@@ -490,11 +490,15 @@ def _taint_sub(context: CheckContext) -> CheckResult:
         outcome = Outcome.NOT_APPLICABLE
     else:
         outcome = Outcome.PASS
+    if any(g.reason_code in ("unsupported_language", "parse_error") for g in gaps):
+        coverage = Coverage.UNKNOWN
+    else:
+        coverage = Coverage.COMPLETE if not gaps else Coverage.PARTIAL
     return _sub_result(
         context,
         suffix="taint",
         outcome=outcome,
-        coverage=Coverage.COMPLETE if not gaps else Coverage.PARTIAL,
+        coverage=coverage,
         evaluated_scope={"relevant_lines": relevant},
         scope_enumeration={"complete": not gaps, "relevant_lines": relevant},
         candidate_discovery={"complete": not gaps, "relevant_lines": relevant, "unresolved": unresolved},
