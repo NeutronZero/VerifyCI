@@ -53,6 +53,7 @@ class ImportFact:
     names: tuple[str, ...]
     line: int
     level: int = 0
+    aliases: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -394,14 +395,25 @@ def analyze_python(path: str, source: str, source_roots: Sequence[str] = ()) -> 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                imports.append(ImportFact(alias.name, (alias.asname or alias.name,), node.lineno, 0))
+                local = alias.asname or alias.name
+                imports.append(
+                    ImportFact(
+                        module=alias.name,
+                        names=(local,),
+                        line=node.lineno,
+                        level=0,
+                        aliases=((alias.name, local),),
+                    )
+                )
         elif isinstance(node, ast.ImportFrom):
+            aliases = tuple((alias.name, alias.asname or alias.name) for alias in node.names)
             imports.append(
                 ImportFact(
-                    node.module or "",
-                    tuple(alias.name for alias in node.names),
-                    node.lineno,
-                    node.level,
+                    module=node.module or "",
+                    names=tuple(alias.name for alias in node.names),
+                    line=node.lineno,
+                    level=node.level,
+                    aliases=aliases,
                 )
             )
     entities = _python_entities(path, source, tree, source_roots)
@@ -620,7 +632,41 @@ def analyze_typescript(path: str, source: str) -> SourceFacts:
             text = _node_text(node)
             m = re.search(r"from\s+['\"]([^'\"]+)['\"]", text)
             if m:
-                imports.append(ImportFact(m.group(1), (), node.start_point.row + 1, 0))
+                mod = m.group(1)
+                names: list[str] = []
+                aliases: list[tuple[str, str]] = []
+                clause = text.split("from", 1)[0].replace("import", "").strip()
+                if "{" in clause and "}" in clause:
+                    specifiers = clause[clause.find("{") + 1 : clause.rfind("}")].split(",")
+                    for spec in specifiers:
+                        spec = spec.strip()
+                        if not spec:
+                            continue
+                        if " as " in spec:
+                            orig, local = spec.split(" as ", 1)
+                            orig, local = orig.strip(), local.strip()
+                            names.append(orig)
+                            aliases.append((orig, local))
+                        else:
+                            names.append(spec)
+                            aliases.append((spec, spec))
+                elif "* as " in clause:
+                    local = clause.split("* as ", 1)[1].strip()
+                    names.append(local)
+                    aliases.append(("*", local))
+                elif clause:
+                    local = clause.strip()
+                    names.append(local)
+                    aliases.append(("default", local))
+                imports.append(
+                    ImportFact(
+                        module=mod,
+                        names=(),
+                        line=node.start_point.row + 1,
+                        level=0,
+                        aliases=tuple(aliases),
+                    )
+                )
         elif node.type in ("identifier", "property_identifier"):
             loads.add(_node_text(node))
         for child in node.children:

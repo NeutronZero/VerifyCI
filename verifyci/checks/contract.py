@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import posixpath
 from typing import Any
 
 from verifyci.checks.base import (
@@ -15,6 +16,68 @@ from verifyci.checks.base import (
 from verifyci.contracts.model import CheckResult, Coverage, Entity, EvidenceKind, Outcome
 from verifyci.contracts.names import symbol_matches_any
 from verifyci.scope.entities import CallSite, SourceFacts
+
+_BUILTIN_CALLS: frozenset[str] = frozenset(
+    {
+        "print",
+        "len",
+        "range",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "dict",
+        "list",
+        "set",
+        "tuple",
+        "min",
+        "max",
+        "sum",
+        "any",
+        "all",
+        "zip",
+        "enumerate",
+        "isinstance",
+        "issubclass",
+        "hasattr",
+        "getattr",
+        "setattr",
+        "super",
+        "open",
+        "type",
+        "repr",
+        "id",
+        "hash",
+        "sorted",
+        "filter",
+        "map",
+        "round",
+        "abs",
+        "divmod",
+        "pow",
+        "callable",
+        "iter",
+        "next",
+        "slice",
+        "format",
+        "bytes",
+        "bytearray",
+        "console",
+        "Math",
+        "JSON",
+        "Promise",
+        "Array",
+        "Object",
+        "String",
+        "Number",
+        "Boolean",
+        "Error",
+        "TypeError",
+        "parseInt",
+        "parseFloat",
+        "isNaN",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,8 +117,160 @@ def _simple(qname: str) -> str:
     return qname.split(":", 1)[-1].rsplit(".", 1)[-1]
 
 
-def _matches_callee(callee: str, simple: str) -> bool:
-    return callee == simple or callee.endswith("." + simple)
+def _normalize_mod(path: str) -> str:
+    p = path.replace("\\", "/").strip()
+    for ext in (
+        ".py",
+        ".pyi",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".mjs",
+        ".cjs",
+        ".mts",
+        ".cts",
+        ".go",
+        ".rs",
+    ):
+        if p.endswith(ext):
+            p = p[: -len(ext)]
+            break
+    if p.endswith("/__init__"):
+        p = p[: -len("/__init__")]
+    elif p.endswith(".__init__"):
+        p = p[: -len(".__init__")]
+    return p.replace(".", "/")
+
+
+def _resolve_import_module(imp_module: str, importing_path: str, level: int = 0) -> str:
+    importing_dir = posixpath.dirname(importing_path.replace("\\", "/"))
+    imp_module = (imp_module or "").strip()
+    if imp_module.startswith("./") or imp_module.startswith("../"):
+        norm = posixpath.normpath(posixpath.join(importing_dir, imp_module))
+        return _normalize_mod(norm)
+    if imp_module.startswith("."):
+        dots = len(imp_module) - len(imp_module.lstrip("."))
+        level = level or dots
+        imp_module = imp_module.lstrip(".")
+    if level and level > 0:
+        base_mod = _normalize_mod(importing_path)
+        parts = base_mod.split("/") if base_mod else []
+        if not importing_path.endswith("__init__.py") and parts:
+            parts = parts[:-1]
+        if level > 1:
+            if level - 1 >= len(parts):
+                parts = []
+            else:
+                parts = parts[: len(parts) - (level - 1)]
+        pkg = "/".join(parts)
+        if imp_module:
+            rel = imp_module.replace(".", "/")
+            return f"{pkg}/{rel}" if pkg else rel
+        return pkg
+    return _normalize_mod(imp_module)
+
+
+def _match_callee_to_entity(
+    call: CallSite,
+    caller_path: str,
+    caller_facts: SourceFacts,
+    target: Entity,
+) -> str:
+    target_mod = _normalize_mod(target.file_path)
+    target_symbol = target.qname.split(":", 1)[-1]
+    target_simple = target_symbol.rsplit(".", 1)[-1]
+
+    callee = call.callee
+
+    if "." not in callee:
+        if caller_path == target.file_path:
+            for imp in caller_facts.imports:
+                for orig_name, local_name in getattr(imp, "aliases", ()):
+                    if local_name == callee:
+                        imp_mod = _resolve_import_module(
+                            imp.module, caller_path, getattr(imp, "level", 0)
+                        )
+                        if imp_mod != target_mod:
+                            return "NO_MATCH"
+                if not getattr(imp, "aliases", ()) and callee in imp.names:
+                    imp_mod = _resolve_import_module(
+                        imp.module, caller_path, getattr(imp, "level", 0)
+                    )
+                    if imp_mod != target_mod:
+                        return "NO_MATCH"
+            if callee == target_simple:
+                return "MATCH"
+            return "NO_MATCH"
+
+        for imp in caller_facts.imports:
+            imp_mod = _resolve_import_module(
+                imp.module, caller_path, getattr(imp, "level", 0)
+            )
+            aliases = getattr(imp, "aliases", ())
+            if aliases:
+                for orig_name, local_name in aliases:
+                    if local_name == callee:
+                        if imp_mod == target_mod and (
+                            orig_name == target_symbol or orig_name == target_simple
+                        ):
+                            return "MATCH"
+                        return "NO_MATCH"
+            else:
+                if callee in imp.names:
+                    if imp_mod == target_mod and callee == target_simple:
+                        return "MATCH"
+                    return "NO_MATCH"
+
+        for ent in caller_facts.entities:
+            ent_simple = ent.qname.split(":", 1)[-1].rsplit(".", 1)[-1]
+            if ent_simple == callee:
+                return "NO_MATCH"
+
+        if callee in _BUILTIN_CALLS:
+            return "NO_MATCH"
+
+        if callee == target_simple:
+            return "AMBIGUOUS"
+
+        return "NO_MATCH"
+
+    else:
+        receiver, attr = callee.rsplit(".", 1)
+        if attr != target_simple:
+            return "NO_MATCH"
+
+        if receiver in ("self", "cls"):
+            if caller_path == target.file_path:
+                return "MATCH"
+            return "NO_MATCH"
+
+        for imp in caller_facts.imports:
+            imp_mod = _resolve_import_module(
+                imp.module, caller_path, getattr(imp, "level", 0)
+            )
+            aliases = getattr(imp, "aliases", ())
+            if aliases:
+                for orig_name, local_name in aliases:
+                    if local_name == receiver or local_name == callee:
+                        if imp_mod == target_mod:
+                            return "MATCH"
+                        return "NO_MATCH"
+            else:
+                if (
+                    receiver in imp.names
+                    or receiver == imp.module
+                    or receiver.rsplit(".", 1)[-1] == imp.module.rsplit(".", 1)[-1]
+                ):
+                    if imp_mod == target_mod:
+                        return "MATCH"
+                    return "NO_MATCH"
+
+        rec_mod = _normalize_mod(receiver)
+        if rec_mod == target_mod:
+            return "MATCH"
+
+        return "AMBIGUOUS"
 
 
 def _call_problem(call: CallSite, sig: _Sig) -> str:
@@ -192,14 +407,27 @@ def run(context: CheckContext) -> CheckResult:
                     problems.append("kwargs_removed")
                 if old_sig.keyword_names - new_sig.keyword_names:
                     problems.append("keyword_parameters_removed")
-                callers = [
-                    (path, facts, call)
-                    for path, facts, call in all_head_calls
-                    if _matches_callee(call.callee, _simple(qname))
-                ]
+                matched_callers = []
+                for path, facts, call in all_head_calls:
+                    res = _match_callee_to_entity(call, path, facts, head)
+                    if res == "MATCH":
+                        matched_callers.append((path, facts, call))
+                    elif res == "AMBIGUOUS":
+                        gaps.append(
+                            gap(
+                                "dynamic_target_unresolved",
+                                {
+                                    "check_id": "contract",
+                                    "path": path,
+                                    "line": call.line,
+                                    "callee": call.callee,
+                                    "target": head.qname,
+                                },
+                            )
+                        )
+
                 public = _public_api(context, head)
-                if public or (not callers and problems):
-                    problems = problems or ["declared_public_api"]
+                if problems and (public or not matched_callers):
                     findings.append(
                         make_finding(
                             context=context,
@@ -227,13 +455,12 @@ def run(context: CheckContext) -> CheckResult:
                                 "async_changed": async_changed,
                             },
                             message=(
-                                f"signature of {qname} changed incompatibly"
-                                + (": " + ", ".join(problems) if problems else " with its declared public API")
+                                f"signature of {qname} changed incompatibly: " + ", ".join(problems)
                             ),
                             remediation="Preserve the previous signature or migrate every caller.",
                         )
                     )
-                for path, facts, call in callers:
+                for path, facts, call in matched_callers:
                     if call.has_starargs or call.has_kwargs:
                         gaps.append(
                             gap(
@@ -252,7 +479,7 @@ def run(context: CheckContext) -> CheckResult:
                         problem = "async_changed"
                     if problem:
                         checked_calls += 1
-                        if not public:
+                        if not (public and problems):
                             findings.append(
                                 _finding_call(
                                     context,
@@ -303,15 +530,27 @@ def run(context: CheckContext) -> CheckResult:
                 )
             )
             continue
-        candidates = [
-            entity
-            for entity in base_entities.values()
-            if _matches_callee(call.callee, _simple(entity.qname))
-            and entity.qname not in changed_qnames
-        ]
-        if not candidates:
+        matched_bases = []
+        ambiguous = False
+        for entity in base_entities.values():
+            if entity.qname in changed_qnames:
+                continue
+            res = _match_callee_to_entity(call, path, facts, entity)
+            if res == "MATCH":
+                matched_bases.append(entity)
+            elif res == "AMBIGUOUS":
+                ambiguous = True
+        if ambiguous and not matched_bases:
+            gaps.append(
+                gap(
+                    "dynamic_target_unresolved",
+                    {"check_id": "contract", "path": path, "line": call.line, "callee": call.callee},
+                )
+            )
             continue
-        base = candidates[0]
+        if not matched_bases:
+            continue
+        base = matched_bases[0]
         old_sig = _sig(base)
         problem = _call_problem(call, old_sig)
         if problem:
