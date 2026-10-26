@@ -185,6 +185,8 @@ def _match_callee_to_entity(
 
     if "." not in callee:
         if caller_path == target.file_path:
+            if getattr(call, "is_shadowed", False):
+                return "NO_MATCH"
             for imp in caller_facts.imports:
                 for orig_name, local_name in getattr(imp, "aliases", ()):
                     if local_name == callee:
@@ -426,8 +428,11 @@ def run(context: CheckContext) -> CheckResult:
                             )
                         )
 
-                public = _public_api(context, head)
-                if problems and (public or not matched_callers):
+                is_declared_public = _public_api(context, head)
+                symbol_name = _simple(qname)
+                is_private = symbol_name.startswith("_") or not getattr(head, "is_export", True)
+
+                if problems and (is_declared_public or (not matched_callers and not is_private)):
                     findings.append(
                         make_finding(
                             context=context,
@@ -479,7 +484,7 @@ def run(context: CheckContext) -> CheckResult:
                         problem = "async_changed"
                     if problem:
                         checked_calls += 1
-                        if not (public and problems):
+                        if not (is_declared_public and problems):
                             findings.append(
                                 _finding_call(
                                     context,

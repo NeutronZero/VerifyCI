@@ -190,3 +190,54 @@ def test_public_api_required_parameter_added_break(tmp_path: Path):
     assert finding.defect_id == "CTR-SIGNATURE-BREAK"
     assert finding.subject["symbol"] == "src/api:query"
     assert "required_positional_parameters_added" in finding.premises["problems"]
+
+
+@pytest.mark.invariant
+def test_uncalled_private_function_signature_change_safe(tmp_path: Path):
+    """Incompatible signature change to an uncalled private function must not break contract."""
+    base_files = {
+        "src/utils.py": "def _secret_helper(x: int) -> int:\n    return x\n",
+    }
+    head_files = {
+        # Private helper gains required parameter, but has 0 repo callers and is not public
+        "src/utils.py": "def _secret_helper(x: int, salt: str) -> int:\n    return x\n",
+    }
+    result = _build_and_run("uncalled_private", base_files, head_files, None, tmp_path)
+    assert result.outcome == Outcome.PASS
+    assert len(result.findings) == 0
+
+
+@pytest.mark.invariant
+def test_same_file_call_shadowed_by_local_binding(tmp_path: Path):
+    """Same-file call shadowed by a local binding must not be attributed to module target."""
+    base_files = {
+        "src/service.py": (
+            "def helper(x: int) -> int:\n"
+            "    return x\n\n"
+            "def call_valid():\n"
+            "    return helper(1)\n\n"
+            "def compute():\n"
+            "    helper = lambda a: a * 2\n"
+            "    return helper(10)\n"
+        ),
+    }
+    head_files = {
+        # helper updated to 2 arguments
+        # call_valid updated to 2 arguments
+        # compute has local lambda with 1 argument (shadowing helper)
+        "src/service.py": (
+            "def helper(x: int, y: int) -> int:\n"
+            "    return x + y\n\n"
+            "def call_valid():\n"
+            "    return helper(1, 2)\n\n"
+            "def compute():\n"
+            "    helper = lambda a: a * 2\n"
+            "    return helper(10)\n"
+        ),
+    }
+    result = _build_and_run("same_file_shadowing", base_files, head_files, None, tmp_path)
+    # The shadowed call helper(10) in compute must NOT be attributed to module helper(x, y).
+    # call_valid is compatible, so outcome is PASS with 0 findings.
+    assert result.outcome == Outcome.PASS
+    assert len(result.findings) == 0
+
