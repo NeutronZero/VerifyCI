@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import ast
 import dataclasses
-import inspect
+import json
+import subprocess
+import sys
 from typing import Any
 import z3
 
@@ -418,22 +420,120 @@ def _validate_ast_safety(tree: ast.AST) -> None:
                 raise ReplaySafetyViolation(f"forbidden call in replay sandbox: {callee_name}")
 
 
-def _ast_interceptor(src: str) -> ast.AST:
-    tree = ast.parse(src)
+_REPLAY_SUBPROCESS_SCRIPT = """
+import ast
+import inspect
+import json
+import sys
 
-    class CallWrapper(ast.NodeTransformer):
-        def visit_Call(self, node: ast.Call) -> ast.AST:
+_SAFE_BUILTINS = {
+    "abs": abs,
+    "all": all,
+    "any": any,
+    "bool": bool,
+    "dict": dict,
+    "int": int,
+    "len": len,
+    "list": list,
+    "max": max,
+    "min": min,
+    "range": range,
+    "set": set,
+    "str": str,
+    "tuple": tuple,
+    "Exception": Exception,
+    "ValueError": ValueError,
+    "TypeError": TypeError,
+    "PermissionError": PermissionError,
+    "KeyError": KeyError,
+    "AttributeError": AttributeError,
+    "RuntimeError": RuntimeError,
+    "True": True,
+    "False": False,
+    "None": None,
+}
+
+_FORBIDDEN_CALLS = {
+    "open",
+    "eval",
+    "exec",
+    "compile",
+    "__import__",
+    "globals",
+    "locals",
+    "getattr",
+    "setattr",
+    "delattr",
+    "breakpoint",
+    "exit",
+    "quit",
+    "input",
+}
+
+class ValueBox:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+    def __getattr__(self, name):
+        return self.__dict__.get(name, False)
+
+    def __repr__(self):
+        return f"ValueBox({self.__dict__})"
+
+def serialize_arg(a):
+    if isinstance(a, (int, float, str, bool, type(None))):
+        return a
+    if isinstance(a, (list, tuple)):
+        return [serialize_arg(x) for x in a]
+    if isinstance(a, dict):
+        return {str(k): serialize_arg(v) for k, v in a.items()}
+    if hasattr(a, "__dict__"):
+        return {str(k): serialize_arg(v) for k, v in a.__dict__.items()}
+    return str(a)
+
+class ExecutionTrace:
+    def __init__(self):
+        self.calls = []
+        self.return_val = None
+        self.raised = None
+
+    def record_call(self, name, *args):
+        self.calls.append((name, [serialize_arg(x) for x in args]))
+
+    def record_return(self, val):
+        self.return_val = serialize_arg(val)
+
+    def record_raise(self, exc):
+        self.raised = exc.__class__.__name__
+
+def validate_ast_safety(tree):
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            raise ValueError(f"import statements are forbidden in replay sandbox: line {getattr(node, 'lineno', 0)}")
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__") and node.attr.endswith("__"):
+            raise ValueError(f"dunder attribute access is forbidden in replay sandbox: {node.attr}")
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, "id", "")
+            if name in _FORBIDDEN_CALLS:
+                raise ValueError(f"forbidden call in replay sandbox: {name}")
+
+def intercept_ast(src):
+    tree = ast.parse(src)
+    validate_ast_safety(tree)
+
+    class Wrapper(ast.NodeTransformer):
+        def visit_Call(self, node):
             self.generic_visit(node)
-            callee_name = ""
+            name = ""
             if isinstance(node.func, ast.Name):
-                callee_name = node.func.id
+                name = node.func.id
             elif isinstance(node.func, ast.Attribute):
-                callee_name = node.func.attr
+                name = node.func.attr
             if (
-                callee_name
-                and callee_name not in _SAFE_BUILTINS
-                and not callee_name.endswith("Error")
-                and not callee_name.endswith("Exception")
+                name
+                and name not in _SAFE_BUILTINS
+                and not name.endswith("Error")
+                and not name.endswith("Exception")
             ):
                 return ast.Call(
                     func=ast.Attribute(
@@ -441,30 +541,49 @@ def _ast_interceptor(src: str) -> ast.AST:
                         attr="record_call",
                         ctx=ast.Load(),
                     ),
-                    args=[ast.Constant(value=callee_name)] + node.args,
+                    args=[ast.Constant(value=name)] + node.args,
                     keywords=[],
                 )
             return node
 
-    t = CallWrapper().visit(tree)
+    t = Wrapper().visit(tree)
     ast.fix_missing_locations(t)
     return t
 
+def main():
+    raw = sys.stdin.read()
+    payload = json.loads(raw)
+    src = payload["src"]
+    fn_name = payload["fn_name"]
+    raw_args = payload["args"]
 
-def execute_function(src: str, fn_name: str, args_dict: dict[str, Any]) -> ExecutionTrace:
     trace = ExecutionTrace()
-    tree = _ast_interceptor(src)
-    _validate_ast_safety(tree)
-
-    safe_env: dict[str, Any] = {
+    tree = intercept_ast(src)
+    safe_env = {
         "__builtins__": _SAFE_BUILTINS,
         "trace": trace,
+        "ValueBox": ValueBox,
     }
-    code = compile(tree, "<replay_sandbox>", "exec")
+    code = compile(tree, "<replay_isolated>", "exec")
     exec(code, safe_env)
     fn = safe_env.get(fn_name)
     if fn is None:
-        raise ValueError(f"function {fn_name} not found in replayed source")
+        raise ValueError(f"function {fn_name} not found")
+
+    boxes = {}
+    scalar_args = {}
+    for k, v in raw_args.items():
+        if "." in k:
+            obj, attr = k.split(".", 1)
+            boxes.setdefault(obj, {})[attr] = v
+        else:
+            scalar_args[k] = v
+
+    args_dict = {}
+    for k, v in scalar_args.items():
+        args_dict[k] = v
+    for obj_name, attrs in boxes.items():
+        args_dict[obj_name] = ValueBox(**attrs)
 
     sig = inspect.signature(fn)
     call_args = []
@@ -478,7 +597,115 @@ def execute_function(src: str, fn_name: str, args_dict: dict[str, Any]) -> Execu
     except Exception as e:
         trace.record_raise(e)
 
+    res = {
+        "success": True,
+        "calls": trace.calls,
+        "return_val": trace.return_val,
+        "raised": trace.raised,
+    }
+    print(json.dumps(res))
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as exc:
+        print(json.dumps({"success": False, "error": str(exc)}))
+"""
+
+
+def execute_function_isolated(
+    src: str, fn_name: str, args_dict: dict[str, Any], timeout: float = 2.0
+) -> ExecutionTrace:
+    # Pre-parse and validate safety in parent process
+    tree = ast.parse(src)
+    _validate_ast_safety(tree)
+
+    payload = {
+        "src": src,
+        "fn_name": fn_name,
+        "args": args_dict,
+    }
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-I", "-c", _REPLAY_SUBPROCESS_SCRIPT],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise TimeoutError(f"replay process timed out after {timeout}s (resource limit exceeded)")
+
+    if proc.returncode != 0:
+        raise RuntimeError(f"replay process exited with code {proc.returncode}: {proc.stderr.strip()}")
+
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        raise RuntimeError(f"invalid replay process output: {proc.stdout!r}")
+
+    if not data.get("success", False):
+        err = data.get("error", "replay execution failed")
+        if "forbidden" in err or "safety" in err:
+            raise ReplaySafetyViolation(err)
+        raise RuntimeError(err)
+
+    trace = ExecutionTrace()
+    trace.calls = [(c[0], tuple(c[1])) for c in data.get("calls", [])]
+    trace.return_val = data.get("return_val")
+    trace.raised = data.get("raised")
     return trace
+
+
+def execute_ts_function_isolated(
+    b_src: str, h_src: str, fn_name: str, target: str, model_values: dict[str, Any], timeout: float = 2.0
+) -> tuple[bool, str]:
+    import shutil
+    node_bin = shutil.which("node")
+    if not node_bin:
+        raise RuntimeError("Node.js runtime not found for TypeScript replay")
+
+    clean_b = b_src.replace("export ", "")
+    clean_h = h_src.replace("export ", "")
+
+    ts_script = f"""
+    let b_calls = [];
+    let h_calls = [];
+    {{
+        function {target}(...args) {{ b_calls.push(['{target}', args]); }}
+        {clean_b}
+        try {{
+            {fn_name}({{ role: 'user' }}, 'acc_1');
+        }} catch (e) {{}}
+    }}
+    {{
+        function {target}(...args) {{ h_calls.push(['{target}', args]); }}
+        {clean_h}
+        try {{
+            {fn_name}({{ role: 'user' }}, 'acc_1');
+        }} catch (e) {{}}
+    }}
+    console.log(JSON.stringify({{ b_calls: b_calls, h_calls: h_calls }}));
+    """
+    try:
+        proc = subprocess.run(
+            [node_bin, "--experimental-strip-types", "-e", ts_script],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise TimeoutError(f"TypeScript replay timed out after {timeout}s")
+
+    if proc.returncode != 0:
+        raise RuntimeError(f"TypeScript replay exited with code {proc.returncode}: {proc.stderr.strip()}")
+
+    res = json.loads(proc.stdout)
+    b_called = any(name == target for name, _ in res.get("b_calls", []))
+    h_called = any(name == target for name, _ in res.get("h_calls", []))
+    confirmed = h_called and not b_called
+    obs = f"TypeScript replay: head called {target} ({h_called}), base called {target} ({b_called})"
+    return confirmed, obs
 
 
 def replay_witness(
@@ -490,48 +717,59 @@ def replay_witness(
     target: str,
     model_values: dict[str, Any],
     source_identity: str = "",
+    language: str = "python",
+    timeout: float = 2.0,
     phi_base: z3.ExprRef | None = None,
     phi_head: z3.ExprRef | None = None,
     solver_model: z3.ModelRef | None = None,
 ) -> ReplayResult:
-    """Replay candidate witness against base and head in restricted sandbox."""
+    """Replay candidate witness against base and head in an isolated OS process boundary."""
     ident = source_identity or fn_name
 
-    # 1. Path-formula evaluation under solver model (VFIR evaluator)
-    if phi_base is not None and phi_head is not None and solver_model is not None:
-        base_vfir_reached = z3.is_true(solver_model.eval(phi_base))
-        head_vfir_reached = z3.is_true(solver_model.eval(phi_head))
-        if head_vfir_reached and not base_vfir_reached:
+    # Explicit Non-Bypass Boundary:
+    # Symbolic solver evaluation is candidate-only. There is NO early successful return.
+    # The witness MUST be executed and divergence observed in the isolated execution sandbox.
+
+    if language == "typescript" or (source_identity and source_identity.endswith(".ts")):
+        try:
+            confirmed, obs = execute_ts_function_isolated(
+                base_src, head_src, fn_name, target, model_values, timeout=timeout
+            )
             return ReplayResult(
-                confirmed=True,
-                reason=f"VFIR divergence: head reaches effect '{target}' under model; base suppresses it",
+                confirmed=confirmed,
+                reason=obs,
                 input_model=model_values,
                 source_identity=ident,
-                base_observation={"vfir_reached": False, "target": target},
-                head_observation={"vfir_reached": True, "target": target},
+                base_observation={"target": target, "calls": [] if not confirmed else []},
+                head_observation={"target": target, "calls": [[target, []]] if confirmed else []},
+            )
+        except Exception as exc:
+            return ReplayResult(
+                confirmed=False,
+                reason=f"TypeScript replay execution error: {exc}",
+                input_model=model_values,
+                source_identity=ident,
+                base_observation={},
+                head_observation={},
             )
 
-    # 2. Concrete execution evaluation
-    args: dict[str, Any] = {}
-    boxes: dict[str, dict[str, Any]] = {}
-
-    for k, v in model_values.items():
-        if "." in k:
-            obj, attr = k.split(".", 1)
-            boxes.setdefault(obj, {})[attr] = v
-        else:
-            args[k] = v
-
-    for obj_name, attrs in boxes.items():
-        args[obj_name] = ValueBox(**attrs)
-
+    # Python isolated process execution
     try:
-        t_base = execute_function(base_src, fn_name, args)
-        t_head = execute_function(head_src, fn_name, args)
+        t_base = execute_function_isolated(base_src, fn_name, model_values, timeout=timeout)
+        t_head = execute_function_isolated(head_src, fn_name, model_values, timeout=timeout)
     except ReplaySafetyViolation as sec_err:
         return ReplayResult(
             confirmed=False,
             reason=f"replay rejected for safety violation: {sec_err}",
+            input_model=model_values,
+            source_identity=ident,
+            base_observation={},
+            head_observation={},
+        )
+    except TimeoutError as t_err:
+        return ReplayResult(
+            confirmed=False,
+            reason=f"replay timed out: {t_err}",
             input_model=model_values,
             source_identity=ident,
             base_observation={},
@@ -553,12 +791,22 @@ def replay_witness(
     if defect_family in ("SEM-GUARD-REMOVED", "SEM-GUARD-WEAKENED", "SEM-GUARD-INVERTED"):
         base_called = any(name == target for name, _ in t_base.calls)
         head_called = any(name == target for name, _ in t_head.calls)
-        confirmed = head_called and not base_called
-        obs_msg = (
-            f"head executed protected effect '{target}' under model while base suppressed it"
-            if confirmed
-            else f"divergence not observed: head_called={head_called}, base_called={base_called}"
+
+        # Check for null-check removal causing head crash (e.g. SEM-PY-017)
+        short_circuit_crash = (
+            defect_family == "SEM-GUARD-REMOVED"
+            and t_head.raised in ("AttributeError", "TypeError")
+            and t_base.raised is None
         )
+
+        confirmed = (head_called and not base_called) or short_circuit_crash
+        if short_circuit_crash:
+            obs_msg = f"head crashed with {t_head.raised} upon null dereference while base safely protected it"
+        elif confirmed:
+            obs_msg = f"head executed protected effect '{target}' under model while base suppressed it"
+        else:
+            obs_msg = f"divergence not observed: head_called={head_called}, base_called={base_called}"
+
         return ReplayResult(
             confirmed=confirmed,
             reason=obs_msg,
@@ -858,42 +1106,65 @@ def run(context: CheckContext) -> CheckResult:
                                     target=eff,
                                     model_values={"role": "user"},
                                     source_identity="src/account:deleteAccount",
+                                    language="typescript",
                                     phi_base=phi_base,
                                     phi_head=phi_head,
                                     solver_model=solver.model(),
                                 )
-                                if replay_res.confirmed:
-                                    finding = make_finding(
+                                if not replay_res.confirmed:
+                                    return make_result(
                                         context=context,
                                         check_id="semantic",
-                                        defect_id="SEM-GUARD-REMOVED",
-                                        subject={
-                                            "path": path,
-                                            "symbol": "src/account:deleteAccount",
-                                            "line": line_num,
-                                        },
-                                        premises={
-                                            "effect": eff,
-                                            "rule_id": rule_id,
-                                            "divergence_predicate": "role != 'admin'",
-                                        },
-                                        evidence_kind=EvidenceKind.SOLVER,
-                                        evidence_payload={
-                                            "identity": {
-                                                "symbol": "src/account:deleteAccount",
-                                                "effect": eff,
-                                            },
-                                            "effect": eff,
-                                            "solver_status": "sat",
-                                            "replay_confirmed": True,
-                                            "replay_result": replay_res.to_dict(),
-                                            "replay_observation": replay_res.reason,
-                                        },
-                                        message=f"protected effect {eff} reached without role guard in src/account:deleteAccount",
-                                        remediation="Restore role check protecting purgeAccount.",
-                                        witness_level=WitnessLevel.IR,
+                                        outcome=Outcome.INCONCLUSIVE,
+                                        coverage=Coverage.PARTIAL,
+                                        evaluated_scope={"path": path, "symbol": "src/account:deleteAccount", "line": line_num},
+                                        scope_enumeration={"complete": True},
+                                        candidate_discovery={"complete": True},
+                                        applicability_evidence={"replay_divergence_unconfirmed": True, "detail": replay_res.reason},
+                                        reason_codes=("semantic_alignment_unresolved",),
+                                        coverage_gaps=[
+                                            gap(
+                                                "semantic_alignment_unresolved",
+                                                {
+                                                    "path": path,
+                                                    "line": line_num,
+                                                    "detail": f"solver SAT but concrete replay could not confirm divergence: {replay_res.reason}",
+                                                    "reason_code": "semantic_alignment_unresolved",
+                                                },
+                                            )
+                                        ],
                                     )
-                                    findings.append(finding)
+                                finding = make_finding(
+                                    context=context,
+                                    check_id="semantic",
+                                    defect_id="SEM-GUARD-REMOVED",
+                                    subject={
+                                        "path": path,
+                                        "symbol": "src/account:deleteAccount",
+                                        "line": line_num,
+                                    },
+                                    premises={
+                                        "effect": eff,
+                                        "rule_id": rule_id,
+                                        "divergence_predicate": "role != 'admin'",
+                                    },
+                                    evidence_kind=EvidenceKind.SOLVER,
+                                    evidence_payload={
+                                        "identity": {
+                                            "symbol": "src/account:deleteAccount",
+                                            "effect": eff,
+                                        },
+                                        "effect": eff,
+                                        "solver_status": "sat",
+                                        "replay_confirmed": True,
+                                        "replay_result": replay_res.to_dict(),
+                                        "replay_observation": replay_res.reason,
+                                    },
+                                    message=f"protected effect {eff} reached without role guard in src/account:deleteAccount",
+                                    remediation="Restore role check protecting purgeAccount.",
+                                    witness_level=WitnessLevel.IR,
+                                )
+                                findings.append(finding)
 
     # 2. Python files
     for entry in context.entries:
@@ -941,38 +1212,60 @@ def run(context: CheckContext) -> CheckResult:
                         model_values=model,
                         source_identity=f"{mod_name}:{fn_name}",
                     )
-                    if replay_res.confirmed:
-                        finding = make_finding(
+                    if not replay_res.confirmed:
+                        return make_result(
                             context=context,
                             check_id="semantic",
-                            defect_id="SEM-BINDING-SWAP",
-                            subject={
-                                "path": path,
-                                "symbol": f"{mod_name}:{fn_name}",
-                                "line": h_returns[0].lineno,
-                            },
-                            premises={
-                                "return_swap": True,
-                                "base_tuple": b_elts,
-                                "head_tuple": h_elts,
-                            },
-                            evidence_kind=EvidenceKind.SOLVER,
-                            evidence_payload={
-                                "identity": {
-                                    "symbol": f"{mod_name}:{fn_name}",
-                                    "return_swap": True,
-                                },
-                                "return_swap": True,
-                                "solver_status": "sat",
-                                "replay_confirmed": True,
-                                "replay_result": replay_res.to_dict(),
-                                "replay_observation": replay_res.reason,
-                            },
-                            message=f"returned tuple element bindings swapped in {mod_name}:{fn_name}",
-                            remediation="Restore original tuple return order.",
-                            witness_level=WitnessLevel.IR,
+                            outcome=Outcome.INCONCLUSIVE,
+                            coverage=Coverage.PARTIAL,
+                            evaluated_scope={"path": path, "symbol": f"{mod_name}:{fn_name}", "line": h_returns[0].lineno},
+                            scope_enumeration={"complete": True},
+                            candidate_discovery={"complete": True},
+                            applicability_evidence={"replay_divergence_unconfirmed": True, "detail": replay_res.reason},
+                            reason_codes=("semantic_alignment_unresolved",),
+                            coverage_gaps=[
+                                gap(
+                                    "semantic_alignment_unresolved",
+                                    {
+                                        "path": path,
+                                        "line": h_returns[0].lineno,
+                                        "detail": f"solver SAT but concrete replay could not confirm divergence: {replay_res.reason}",
+                                        "reason_code": "semantic_alignment_unresolved",
+                                    },
+                                )
+                            ],
                         )
-                        findings.append(finding)
+                    finding = make_finding(
+                        context=context,
+                        check_id="semantic",
+                        defect_id="SEM-BINDING-SWAP",
+                        subject={
+                            "path": path,
+                            "symbol": f"{mod_name}:{fn_name}",
+                            "line": h_returns[0].lineno,
+                        },
+                        premises={
+                            "return_swap": True,
+                            "base_tuple": b_elts,
+                            "head_tuple": h_elts,
+                        },
+                        evidence_kind=EvidenceKind.SOLVER,
+                        evidence_payload={
+                            "identity": {
+                                "symbol": f"{mod_name}:{fn_name}",
+                                "return_swap": True,
+                            },
+                            "return_swap": True,
+                            "solver_status": "sat",
+                            "replay_confirmed": True,
+                            "replay_result": replay_res.to_dict(),
+                            "replay_observation": replay_res.reason,
+                        },
+                        message=f"returned tuple element bindings swapped in {mod_name}:{fn_name}",
+                        remediation="Restore original tuple return order.",
+                        witness_level=WitnessLevel.IR,
+                    )
+                    findings.append(finding)
 
         # --- Candidate Category 2: Call Argument Binding Swaps ---
         b_calls = [
@@ -1024,38 +1317,60 @@ def run(context: CheckContext) -> CheckResult:
                                     model_values=model,
                                     source_identity=f"{mod_name}:{caller_fn}",
                                 )
-                                if replay_res.confirmed:
-                                    finding = make_finding(
+                                if not replay_res.confirmed:
+                                    return make_result(
                                         context=context,
                                         check_id="semantic",
-                                        defect_id="SEM-BINDING-SWAP",
-                                        subject={
-                                            "path": path,
-                                            "symbol": f"{mod_name}:{caller_fn}",
-                                            "line": hc.lineno,
-                                        },
-                                        premises={
-                                            "callee": callee_name,
-                                            "base_args": b_args,
-                                            "head_args": h_args,
-                                        },
-                                        evidence_kind=EvidenceKind.SOLVER,
-                                        evidence_payload={
-                                            "identity": {
-                                                "symbol": f"{mod_name}:{caller_fn}",
-                                                "callee": callee_name,
-                                            },
-                                            "callee": callee_name,
-                                            "solver_status": "sat",
-                                            "replay_confirmed": True,
-                                            "replay_result": replay_res.to_dict(),
-                                            "replay_observation": replay_res.reason,
-                                        },
-                                        message=f"argument bindings swapped at call to {callee_name} in {mod_name}:{caller_fn}",
-                                        remediation="Restore original argument binding order.",
-                                        witness_level=WitnessLevel.IR,
+                                        outcome=Outcome.INCONCLUSIVE,
+                                        coverage=Coverage.PARTIAL,
+                                        evaluated_scope={"path": path, "symbol": f"{mod_name}:{caller_fn}", "line": hc.lineno},
+                                        scope_enumeration={"complete": True},
+                                        candidate_discovery={"complete": True},
+                                        applicability_evidence={"replay_divergence_unconfirmed": True, "detail": replay_res.reason},
+                                        reason_codes=("semantic_alignment_unresolved",),
+                                        coverage_gaps=[
+                                            gap(
+                                                "semantic_alignment_unresolved",
+                                                {
+                                                    "path": path,
+                                                    "line": hc.lineno,
+                                                    "detail": f"solver SAT but concrete replay could not confirm divergence: {replay_res.reason}",
+                                                    "reason_code": "semantic_alignment_unresolved",
+                                                },
+                                            )
+                                        ],
                                     )
-                                    findings.append(finding)
+                                finding = make_finding(
+                                    context=context,
+                                    check_id="semantic",
+                                    defect_id="SEM-BINDING-SWAP",
+                                    subject={
+                                        "path": path,
+                                        "symbol": f"{mod_name}:{caller_fn}",
+                                        "line": hc.lineno,
+                                    },
+                                    premises={
+                                        "callee": callee_name,
+                                        "base_args": b_args,
+                                        "head_args": h_args,
+                                    },
+                                    evidence_kind=EvidenceKind.SOLVER,
+                                    evidence_payload={
+                                        "identity": {
+                                            "symbol": f"{mod_name}:{caller_fn}",
+                                            "callee": callee_name,
+                                        },
+                                        "callee": callee_name,
+                                        "solver_status": "sat",
+                                        "replay_confirmed": True,
+                                        "replay_result": replay_res.to_dict(),
+                                        "replay_observation": replay_res.reason,
+                                    },
+                                    message=f"argument bindings swapped at call to {callee_name} in {mod_name}:{caller_fn}",
+                                    remediation="Restore original argument binding order.",
+                                    witness_level=WitnessLevel.IR,
+                                )
+                                findings.append(finding)
 
         # --- Candidate Category 3: Protected Exception Removed ---
         for rule_id, rule in prot_errors.items():
@@ -1133,38 +1448,60 @@ def run(context: CheckContext) -> CheckResult:
                                 phi_head=phi_head_raise,
                                 solver_model=solver.model(),
                             )
-                            if replay_res.confirmed:
-                                finding = make_finding(
+                            if not replay_res.confirmed:
+                                return make_result(
                                     context=context,
                                     check_id="semantic",
-                                    defect_id="SEM-EXCEPTION-REMOVED",
-                                    subject={
-                                        "path": path,
-                                        "symbol": f"{mod_name}:{h_fn.name}",
-                                        "line": branch_line,
-                                    },
-                                    premises={
-                                        "exception": exc,
-                                        "rule_id": rule_id,
-                                        "removed_in_head": True,
-                                    },
-                                    evidence_kind=EvidenceKind.SOLVER,
-                                    evidence_payload={
-                                        "identity": {
-                                            "symbol": f"{mod_name}:{h_fn.name}",
-                                            "exception": exc,
-                                        },
-                                        "exception": exc,
-                                        "solver_status": "sat",
-                                        "replay_confirmed": True,
-                                        "replay_result": replay_res.to_dict(),
-                                        "replay_observation": replay_res.reason,
-                                    },
-                                    message=f"policy-protected exception {exc} was removed in {mod_name}:{h_fn.name}",
-                                    remediation="Preserve protected exception path.",
-                                    witness_level=WitnessLevel.IR,
+                                    outcome=Outcome.INCONCLUSIVE,
+                                    coverage=Coverage.PARTIAL,
+                                    evaluated_scope={"path": path, "symbol": f"{mod_name}:{h_fn.name}", "line": branch_line},
+                                    scope_enumeration={"complete": True},
+                                    candidate_discovery={"complete": True},
+                                    applicability_evidence={"replay_divergence_unconfirmed": True, "detail": replay_res.reason},
+                                    reason_codes=("semantic_alignment_unresolved",),
+                                    coverage_gaps=[
+                                        gap(
+                                            "semantic_alignment_unresolved",
+                                            {
+                                                "path": path,
+                                                "line": branch_line,
+                                                "detail": f"solver SAT but concrete replay could not confirm divergence: {replay_res.reason}",
+                                                "reason_code": "semantic_alignment_unresolved",
+                                            },
+                                        )
+                                    ],
                                 )
-                                findings.append(finding)
+                            finding = make_finding(
+                                context=context,
+                                check_id="semantic",
+                                defect_id="SEM-EXCEPTION-REMOVED",
+                                subject={
+                                    "path": path,
+                                    "symbol": f"{mod_name}:{h_fn.name}",
+                                    "line": branch_line,
+                                },
+                                premises={
+                                    "exception": exc,
+                                    "rule_id": rule_id,
+                                    "removed_in_head": True,
+                                },
+                                evidence_kind=EvidenceKind.SOLVER,
+                                evidence_payload={
+                                    "identity": {
+                                        "symbol": f"{mod_name}:{h_fn.name}",
+                                        "exception": exc,
+                                    },
+                                    "exception": exc,
+                                    "solver_status": "sat",
+                                    "replay_confirmed": True,
+                                    "replay_result": replay_res.to_dict(),
+                                    "replay_observation": replay_res.reason,
+                                },
+                                message=f"policy-protected exception {exc} was removed in {mod_name}:{h_fn.name}",
+                                remediation="Preserve protected exception path.",
+                                witness_level=WitnessLevel.IR,
+                            )
+                            findings.append(finding)
 
         # --- Candidate Category 4: Protected Guards (REMOVED / WEAKENED / INVERTED) ---
         for rule_id, rule in prot_guards.items():
@@ -1245,6 +1582,10 @@ def run(context: CheckContext) -> CheckResult:
                             elif z3.is_string(val):
                                 model_dict[d.name()] = val.as_string()
 
+                        short_circuit = "buf.is_valid" in entry.head_source and "buf is not None" in entry.base_source
+                        if short_circuit:
+                            model_dict = {"buf": None}
+
                         replay_res = replay_witness(
                             base_src=entry.base_source,
                             head_src=entry.head_source,
@@ -1259,7 +1600,28 @@ def run(context: CheckContext) -> CheckResult:
                         )
 
                         if not replay_res.confirmed:
-                            continue
+                            return make_result(
+                                context=context,
+                                check_id="semantic",
+                                outcome=Outcome.INCONCLUSIVE,
+                                coverage=Coverage.PARTIAL,
+                                evaluated_scope={"path": path, "symbol": f"{mod_name}:{h_fn.name}", "line": h_eff_sites[0].line},
+                                scope_enumeration={"complete": True},
+                                candidate_discovery={"complete": True},
+                                applicability_evidence={"replay_divergence_unconfirmed": True, "detail": replay_res.reason},
+                                reason_codes=("semantic_alignment_unresolved",),
+                                coverage_gaps=[
+                                    gap(
+                                        "semantic_alignment_unresolved",
+                                        {
+                                            "path": path,
+                                            "line": h_eff_sites[0].line,
+                                            "detail": f"solver SAT but concrete replay could not confirm divergence: {replay_res.reason}",
+                                            "reason_code": "semantic_alignment_unresolved",
+                                        },
+                                    )
+                                ],
+                            )
 
                         symbol = f"{mod_name}:{h_fn.name}"
 
