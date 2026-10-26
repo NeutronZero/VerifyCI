@@ -753,8 +753,8 @@ def test_transparent_decorator_policy_respected(tmp_path: Path):
     ],
 )
 @pytest.mark.invariant
-def test_systematic_unsupported_statement_types_raise_error(label: str, generator):
-    """Systematically verify every unmodeled statement raises UnsupportedControlFlowError."""
+def test_systematic_unsupported_statement_and_expression_forms_raise_error(label: str, generator):
+    """Systematically verify every unmodeled statement and expression form raises UnsupportedControlFlowError."""
     stmts = generator()
     ctx = SymbolicContext()
     with pytest.raises(UnsupportedControlFlowError) as exc_info:
