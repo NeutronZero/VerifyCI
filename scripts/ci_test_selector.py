@@ -10,8 +10,7 @@ from pathlib import Path
 
 # Permanent Core Invariant Set: ALWAYS executed on every run regardless of diff
 CORE_INVARIANTS = [
-    "tests/v2/test_remediation_spec.py",
-    "tests/v2/test_all_layers.py",
+    "tests/v3/test_gate_v3.py",
 ]
 
 SAFE_TEST_TARGET_RE = re.compile(r"[A-Za-z0-9_./-]+\.py")
@@ -19,40 +18,9 @@ SAFE_TEST_DIR_RE = re.compile(r"tests/(?:[A-Za-z0-9_.-]+/)*")
 
 # Source path to test directory mapping
 PATH_MAPPING = {
-    "verifyci_v2/contracts/": [
-        "tests/v2/test_all_layers.py",
-        "tests/v2/test_remediation_spec.py",
+    "verifyci/": [
+        "tests/v3/",
     ],
-    "verifyci_v2/ingestion/": [
-        "tests/v2/test_all_layers.py",
-        "tests/v2/test_remediation_spec.py",
-    ],
-    "verifyci_v2/symbolic/": [
-        "tests/v2/test_all_layers.py",
-        "tests/v2/test_remediation_spec.py",
-    ],
-    "verifyci_v2/neural/": [
-        "tests/v2/test_all_layers.py",
-        "tests/v2/test_remediation_spec.py",
-    ],
-    "verifyci_v2/store/": [
-        "tests/v2/test_all_layers.py",
-        "tests/v2/test_remediation_spec.py",
-    ],
-    "verifyci_v2/sandbox/": [
-        "tests/v2/test_all_layers.py",
-        "tests/v2/test_remediation_spec.py",
-    ],
-    "verifyci_v2/provenance/": [
-        "tests/v2/test_all_layers.py",
-        "tests/v2/test_remediation_spec.py",
-    ],
-    "verifyci_v2/interface/": [
-        "tests/v2/test_all_layers.py",
-        "tests/v2/test_remediation_spec.py",
-    ],
-    "verifyci_v2/": ["tests/v2/"],
-    "benchmarks/": ["tests/v2/"],
 }
 
 # Changes that trigger the FULL test suite

@@ -1,5 +1,5 @@
 name: "VerifyCI Gate"
-description: "Deterministic, local-first code verification for agentic pull requests and diffs"
+description: "Deterministic, local-first code verification for agentic pull requests and diffs (v3.1)"
 author: "VerifyCI Contributors"
 
 branding:
@@ -11,10 +11,6 @@ inputs:
     description: "Path to repository or code root"
     required: false
     default: "."
-  db:
-    description: "Path to VerifyCI database (defaults to <path>/.verifyci/store.vc2)"
-    required: false
-    default: ""
   base-ref:
     description: "Base git ref/commit to diff against (defaults to PR base SHA or HEAD~1)"
     required: false
@@ -31,20 +27,29 @@ inputs:
     description: "File path to save the verification report"
     required: false
     default: "verifyci-results.sarif"
-  fail-on-inconclusive:
-    description: "Whether INCONCLUSIVE or HUMAN_REVIEW verdicts (exit code 2) fail the action (fail-closed by default)"
+  as-of:
+    description: "UTC calendar date YYYY-MM-DD for deterministic waiver/acceptance evaluation"
     required: false
-    default: "true"
+    default: ""
+  review-mode:
+    description: "Review clearing mode: default or codeowners"
+    required: false
+    default: "default"
+  cache-mode:
+    description: "Cache mode: authenticated, none, or local"
+    required: false
+    default: "none"
+  cache-dir:
+    description: "Directory for VerifyCI cache"
+    required: false
+    default: ""
 
 outputs:
   status:
-    description: "Verification verdict: PASS, FAIL, HUMAN_REVIEW, INCONCLUSIVE, INFRA_ERROR, TIMEOUT"
+    description: "Verification verdict: PASS, FAIL, INCONCLUSIVE, ERROR, REVIEW"
     value: ${{ steps.run-verifyci.outputs.status }}
-  rationale:
-    description: "Verdict explanation or invariant rationale"
-    value: ${{ steps.run-verifyci.outputs.rationale }}
   exit-code:
-    description: "VerifyCI CLI exit code (0=PASS, 1=FAIL, 2=UNCERTAIN/REVIEW, 3=INFRA_ERROR/TIMEOUT)"
+    description: "VerifyCI CLI exit code (0=PASS, 1=FAIL, 2=INCONCLUSIVE, 3=ERROR, 4=REVIEW)"
     value: ${{ steps.run-verifyci.outputs.exit_code }}
   report-file:
     description: "Path to generated report file"
@@ -58,254 +63,143 @@ runs:
       shell: bash
       env:
         INPUT_PATH: ${{ inputs.path }}
-        INPUT_DB: ${{ inputs.db }}
         INPUT_BASE_REF: ${{ inputs.base-ref }}
         INPUT_HEAD_REF: ${{ inputs.head-ref }}
         INPUT_FORMAT: ${{ inputs.format }}
         INPUT_OUTPUT_FILE: ${{ inputs.output-file }}
-        INPUT_FAIL_ON_INC: ${{ inputs.fail-on-inconclusive }}
+        INPUT_AS_OF: ${{ inputs.as-of }}
+        INPUT_REVIEW_MODE: ${{ inputs.review-mode }}
+        INPUT_CACHE_MODE: ${{ inputs.cache-mode }}
+        INPUT_CACHE_DIR: ${{ inputs.cache-dir }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
-        # PHASE 1-A boundary rule: this script body contains ZERO template
-        # interpolations of the workflow expression language. Every
-        # caller-controlled value arrives via the `env:` block above, so
-        # quotes, command substitutions, backticks, newlines, and glob
-        # characters in inputs are inert data, never shell syntax.
-        # All parameter expansions below are double-quoted.
         set -uo pipefail
 
-        # `${VAR-default}` (no colon) is deliberate: GitHub always sets these
-        # from action defaults when the caller omits them, so an explicitly
-        # empty value must reach validation and fail closed, not silently
-        # inherit a default.
         REPO_PATH="${INPUT_PATH-.}"
-        DB_ARG="${INPUT_DB-}"
         BASE_REF="${INPUT_BASE_REF-}"
         HEAD_REF="${INPUT_HEAD_REF-HEAD}"
         FORMAT="${INPUT_FORMAT-sarif}"
         OUT_FILE="${INPUT_OUTPUT_FILE-verifyci-results.sarif}"
-        FAIL_ON_INC="${INPUT_FAIL_ON_INC-true}"
+        AS_OF="${INPUT_AS_OF-}"
+        REVIEW_MODE="${INPUT_REVIEW_MODE-default}"
+        CACHE_MODE="${INPUT_CACHE_MODE-none}"
+        CACHE_DIR="${INPUT_CACHE_DIR-}"
 
-        # Fail closed on invalid input (exit 3 = infrastructure/misuse, the
-        # same ladder the CLI uses). Never run the tool on unvalidated input.
         fail_infra() {
           echo "::error::VerifyCI action input rejected: $1"
           exit 3
         }
 
-        # --- format: strict allowlist (blocks `json;cmd`, newlines, `XML`) ---
         case "$FORMAT" in
           sarif|json|text) ;;
           *) fail_infra "format must be one of: sarif, json, text." ;;
         esac
 
-        # --- fail-on-inconclusive flag: strict allowlist ---
-        case "$FAIL_ON_INC" in
-          true|false) ;;
-          *) fail_infra "fail-on-inconclusive must be 'true' or 'false'." ;;
+        case "$REVIEW_MODE" in
+          default|codeowners) ;;
+          *) fail_infra "review-mode must be 'default' or 'codeowners'." ;;
         esac
 
-        # --- output-file: relative workspace path only ---
-        # Blocks absolute paths (`/etc/...`), parent traversal (`../`),
-        # newline injection, and shell metacharacters. Names are matched
-        # against an explicit charset; anything else is rejected.
+        case "$CACHE_MODE" in
+          authenticated|none|local) ;;
+          *) fail_infra "cache-mode must be one of: authenticated, none, local." ;;
+        esac
+
         case "$OUT_FILE" in
           ""|/*) fail_infra "output-file must be a non-empty relative path." ;;
-        esac
-        case "$OUT_FILE" in
           -*|*$'\n'*) fail_infra "output-file must not start with '-' or contain newlines." ;;
         esac
-        if [[ "$OUT_FILE" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-          :
-        else
-          fail_infra "output-file contains characters outside [A-Za-z0-9._/-]."
-        fi
-        if [[ "/$OUT_FILE/" == *"/../"* ]]; then
-          fail_infra "output-file must not contain '..' path segments."
+        if [[ ! "$OUT_FILE" =~ ^[A-Za-z0-9._/-]+$ ]] || [[ "/$OUT_FILE/" == *"/../"* ]]; then
+          fail_infra "output-file contains invalid characters or path traversal."
         fi
 
-        # --- repo path: non-empty, no newline, never option-like ---
-        # (Quoted argv is safe from splitting, but a leading `-` could be
-        # parsed as a CLI flag by the tool itself.)
-        case "$REPO_PATH" in
-          ""|-*|*$'\n'*) fail_infra "path must be a non-empty relative path not starting with '-'." ;;
-        esac
-        # Shell metacharacters are never legitimate in a repository path and
-        # always indicate an injection attempt. Spaces, parens, and unicode
-        # stay allowed (e.g. "my repo").
-        case "$REPO_PATH" in
-          *';'*|*'&'*|*'|'*|*'<'*|*'>'*|*'$'*|*'`'*|*'"'*|*"'"*|*'*'*|*'?'*|*'['*) fail_infra "path contains shell metacharacters." ;;
-        esac
-
-        # --- git refs: conservative charset, never option-like ---
-        # Allows SHAs, HEAD, HEAD~1, HEAD^, branches, tags, slashes.
-        # Rejects option injection (`--output=...`), command separators,
-        # newlines, and exotic `@{...}` syntax (fail closed: pass an
-        # explicit SHA instead). `--` is still used below as belt-and-braces.
-        valid_ref() {
-          case "$1" in
-            ""|-*) return 1 ;;
-          esac
-          if [[ "$1" =~ ^[A-Za-z0-9._/+~^:-]+$ ]]; then
-            return 0
-          fi
-          return 1
-        }
-        if [ -n "$BASE_REF" ]; then
-          valid_ref "$BASE_REF" || fail_infra "base-ref is not a safe git ref."
-        fi
-        valid_ref "$HEAD_REF" || fail_infra "head-ref is not a safe git ref."
-
-        # --- db path: same rules as repo path when explicitly provided ---
-        if [ -n "$DB_ARG" ]; then
-          case "$DB_ARG" in
-            -*|*$'\n'*) fail_infra "db must not start with '-' or contain newlines." ;;
-          esac
-          case "$DB_ARG" in
-            *';'*|*'&'*|*'|'*|*'<'*|*'>'*|*'$'*|*'`'*|*'"'*|*"'"*|*'*'*|*'?'*|*'['*) fail_infra "db contains shell metacharacters." ;;
-          esac
-        fi
-
-        # Ensure VerifyCI CLI is available (pinned transitive dependencies).
-        if ! command -v verifyci >/dev/null 2>&1; then
-          echo "::group::Installing VerifyCI (pinned dependencies)"
-          python -m pip install --upgrade pip
-          python -m pip install -c "$ACTION_PATH/constraints-ci.txt" "$ACTION_PATH"
-          echo "::endgroup::"
-        fi
-
-        # Resolve Database Path
-        if [ -z "$DB_ARG" ]; then
-          DB_PATH="$REPO_PATH/.verifyci/store.vc2"
-        else
-          DB_PATH="$DB_ARG"
-        fi
-
-        # Initialize and ingest codebase if graph database is not yet present
-        if [ ! -f "$DB_PATH" ]; then
-          echo "::group::Initializing and Ingesting Codebase"
-          verifyci init "$REPO_PATH"
-          verifyci ingest "$REPO_PATH" --db "$DB_PATH"
-          echo "::endgroup::"
-        fi
-
-        # Determine git base reference for PR diff
+        # Infer base revision if omitted
         if [ -z "$BASE_REF" ]; then
           if [ -n "${GITHUB_BASE_REF:-}" ]; then
-            if valid_ref "$GITHUB_BASE_REF"; then
-              git fetch origin --depth=1 "$GITHUB_BASE_REF" || true
-              BASE_REF="origin/$GITHUB_BASE_REF"
-            else
-              echo "::warning::Ignoring unsafe GITHUB_BASE_REF value; falling back to HEAD~1."
-              BASE_REF="HEAD~1"
-            fi
-          else
+            BASE_REF="origin/$GITHUB_BASE_REF"
+          elif git rev-parse --verify -q "HEAD~1" >/dev/null; then
             BASE_REF="HEAD~1"
+          else
+            fail_infra "Cannot infer base-ref; specify base-ref input."
           fi
         fi
 
-        DIFF_FILE="$(mktemp)"
-        trap 'rm -f "$DIFF_FILE"' EXIT
-
-        if ! git diff "$BASE_REF" "$HEAD_REF" -- > "$DIFF_FILE"; then
-          echo "::error::Failed to compute git diff. Ensure references are fetched and valid."
-          exit 3
+        CMD=(vc gate --repo "$REPO_PATH" --base "$BASE_REF" --head "$HEAD_REF" --format "$FORMAT" --output "$OUT_FILE" --review-mode "$REVIEW_MODE" --cache-mode "$CACHE_MODE")
+        if [ -n "$AS_OF" ]; then
+          CMD+=(--as-of "$AS_OF")
         fi
-        echo "Computed diff ($(wc -l < "$DIFF_FILE") lines)"
+        if [ -n "$CACHE_DIR" ]; then
+          CMD+=(--cache-dir "$CACHE_DIR")
+        fi
+        if [ "$CACHE_MODE" = "local" ]; then
+          CMD+=(--allow-local-cache)
+        fi
 
-        # Execute VerifyCI verify-diff
-        echo "::group::Executing VerifyCI Verification"
-        verifyci verify-diff --diff-file "$DIFF_FILE" --db "$DB_PATH" --format "$FORMAT" --output "$OUT_FILE"
+        echo "::group::Executing VerifyCI Gate"
+        "${CMD[@]}"
         EXIT_CODE=$?
         echo "::endgroup::"
 
-        # Read verdict details from generated report if available
         STATUS="UNKNOWN"
-        RATIONALE=""
         if [ "$FORMAT" = "json" ] && [ -f "$OUT_FILE" ]; then
           STATUS=$(python -c "import sys, json; d=json.load(open(sys.argv[1], encoding='utf-8')); print(d.get('verdict', {}).get('status', 'UNKNOWN'))" "$OUT_FILE" 2>/dev/null || echo "UNKNOWN")
-          RATIONALE=$(python -c "import sys, json; d=json.load(open(sys.argv[1], encoding='utf-8')); print(d.get('verdict', {}).get('rationale', ''))" "$OUT_FILE" 2>/dev/null || echo "")
         elif [ "$FORMAT" = "sarif" ] && [ -f "$OUT_FILE" ]; then
           STATUS=$(python -c "import sys, json; d=json.load(open(sys.argv[1], encoding='utf-8')); inv=d.get('runs', [{}])[0].get('invocations', [{}])[0]; print(inv.get('properties', {}).get('verdict', 'UNKNOWN'))" "$OUT_FILE" 2>/dev/null || echo "UNKNOWN")
-          RATIONALE=$(python -c "import sys, json; d=json.load(open(sys.argv[1], encoding='utf-8')); inv=d.get('runs', [{}])[0].get('invocations', [{}])[0]; print(inv.get('properties', {}).get('rationale', ''))" "$OUT_FILE" 2>/dev/null || echo "")
         fi
 
-        # Fallback status from exit code if unparsed
         if [ "$STATUS" = "UNKNOWN" ]; then
           case "$EXIT_CODE" in
             0) STATUS="PASS" ;;
             1) STATUS="FAIL" ;;
-            2) STATUS="UNCERTAIN" ;;
-            3) STATUS="INFRA_ERROR" ;;
+            2) STATUS="INCONCLUSIVE" ;;
+            3) STATUS="ERROR" ;;
+            4) STATUS="REVIEW" ;;
             *) STATUS="UNKNOWN" ;;
           esac
         fi
 
-        # Sanitize STATUS to a single allowlisted token: the verdict field
-        # comes from report content, which can carry attacker-influenced
-        # diff text. Without this, a crafted verdict could inject extra
-        # `key=value` lines into GITHUB_OUTPUT.
         STATUS="$(printf '%s' "$STATUS" | tr -cd 'A-Za-z_' | cut -c1-32)"
-        if [ -z "$STATUS" ]; then
-          STATUS="UNKNOWN"
-        fi
+        [ -z "$STATUS" ] && STATUS="UNKNOWN"
 
-        # EXIT_CODE must be numeric (it comes from our own tool, but enforce).
-        case "$EXIT_CODE" in
-          ''|*[!0-9]*) EXIT_CODE=3 ;;
-        esac
+        echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+        echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
 
-        # Write output variables with a per-run random heredoc delimiter:
-        # a fixed delimiter (e.g. EOF_VERIFYCI) can be matched by a crafted
-        # rationale line, truncating or injecting step outputs.
-        DELIM="verifyci_delim_${GITHUB_RUN_ID:-local}_${RANDOM}_${RANDOM}_${BASHPID:-$$}"
-        {
-          echo "status=$STATUS"
-          echo "exit_code=$EXIT_CODE"
-          echo "rationale<<$DELIM"
-          printf '%s\n' "$RATIONALE"
-          echo "$DELIM"
-        } >> "$GITHUB_OUTPUT"
-
-        echo "VerifyCI Verdict: $STATUS (exit code: $EXIT_CODE)"
-        if [ -n "$RATIONALE" ]; then
-          echo "Rationale: $RATIONALE"
-        fi
-
-        # Write clean step summary when running on GitHub Actions
         if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
           {
-            echo "### 🛡️ VerifyCI Verification Gate"
+            echo "### VerifyCI Verification Gate"
             echo ""
             echo "| Field | Value |"
             echo "| :--- | :--- |"
             echo "| **Verdict** | \`$STATUS\` |"
             echo "| **Exit Code** | \`$EXIT_CODE\` |"
-            echo "| **Rationale** | \`$RATIONALE\` |"
             echo "| **Report File** | \`$OUT_FILE\` |"
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
         fi
 
-        # Enforce Honest Exit Semantics
-        if [ "$EXIT_CODE" -eq 0 ]; then
-          echo "::notice::VerifyCI PASSED: $RATIONALE"
-          exit 0
-        elif [ "$EXIT_CODE" -eq 1 ]; then
-          echo "::error::VerifyCI FAILED: Blocking invariant or verification check failed ($RATIONALE)"
-          exit 1
-        elif [ "$EXIT_CODE" -eq 3 ]; then
-          echo "::error::VerifyCI INFRA_ERROR/TIMEOUT: Infrastructure substrate unavailable or verification deadline exceeded ($RATIONALE)"
-          exit 3
-        elif [ "$EXIT_CODE" -eq 2 ]; then
-          if [ "$FAIL_ON_INC" = "true" ]; then
-            echo "::error::VerifyCI $STATUS: Uncertain or human-review required ($RATIONALE)"
-            exit 2
-          else
-            echo "::warning::VerifyCI $STATUS: Routed to human review / ungrounded ($RATIONALE) - advisory mode (fail-on-inconclusive is false)"
+        case "$EXIT_CODE" in
+          0)
+            echo "::notice::VerifyCI PASSED: no declared defects found with complete coverage."
             exit 0
-          fi
-        else
-          echo "::error::VerifyCI returned unexpected exit code $EXIT_CODE"
-          exit "$EXIT_CODE"
-        fi
+            ;;
+          1)
+            echo "::error::VerifyCI FAILED: blocking defect established with validated evidence."
+            exit 1
+            ;;
+          2)
+            echo "::warning::VerifyCI INCONCLUSIVE: analysis incomplete or budget exhausted."
+            exit 2
+            ;;
+          3)
+            echo "::error::VerifyCI ERROR: fatal execution fault or invalid configuration."
+            exit 3
+            ;;
+          4)
+            echo "::warning::VerifyCI REVIEW: gate-integrity or policy change requires human review."
+            exit 4
+            ;;
+          *)
+            echo "::error::VerifyCI returned unexpected exit code $EXIT_CODE"
+            exit "$EXIT_CODE"
+            ;;
+        esac

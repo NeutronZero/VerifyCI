@@ -1,41 +1,51 @@
-"""Core verification contracts, findings, verdicts, and attestation schemas."""
+"""VerifyCI v3 data contracts, models, capabilities, and manifests."""
 
 from __future__ import annotations
 
-from verifyci.contracts.attestation import (
-    ATTESTATION_DIGEST_DOMAIN,
-    ATTESTATION_SCHEMA_VERSION,
-    CanonicalAttestationPayload,
-    VerificationCertificate,
-    canonical_json_bytes,
-    normalize_path,
-)
 from verifyci.contracts.capabilities import (
     Capability,
     CapabilityDeclaration,
     ExecutionStatus,
+    ProviderClass,
+    provider_for_capability,
+    validate_capabilities,
 )
-from verifyci.contracts.verdict import (
-    FindingReason,
-    Severity,
-    VerificationFinding,
-    VerificationVerdict,
-    derive_verdict,
+from verifyci.contracts.manifest import CheckSpec, CHECK_SPECS, CHECK_ORDER
+from verifyci.contracts.model import (
+    CheckResult,
+    Coverage,
+    CoverageGap,
+    DiffEntry,
+    EvidenceBundle,
+    Finding,
+    Maturity,
+    Outcome,
+    Tier,
+    Verdict,
+    VerdictResult,
 )
+from verifyci.contracts.reason_codes import DEFECT_REASON_CODES
 
 __all__ = [
-    "ATTESTATION_DIGEST_DOMAIN",
-    "ATTESTATION_SCHEMA_VERSION",
-    "CanonicalAttestationPayload",
+    "CHECK_ORDER",
+    "CHECK_SPECS",
     "Capability",
     "CapabilityDeclaration",
+    "CheckResult",
+    "CheckSpec",
+    "Coverage",
+    "CoverageGap",
+    "DEFECT_REASON_CODES",
+    "DiffEntry",
+    "EvidenceBundle",
     "ExecutionStatus",
-    "FindingReason",
-    "Severity",
-    "VerificationCertificate",
-    "VerificationFinding",
-    "VerificationVerdict",
-    "canonical_json_bytes",
-    "derive_verdict",
-    "normalize_path",
+    "Finding",
+    "Maturity",
+    "Outcome",
+    "ProviderClass",
+    "Tier",
+    "Verdict",
+    "VerdictResult",
+    "provider_for_capability",
+    "validate_capabilities",
 ]

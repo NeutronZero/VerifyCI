@@ -1,0 +1,3 @@
+[deny_changes.protected_parser]
+symbols = ["sample:parse_item"]
+reason = "Parser modifications are restricted."
