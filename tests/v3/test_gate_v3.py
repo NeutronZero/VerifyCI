@@ -12,11 +12,13 @@ from hashlib import sha256
 from pathlib import Path
 import subprocess
 
+from dataclasses import replace
 import pytest
 
 from verifyci.checks.security import _redact
 from verifyci.cli import main
-from verifyci.contracts.manifest import validate_manifest
+from verifyci.contracts.manifest import CHECK_SPECS, validate_manifest
+from verifyci.contracts.model import Maturity, Tier
 from verifyci.contracts.names import (
     NameError as GlobNameError,
     glob_match,
@@ -145,7 +147,9 @@ def test_codeowners_coverage_and_noninterference():
     assert "codeowners_noninterference_unproven" in coverage.reasons
 
 
-def test_clean_gate_stays_error_until_release_validation(tmp_path):
+def test_clean_gate_stays_error_until_release_validation(monkeypatch, tmp_path):
+    monkeypatch.setattr("verifyci.contracts.manifest.RELEASE_VALIDATED", False)
+    monkeypatch.setattr("verifyci.gate.orchestrator.RELEASE_VALIDATED", False)
     root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
     head = _commit(
         root,
@@ -163,6 +167,26 @@ def test_clean_gate_stays_error_until_release_validation(tmp_path):
     assert results["security"]["outcome"] == "PASS"
     assert all(result["toolchain_fingerprint"] for result in results.values())
     sarif = bundle_to_sarif(first)
+    assert sarif["version"] == "2.1.0"
+    assert sarif["runs"][0]["results"] == []
+
+
+def test_clean_gate_passes_when_release_validated(tmp_path):
+    root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
+    head = _commit(
+        root,
+        {"app.py": "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n"},
+    )
+    bundle = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
+    assert bundle.payload["verdict"]["status"] == "PASS"
+    assert bundle.exit_code == 0
+    assert "check_not_validated" not in bundle.payload["verdict"]["fault_reason_codes"]
+    assert bundle.payload["manifest"]["release_validated"] is True
+    results = _assert_check_results(bundle)
+    assert results["grounding"]["outcome"] == "PASS"
+    assert results["security"]["outcome"] == "PASS"
+    assert all(result["toolchain_fingerprint"] for result in results.values())
+    sarif = bundle_to_sarif(bundle)
     assert sarif["version"] == "2.1.0"
     assert sarif["runs"][0]["results"] == []
 
@@ -279,8 +303,9 @@ def test_module_level_edit_is_grounded_without_symbol_match(tmp_path):
     )
     head = _commit(root, {"app.py": "def f(a):\n    return a\n\nX = 2\n"})
     bundle = _gate(root, base, head)
-    assert bundle.payload["verdict"]["status"] == "ERROR"
-    assert "check_not_validated" in bundle.payload["verdict"]["fault_reason_codes"]
+    assert bundle.payload["verdict"]["status"] == "PASS"
+    assert bundle.exit_code == 0
+    assert "check_not_validated" not in bundle.payload["verdict"]["fault_reason_codes"]
     grounding = _assert_check_results(bundle)["grounding"]
     assert grounding["outcome"] == "PASS"
     assert grounding["evaluated_scope"]["other_text_hunks"]
@@ -295,9 +320,9 @@ def test_deny_changes_emits_one_finding_for_multiple_matching_rules(tmp_path):
     root, base = _repo(tmp_path, {"src/core/x.py": "x = 1\n"}, policy=policy)
     head = _commit(root, {"src/core/x.py": "x = 2\n"})
     bundle = _gate(root, base, head)
-    assert bundle.payload["verdict"]["status"] == "ERROR"
-    assert bundle.exit_code == 3
-    assert "check_not_validated" in bundle.payload["verdict"]["fault_reason_codes"]
+    assert bundle.payload["verdict"]["status"] == "FAIL"
+    assert bundle.exit_code == 1
+    assert "check_not_validated" not in bundle.payload["verdict"]["fault_reason_codes"]
     result = _assert_check_results(bundle)["grounding"]
     assert result["outcome"] == "FAIL"
     assert len(result["findings"]) == 1
@@ -320,7 +345,8 @@ def test_deletion_finds_live_reference_in_unchanged_file(tmp_path):
     assert result["outcome"] == "FAIL"
     finding = next(f for f in result["findings"] if f["defect_id"] == "DEL-DANGLING-REFERENCE")
     assert finding["evidence"]["payload"]["reference"]["path"] == "main.py"
-    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.payload["verdict"]["status"] == "FAIL"
+    assert bundle.exit_code == 1
 
 
 def test_contract_finds_incompatible_caller_in_unchanged_file(tmp_path):
@@ -370,7 +396,8 @@ def test_contract_finds_unchanged_caller_when_parameter_is_removed(tmp_path):
     result = _assert_check_results(bundle)["contract"]
     finding = next(f for f in result["findings"] if f["defect_id"] == "CTR-SIGNATURE-BREAK")
     assert "too_many_positional_arguments" in finding["premises"]["problem"]
-    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.payload["verdict"]["status"] == "FAIL"
+    assert bundle.exit_code == 1
 
 
 def test_contract_changed_callsite_against_unchanged_callee(tmp_path):
@@ -385,7 +412,8 @@ def test_contract_changed_callsite_against_unchanged_callee(tmp_path):
     bundle = _gate(root, base, head)
     result = _assert_check_results(bundle)["contract"]
     assert any(f["defect_id"] == "CTR-CALL-INCOMPATIBLE" for f in result["findings"])
-    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.payload["verdict"]["status"] == "FAIL"
+    assert bundle.exit_code == 1
 
 
 def test_contract_without_callers_reports_signature_break(tmp_path):
@@ -410,7 +438,17 @@ def test_secret_finding_is_redacted_and_not_duplicated(tmp_path):
     assert payload["validation"].startswith("offline:")
 
 
-def test_shadow_secret_finding_is_not_suppressed_by_blocking_waiver(tmp_path):
+def test_shadow_secret_finding_is_not_suppressed_by_blocking_waiver(monkeypatch, tmp_path):
+    monkeypatch.setitem(
+        CHECK_SPECS,
+        "security",
+        replace(
+            CHECK_SPECS["security"],
+            tier=Tier.ADVISORY,
+            maturity=Maturity.SHADOW,
+            promotion_record_hash="",
+        ),
+    )
     token = "ghp_1234567890abcdefghijABCDEFGHIJ"
     redacted = _redact(token)
     fingerprint = stable_finding_fingerprint(
@@ -440,13 +478,24 @@ def test_shadow_secret_finding_is_not_suppressed_by_blocking_waiver(tmp_path):
     root, base = _repo(tmp_path, {"app.py": "x = 1\n"}, policy=policy)
     head = _commit(root, {"app.py": f'TOKEN = "{token}"\n'})
     bundle = _gate(root, base, head)
-    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.payload["verdict"]["status"] == "PASS"
+    assert bundle.exit_code == 0
     assert bundle.payload["waivers"] == []
     secret = next(f for f in bundle.payload["findings"] if f["defect_id"] == "SEC-SECRET")
     assert secret["disposition"] == "OPEN"
 
 
-def test_coverage_acceptance_does_not_change_shadow_result(tmp_path):
+def test_coverage_acceptance_does_not_change_shadow_result(monkeypatch, tmp_path):
+    monkeypatch.setitem(
+        CHECK_SPECS,
+        "contract",
+        replace(
+            CHECK_SPECS["contract"],
+            tier=Tier.ADVISORY,
+            maturity=Maturity.SHADOW,
+            promotion_record_hash="",
+        ),
+    )
     policy = (
         POLICY
         + "[coverage_acceptances.test_decorator]\n"
@@ -464,7 +513,8 @@ def test_coverage_acceptance_does_not_change_shadow_result(tmp_path):
         {"app.py": "def deco(fn):\n    return fn\n\n@deco\ndef f(a):\n    return a\n"},
     )
     bundle = _gate(root, base, head)
-    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.payload["verdict"]["status"] == "PASS"
+    assert bundle.exit_code == 0
     result = _assert_check_results(bundle)["contract"]
     assert result["outcome"] == "INCONCLUSIVE"
     assert result["coverage"] == "PARTIAL"
@@ -481,8 +531,8 @@ def test_configured_taint_without_resolved_path_is_inconclusive(tmp_path):
     root, base = _repo(tmp_path, {"app.py": "x = 1\n"}, policy=policy)
     head = _commit(root, {"app.py": 'q = request.args.get("q")\n'})
     bundle = _gate(root, base, head)
-    assert bundle.payload["verdict"]["status"] == "ERROR"
-    assert bundle.exit_code == 3
+    assert bundle.payload["verdict"]["status"] == "INCONCLUSIVE"
+    assert bundle.exit_code == 2
     result = _assert_check_results(bundle)["security"]
     assert "taint_path_unresolved" in result["reason_codes"]
 
@@ -492,7 +542,8 @@ def test_vendored_path_does_not_suppress_dangerous_call_scan(tmp_path):
     root, base = _repo(tmp_path, {"app.py": "x = 1\n"}, policy=policy)
     head = _commit(root, {"vendor/new_tool.py": 'eval("1 + 1")\n'})
     bundle = _gate(root, base, head)
-    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.payload["verdict"]["status"] == "FAIL"
+    assert bundle.exit_code == 1
     result = _assert_check_results(bundle)["security"]
     assert any(f["defect_id"] == "SEC-DANGEROUS-CALL" for f in result["findings"])
 
@@ -504,8 +555,8 @@ def test_policy_change_requires_review_and_invalid_policy_is_error(tmp_path):
         {".verifyci/policy.toml": POLICY + "cold_deadline_seconds = 60\n"},
     )
     review = _gate(root, base, review_head)
-    assert review.payload["verdict"]["status"] == "ERROR"
-    assert review.exit_code == 3
+    assert review.payload["verdict"]["status"] == "REVIEW"
+    assert review.exit_code == 4
     assert set(review.payload["verdict"]["reason_codes"]) >= {
         "policy_change_review",
         "gate_integrity_review",
@@ -527,7 +578,8 @@ def test_gate_integrity_workflow_change_requires_review(tmp_path):
     root, base = _repo(tmp_path, {"app.py": "x = 1\n"})
     head = _commit(root, {".github/workflows/ci.yml": "name: CI\n"})
     bundle = _gate(root, base, head)
-    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.payload["verdict"]["status"] == "REVIEW"
+    assert bundle.exit_code == 4
     assert "gate_integrity_review" in bundle.payload["verdict"]["reason_codes"]
 
 
@@ -563,7 +615,7 @@ def test_policy_only_stale_waiver_remediation_respects_codeowners(tmp_path, caps
         ]
     )
     captured = capsys.readouterr()
-    assert code == 3
+    assert code == 0
     assert "policy_change_review" in captured.out
 
 
@@ -595,7 +647,7 @@ def test_policy_only_stale_waiver_remediation_respects_codeowners(tmp_path, caps
         ]
     )
     captured = capsys.readouterr()
-    assert code == 3
+    assert code == 4
     assert "waiver_review" in captured.out
 
 
@@ -604,7 +656,8 @@ def test_unsupported_language_change_is_inconclusive(tmp_path):
     head = _commit(root, {"main.go": "package main\n\nfunc main() {}\n"})
     bundle = _gate(root, base, head)
     results = _assert_check_results(bundle)
-    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.payload["verdict"]["status"] == "INCONCLUSIVE"
+    assert bundle.exit_code == 2
     for check_id in ("contract", "deletion"):
         result = results[check_id]
         assert result["outcome"] == "INCONCLUSIVE"
@@ -644,12 +697,12 @@ def test_cli_formats_and_codeowners_review_mode(tmp_path, capsys):
     head = _commit(root, {"app.py": "x = 2\n"})
     code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "json"])
     captured = capsys.readouterr()
-    assert code == 3
-    assert json.loads(captured.out)["payload"]["verdict"]["status"] == "ERROR"
+    assert code == 0
+    assert json.loads(captured.out)["payload"]["verdict"]["status"] == "PASS"
 
     code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "sarif"])
     captured = capsys.readouterr()
-    assert code == 3
+    assert code == 0
     assert json.loads(captured.out)["version"] == "2.1.0"
 
     cache_dir = root / ".cache"
@@ -689,7 +742,7 @@ def test_cli_formats_and_codeowners_review_mode(tmp_path, capsys):
             "codeowners",
         ]
     )
-    assert code == 3
+    assert code == 0
 
 
 def test_accepted_gap_with_incomplete_scope_or_discovery_remains_inconclusive() -> None:
@@ -815,7 +868,8 @@ def test_git_submodule_lifecycle(tmp_path: Path) -> None:
 
     # Gate run treats submodule as excluded scope without error
     bundle_add = _gate(root, base, head_add)
-    assert bundle_add.payload["verdict"]["status"] == "ERROR"
+    assert bundle_add.payload["verdict"]["status"] == "PASS"
+    assert bundle_add.exit_code == 0
     excluded_kinds = [x["kind"] for x in bundle_add.payload["excluded_scope"]]
     assert "submodule" in excluded_kinds
 

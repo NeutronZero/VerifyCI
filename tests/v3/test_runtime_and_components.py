@@ -151,9 +151,10 @@ def test_cache_sampling_is_entry_deterministic_and_pinned():
         "rate_numerator": 5,
         "rate_denominator": 100,
     }
-    assert all(CHECK_SPECS[check].maturity == Maturity.SHADOW for check in CHECK_ORDER)
-    assert all(CHECK_SPECS[check].tier == Tier.ADVISORY for check in CHECK_ORDER)
-    assert all(not CHECK_SPECS[check].promotion_record_hash for check in CHECK_ORDER)
+    promoted = CHECK_ORDER
+    assert all(CHECK_SPECS[check].maturity == Maturity.PROVISIONAL for check in promoted)
+    assert all(CHECK_SPECS[check].tier == Tier.BLOCKING for check in promoted)
+    assert all(CHECK_SPECS[check].promotion_record_hash for check in promoted)
     assert all(CHECK_SPECS[check].spec_core_hash.startswith("sha256:") for check in CHECK_ORDER)
 
 

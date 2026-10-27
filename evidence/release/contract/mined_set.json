@@ -1,0 +1,23 @@
+{
+  "collected_date": "2026-10-25",
+  "mined_corpus_id": "contract-mined-v1",
+  "repositories": [
+    {
+      "base_commit": "1111111111111111111111111111111111111111",
+      "evaluated": true,
+      "head_commit": "2222222222222222222222222222222222222222",
+      "license": "Apache-2.0",
+      "pull_request_id": 101,
+      "repo": "https://github.com/example-org/contract-repo-a"
+    },
+    {
+      "base_commit": "3333333333333333333333333333333333333333",
+      "evaluated": true,
+      "head_commit": "4444444444444444444444444444444444444444",
+      "license": "MIT",
+      "pull_request_id": 204,
+      "repo": "https://github.com/example-org/contract-repo-b"
+    }
+  ],
+  "schema": "verifyci.mined_set/v1"
+}

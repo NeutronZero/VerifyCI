@@ -1,0 +1,8 @@
+{
+  "created_date": "2026-10-27",
+  "report_hash": "sha256:a3f00df74f5067e4ec65b78e6337581c9d982778b77d66cded1015edddd97b0b",
+  "schema": "verifyci.promotion_record/v1",
+  "spec_core_hash": "sha256:4d5c3cdc03e296174b703056b268b2a37d902fbbc6e6bdf0ba6c3169a2539fe9",
+  "target_maturity": "provisional",
+  "toolchain_fingerprint": "sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9"
+}

@@ -28,10 +28,30 @@ from verifyci.contracts.model import (
 )
 from verifyci.contracts.names import path_matches_any
 
-_SUPPORTED_EXTENSIONS = (".py", ".pyi", ".ts", ".tsx", ".js", ".jsx")
+_SUPPORTED_EXTENSIONS = (".py", ".pyi", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts")
+_CODE_SUFFIXES = frozenset(
+    {
+        "py", "pyi", "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts",
+        "go", "rs", "java", "kt", "kts", "c", "cc", "cpp", "h", "hpp", "cs",
+        "rb", "php", "swift", "scala",
+    }
+)
 _STANDARD_TRANSPARENT_DECORATORS = frozenset(
     {"property", "staticmethod", "classmethod", "abstractmethod"}
 )
+
+
+def _is_local_identity_decorator(tree: ast.AST, dec_name: str) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == dec_name:
+            args = node.args.args
+            if len(args) == 1:
+                param_name = args[0].arg
+                if len(node.body) == 1 and isinstance(node.body[0], ast.Return):
+                    ret_val = node.body[0].value
+                    if isinstance(ret_val, ast.Name) and ret_val.id == param_name:
+                        return True
+    return False
 
 _SAFE_BUILTINS: dict[str, Any] = {
     "abs": abs,
@@ -617,7 +637,8 @@ def main():
     for k, v in scalar_args.items():
         args_dict[k] = v
     for obj_name, attrs in boxes.items():
-        args_dict[obj_name] = ValueBox(**attrs)
+        if obj_name not in scalar_args or scalar_args[obj_name] is not None:
+            args_dict[obj_name] = ValueBox(**attrs)
 
     sig = inspect.signature(fn)
     call_args = []
@@ -713,6 +734,7 @@ def execute_ts_function_isolated(
 
     clean_b = b_src.replace("export ", "")
     clean_h = h_src.replace("export ", "")
+    arg_obj = json.dumps(model_values)
 
     ts_script = f"""
     let b_calls = [];
@@ -721,14 +743,14 @@ def execute_ts_function_isolated(
         function {target}(...args) {{ b_calls.push(['{target}', args]); }}
         {clean_b}
         try {{
-            {fn_name}({{ role: 'user' }}, 'acc_1');
+            {fn_name}({arg_obj}, 'acc_1');
         }} catch (e) {{}}
     }}
     {{
         function {target}(...args) {{ h_calls.push(['{target}', args]); }}
         {clean_h}
         try {{
-            {fn_name}({{ role: 'user' }}, 'acc_1');
+            {fn_name}({arg_obj}, 'acc_1');
         }} catch (e) {{}}
     }}
     console.log(JSON.stringify({{ b_calls: b_calls, h_calls: h_calls }}));
@@ -947,19 +969,186 @@ def _strip_docstrings(tree: ast.AST) -> None:
                 node.body = node.body[1:]
 
 
+def _find_enclosing_function(tree: ast.AST, target_node: ast.AST) -> str:
+    """Find the enclosing function name for an AST node."""
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for child in ast.walk(node):
+                if child is target_node:
+                    return node.name
+    return ""
+
+
+def _find_function_node(tree: ast.AST, fn_name: str) -> ast.FunctionDef | None:
+    """Find FunctionDef AST node matching name."""
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == fn_name:
+            return node
+    return None
+
+
+def _node_to_var_name(node: ast.AST) -> str:
+    """Convert an AST expression node into a canonical variable name or path."""
+    if isinstance(node, ast.Name):
+        return node.id
+    elif isinstance(node, ast.Attribute):
+        val = _node_to_var_name(node.value)
+        return f"{val}.{node.attr}" if val else node.attr
+    elif isinstance(node, ast.Constant):
+        return str(node.value)
+    return ""
+
+
+def _extract_model_dict(z3_model: z3.ModelRef) -> dict[str, Any]:
+    """Dynamically extract variables and concrete values from a Z3 solver model."""
+    model_dict: dict[str, Any] = {}
+    for d in z3_model.decls():
+        name = d.name()
+        val = z3_model[d]
+        if z3.is_bool(val):
+            model_dict[name] = bool(val)
+        elif z3.is_int(val):
+            model_dict[name] = val.as_long()
+        elif z3.is_string(val):
+            model_dict[name] = val.as_string()
+    return model_dict
+
+
+def _has_null_check(fn: ast.AST) -> tuple[bool, str]:
+    """Inspect AST for explicit None checks on variable access paths."""
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Compare):
+            for op, comp in zip(n.ops, n.comparators):
+                if isinstance(op, (ast.IsNot, ast.Is)) and isinstance(comp, ast.Constant) and comp.value is None:
+                    var_name = _node_to_var_name(n.left)
+                    if var_name:
+                        return True, var_name
+    return False, ""
+
+
+def _analyze_typescript_guard(
+    b_src: str,
+    h_src: str,
+    eff: str,
+) -> tuple[str, str, z3.ExprRef, z3.ExprRef, dict[str, Any], int, str] | None:
+    """Analyze TypeScript file using tree-sitter AST to extract function, guard condition, and Z3 model."""
+    try:
+        import tree_sitter_typescript as ts
+        from tree_sitter import Language, Parser
+        parser = Parser(Language(ts.language_typescript()))
+    except Exception:
+        return None
+
+    b_tree = parser.parse(b_src.encode("utf-8"))
+    h_tree = parser.parse(h_src.encode("utf-8"))
+
+    def _find_fn_and_guard(root_node: Any, effect_name: str):
+        found_fn = ""
+        found_guard = None
+        call_line = 1
+
+        def _search(node: Any, current_fn: str, current_guard: Any) -> bool:
+            nonlocal found_fn, found_guard, call_line
+            next_fn = current_fn
+            next_guard = current_guard
+
+            if node.type in ("function_declaration", "method_definition", "function"):
+                for child in node.children:
+                    if child.type in ("identifier", "property_identifier"):
+                        next_fn = child.text.decode("utf-8")
+                        break
+            elif node.type == "if_statement":
+                for child in node.children:
+                    if child.type == "parenthesized_expression":
+                        next_guard = child
+                        break
+            elif node.type == "call_expression":
+                fn_ident = None
+                for child in node.children:
+                    if child.type in ("identifier", "property_identifier"):
+                        fn_ident = child.text.decode("utf-8")
+                        break
+                if fn_ident == effect_name:
+                    found_fn = current_fn
+                    found_guard = current_guard
+                    call_line = node.start_point[0] + 1
+                    return True
+
+            for child in node.children:
+                if _search(child, next_fn, next_guard):
+                    return True
+            return False
+
+        _search(root_node, "", None)
+        return found_fn, found_guard, call_line
+
+    b_fn_name, b_guard_node, b_call_line = _find_fn_and_guard(b_tree.root_node, eff)
+    h_fn_name, h_guard_node, h_call_line = _find_fn_and_guard(h_tree.root_node, eff)
+
+    if not b_fn_name or not h_fn_name:
+        return None
+
+    if b_guard_node and not h_guard_node:
+        var_name = "role"
+        val_str = "admin"
+        for child in b_guard_node.children:
+            if child.type == "binary_expression":
+                left_text = ""
+                right_text = ""
+                for sub in child.children:
+                    if sub.type in ("member_expression", "identifier"):
+                        if not left_text:
+                            left_text = sub.text.decode("utf-8")
+                    elif sub.type in ("string", "string_fragment", "number"):
+                        right_text = sub.text.decode("utf-8").strip("\"'")
+                if left_text:
+                    var_name = left_text.split(".")[-1]
+                if right_text:
+                    val_str = right_text
+                break
+
+        z3_var = z3.String(var_name)
+        phi_base = (z3_var == val_str)
+        phi_head = z3.BoolVal(True)
+        delta = z3.And(phi_head, z3.Not(phi_base))
+
+        solver = z3.Solver()
+        solver.set("rlimit", 100000)
+        solver.add(delta)
+        if solver.check() == z3.sat:
+            z3_model = solver.model()
+            model_values: dict[str, Any] = {}
+            for d in z3_model.decls():
+                v = z3_model[d]
+                model_values[d.name()] = v.as_string() if z3.is_string(v) else bool(v)
+            if not model_values.get(var_name) or model_values[var_name] == val_str:
+                model_values[var_name] = "user"
+
+            guard_desc = f"{var_name} guard" if var_name else "required guard"
+            return b_fn_name, h_fn_name, phi_base, phi_head, model_values, h_call_line, guard_desc
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # 6. Semantic Check Runner
 # ---------------------------------------------------------------------------
 
 def run(context: CheckContext) -> CheckResult:
-    # --- Check A: Strict Unsupported Language Check ---
+    # --- Check A: Strict Unsupported Language Check on Code Scope ---
+    code_entries = []
     for entry in context.entries:
         path = entry.head_path or entry.base_path
+        if not path:
+            continue
         if entry.is_binary or entry.is_submodule or entry.is_lfs:
             continue
-        ext = "." + path.rsplit(".", 1)[-1] if "." in path else ""
+        ext = ("." + path.rsplit(".", 1)[-1].lower()) if "." in path else ""
+        suffix = ext.lstrip(".")
+        if suffix not in _CODE_SUFFIXES:
+            continue
         if ext not in _SUPPORTED_EXTENSIONS:
-            lang = ext.lstrip(".") or "unknown"
+            lang = suffix or "unknown"
             return make_result(
                 context=context,
                 check_id="semantic",
@@ -977,9 +1166,22 @@ def run(context: CheckContext) -> CheckResult:
                     )
                 ],
             )
+        code_entries.append(entry)
+
+    if not code_entries:
+        return make_result(
+            context=context,
+            check_id="semantic",
+            outcome=Outcome.NOT_APPLICABLE,
+            coverage=Coverage.COMPLETE,
+            evaluated_scope={},
+            scope_enumeration={"complete": True, "relevant_paths": 0},
+            candidate_discovery={"complete": True},
+            applicability_evidence={"configured": True, "relevant_paths": 0},
+        )
 
     # --- Check B: Parser Integrity & Syntax Validation ---
-    for entry in context.entries:
+    for entry in code_entries:
         path = entry.head_path or entry.base_path
         if path.endswith((".py", ".pyi")):
             for side, src in (("base", entry.base_source), ("head", entry.head_source)):
@@ -1006,7 +1208,7 @@ def run(context: CheckContext) -> CheckResult:
                         )
 
     # --- Check C: Dynamic Dispatch & Unknown Decorator Gaps ---
-    for entry in context.entries:
+    for entry in code_entries:
         path = entry.head_path or entry.base_path
         if path.endswith((".py", ".pyi")) and entry.head_source:
             tree = ast.parse(entry.head_source)
@@ -1059,6 +1261,7 @@ def run(context: CheckContext) -> CheckResult:
                         is_transparent = (
                             dec_name in _STANDARD_TRANSPARENT_DECORATORS
                             or dec_name in context.policy.transparent_decorators
+                            or _is_local_identity_decorator(tree, dec_name)
                         )
                         if not is_transparent and dec_name:
                             return make_result(
@@ -1086,7 +1289,7 @@ def run(context: CheckContext) -> CheckResult:
 
     # --- Check D: Normalized Body Digest (Docstring / Comment Exclusion) ---
     has_body_change = False
-    for entry in context.entries:
+    for entry in code_entries:
         path = entry.head_path or entry.base_path
         if path.endswith((".py", ".pyi")):
             b_tree = ast.parse(entry.base_source)
@@ -1119,101 +1322,93 @@ def run(context: CheckContext) -> CheckResult:
     findings = []
 
     # 1. TypeScript files
-    for entry in context.entries:
+    for entry in code_entries:
         path = entry.head_path or entry.base_path
-        if path.endswith(".ts") and entry.base_source and entry.head_source:
+        if path.endswith((".ts", ".tsx", ".js", ".jsx")) and entry.base_source and entry.head_source:
             b_src = entry.base_source
             h_src = entry.head_source
+            mod_name = path.rsplit(".", 1)[0].replace("\\", "/")
             for rule_id, rule in prot_guards.items():
                 paths = rule.get("paths", ())
                 if paths and not path_matches_any(paths, path):
                     continue
                 for eff in rule.get("effects", ()):
                     if eff in b_src and eff in h_src:
-                        if 'role === "admin"' in b_src and 'role === "admin"' not in h_src:
-                            role = z3.String("role")
-                            solver = z3.Solver()
-                            solver.set("rlimit", 100000)
-                            phi_head = z3.BoolVal(True)
-                            phi_base = role == "admin"
-                            delta = z3.And(phi_head, z3.Not(phi_base))
-                            solver.add(delta)
-                            if solver.check() == z3.sat:
-                                line_num = 2
-                                for idx, line_text in enumerate(h_src.splitlines(), start=1):
-                                    if f"{eff}(" in line_text:
-                                        line_num = idx
-                                        break
-                                replay_res = replay_witness(
-                                    base_src=b_src,
-                                    head_src=h_src,
-                                    fn_name="deleteAccount",
-                                    defect_family="SEM-GUARD-REMOVED",
-                                    target=eff,
-                                    model_values={"role": "user"},
-                                    source_identity="src/account:deleteAccount",
-                                    language="typescript",
-                                    phi_base=phi_base,
-                                    phi_head=phi_head,
-                                    solver_model=solver.model(),
-                                )
-                                if not replay_res.confirmed:
-                                    return make_result(
-                                        context=context,
-                                        check_id="semantic",
-                                        outcome=Outcome.INCONCLUSIVE,
-                                        coverage=Coverage.PARTIAL,
-                                        evaluated_scope={"path": path, "symbol": "src/account:deleteAccount", "line": line_num},
-                                        scope_enumeration={"complete": True},
-                                        candidate_discovery={"complete": True},
-                                        applicability_evidence={"replay_divergence_unconfirmed": True, "detail": replay_res.reason},
-                                        reason_codes=("semantic_alignment_unresolved",),
-                                        coverage_gaps=[
-                                            gap(
-                                                "semantic_alignment_unresolved",
-                                                {
-                                                    "path": path,
-                                                    "line": line_num,
-                                                    "detail": f"solver SAT but concrete replay could not confirm divergence: {replay_res.reason}",
-                                                    "reason_code": "semantic_alignment_unresolved",
-                                                },
-                                            )
-                                        ],
-                                    )
-                                finding = make_finding(
+                        analysis = _analyze_typescript_guard(b_src, h_src, eff)
+                        if analysis is not None:
+                            b_fn_name, h_fn_name, phi_base, phi_head, model_values, line_num, guard_desc = analysis
+                            fn_name = h_fn_name or b_fn_name
+                            symbol = f"{mod_name}:{fn_name}"
+                            replay_res = replay_witness(
+                                base_src=b_src,
+                                head_src=h_src,
+                                fn_name=fn_name,
+                                defect_family="SEM-GUARD-REMOVED",
+                                target=eff,
+                                model_values=model_values,
+                                source_identity=symbol,
+                                language="typescript",
+                                phi_base=phi_base,
+                                phi_head=phi_head,
+                                solver_model=None,
+                            )
+                            if not replay_res.confirmed:
+                                return make_result(
                                     context=context,
                                     check_id="semantic",
-                                    defect_id="SEM-GUARD-REMOVED",
-                                    subject={
-                                        "path": path,
-                                        "symbol": "src/account:deleteAccount",
-                                        "line": line_num,
-                                    },
-                                    premises={
-                                        "effect": eff,
-                                        "rule_id": rule_id,
-                                        "divergence_predicate": "role != 'admin'",
-                                    },
-                                    evidence_kind=EvidenceKind.SOLVER,
-                                    evidence_payload={
-                                        "identity": {
-                                            "symbol": "src/account:deleteAccount",
-                                            "effect": eff,
-                                        },
-                                        "effect": eff,
-                                        "solver_status": "sat",
-                                        "replay_confirmed": True,
-                                        "replay_result": replay_res.to_dict(),
-                                        "replay_observation": replay_res.reason,
-                                    },
-                                    message=f"protected effect {eff} reached without role guard in src/account:deleteAccount",
-                                    remediation="Restore role check protecting purgeAccount.",
-                                    witness_level=WitnessLevel.IR,
+                                    outcome=Outcome.INCONCLUSIVE,
+                                    coverage=Coverage.PARTIAL,
+                                    evaluated_scope={"path": path, "symbol": symbol, "line": line_num},
+                                    scope_enumeration={"complete": True},
+                                    candidate_discovery={"complete": True},
+                                    applicability_evidence={"replay_divergence_unconfirmed": True, "detail": replay_res.reason},
+                                    reason_codes=("semantic_alignment_unresolved",),
+                                    coverage_gaps=[
+                                        gap(
+                                            "semantic_alignment_unresolved",
+                                            {
+                                                "path": path,
+                                                "line": line_num,
+                                                "detail": f"solver SAT but concrete replay could not confirm divergence: {replay_res.reason}",
+                                                "reason_code": "semantic_alignment_unresolved",
+                                            },
+                                        )
+                                    ],
                                 )
-                                findings.append(finding)
+                            finding = make_finding(
+                                context=context,
+                                check_id="semantic",
+                                defect_id="SEM-GUARD-REMOVED",
+                                subject={
+                                    "path": path,
+                                    "symbol": symbol,
+                                    "line": line_num,
+                                },
+                                premises={
+                                    "effect": eff,
+                                    "rule_id": rule_id,
+                                    "guard_removed": True,
+                                },
+                                evidence_kind=EvidenceKind.SOLVER,
+                                evidence_payload={
+                                    "identity": {
+                                        "symbol": symbol,
+                                        "effect": eff,
+                                    },
+                                    "effect": eff,
+                                    "solver_status": "sat",
+                                    "replay_confirmed": True,
+                                    "replay_result": replay_res.to_dict(),
+                                    "replay_observation": replay_res.reason,
+                                },
+                                message=f"protected effect {eff} reached without {guard_desc} in {symbol}",
+                                remediation=f"Restore role check protecting {eff}." if "role" in guard_desc else f"Restore protecting guard for {eff}.",
+                                witness_level=WitnessLevel.IR,
+                            )
+                            findings.append(finding)
 
     # 2. Python files
-    for entry in context.entries:
+    for entry in code_entries:
         path = entry.head_path or entry.base_path
         if not path.endswith((".py", ".pyi")) or not entry.base_source or not entry.head_source:
             continue
@@ -1233,22 +1428,25 @@ def run(context: CheckContext) -> CheckResult:
             b_elts = [ast.dump(e, include_attributes=False) for e in b_returns[0].value.elts]
             h_elts = [ast.dump(e, include_attributes=False) for e in h_returns[0].value.elts]
             if len(b_elts) >= 2 and b_elts != h_elts and sorted(b_elts) == sorted(h_elts):
+                fn_name = _find_enclosing_function(h_tree, h_returns[0])
                 ctx_sym = SymbolicContext()
-                e1 = ctx_sym.get_var("user.id", "string")
-                e2 = ctx_sym.get_var("user.token", "string")
+                b_names = [_node_to_var_name(e) for e in b_returns[0].value.elts]
+                h_names = [_node_to_var_name(e) for e in h_returns[0].value.elts]
+                b_vars = [ctx_sym.get_var(n, "string") for n in b_names]
+                h_vars = [ctx_sym.get_var(n, "string") for n in h_names]
                 solver = z3.Solver()
                 solver.set("rlimit", 100000)
-                delta_bind = e1 != e2
+                diff_pairs = [bv != hv for bv, hv in zip(b_vars, h_vars) if bv is not hv]
+                delta_bind = z3.Or(*diff_pairs) if diff_pairs else z3.BoolVal(False)
                 solver.add(delta_bind)
                 if solver.check() == z3.sat:
-                    fn_name = "get_credentials"
-                    for fn in ast.walk(h_tree):
-                        if isinstance(fn, ast.FunctionDef):
-                            for n in ast.walk(fn):
-                                if n is h_returns[0]:
-                                    fn_name = fn.name
-                                    break
-                    model = {"user.id": "id_val_1", "user.token": "tok_val_2"}
+                    z3_model = solver.model()
+                    model = _extract_model_dict(z3_model)
+                    fn_node = _find_function_node(h_tree, fn_name)
+                    if fn_node:
+                        for arg in fn_node.args.args:
+                            if arg.arg not in model and not any(k.startswith(f"{arg.arg}.") for k in model):
+                                model[arg.arg] = f"val_{arg.arg}"
                     replay_res = replay_witness(
                         base_src=entry.base_source,
                         head_src=entry.head_source,
@@ -1338,22 +1536,25 @@ def run(context: CheckContext) -> CheckResult:
                                 compensated = True
 
                         if not compensated:
+                            caller_fn = _find_enclosing_function(h_tree, hc)
                             ctx_sym = SymbolicContext()
-                            a0 = ctx_sym.get_var("src", "string")
-                            a1 = ctx_sym.get_var("dst", "string")
+                            b_names = [_node_to_var_name(a) for a in bc.args]
+                            h_names = [_node_to_var_name(a) for a in hc.args]
+                            b_vars = [ctx_sym.get_var(n, "string") for n in b_names]
+                            h_vars = [ctx_sym.get_var(n, "string") for n in h_names]
                             solver = z3.Solver()
                             solver.set("rlimit", 100000)
-                            delta_bind = a0 != a1
+                            diff_pairs = [bv != hv for bv, hv in zip(b_vars, h_vars) if bv is not hv]
+                            delta_bind = z3.Or(*diff_pairs) if diff_pairs else z3.BoolVal(False)
                             solver.add(delta_bind)
                             if solver.check() == z3.sat:
-                                caller_fn = "transfer"
-                                for fn in ast.walk(h_tree):
-                                    if isinstance(fn, ast.FunctionDef):
-                                        for n in ast.walk(fn):
-                                            if n is hc:
-                                                caller_fn = fn.name
-                                                break
-                                model = {"src": "acc_1", "dst": "acc_2", "amount": 100}
+                                z3_model = solver.model()
+                                model = _extract_model_dict(z3_model)
+                                fn_node = _find_function_node(h_tree, caller_fn)
+                                if fn_node:
+                                    for arg in fn_node.args.args:
+                                        if arg.arg not in model and not any(k.startswith(f"{arg.arg}.") for k in model):
+                                            model[arg.arg] = 100 if "amount" in arg.arg or "count" in arg.arg else f"val_{arg.arg}"
                                 replay_res = replay_witness(
                                     base_src=entry.base_source,
                                     head_src=entry.head_source,
@@ -1476,12 +1677,16 @@ def run(context: CheckContext) -> CheckResult:
                         solver.set("rlimit", 100000)
                         solver.add(delta_err)
                         if solver.check() == z3.sat:
-                            branch_line = 2
+                            branch_line = h_fn.lineno
                             for stmt in h_fn.body:
                                 if isinstance(stmt, ast.If):
                                     branch_line = stmt.lineno
                                     break
-                            model = {"token": ""}
+                            z3_model = solver.model()
+                            model = _extract_model_dict(z3_model)
+                            for arg in h_fn.args.args:
+                                if arg.arg not in model and not any(k.startswith(f"{arg.arg}.") for k in model):
+                                    model[arg.arg] = ""
                             replay_res = replay_witness(
                                 base_src=entry.base_source,
                                 head_src=entry.head_source,
@@ -1618,19 +1823,14 @@ def run(context: CheckContext) -> CheckResult:
 
                     if solver_res == z3.sat:
                         z3_model = solver.model()
-                        model_dict: dict[str, Any] = {}
-                        for d in z3_model.decls():
-                            val = z3_model[d]
-                            if z3.is_bool(val):
-                                model_dict[d.name()] = bool(val)
-                            elif z3.is_int(val):
-                                model_dict[d.name()] = val.as_long()
-                            elif z3.is_string(val):
-                                model_dict[d.name()] = val.as_string()
+                        model_dict = _extract_model_dict(z3_model)
 
-                        short_circuit = "buf.is_valid" in entry.head_source and "buf is not None" in entry.base_source
-                        if short_circuit:
-                            model_dict = {"buf": None}
+                        b_has_null, null_var = _has_null_check(b_fn)
+                        h_has_null, _ = _has_null_check(h_fn)
+                        null_check_removed = b_has_null and not h_has_null
+                        if null_check_removed and null_var:
+                            model_dict = {k: v for k, v in model_dict.items() if not k.startswith(f"{null_var}.")}
+                            model_dict[null_var] = None
 
                         replay_res = replay_witness(
                             base_src=entry.base_source,
@@ -1672,7 +1872,9 @@ def run(context: CheckContext) -> CheckResult:
                         symbol = f"{mod_name}:{h_fn.name}"
 
                         # Classification per §8.4.2.1(f)
-                        # 1. Check SEM-GUARD-INVERTED
+                        # Precedence: SEM-GUARD-INVERTED -> SEM-GUARD-REMOVED -> SEM-GUARD-WEAKENED
+
+                        # Step 1: Check SEM-GUARD-INVERTED
                         is_inverted = False
                         b_first_test = None
                         h_first_test = None
@@ -1692,6 +1894,15 @@ def run(context: CheckContext) -> CheckResult:
                             and isinstance(b_first_test.op, ast.Not)
                             and ast.dump(b_first_test.operand, include_attributes=False)
                             == ast.dump(h_first_test, include_attributes=False)
+                        ):
+                            is_inverted = True
+                        elif (
+                            b_first_test
+                            and h_first_test
+                            and isinstance(h_first_test, ast.UnaryOp)
+                            and isinstance(h_first_test.op, ast.Not)
+                            and ast.dump(h_first_test.operand, include_attributes=False)
+                            == ast.dump(b_first_test, include_attributes=False)
                         ):
                             is_inverted = True
 
@@ -1729,19 +1940,81 @@ def run(context: CheckContext) -> CheckResult:
                             findings.append(finding)
                             continue
 
-                        # 2. Check SEM-GUARD-WEAKENED
-                        # Same guard site present in head (h_enc_len > 0), but boundary relaxed or nested guard removed
+                        # Step 2: Check SEM-GUARD-REMOVED
+                        # §8.4.2.1(f) Rule 2: At least one head path witnessing Delta(E) reaches E without aligned guard:
+                        # Required guard site absent from path (h_enc_len == 0 or null check absent from path).
+                        b_enc_len = len(b_eff_sites[0].enclosing_conditions)
+                        h_enc_len = len(h_eff_sites[0].enclosing_conditions)
+                        uncond_sites = [s for s in h_eff_sites if len(s.enclosing_conditions) == 0]
+                        is_removed = bool(uncond_sites) or null_check_removed
+
+                        if is_removed:
+                            msg = (
+                                f"null check guard removed for effect {eff} in {symbol}"
+                                if null_check_removed
+                                else f"protected effect {eff} reached without required guard in {symbol}"
+                            )
+                            rem = (
+                                "Restore null check before buffer commit."
+                                if null_check_removed
+                                else "Restore the protecting guard condition or remove reachable effect."
+                            )
+                            line_w = uncond_sites[0].line if uncond_sites else (h_first_test.lineno if (null_check_removed and h_first_test) else h_eff_sites[0].line)
+
+                            finding = make_finding(
+                                context=context,
+                                check_id="semantic",
+                                defect_id="SEM-GUARD-REMOVED",
+                                subject={
+                                    "path": path,
+                                    "symbol": symbol,
+                                    "line": line_w,
+                                },
+                                premises={
+                                    "effect": eff,
+                                    "rule_id": rule_id,
+                                    "guard_removed": True,
+                                },
+                                evidence_kind=EvidenceKind.SOLVER,
+                                evidence_payload={
+                                    "identity": {
+                                        "symbol": symbol,
+                                        "effect": eff,
+                                    },
+                                    "effect": eff,
+                                    "solver_status": "sat",
+                                    "replay_confirmed": True,
+                                    "replay_result": replay_res.to_dict(),
+                                    "replay_observation": replay_res.reason,
+                                },
+                                message=msg,
+                                remediation=rem,
+                                witness_level=WitnessLevel.IR,
+                            )
+                            findings.append(finding)
+                            continue
+
+                        # Step 3: Check SEM-GUARD-WEAKENED
+                        # §8.4.2.1(f) Rule 3: Otherwise, head path retains paired guard site with original normalized polarity,
+                        # but actual predicate or connective relaxed so Delta(E) is SAT (e.g. nested guard removed, boundary relaxed).
                         is_weakened = False
                         msg = ""
                         line_witness = h_eff_sites[0].line
-                        b_enc_len = len(b_eff_sites[0].enclosing_conditions)
-                        h_enc_len = len(h_eff_sites[0].enclosing_conditions)
+
                         if b_enc_len > h_enc_len and h_enc_len > 0:
                             is_weakened = True
-                            msg = f"nested guard income > 50000 removed for effect {eff} in {symbol}"
-                        elif "balance >= amount + 10" in entry.base_source and "balance >= amount" in entry.head_source:
+                            b_if_tests = [s.test for s in ast.walk(b_fn) if isinstance(s, ast.If)]
+                            h_if_tests = [s.test for s in ast.walk(h_fn) if isinstance(s, ast.If)]
+                            h_dumps = {ast.dump(t, include_attributes=False) for t in h_if_tests}
+                            missing_conds = [
+                                t for t in b_if_tests
+                                if ast.dump(t, include_attributes=False) not in h_dumps
+                            ]
+                            cond_text = ast.unparse(missing_conds[0]) if missing_conds else "nested guard"
+                            msg = f"nested guard {cond_text} removed for effect {eff} in {symbol}"
+                        else:
                             is_weakened = True
-                            line_witness = 2
+                            line_witness = h_first_test.lineno if h_first_test else 2
                             msg = f"guard boundary relaxed for effect {eff} in {symbol}"
 
                         if is_weakened:
@@ -1780,52 +2053,6 @@ def run(context: CheckContext) -> CheckResult:
                             findings.append(finding)
                             continue
 
-                        # 3. Default guard regression: SEM-GUARD-REMOVED
-                        short_circuit = "buf.is_valid" in entry.head_source and "buf is not None" in entry.base_source
-                        msg = (
-                            f"null check guard removed for effect {eff} in {symbol}"
-                            if short_circuit
-                            else f"protected effect {eff} reached without required guard in {symbol}"
-                        )
-                        rem = (
-                            "Restore null check before buffer commit."
-                            if short_circuit
-                            else "Restore the protecting guard condition or remove reachable effect."
-                        )
-                        line_w = 2 if short_circuit else h_eff_sites[0].line
-
-                        finding = make_finding(
-                            context=context,
-                            check_id="semantic",
-                            defect_id="SEM-GUARD-REMOVED",
-                            subject={
-                                "path": path,
-                                "symbol": symbol,
-                                "line": line_w,
-                            },
-                            premises={
-                                "effect": eff,
-                                "rule_id": rule_id,
-                                "guard_removed": True,
-                            },
-                            evidence_kind=EvidenceKind.SOLVER,
-                            evidence_payload={
-                                "identity": {
-                                    "symbol": symbol,
-                                    "effect": eff,
-                                },
-                                "effect": eff,
-                                "solver_status": "sat",
-                                "replay_confirmed": True,
-                                "replay_result": replay_res.to_dict(),
-                                "replay_observation": replay_res.reason,
-                            },
-                            message=msg,
-                            remediation=rem,
-                            witness_level=WitnessLevel.IR,
-                        )
-                        findings.append(finding)
-
     # --- Result Assembly ---
     if findings:
         return make_result(
@@ -1833,7 +2060,7 @@ def run(context: CheckContext) -> CheckResult:
             check_id="semantic",
             outcome=Outcome.FAIL,
             coverage=Coverage.COMPLETE,
-            evaluated_scope={"paths": [e.head_path or e.base_path for e in context.entries]},
+            evaluated_scope={"paths": [e.head_path or e.base_path for e in code_entries]},
             scope_enumeration={"complete": True},
             candidate_discovery={"complete": True, "candidates": len(findings)},
             applicability_evidence={"configured": True},
@@ -1845,7 +2072,7 @@ def run(context: CheckContext) -> CheckResult:
             check_id="semantic",
             outcome=Outcome.PASS,
             coverage=Coverage.COMPLETE,
-            evaluated_scope={"paths": [e.head_path or e.base_path for e in context.entries]},
+            evaluated_scope={"paths": [e.head_path or e.base_path for e in code_entries]},
             scope_enumeration={"complete": True},
             candidate_discovery={"complete": True, "candidates": 0},
             applicability_evidence={"configured": True},

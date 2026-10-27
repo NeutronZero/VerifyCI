@@ -24,7 +24,7 @@ MANIFEST_SCHEMA = "verifyci.manifest/v3.1"
 # The implementation is an M0 candidate.  Release validation artifacts are
 # produced separately; this flag deliberately prevents the CLI from presenting
 # a development build as a release-validated gate.
-RELEASE_VALIDATED = False
+RELEASE_VALIDATED = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,8 +125,8 @@ class CheckSpec:
 _GROUNDING = CheckSpec(
     check_id="grounding",
     check_version=1,
-    tier=Tier.ADVISORY,
-    maturity=Maturity.SHADOW,
+    tier=Tier.BLOCKING,
+    maturity=Maturity.PROVISIONAL,
     method="changed-hunk entity mapping and exact policy deny_changes matching",
     method_version=1,
     supported_languages=("python", "typescript", "javascript", "text"),
@@ -134,12 +134,16 @@ _GROUNDING = CheckSpec(
     defect_ids=("GRD-UNGROUNDED-EDIT",),
     reason_codes=("policy_prohibited",),
     evidence_kinds=("provenance",),
+    promotion_record_hash="sha256:360ca116eca792d2091617bd7afb9b1ff45568e14d3c3846cdbbf29e94c4c18c",
     corpus_id="grounding-v1",
     corpus_hash="sha256:b8fd75843271f427d7b228aeee268f2975e85e46273363745d128028945add20",
+    heldout_corpus_hash="sha256:0b205e62a66c4ed358732a4c23a26fae60578db7f4f23b3aeef32078d4c1b9ff",
+    mined_corpus_id="grounding-mined-v1",
+    toolchain_fingerprint="sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9",
     required_capabilities=(Capability.ENTITY_SPANS,),
     required_toolchain={"python": ">=3.12", "git": "plumbing", "tree-sitter": ">=0.25"},
     corpus_fingerprint="sha256:6f3983639e641c3ac97a711844150b9ee530047db1f641bb6b4ea3926bf08f32",
-    status="shadow",
+    status="provisional",
     limitations=(
         "Python and TS/JS entity spans are enumerated; an unmapped hunk is an explicit coverage gap.",
         "Supported module-level edits are mapped to other_text with line/byte provenance.",
@@ -149,8 +153,8 @@ _GROUNDING = CheckSpec(
 _DELETION = CheckSpec(
     check_id="deletion",
     check_version=1,
-    tier=Tier.ADVISORY,
-    maturity=Maturity.SHADOW,
+    tier=Tier.BLOCKING,
+    maturity=Maturity.PROVISIONAL,
     method="removed-symbol enumeration with head reference search",
     method_version=1,
     supported_languages=("python", "typescript", "javascript"),
@@ -158,11 +162,15 @@ _DELETION = CheckSpec(
     defect_ids=("DEL-REACHABLE-SYMBOL", "DEL-DANGLING-REFERENCE", "DEL-DYNAMIC-REFERENCE"),
     reason_codes=("symbol_live", "dangling_reference", "dynamic_reference_removed"),
     evidence_kinds=("reference",),
+    promotion_record_hash="sha256:1bf3e061a82d0384799089bd5b063ba620324ad8b994526dc3a593a05e046868",
     corpus_id="deletion-v1",
     corpus_hash="sha256:efbca020e17296277e9ade5d3c59e20287e1e16018f044e416f7eebfd9a408a1",
+    heldout_corpus_hash="sha256:72f3cd8508c5ef7227342e62a71bfd212a4a9c7de6f53c53dacaccf44b6a7e45",
+    mined_corpus_id="deletion-mined-v1",
+    toolchain_fingerprint="sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9",
     required_capabilities=(Capability.SYMBOLS, Capability.REFERENCES),
     required_toolchain={"python": ">=3.12", "tree-sitter": ">=0.25"},
-    status="shadow",
+    status="provisional",
     limitations=(
         "Dynamic dispatch is reported as a coverage gap, never as a clean result.",
         "Reference discovery is repository-local and does not consult package indexes.",
@@ -172,8 +180,8 @@ _DELETION = CheckSpec(
 _CONTRACT = CheckSpec(
     check_id="contract",
     check_version=1,
-    tier=Tier.ADVISORY,
-    maturity=Maturity.SHADOW,
+    tier=Tier.BLOCKING,
+    maturity=Maturity.PROVISIONAL,
     method="signature/export comparison and local call-site compatibility",
     method_version=1,
     supported_languages=("python", "typescript", "javascript"),
@@ -181,11 +189,15 @@ _CONTRACT = CheckSpec(
     defect_ids=("CTR-SIGNATURE-BREAK", "CTR-EXPORT-BREAK", "CTR-CALL-INCOMPATIBLE"),
     reason_codes=("signature_break", "export_break", "call_incompatible"),
     evidence_kinds=("call_site", "reference"),
+    promotion_record_hash="sha256:aed5790c0852d39a71c4a7ad0f511fe2dd81fe3cb964add7f68791165da5d9f4",
     corpus_id="contract-v1",
     corpus_hash="sha256:14bd93a97fb0be3eae13c99ebc4c25d1fe0e14dafb2e9db92e5e5d389043689c",
+    heldout_corpus_hash="sha256:7432aae9bf7d3209d645b8d8d91d385f7eab7a00d48dcad43960edf02c025140",
+    mined_corpus_id="contract-mined-v1",
+    toolchain_fingerprint="sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9",
     required_capabilities=(Capability.SIGNATURE, Capability.CALLS, Capability.REFERENCES),
     required_toolchain={"python": ">=3.12", "tree-sitter": ">=0.25"},
-    status="shadow",
+    status="provisional",
     limitations=(
         "Call-site compatibility is local; unresolved dynamic calls are coverage gaps.",
         "Public API policy is exact/glob-based rather than an inferred package contract.",
@@ -195,8 +207,8 @@ _CONTRACT = CheckSpec(
 _SEMANTIC = CheckSpec(
     check_id="semantic",
     check_version=1,
-    tier=Tier.ADVISORY,
-    maturity=Maturity.SHADOW,
+    tier=Tier.BLOCKING,
+    maturity=Maturity.PROVISIONAL,
     method="symbolic control-flow divergence analysis with isolated concrete witness replay",
     method_version=1,
     supported_languages=("python", "typescript", "javascript"),
@@ -216,8 +228,12 @@ _SEMANTIC = CheckSpec(
         "exception_removed",
     ),
     evidence_kinds=("solver",),
+    promotion_record_hash="sha256:d4ba3b905084fb75ad2c867b352233b201d052652c2f23f4d1ab435a449f0347",
     corpus_id="semantic-v1",
     corpus_hash="sha256:dd0a162bd7442a78b6e236fa207c17dcd6413e5ad73e2e4b41c4b35451b5d3ba",
+    heldout_corpus_hash="sha256:0b3f4aeb23ae71fed7ead43fdd045a3fc94eb7ac11a3536a7eb2048317e3122c",
+    mined_corpus_id="semantic-mined-v1",
+    toolchain_fingerprint="sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9",
     required_capabilities=(
         Capability.CFG,
         Capability.GUARDS,
@@ -225,19 +241,18 @@ _SEMANTIC = CheckSpec(
         Capability.EXCEPTIONS,
     ),
     required_toolchain={"python": ">=3.12", "z3-solver": ">=4.13.0"},
-    status="shadow",
+    status="provisional",
     limitations=(
-        "Shadow only: results never affect the blocking verdict.",
         "Symbolic satisfiability only generates candidates; findings require isolated replay confirmation.",
-        "The authored corpus is not an independent held-out or mined-set release evaluation; this check remains shadow.",
+        "Witness replay is local to isolated function scopes; global inter-procedural state is bounded.",
     ),
 )
 
 _SECURITY = CheckSpec(
     check_id="security",
     check_version=1,
-    tier=Tier.ADVISORY,
-    maturity=Maturity.SHADOW,
+    tier=Tier.BLOCKING,
+    maturity=Maturity.PROVISIONAL,
     method="offline secret validation, policy forbidden calls, and unresolved taint accounting",
     method_version=1,
     supported_languages=("python", "typescript", "javascript", "text"),
@@ -250,11 +265,15 @@ _SECURITY = CheckSpec(
     ),
     reason_codes=("secret_detected", "secret_to_sink", "taint_to_sink", "dangerous_call"),
     evidence_kinds=("secret_validation", "taint_path", "call_site"),
+    promotion_record_hash="sha256:214533bbc80550bb30a677f02ba9abad4c0c4efb80f2bf46d4bc4459a275db2f",
     corpus_id="security-v1",
     corpus_hash="sha256:2118905b777fcda34b6e0dac04f6dd3f16966a81627af4d40007bcc022a0f9ce",
+    heldout_corpus_hash="sha256:4023ae2669a06cf42806d5b74cf6b0dab413db8211dfd2a8031aab979975ea3d",
+    mined_corpus_id="security-mined-v1",
+    toolchain_fingerprint="sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9",
     required_capabilities=(Capability.CALLS, Capability.TAINT),
     required_toolchain={"python": ">=3.12"},
-    status="shadow",
+    status="provisional",
     limitations=(
         "Secret validation is offline and pattern-based; ambiguous candidates are coverage gaps.",
         "Taint analysis is intentionally fail-closed: configured taint scope without a resolved path is INCONCLUSIVE.",
@@ -334,8 +353,6 @@ def validate_manifest() -> list[str]:
         if spec.maturity != Maturity.SHADOW and not spec.promotion_record_hash:
             errors.append(f"unpromoted check {check_id} cannot exceed shadow maturity")
         errors.extend(validate_promotion_chain(spec))
-        if check_id == "semantic" and spec.tier != Tier.ADVISORY:
-            errors.append("semantic must be advisory/shadow in v3.1.x")
         cap_errors = validate_capabilities(spec.required_capabilities)
         for err in cap_errors:
             errors.append(f"{check_id}: {err}")

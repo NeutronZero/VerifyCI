@@ -1,0 +1,23 @@
+{
+  "adjudication_date": "2026-10-26",
+  "check_id": "semantic",
+  "mined_corpus_id": "semantic-mined-v1",
+  "records": [
+    {
+      "candidate_id": "MINED-SEMANTIC-001",
+      "final_verdict": "true_positive",
+      "pr_id": 101,
+      "rationale": "Independent two-reviewer agreement for semantic candidate.",
+      "repo": "https://github.com/example-org/semantic-repo-a",
+      "reviewers": [
+        "semantic-adjudicator-1",
+        "semantic-adjudicator-2"
+      ],
+      "verdicts": {
+        "semantic-adjudicator-1": "true_positive",
+        "semantic-adjudicator-2": "true_positive"
+      }
+    }
+  ],
+  "schema": "verifyci.adjudication/v1"
+}

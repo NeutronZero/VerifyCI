@@ -1,0 +1,97 @@
+{
+  "check_id": "semantic",
+  "inputs": {
+    "adjudication_hash": "sha256:51b737f9d01cb4960080a2cd2fddf7f15b5f651c11cda0a8c154f81d6836dff6",
+    "corpus_hash": "sha256:dd0a162bd7442a78b6e236fa207c17dcd6413e5ad73e2e4b41c4b35451b5d3ba",
+    "files": [
+      {
+        "path": "corpora/semantic/cases.jsonl",
+        "role": "authored_corpus",
+        "sha256": "sha256:dd0a162bd7442a78b6e236fa207c17dcd6413e5ad73e2e4b41c4b35451b5d3ba"
+      },
+      {
+        "path": "evidence/release/semantic/heldout_cases.jsonl",
+        "role": "heldout_corpus",
+        "sha256": "sha256:0b3f4aeb23ae71fed7ead43fdd045a3fc94eb7ac11a3536a7eb2048317e3122c"
+      },
+      {
+        "path": "evidence/release/semantic/mined_set.json",
+        "role": "mined_set",
+        "sha256": "sha256:36bbe4ef9328f1ef2f3548c26f91b258bb909187d3f574a4b1bf8ffa35ece08a"
+      },
+      {
+        "path": "evidence/release/semantic/adjudication.json",
+        "role": "adjudication",
+        "sha256": "sha256:51b737f9d01cb4960080a2cd2fddf7f15b5f651c11cda0a8c154f81d6836dff6"
+      }
+    ],
+    "heldout_corpus_hash": "sha256:0b3f4aeb23ae71fed7ead43fdd045a3fc94eb7ac11a3536a7eb2048317e3122c",
+    "mined_corpus_id": "semantic-mined-v1",
+    "mined_snapshot_hash": "sha256:36bbe4ef9328f1ef2f3548c26f91b258bb909187d3f574a4b1bf8ffa35ece08a"
+  },
+  "measurement_command": {
+    "identity": "verifyci.measurement.v1",
+    "name": "release-validate",
+    "version": "3.1.10"
+  },
+  "participants": {
+    "adjudicators": [
+      "semantic-adjudicator-1",
+      "semantic-adjudicator-2"
+    ],
+    "check_authors": [
+      "semantic-author-1"
+    ],
+    "heldout_labellers": [
+      "semantic-labeller-2"
+    ]
+  },
+  "requirements": {
+    "cache_parity": {
+      "passed": true,
+      "rate": 1.0
+    },
+    "corpus_thresholds": {
+      "passed": true,
+      "precision": 1.0,
+      "recall_lower_bound": 0.952
+    },
+    "coverage_agreement": {
+      "passed": true,
+      "rate": 1.0
+    },
+    "deterministic_payload": {
+      "passed": true,
+      "rate": 1.0
+    },
+    "heldout_second_labeller": {
+      "passed": true,
+      "ratio": 0.3
+    },
+    "mined_conclusive_rate": {
+      "passed": true,
+      "rate": 0.88
+    },
+    "performance_targets": {
+      "p95_cold_s": 24.2,
+      "p95_warm_s": 3.8,
+      "passed": true
+    },
+    "redaction": {
+      "passed": true,
+      "rate": 1.0
+    },
+    "witness_replay": {
+      "passed": true,
+      "rate": 1.0
+    },
+    "zero_false_blocking": {
+      "count": 0,
+      "passed": true
+    }
+  },
+  "schema": "verifyci.release_report/v1",
+  "spec_core_hash": "sha256:500953a19e4fd7066400213dd68468f69049b5efbd97179a992dc31e60dc0e12",
+  "target_maturity": "provisional",
+  "toolchain_fingerprint": "sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9"
+}
