@@ -15,15 +15,12 @@ from pathlib import Path
 import shutil
 import subprocess
 import time
-from typing import Any
 
 import pytest
-import z3
 
 from verifyci.checks.base import CheckContext
 from verifyci.checks.semantic import (
     execute_function_isolated,
-    ReplayResult,
     ReplaySafetyViolation,
     replay_witness,
     run as run_semantic,

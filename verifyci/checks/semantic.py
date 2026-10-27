@@ -15,7 +15,7 @@ import dataclasses
 import json
 import subprocess
 import sys
-from typing import Any
+from typing import Any, cast
 import z3
 
 from verifyci.checks.base import CheckContext, gap, make_finding, make_result
@@ -179,18 +179,18 @@ def ast_to_z3(node: ast.AST, ctx: SymbolicContext) -> z3.ExprRef:
             else:
                 return operand == z3.IntVal(0)
         elif isinstance(node.op, ast.USub):
-            return -operand
+            return -operand  # ty: ignore[unsupported-operator]
         raise UnsupportedExpressionError(node, f"unsupported unary operator: {type(node.op).__name__}")
 
     elif isinstance(node, ast.BinOp):
         left = ast_to_z3(node.left, ctx)
         right = ast_to_z3(node.right, ctx)
         if isinstance(node.op, ast.Add):
-            return left + right
+            return left + right  # ty: ignore[unsupported-operator]
         elif isinstance(node.op, ast.Sub):
-            return left - right
+            return left - right  # ty: ignore[unsupported-operator]
         elif isinstance(node.op, ast.Mult):
-            return left * right
+            return left * right  # ty: ignore[unsupported-operator]
         raise UnsupportedExpressionError(node, f"unsupported binary operator: {type(node.op).__name__}")
 
     elif isinstance(node, ast.BoolOp):
@@ -218,13 +218,13 @@ def ast_to_z3(node: ast.AST, ctx: SymbolicContext) -> z3.ExprRef:
             elif isinstance(op, ast.NotEq):
                 comparisons.append(curr_left != right)
             elif isinstance(op, ast.Lt):
-                comparisons.append(curr_left < right)
+                comparisons.append(curr_left < right)  # ty: ignore[unsupported-operator]
             elif isinstance(op, ast.LtE):
-                comparisons.append(curr_left <= right)
+                comparisons.append(curr_left <= right)  # ty: ignore[unsupported-operator]
             elif isinstance(op, ast.Gt):
-                comparisons.append(curr_left > right)
+                comparisons.append(curr_left > right)  # ty: ignore[unsupported-operator]
             elif isinstance(op, ast.GtE):
-                comparisons.append(curr_left >= right)
+                comparisons.append(curr_left >= right)  # ty: ignore[unsupported-operator]
             elif isinstance(op, (ast.Is, ast.Eq)):
                 comparisons.append(curr_left == right)
             elif isinstance(op, (ast.IsNot, ast.NotEq)):
@@ -983,7 +983,7 @@ def _find_function_node(tree: ast.AST, fn_name: str) -> ast.FunctionDef | None:
     """Find FunctionDef AST node matching name."""
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == fn_name:
-            return node
+            return cast(ast.FunctionDef, node)
     return None
 
 
@@ -1425,13 +1425,13 @@ def run(context: CheckContext) -> CheckResult:
             n for n in ast.walk(h_tree) if isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple)
         ]
         if b_returns and h_returns:
-            b_elts = [ast.dump(e, include_attributes=False) for e in b_returns[0].value.elts]
-            h_elts = [ast.dump(e, include_attributes=False) for e in h_returns[0].value.elts]
+            b_elts = [ast.dump(e, include_attributes=False) for e in b_returns[0].value.elts]  # ty: ignore[unresolved-attribute]
+            h_elts = [ast.dump(e, include_attributes=False) for e in h_returns[0].value.elts]  # ty: ignore[unresolved-attribute]
             if len(b_elts) >= 2 and b_elts != h_elts and sorted(b_elts) == sorted(h_elts):
                 fn_name = _find_enclosing_function(h_tree, h_returns[0])
                 ctx_sym = SymbolicContext()
-                b_names = [_node_to_var_name(e) for e in b_returns[0].value.elts]
-                h_names = [_node_to_var_name(e) for e in h_returns[0].value.elts]
+                b_names = [_node_to_var_name(e) for e in b_returns[0].value.elts]  # ty: ignore[unresolved-attribute]
+                h_names = [_node_to_var_name(e) for e in h_returns[0].value.elts]  # ty: ignore[unresolved-attribute]
                 b_vars = [ctx_sym.get_var(n, "string") for n in b_names]
                 h_vars = [ctx_sym.get_var(n, "string") for n in h_names]
                 solver = z3.Solver()
@@ -1520,14 +1520,14 @@ def run(context: CheckContext) -> CheckResult:
         ]
         for bc in b_calls:
             for hc in h_calls:
-                if bc.func.id == hc.func.id and len(bc.args) >= 2 and len(bc.args) == len(hc.args):
+                if bc.func.id == hc.func.id and len(bc.args) >= 2 and len(bc.args) == len(hc.args):  # ty: ignore[unresolved-attribute]
                     b_args = [ast.dump(a, include_attributes=False) for a in bc.args]
                     h_args = [ast.dump(a, include_attributes=False) for a in hc.args]
                     if b_args != h_args and sorted(b_args) == sorted(h_args):
                         # Callee definition compensation check
                         b_funcs = {f.name: f for f in ast.walk(b_tree) if isinstance(f, ast.FunctionDef)}
                         h_funcs = {f.name: f for f in ast.walk(h_tree) if isinstance(f, ast.FunctionDef)}
-                        callee_name = bc.func.id
+                        callee_name = bc.func.id  # ty: ignore[unresolved-attribute]
                         compensated = False
                         if callee_name in b_funcs and callee_name in h_funcs:
                             bf_params = [a.arg for a in b_funcs[callee_name].args.args]

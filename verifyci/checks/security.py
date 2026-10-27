@@ -585,19 +585,24 @@ def _taint_sub(context: CheckContext) -> CheckResult:
                 continue
             relevant += 1
             if has_source and has_sink:
+                _source_match = _TAINT_SOURCE_RE.search(line)
+                _sink_match = _TAINT_SINK_RE.search(line)
+                assert _source_match is not None and _sink_match is not None
+                _source_text = _source_match.group(0)
+                _sink_text = _sink_match.group(0)
                 findings.append(
                     make_finding(
                         context=context,
                         check_id="security",
                         defect_id="SEC-TAINT-TO-SINK",
                         subject={"path": path, "line": line_number, "symbol": ""},
-                        premises={"source": _TAINT_SOURCE_RE.search(line).group(0), "sink": _TAINT_SINK_RE.search(line).group(0)},
+                        premises={"source": _source_text, "sink": _sink_text},
                         evidence_kind=EvidenceKind.TAINT_PATH,
                         evidence_payload={
                             "identity": {"path": path, "line": line_number, "kind": "same_line"},
                             "path": path,
-                            "source": {"line": line_number, "text": _TAINT_SOURCE_RE.search(line).group(0)},
-                            "sink": {"line": line_number, "text": _TAINT_SINK_RE.search(line).group(0)},
+                            "source": {"line": line_number, "text": _source_text},
+                            "sink": {"line": line_number, "text": _sink_text},
                             "edges": [{"line": line_number, "justification": "same expression"}],
                         },
                         message=f"untrusted input reaches a dangerous sink at {path}:{line_number}",

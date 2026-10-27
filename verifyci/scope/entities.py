@@ -11,7 +11,7 @@ import ast
 from dataclasses import asdict, dataclass
 from hashlib import sha1, sha256
 import re
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from verifyci.contracts.model import DiffEntry, Entity, Hunk
 from verifyci.contracts.names import normalize_repo_path, qualify
@@ -102,9 +102,9 @@ def _py_language() -> Any:
         import tree_sitter_python as tp
         from tree_sitter import Language, Parser
 
-        fn = getattr(tp, "language", None) or getattr(tp, "language_python", None)
+        fn: Callable[[], Any] | None = getattr(tp, "language", None) or getattr(tp, "language_python", None)
         if fn is not None:
-            _PY_PARSER = Parser(Language(fn()))
+            _PY_PARSER = Parser(Language(fn()))  # ty: ignore[deprecated]
     except Exception:
         _PY_PARSER = None
     return _PY_PARSER
@@ -523,21 +523,27 @@ def _ts_language(language: str) -> Any:
         if language == "typescript":
             import tree_sitter_typescript as ts
 
-            fn = getattr(ts, "language_typescript", None) or getattr(ts, "language", None)
+            fn: Callable[[], Any] | None = getattr(ts, "language_typescript", None) or getattr(ts, "language", None)
+            if fn is None:
+                raise RuntimeError("tree-sitter typescript language unavailable")
             capsule = fn()
         elif language == "tsx":
             import tree_sitter_typescript as ts
 
-            fn = getattr(ts, "language_tsx", None) or getattr(ts, "language", None)
+            fn: Callable[[], Any] | None = getattr(ts, "language_tsx", None) or getattr(ts, "language", None)
+            if fn is None:
+                raise RuntimeError("tree-sitter typescript language unavailable")
             capsule = fn()
         else:
             import tree_sitter_javascript as js
 
-            fn = getattr(js, "language", None)
+            fn: Callable[[], Any] | None = getattr(js, "language", None)
+            if fn is None:
+                raise RuntimeError("tree-sitter javascript language unavailable")
             capsule = fn()
         from tree_sitter import Language, Parser
 
-        result = Parser(Language(capsule))
+        result = Parser(Language(capsule))  # ty: ignore[deprecated]
     except Exception:
         result = None
     _TS_LANGUAGE_CACHE[language] = result
@@ -794,12 +800,12 @@ def _facts_from_cache(value: Mapping[str, Any]) -> SourceFacts:
         item["parameters"] = tuple(tuple(param) for param in item.get("parameters", ()))
         entities.append(Entity(**item))
     calls = [
-        CallSite(**{**dict(raw), "keywords": tuple(raw.get("keywords", ()))})
+        CallSite(**{**dict(raw), "keywords": tuple(raw.get("keywords", ()))})  # ty: ignore[invalid-argument-type]
         for raw in value["calls"]
     ]
     imports = [
         ImportFact(
-            **{
+            **{  # ty: ignore[invalid-argument-type]
                 **dict(raw),
                 "names": tuple(raw.get("names", ())),
                 "aliases": tuple(tuple(pair) for pair in raw.get("aliases", ())),

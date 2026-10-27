@@ -274,7 +274,7 @@ def test_authenticated_sampled_cache_mismatch_fails_gate_closed(tmp_path):
     assert matching_record is not None
     components = matching_record["components"]
     assert CacheStore.sample_selected("symbol_facts", components)
-    entry_key = entry_digest("symbol_facts", components)
+    entry_digest("symbol_facts", components)
     record_path = next(
         path
         for path in records

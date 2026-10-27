@@ -107,7 +107,7 @@ def apply_waivers(
     policy: Policy,
     *,
     as_of_date: str,
-) -> tuple[tuple[CheckResult, ...], tuple[Mapping[str, Any], ...], set[str], list[Mapping[str, Any]]]:
+) -> tuple[tuple[CheckResult, ...], tuple[Mapping[str, Any], ...], set[str], list[dict[str, Any]]]:
     applied: list[dict[str, Any]] = []
     applied_keys: set[tuple[str, str]] = set()
     review_reasons: set[str] = set()
@@ -238,7 +238,7 @@ def apply_acceptances(
     policy: Policy,
     *,
     as_of_date: str,
-) -> tuple[tuple[CheckResult, ...], tuple[Mapping[str, Any], ...], set[str], list[Mapping[str, Any]]]:
+) -> tuple[tuple[CheckResult, ...], tuple[Mapping[str, Any], ...], set[str], list[dict[str, Any]]]:
     accepted: list[dict[str, Any]] = []
     accepted_keys: set[tuple[str, str, str]] = set()
     review_reasons: set[str] = set()

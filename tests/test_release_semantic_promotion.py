@@ -19,13 +19,9 @@ import pytest
 from verifyci.contracts.manifest import (
     CHECK_ORDER,
     CHECK_SPECS,
-    RELEASE_VALIDATED,
-    validate_manifest,
 )
-from verifyci.contracts.model import Maturity, Tier, Verdict
+from verifyci.contracts.model import Verdict
 from verifyci.contracts.promotion import (
-    PROMOTION_SCHEMA,
-    REPORT_SCHEMA,
     validate_promotion_chain,
 )
 from verifyci.gate.orchestrator import GateRequest, run_gate

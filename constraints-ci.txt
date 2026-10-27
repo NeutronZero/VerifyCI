@@ -12,7 +12,7 @@
 #      1:1 versions from the `[[package]]` entries in `uv.lock`).
 #
 # Every entry below corresponds to a runtime dependency actually imported by
-# `verifyci_v2`; optional extras (temporal, embeddings, otel-semconv) are not
+# `verifyci`; optional extras (temporal, embeddings, otel-semconv) are not
 # pinned here because they are not installed by the action.
 tree-sitter==0.26.0
 tree-sitter-python==0.25.0
