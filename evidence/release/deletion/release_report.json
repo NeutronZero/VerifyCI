@@ -1,7 +1,7 @@
 {
   "check_id": "deletion",
   "inputs": {
-    "adjudication_hash": "sha256:1338a91298789bb3f0e0e2f5792835fa35d6a2814ef21563770e20a765c6c4cd",
+    "adjudication_hash": "sha256:e2bc08fd323964f6a405186129243dd00ba34cea24de5e62654ffb5bd10c8897",
     "corpus_hash": "sha256:efbca020e17296277e9ade5d3c59e20287e1e16018f044e416f7eebfd9a408a1",
     "files": [
       {
@@ -12,22 +12,22 @@
       {
         "path": "evidence/release/deletion/heldout_cases.jsonl",
         "role": "heldout_corpus",
-        "sha256": "sha256:72f3cd8508c5ef7227342e62a71bfd212a4a9c7de6f53c53dacaccf44b6a7e45"
+        "sha256": "sha256:43f68f7549b6a234bf8781bfdf437e4d611bdf8eb2c0b523c8aceaa785759caa"
       },
       {
         "path": "evidence/release/deletion/mined_set.json",
         "role": "mined_set",
-        "sha256": "sha256:b6cd7a4965c866e50a1c6e72d00f1bf93da8d1793cb4462ee2009cb086acec28"
+        "sha256": "sha256:5bc53afcc10599354707cb6591ba4fc79999ffddf371177a6ef7616b6426939a"
       },
       {
         "path": "evidence/release/deletion/adjudication.json",
         "role": "adjudication",
-        "sha256": "sha256:1338a91298789bb3f0e0e2f5792835fa35d6a2814ef21563770e20a765c6c4cd"
+        "sha256": "sha256:e2bc08fd323964f6a405186129243dd00ba34cea24de5e62654ffb5bd10c8897"
       }
     ],
-    "heldout_corpus_hash": "sha256:72f3cd8508c5ef7227342e62a71bfd212a4a9c7de6f53c53dacaccf44b6a7e45",
+    "heldout_corpus_hash": "sha256:43f68f7549b6a234bf8781bfdf437e4d611bdf8eb2c0b523c8aceaa785759caa",
     "mined_corpus_id": "deletion-mined-v1",
-    "mined_snapshot_hash": "sha256:b6cd7a4965c866e50a1c6e72d00f1bf93da8d1793cb4462ee2009cb086acec28"
+    "mined_snapshot_hash": "sha256:5bc53afcc10599354707cb6591ba4fc79999ffddf371177a6ef7616b6426939a"
   },
   "measurement_command": {
     "identity": "verifyci.measurement.v1",
@@ -91,7 +91,7 @@
     }
   },
   "schema": "verifyci.release_report/v1",
-  "spec_core_hash": "sha256:f0cb4b02d0f8a852587440e2746e30f455a75514f5ce872a894b94f4ef42c8d8",
+  "spec_core_hash": "sha256:7f6800a0bce75a9f2c09baff3438ba3126ee0d26173856640c98b1797a1056dd",
   "target_maturity": "provisional",
   "toolchain_fingerprint": "sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9"
 }

@@ -1,8 +1,8 @@
 {
   "created_date": "2026-10-27",
-  "report_hash": "sha256:67cd0c634e67986f7737648b36fe7809e18c00ac078bff33f840d1ff84f7ae8a",
+  "report_hash": "sha256:8fa5519fd5823a62d8ee0d2006f5f793e51f32bbdcac9f89b0dbe3af67481ce4",
   "schema": "verifyci.promotion_record/v1",
-  "spec_core_hash": "sha256:535108ae1a23e4033378128b6f70f62a314eb7c09af3cfd72e335eb9edaa4760",
+  "spec_core_hash": "sha256:10f2067a4eaf95109aa4f6c33d165fe4809f86fd7914dd8ea5c4432ca81e0c1d",
   "target_maturity": "provisional",
   "toolchain_fingerprint": "sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9"
 }

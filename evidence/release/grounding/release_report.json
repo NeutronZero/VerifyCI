@@ -1,7 +1,7 @@
 {
   "check_id": "grounding",
   "inputs": {
-    "adjudication_hash": "sha256:3c8ecaa2db3721a7775ba07b2943ad3723b4fd292f2024a5ab59a8158b4a40bf",
+    "adjudication_hash": "sha256:d43b12cf245a8aa19a38c2534ca109151ba2ed85f25bbda7aea6871054791f9c",
     "corpus_hash": "sha256:b8fd75843271f427d7b228aeee268f2975e85e46273363745d128028945add20",
     "files": [
       {
@@ -12,22 +12,22 @@
       {
         "path": "evidence/release/grounding/heldout_cases.jsonl",
         "role": "heldout_corpus",
-        "sha256": "sha256:0b205e62a66c4ed358732a4c23a26fae60578db7f4f23b3aeef32078d4c1b9ff"
+        "sha256": "sha256:b6cd4cec17201b9a2bd3c91295d17223d73c7f319e66501f4ae583275683fb29"
       },
       {
         "path": "evidence/release/grounding/mined_set.json",
         "role": "mined_set",
-        "sha256": "sha256:687fd6175d6667bc8d4be2635385026adb5b4942cf22f34572066190e2406f28"
+        "sha256": "sha256:17f8b80c49d3c2746daf81d55e32c2e65c0f1616b1eb5996b0acf6452086f04f"
       },
       {
         "path": "evidence/release/grounding/adjudication.json",
         "role": "adjudication",
-        "sha256": "sha256:3c8ecaa2db3721a7775ba07b2943ad3723b4fd292f2024a5ab59a8158b4a40bf"
+        "sha256": "sha256:d43b12cf245a8aa19a38c2534ca109151ba2ed85f25bbda7aea6871054791f9c"
       }
     ],
-    "heldout_corpus_hash": "sha256:0b205e62a66c4ed358732a4c23a26fae60578db7f4f23b3aeef32078d4c1b9ff",
+    "heldout_corpus_hash": "sha256:b6cd4cec17201b9a2bd3c91295d17223d73c7f319e66501f4ae583275683fb29",
     "mined_corpus_id": "grounding-mined-v1",
-    "mined_snapshot_hash": "sha256:687fd6175d6667bc8d4be2635385026adb5b4942cf22f34572066190e2406f28"
+    "mined_snapshot_hash": "sha256:17f8b80c49d3c2746daf81d55e32c2e65c0f1616b1eb5996b0acf6452086f04f"
   },
   "measurement_command": {
     "identity": "verifyci.measurement.v1",
@@ -91,7 +91,7 @@
     }
   },
   "schema": "verifyci.release_report/v1",
-  "spec_core_hash": "sha256:4d5c3cdc03e296174b703056b268b2a37d902fbbc6e6bdf0ba6c3169a2539fe9",
+  "spec_core_hash": "sha256:eb924fa39ff8b742545d39a4591e7fe019826312719b5f5e3b9e774b42d8e5d0",
   "target_maturity": "provisional",
   "toolchain_fingerprint": "sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9"
 }

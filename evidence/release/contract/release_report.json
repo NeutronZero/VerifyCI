@@ -1,7 +1,7 @@
 {
   "check_id": "contract",
   "inputs": {
-    "adjudication_hash": "sha256:7199a1f36ac744140b3301d42bb0e61f4f40837d2c2232b53b01bea78dd62c9a",
+    "adjudication_hash": "sha256:d8e991c008556a810016207b6cecee1f5b81fd82f8e802ea96e1f905d88cfc21",
     "corpus_hash": "sha256:14bd93a97fb0be3eae13c99ebc4c25d1fe0e14dafb2e9db92e5e5d389043689c",
     "files": [
       {
@@ -12,22 +12,22 @@
       {
         "path": "evidence/release/contract/heldout_cases.jsonl",
         "role": "heldout_corpus",
-        "sha256": "sha256:7432aae9bf7d3209d645b8d8d91d385f7eab7a00d48dcad43960edf02c025140"
+        "sha256": "sha256:6cdaefcdddfb73119bcd84b4fd21cf2b6619e4cb31726b7389a62ef2c799f2f6"
       },
       {
         "path": "evidence/release/contract/mined_set.json",
         "role": "mined_set",
-        "sha256": "sha256:23d6570e5facd3375d81c9bc45434b2694b597a46122f74f7b927517e6100635"
+        "sha256": "sha256:9cfb95a9061c9daf46fc73d99f418b3a7431747ccfae21ecd555b51f46300d6e"
       },
       {
         "path": "evidence/release/contract/adjudication.json",
         "role": "adjudication",
-        "sha256": "sha256:7199a1f36ac744140b3301d42bb0e61f4f40837d2c2232b53b01bea78dd62c9a"
+        "sha256": "sha256:d8e991c008556a810016207b6cecee1f5b81fd82f8e802ea96e1f905d88cfc21"
       }
     ],
-    "heldout_corpus_hash": "sha256:7432aae9bf7d3209d645b8d8d91d385f7eab7a00d48dcad43960edf02c025140",
+    "heldout_corpus_hash": "sha256:6cdaefcdddfb73119bcd84b4fd21cf2b6619e4cb31726b7389a62ef2c799f2f6",
     "mined_corpus_id": "contract-mined-v1",
-    "mined_snapshot_hash": "sha256:23d6570e5facd3375d81c9bc45434b2694b597a46122f74f7b927517e6100635"
+    "mined_snapshot_hash": "sha256:9cfb95a9061c9daf46fc73d99f418b3a7431747ccfae21ecd555b51f46300d6e"
   },
   "measurement_command": {
     "identity": "verifyci.measurement.v1",
@@ -91,7 +91,7 @@
     }
   },
   "schema": "verifyci.release_report/v1",
-  "spec_core_hash": "sha256:308de329634616baebd263d3d1f0641520d7c42a080ed941d38536e8927e8c8b",
+  "spec_core_hash": "sha256:259817320fe6c79d36e3caede0cca2ee10720edce392fa34afe5974504548983",
   "target_maturity": "provisional",
   "toolchain_fingerprint": "sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9"
 }
