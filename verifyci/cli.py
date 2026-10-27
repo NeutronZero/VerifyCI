@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import json
 from pathlib import Path
 import sys
@@ -26,7 +27,14 @@ def _parser() -> argparse.ArgumentParser:
     cache = gate.add_mutually_exclusive_group()
     cache.add_argument("--cache-dir", default=None)
     cache.add_argument("--no-cache", action="store_true", default=False)
+    gate.add_argument(
+        "--cache-mode",
+        choices=("authenticated", "none", "local"),
+        default=None,
+        help="cache trust mode (defaults to local when --cache-dir is supplied, otherwise none)",
+    )
     gate.add_argument("--allow-local-cache", action="store_true")
+    gate.add_argument("--cache-read-only", action="store_true", help="never write cache entries")
     gate.add_argument("--jobs", type=int, default=1)
     gate.add_argument("--review-mode", choices=("fail", "codeowners"), default="fail")
     return parser
@@ -38,10 +46,11 @@ def _validate_cache(
     no_cache: bool,
     *,
     allow_local_cache: bool,
+    cache_mode: str,
 ) -> tuple[str, str] | None:
     if no_cache or cache_dir is None:
         return None
-    if not allow_local_cache:
+    if cache_mode == "local" and not allow_local_cache:
         return (
             "invalid_cache_location",
             "local cache requires --allow-local-cache",
@@ -113,16 +122,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     from verifyci.gate.orchestrator import GateRequest, run_gate
 
     repo = Path(args.repo)
+    cache_mode = args.cache_mode or ("local" if args.cache_dir else "none")
+    if args.no_cache:
+        if args.cache_mode not in (None, "none"):
+            sys.stderr.write("--no-cache conflicts with --cache-mode\n")
+            return 2
+        cache_mode = "none"
+    if cache_mode == "local" and not args.allow_local_cache:
+        sys.stderr.write("local cache requires --allow-local-cache\n")
+        return 3
     cache_error = _validate_cache(
         repo,
         args.cache_dir,
         args.no_cache,
         allow_local_cache=args.allow_local_cache,
+        cache_mode=cache_mode,
     )
     if cache_error:
         code, detail = cache_error
         sys.stderr.write(json.dumps({"error": code, "detail": detail}) + "\n")
         return 3
+    cache_key: bytes | None = None
+    if cache_mode == "authenticated":
+        raw_key = os.environ.pop("VERIFYCI_CACHE_KEY", "")
+        if len(raw_key) == 64:
+            try:
+                parsed_key = bytes.fromhex(raw_key)
+                cache_key = parsed_key if len(parsed_key) == 32 else None
+            except ValueError:
+                cache_key = None
     request = GateRequest(
         repo=repo,
         base=args.base,
@@ -130,9 +158,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         merge_base=args.merge_base,
         as_of_date=args.as_of,
         review_mode=args.review_mode,
-        cache_mode="none" if (args.no_cache or not args.cache_dir) else "local",
+        cache_mode=cache_mode,
         allow_local_cache=args.allow_local_cache,
         cache_dir=args.cache_dir,
+        cache_key=cache_key,
+        cache_key_id=os.environ.pop("VERIFYCI_CACHE_KEY_ID", "k1"),
+        cache_read_only=args.cache_read_only,
         jobs=args.jobs,
     )
     bundle = run_gate(request)

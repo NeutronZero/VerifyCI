@@ -8,7 +8,7 @@ rather than mapped by guesswork.
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from hashlib import sha1, sha256
 import re
 from typing import Any, Mapping, Sequence
@@ -760,7 +760,7 @@ _TEXT_SUFFIXES = {
 }
 
 
-def analyze_source(path: str, source: str, source_roots: Sequence[str] = ()) -> SourceFacts:
+def _analyze_source_uncached(path: str, source: str, source_roots: Sequence[str] = ()) -> SourceFacts:
     suffix = path.rsplit(".", 1)[-1].lower()
     if suffix == "py":
         return analyze_python(path, source, source_roots)
@@ -769,6 +769,106 @@ def analyze_source(path: str, source: str, source_roots: Sequence[str] = ()) -> 
     if suffix in _TEXT_SUFFIXES or "/" not in path and "." not in path:
         return SourceFacts(path=path, language="text", supported=True)
     return SourceFacts(path=path, language=suffix or "unknown", supported=False, parse_error="unsupported language frontend")
+
+
+def _facts_to_cache(facts: SourceFacts) -> dict[str, Any]:
+    return {
+        "path": facts.path,
+        "language": facts.language,
+        "supported": facts.supported,
+        "entities": [asdict(entity) for entity in facts.entities],
+        "calls": [asdict(call) for call in facts.calls],
+        "imports": [asdict(item) for item in facts.imports],
+        "name_loads": sorted(facts.name_loads),
+        "exports": sorted(facts.exports),
+        "parse_error": facts.parse_error,
+        "has_dynamic_dispatch": facts.has_dynamic_dispatch,
+        "has_unknown_decorator": facts.has_unknown_decorator,
+    }
+
+
+def _facts_from_cache(value: Mapping[str, Any]) -> SourceFacts:
+    entities = []
+    for raw in value["entities"]:
+        item = dict(raw)
+        item["parameters"] = tuple(tuple(param) for param in item.get("parameters", ()))
+        entities.append(Entity(**item))
+    calls = [
+        CallSite(**{**dict(raw), "keywords": tuple(raw.get("keywords", ()))})
+        for raw in value["calls"]
+    ]
+    imports = [
+        ImportFact(
+            **{
+                **dict(raw),
+                "names": tuple(raw.get("names", ())),
+                "aliases": tuple(tuple(pair) for pair in raw.get("aliases", ())),
+            }
+        )
+        for raw in value["imports"]
+    ]
+    return SourceFacts(
+        path=str(value["path"]),
+        language=str(value["language"]),
+        supported=bool(value["supported"]),
+        entities=tuple(entities),
+        calls=tuple(calls),
+        imports=tuple(imports),
+        name_loads=frozenset(value["name_loads"]),
+        exports=frozenset(value["exports"]),
+        parse_error=str(value["parse_error"]),
+        has_dynamic_dispatch=bool(value["has_dynamic_dispatch"]),
+        has_unknown_decorator=bool(value["has_unknown_decorator"]),
+    )
+
+
+def _frontend_identity(path: str) -> tuple[str, str]:
+    suffix = path.rsplit(".", 1)[-1].lower()
+    if suffix == "py":
+        import sys
+
+        return "python", f"python-ast-{sys.version_info.major}.{sys.version_info.minor}"
+    if suffix in {"ts", "tsx", "mts", "cts"}:
+        return "typescript", "tree-sitter-typescript-0.23"
+    if suffix in {"js", "jsx", "mjs", "cjs"}:
+        return "javascript", "tree-sitter-javascript-0.23"
+    return "text", "other-text-v1"
+
+
+def analyze_source(
+    path: str,
+    source: str,
+    source_roots: Sequence[str] = (),
+    *,
+    fact_provider=None,
+    toolchain_fingerprint: str = "",
+    blob_hash: str = "",
+) -> SourceFacts:
+    if fact_provider is None or not toolchain_fingerprint or not blob_hash:
+        return _analyze_source_uncached(path, source, source_roots)
+    from verifyci.index.provider import FactProvider
+
+    language_id, frontend_version = _frontend_identity(path)
+    components = FactProvider.tier1_components(
+        toolchain_fingerprint=toolchain_fingerprint,
+        blob_hash=blob_hash,
+        path=normalize_repo_path(path),
+        language_id=language_id,
+        frontend_version=frontend_version,
+        source_roots=tuple(source_roots),
+    )
+    cached = fact_provider.get_or_compute(
+        "symbol_facts",
+        components,
+        lambda: _facts_to_cache(_analyze_source_uncached(path, source, source_roots)),
+    )
+    try:
+        return _facts_from_cache(cached)
+    except (KeyError, TypeError, ValueError):
+        # A malformed local entry is not evidence. Rebuild from the pinned blob.
+        facts = _analyze_source_uncached(path, source, source_roots)
+        fact_provider.cache_store.put("symbol_facts", components, _facts_to_cache(facts))
+        return facts
 
 
 def _is_safe_constant_value(node: ast.AST) -> bool:
@@ -921,6 +1021,9 @@ def build_changed_scope(
     *,
     source_roots: Sequence[str] = (),
     rename_limit_exceeded: bool = False,
+    fact_provider=None,
+    toolchain_fingerprint: str = "",
+    object_format: str = "",
 ) -> ChangedScope:
     base_facts: dict[str, SourceFacts] = {}
     head_facts: dict[str, SourceFacts] = {}
@@ -934,11 +1037,25 @@ def build_changed_scope(
 
     for entry in entries:
         if entry.base_path and not entry.is_binary and not entry.is_submodule:
-            bf = analyze_source(entry.base_path, entry.base_source, source_roots)
+            bf = analyze_source(
+                entry.base_path,
+                entry.base_source,
+                source_roots,
+                fact_provider=fact_provider,
+                toolchain_fingerprint=toolchain_fingerprint,
+                blob_hash=f"{object_format}:{entry.base_blob}" if object_format and entry.base_blob else "",
+            )
             base_facts[entry.base_path] = bf
             base_entities.update(e.qname for e in bf.entities)
         if entry.head_path and not entry.is_binary and not entry.is_submodule:
-            hf = analyze_source(entry.head_path, entry.head_source, source_roots)
+            hf = analyze_source(
+                entry.head_path,
+                entry.head_source,
+                source_roots,
+                fact_provider=fact_provider,
+                toolchain_fingerprint=toolchain_fingerprint,
+                blob_hash=f"{object_format}:{entry.head_blob}" if object_format and entry.head_blob else "",
+            )
             head_facts[entry.head_path] = hf
             head_entities.update(e.qname for e in hf.entities)
 

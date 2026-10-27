@@ -17,7 +17,12 @@ The verification core runs **100% offline** on Git object databases with **zero 
 
 Per VerifyCI v3.1 specification (§1.3):
 
-> **PASS means every applicable blocking check in this release completed with COMPLETE coverage over its declared scope and no unwaived declared defect was established. PASS covers only the defect families listed as blocking in the release manifest [grounding, deletion, contract, security]; families that are shadow or not shipped [semantic] were not enforced. Scope excluded by reviewed coverage acceptances is listed in the evidence bundle. PASS is not a claim that the code is correct or that the diff is safe in general. The evidence bundle states what was checked, the applicable assumptions, the excluded scope, accepted gaps, and any waived findings.**
+> **PASS means every applicable blocking check in this release completed with COMPLETE coverage over its declared scope and no unwaived declared defect was established. This internal candidate has no blocking checks; grounding, deletion, contract, semantic, and security run in shadow and were not enforced. Scope excluded by reviewed coverage acceptances is listed in the evidence bundle. PASS is not a claim that the code is correct or that the diff is safe in general. The evidence bundle states what was checked, the applicable assumptions, the excluded scope, accepted gaps, and any waived findings.**
+
+This checkout is an internal candidate. All five checks are still at `shadow` maturity,
+and the §15.10 measurement pipeline is not implemented. Release validation has not been
+established, so `vc gate` returns `ERROR` with `check_not_validated` instead of issuing a
+normal verdict. Do not use this candidate as a release gate.
 
 ---
 
@@ -84,7 +89,8 @@ jobs:
         run: pip install verifyci
 
       - name: Run VerifyCI Gate
-        uses: NeutronZero/VerifyCI@main
+        # Before adopting a released version, replace this with its verified full commit SHA.
+        uses: NeutronZero/VerifyCI@<verified-release-commit-sha>
         with:
           base-ref: "origin/${{ github.base_ref }}"
           head-ref: "HEAD"
@@ -102,20 +108,20 @@ jobs:
 
 ## Declared Defect Families
 
-1. **Semantic Regressions (`semantic` - shadow tier in v3.1.0)**:
+1. **Semantic Regressions (`semantic` - shadow tier)**:
    - Protected guard removal, weakening, or inversion (`SEM-GUARD-REMOVED`, `SEM-GUARD-WEAKENED`, `SEM-GUARD-INVERTED`)
    - Swapped argument or return bindings (`SEM-BINDING-SWAP`)
    - Removed protected error paths (`SEM-EXCEPTION-REMOVED`)
-2. **Provenance & Grounding (`grounding` - blocking tier)**:
+2. **Provenance & Grounding (`grounding` - shadow tier; not enforced)**:
    - Prohibited edits under `deny_changes` rules (`GRD-UNGROUNDED-EDIT`)
-3. **Security Regressions (`security` - blocking tier)**:
+3. **Security Regressions (`security` - shadow tier; not enforced)**:
    - Offline-validated secrets introduced (`SEC-SECRET`)
    - Taint flows to dangerous sinks (`SEC-SECRET-TO-SINK`, `SEC-TAINT-TO-SINK`)
    - Exact policy-forbidden calls (`SEC-DANGEROUS-CALL`)
-4. **Caller & Contract Breakage (`contract` - blocking tier)**:
+4. **Caller & Contract Breakage (`contract` - shadow tier; not enforced)**:
    - Incompatible signatures, parameter removals, or async/sync shifts (`CTR-SIGNATURE-BREAK`)
    - Broken exports or call-site incompatibilities (`CTR-EXPORT-BREAK`, `CTR-CALL-INCOMPATIBLE`)
-5. **Unsafe Deletion (`deletion` - blocking tier)**:
+5. **Unsafe Deletion (`deletion` - shadow tier; not enforced)**:
    - Removed symbols remaining reachable from entrypoints, exports, or live callers (`DEL-REACHABLE-SYMBOL`)
    - Dangling references (`DEL-DANGLING-REFERENCE`)
    - Dynamic references resolving to removed symbols (`DEL-DYNAMIC-REFERENCE`)

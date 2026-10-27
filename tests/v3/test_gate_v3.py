@@ -8,6 +8,7 @@ reads, patch parsing, and evidence assembly.
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 import subprocess
 
@@ -24,9 +25,14 @@ from verifyci.contracts.names import (
 )
 from verifyci.contracts.reason_codes import ALL_CODES, DEFECT_REASON_CODES
 from verifyci.evidence.sarif import bundle_to_sarif
+from verifyci.evidence.canonical import canonical_json_bytes
 from verifyci.gate.integrity import evaluate_codeowners
 from verifyci.gate.orchestrator import GateRequest, run_gate
 from verifyci.gate.policy import builtin_bootstrap_policy, parse_policy_bytes
+from verifyci.index.cache import CacheStore, compute_hmac, entry_digest
+from verifyci.index.provider import FactProvider
+from verifyci.scope.entities import git_blob_id
+from verifyci.evidence.bundle import toolchain_fingerprint
 
 POLICY = '[gate]\ntarget_drift = "record"\n'
 AS_OF = "2026-10-21"
@@ -139,7 +145,7 @@ def test_codeowners_coverage_and_noninterference():
     assert "codeowners_noninterference_unproven" in coverage.reasons
 
 
-def test_clean_gate_passes_and_evidence_is_deterministic(tmp_path):
+def test_clean_gate_stays_error_until_release_validation(tmp_path):
     root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
     head = _commit(
         root,
@@ -147,8 +153,9 @@ def test_clean_gate_passes_and_evidence_is_deterministic(tmp_path):
     )
     first = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
     second = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
-    assert first.payload["verdict"]["status"] == "PASS"
-    assert first.exit_code == 0
+    assert first.payload["verdict"]["status"] == "ERROR"
+    assert first.exit_code == 3
+    assert "check_not_validated" in first.payload["verdict"]["fault_reason_codes"]
     assert first.envelope["payload_hash"] == second.envelope["payload_hash"]
     assert first.payload["manifest"]["release_validated"] is False
     results = _assert_check_results(first)
@@ -160,6 +167,109 @@ def test_clean_gate_passes_and_evidence_is_deterministic(tmp_path):
     assert sarif["runs"][0]["results"] == []
 
 
+def test_local_cache_reuses_pinned_facts_without_changing_payload(tmp_path):
+    root, base = _repo(
+        tmp_path,
+        {
+            "app.py": "def value(x):\n    return x + 1\n",
+            "caller.py": "from app import value\n\ndef main():\n    return value(1)\n",
+        },
+    )
+    head = _commit(root, {"app.py": "def value(x):\n    return x + 2\n"})
+    cache_dir = str(tmp_path / "shared-cache")
+    common = {
+        "repo": root,
+        "base": base,
+        "head": head,
+        "as_of_date": AS_OF,
+        "generated_at": "2026-10-21T00:00:00Z",
+    }
+    uncached = run_gate(GateRequest(**common))
+    cached_request = GateRequest(
+        **common,
+        cache_mode="local",
+        allow_local_cache=True,
+        cache_dir=cache_dir,
+    )
+    run_gate(cached_request)
+    cached = run_gate(cached_request)
+
+    assert cached.payload == uncached.payload
+    assert cached.envelope["cache"]["authoritative"] is False
+    assert cached.envelope["cache"]["stats"]["hits"] > 0
+
+
+def test_authenticated_sampled_cache_mismatch_fails_gate_closed(tmp_path):
+    key = b"k" * 32
+    git_version = subprocess.check_output(["git", "version"], text=True).strip()
+    tc = toolchain_fingerprint(git_version=git_version, object_format="sha1")
+    source = "VALUE = 7\n"
+    source_blob = source.encode("utf-8").replace(b"\n", b"\r\n")
+    blob_hash = "sha1:" + git_blob_id(source_blob)
+    for index in range(10000):
+        candidate_path = f"cache-sample-{index}.py"
+        components = FactProvider.tier1_components(
+            toolchain_fingerprint=tc,
+            blob_hash=blob_hash,
+            path=candidate_path,
+            language_id="python",
+            frontend_version=f"python-ast-{__import__('sys').version_info.major}.{__import__('sys').version_info.minor}",
+            source_roots=(".",),
+        )
+        if CacheStore.sample_selected("symbol_facts", components):
+            break
+    else:
+        pytest.fail("could not find a deterministically sampled source key")
+
+    root, base = _repo(tmp_path, {candidate_path: source, "app.py": "VALUE = 1\n"})
+    head = _commit(root, {"app.py": "VALUE = 2\n"})
+    cache_dir = tmp_path / "auth-cache"
+    request = GateRequest(
+        repo=root,
+        base=base,
+        head=head,
+        as_of_date=AS_OF,
+        cache_mode="authenticated",
+        cache_key=key,
+        cache_key_id="test-key",
+        cache_dir=str(cache_dir),
+    )
+    seeded = run_gate(request)
+    assert seeded.envelope["cache"]["mode"] == "authenticated"
+    assert seeded.envelope["cache"]["stats"]["writes"] > 0
+
+    records = list(cache_dir.rglob("*.json"))
+    matching_record = next(
+        (
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in records
+            if json.loads(path.read_text(encoding="utf-8")).get("components", {}).get("repo_relative_path") == candidate_path
+        ),
+        None,
+    )
+    assert matching_record is not None
+    components = matching_record["components"]
+    assert CacheStore.sample_selected("symbol_facts", components)
+    entry_key = entry_digest("symbol_facts", components)
+    record_path = next(
+        path
+        for path in records
+        if json.loads(path.read_text(encoding="utf-8")).get("components") == components
+    )
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["value"]["exports"].append("forged_export")
+    value_digest = sha256(canonical_json_bytes(record["value"])).hexdigest()
+    record["value_digest"] = value_digest
+    record["hmac"] = compute_hmac(
+        key, "test-key", "symbol_facts", components, value_digest
+    )
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    result = run_gate(request)
+    assert result.payload["verdict"]["status"] == "ERROR"
+    assert "cache_integrity_mismatch" in result.payload["verdict"]["fault_reason_codes"]
+
+
 def test_module_level_edit_is_grounded_without_symbol_match(tmp_path):
     policy = POLICY + '[deny_changes.protect]\nsymbols = ["app:f"]\nreason = "protected"\n'
     root, base = _repo(
@@ -169,7 +279,8 @@ def test_module_level_edit_is_grounded_without_symbol_match(tmp_path):
     )
     head = _commit(root, {"app.py": "def f(a):\n    return a\n\nX = 2\n"})
     bundle = _gate(root, base, head)
-    assert bundle.payload["verdict"]["status"] == "PASS"
+    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert "check_not_validated" in bundle.payload["verdict"]["fault_reason_codes"]
     grounding = _assert_check_results(bundle)["grounding"]
     assert grounding["outcome"] == "PASS"
     assert grounding["evaluated_scope"]["other_text_hunks"]
@@ -184,8 +295,9 @@ def test_deny_changes_emits_one_finding_for_multiple_matching_rules(tmp_path):
     root, base = _repo(tmp_path, {"src/core/x.py": "x = 1\n"}, policy=policy)
     head = _commit(root, {"src/core/x.py": "x = 2\n"})
     bundle = _gate(root, base, head)
-    assert bundle.payload["verdict"]["status"] == "FAIL"
-    assert bundle.exit_code == 1
+    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.exit_code == 3
+    assert "check_not_validated" in bundle.payload["verdict"]["fault_reason_codes"]
     result = _assert_check_results(bundle)["grounding"]
     assert result["outcome"] == "FAIL"
     assert len(result["findings"]) == 1
@@ -208,7 +320,7 @@ def test_deletion_finds_live_reference_in_unchanged_file(tmp_path):
     assert result["outcome"] == "FAIL"
     finding = next(f for f in result["findings"] if f["defect_id"] == "DEL-DANGLING-REFERENCE")
     assert finding["evidence"]["payload"]["reference"]["path"] == "main.py"
-    assert bundle.payload["verdict"]["status"] == "FAIL"
+    assert bundle.payload["verdict"]["status"] == "ERROR"
 
 
 def test_contract_finds_incompatible_caller_in_unchanged_file(tmp_path):
@@ -258,7 +370,7 @@ def test_contract_finds_unchanged_caller_when_parameter_is_removed(tmp_path):
     result = _assert_check_results(bundle)["contract"]
     finding = next(f for f in result["findings"] if f["defect_id"] == "CTR-SIGNATURE-BREAK")
     assert "too_many_positional_arguments" in finding["premises"]["problem"]
-    assert bundle.payload["verdict"]["status"] == "FAIL"
+    assert bundle.payload["verdict"]["status"] == "ERROR"
 
 
 def test_contract_changed_callsite_against_unchanged_callee(tmp_path):
@@ -273,7 +385,7 @@ def test_contract_changed_callsite_against_unchanged_callee(tmp_path):
     bundle = _gate(root, base, head)
     result = _assert_check_results(bundle)["contract"]
     assert any(f["defect_id"] == "CTR-CALL-INCOMPATIBLE" for f in result["findings"])
-    assert bundle.payload["verdict"]["status"] == "FAIL"
+    assert bundle.payload["verdict"]["status"] == "ERROR"
 
 
 def test_contract_without_callers_reports_signature_break(tmp_path):
@@ -298,7 +410,7 @@ def test_secret_finding_is_redacted_and_not_duplicated(tmp_path):
     assert payload["validation"].startswith("offline:")
 
 
-def test_waiver_suppresses_known_secret_finding(tmp_path):
+def test_shadow_secret_finding_is_not_suppressed_by_blocking_waiver(tmp_path):
     token = "ghp_1234567890abcdefghijABCDEFGHIJ"
     redacted = _redact(token)
     fingerprint = stable_finding_fingerprint(
@@ -328,13 +440,13 @@ def test_waiver_suppresses_known_secret_finding(tmp_path):
     root, base = _repo(tmp_path, {"app.py": "x = 1\n"}, policy=policy)
     head = _commit(root, {"app.py": f'TOKEN = "{token}"\n'})
     bundle = _gate(root, base, head)
-    assert bundle.payload["verdict"]["status"] == "PASS"
-    assert bundle.payload["waivers"][0]["id"] == "known_secret"
+    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.payload["waivers"] == []
     secret = next(f for f in bundle.payload["findings"] if f["defect_id"] == "SEC-SECRET")
-    assert secret["disposition"] == "WAIVED"
+    assert secret["disposition"] == "OPEN"
 
 
-def test_accepted_coverage_gap_does_not_block(tmp_path):
+def test_coverage_acceptance_does_not_change_shadow_result(tmp_path):
     policy = (
         POLICY
         + "[coverage_acceptances.test_decorator]\n"
@@ -352,12 +464,12 @@ def test_accepted_coverage_gap_does_not_block(tmp_path):
         {"app.py": "def deco(fn):\n    return fn\n\n@deco\ndef f(a):\n    return a\n"},
     )
     bundle = _gate(root, base, head)
-    assert bundle.payload["verdict"]["status"] == "PASS"
+    assert bundle.payload["verdict"]["status"] == "ERROR"
     result = _assert_check_results(bundle)["contract"]
-    assert result["outcome"] == "PASS"
-    assert result["coverage"] == "COMPLETE"
-    assert result["coverage_gaps"][0]["accepted"] is True
-    assert bundle.payload["accepted_gaps"][0]["id"] == "test_decorator"
+    assert result["outcome"] == "INCONCLUSIVE"
+    assert result["coverage"] == "PARTIAL"
+    assert result["coverage_gaps"][0]["accepted"] is False
+    assert bundle.payload["accepted_gaps"] == []
 
 
 def test_configured_taint_without_resolved_path_is_inconclusive(tmp_path):
@@ -369,8 +481,8 @@ def test_configured_taint_without_resolved_path_is_inconclusive(tmp_path):
     root, base = _repo(tmp_path, {"app.py": "x = 1\n"}, policy=policy)
     head = _commit(root, {"app.py": 'q = request.args.get("q")\n'})
     bundle = _gate(root, base, head)
-    assert bundle.payload["verdict"]["status"] == "INCONCLUSIVE"
-    assert bundle.exit_code == 2
+    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.exit_code == 3
     result = _assert_check_results(bundle)["security"]
     assert "taint_path_unresolved" in result["reason_codes"]
 
@@ -380,7 +492,7 @@ def test_vendored_path_does_not_suppress_dangerous_call_scan(tmp_path):
     root, base = _repo(tmp_path, {"app.py": "x = 1\n"}, policy=policy)
     head = _commit(root, {"vendor/new_tool.py": 'eval("1 + 1")\n'})
     bundle = _gate(root, base, head)
-    assert bundle.payload["verdict"]["status"] == "FAIL"
+    assert bundle.payload["verdict"]["status"] == "ERROR"
     result = _assert_check_results(bundle)["security"]
     assert any(f["defect_id"] == "SEC-DANGEROUS-CALL" for f in result["findings"])
 
@@ -392,8 +504,8 @@ def test_policy_change_requires_review_and_invalid_policy_is_error(tmp_path):
         {".verifyci/policy.toml": POLICY + "cold_deadline_seconds = 60\n"},
     )
     review = _gate(root, base, review_head)
-    assert review.payload["verdict"]["status"] == "REVIEW"
-    assert review.exit_code == 4
+    assert review.payload["verdict"]["status"] == "ERROR"
+    assert review.exit_code == 3
     assert set(review.payload["verdict"]["reason_codes"]) >= {
         "policy_change_review",
         "gate_integrity_review",
@@ -415,7 +527,7 @@ def test_gate_integrity_workflow_change_requires_review(tmp_path):
     root, base = _repo(tmp_path, {"app.py": "x = 1\n"})
     head = _commit(root, {".github/workflows/ci.yml": "name: CI\n"})
     bundle = _gate(root, base, head)
-    assert bundle.payload["verdict"]["status"] == "REVIEW"
+    assert bundle.payload["verdict"]["status"] == "ERROR"
     assert "gate_integrity_review" in bundle.payload["verdict"]["reason_codes"]
 
 
@@ -451,7 +563,7 @@ def test_policy_only_stale_waiver_remediation_respects_codeowners(tmp_path, caps
         ]
     )
     captured = capsys.readouterr()
-    assert code == 0
+    assert code == 3
     assert "policy_change_review" in captured.out
 
 
@@ -483,7 +595,7 @@ def test_policy_only_stale_waiver_remediation_respects_codeowners(tmp_path, caps
         ]
     )
     captured = capsys.readouterr()
-    assert code == 4
+    assert code == 3
     assert "waiver_review" in captured.out
 
 
@@ -492,7 +604,7 @@ def test_unsupported_language_change_is_inconclusive(tmp_path):
     head = _commit(root, {"main.go": "package main\n\nfunc main() {}\n"})
     bundle = _gate(root, base, head)
     results = _assert_check_results(bundle)
-    assert bundle.payload["verdict"]["status"] == "INCONCLUSIVE"
+    assert bundle.payload["verdict"]["status"] == "ERROR"
     for check_id in ("contract", "deletion"):
         result = results[check_id]
         assert result["outcome"] == "INCONCLUSIVE"
@@ -532,12 +644,12 @@ def test_cli_formats_and_codeowners_review_mode(tmp_path, capsys):
     head = _commit(root, {"app.py": "x = 2\n"})
     code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "json"])
     captured = capsys.readouterr()
-    assert code == 0
-    assert json.loads(captured.out)["payload"]["verdict"]["status"] == "PASS"
+    assert code == 3
+    assert json.loads(captured.out)["payload"]["verdict"]["status"] == "ERROR"
 
     code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "sarif"])
     captured = capsys.readouterr()
-    assert code == 0
+    assert code == 3
     assert json.loads(captured.out)["version"] == "2.1.0"
 
     cache_dir = root / ".cache"
@@ -577,7 +689,7 @@ def test_cli_formats_and_codeowners_review_mode(tmp_path, capsys):
             "codeowners",
         ]
     )
-    assert code == 0
+    assert code == 3
 
 
 def test_accepted_gap_with_incomplete_scope_or_discovery_remains_inconclusive() -> None:
@@ -703,7 +815,7 @@ def test_git_submodule_lifecycle(tmp_path: Path) -> None:
 
     # Gate run treats submodule as excluded scope without error
     bundle_add = _gate(root, base, head_add)
-    assert bundle_add.payload["verdict"]["status"] == "PASS"
+    assert bundle_add.payload["verdict"]["status"] == "ERROR"
     excluded_kinds = [x["kind"] for x in bundle_add.payload["excluded_scope"]]
     assert "submodule" in excluded_kinds
 

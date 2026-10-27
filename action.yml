@@ -32,17 +32,25 @@ inputs:
     required: false
     default: ""
   review-mode:
-    description: "Review clearing mode: default or codeowners"
+    description: "Review clearing mode: fail or codeowners"
     required: false
-    default: "default"
+    default: "fail"
   cache-mode:
-    description: "Cache mode: authenticated, none, or local"
+    description: "Cache mode: authenticated for trusted workflows, otherwise none"
     required: false
     default: "none"
   cache-dir:
     description: "Directory for VerifyCI cache"
     required: false
     default: ""
+  cache-key:
+    description: "32-byte cache HMAC key as 64 lowercase hex characters; pass a protected workflow secret"
+    required: false
+    default: ""
+  cache-key-id:
+    description: "Cache key rotation identifier"
+    required: false
+    default: "k1"
 
 outputs:
   status:
@@ -71,6 +79,10 @@ runs:
         INPUT_REVIEW_MODE: ${{ inputs.review-mode }}
         INPUT_CACHE_MODE: ${{ inputs.cache-mode }}
         INPUT_CACHE_DIR: ${{ inputs.cache-dir }}
+        INPUT_CACHE_KEY_ID: ${{ inputs.cache-key-id }}
+        VERIFYCI_CACHE_KEY: ${{ inputs.cache-key }}
+        INPUT_EVENT_NAME: ${{ github.event_name }}
+        INPUT_IS_FORK_PR: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
         set -uo pipefail
@@ -81,9 +93,10 @@ runs:
         FORMAT="${INPUT_FORMAT-sarif}"
         OUT_FILE="${INPUT_OUTPUT_FILE-verifyci-results.sarif}"
         AS_OF="${INPUT_AS_OF-}"
-        REVIEW_MODE="${INPUT_REVIEW_MODE-default}"
+        REVIEW_MODE="${INPUT_REVIEW_MODE-fail}"
         CACHE_MODE="${INPUT_CACHE_MODE-none}"
         CACHE_DIR="${INPUT_CACHE_DIR-}"
+        CACHE_KEY_ID="${INPUT_CACHE_KEY_ID-k1}"
 
         fail_infra() {
           echo "::error::VerifyCI action input rejected: $1"
@@ -96,14 +109,18 @@ runs:
         esac
 
         case "$REVIEW_MODE" in
-          default|codeowners) ;;
-          *) fail_infra "review-mode must be 'default' or 'codeowners'." ;;
+          fail|codeowners) ;;
+          *) fail_infra "review-mode must be 'fail' or 'codeowners'." ;;
         esac
 
         case "$CACHE_MODE" in
-          authenticated|none|local) ;;
-          *) fail_infra "cache-mode must be one of: authenticated, none, local." ;;
+          none|authenticated) ;;
+          local) fail_infra "local cache mode is for developer machines and is not allowed in the Action." ;;
+          *) fail_infra "cache-mode must be 'authenticated' or 'none'." ;;
         esac
+        if [ "$INPUT_EVENT_NAME" = "pull_request_target" ] || [ "$INPUT_IS_FORK_PR" = "true" ]; then
+          CACHE_MODE="none"
+        fi
 
         case "$OUT_FILE" in
           ""|/*) fail_infra "output-file must be a non-empty relative path." ;;
@@ -125,16 +142,24 @@ runs:
         fi
 
         CMD=(vc gate --repo "$REPO_PATH" --base "$BASE_REF" --head "$HEAD_REF" --format "$FORMAT" --output "$OUT_FILE" --review-mode "$REVIEW_MODE" --cache-mode "$CACHE_MODE")
-        if [ -n "$AS_OF" ]; then
-          CMD+=(--as-of "$AS_OF")
-        fi
         if [ -n "$CACHE_DIR" ]; then
           CMD+=(--cache-dir "$CACHE_DIR")
         fi
-        if [ "$CACHE_MODE" = "local" ]; then
-          CMD+=(--allow-local-cache)
+        if [ -n "${VERIFYCI_CACHE_KEY:-}" ]; then
+          export VERIFYCI_CACHE_KEY
+          export VERIFYCI_CACHE_KEY_ID="$CACHE_KEY_ID"
+        else
+          unset VERIFYCI_CACHE_KEY VERIFYCI_CACHE_KEY_ID
         fi
-
+        if [ "$CACHE_MODE" = "none" ]; then
+          unset VERIFYCI_CACHE_KEY VERIFYCI_CACHE_KEY_ID
+        fi
+        if [ "$INPUT_EVENT_NAME" = "pull_request" ]; then
+          CMD+=(--cache-read-only)
+        fi
+        if [ -n "$AS_OF" ]; then
+          CMD+=(--as-of "$AS_OF")
+        fi
         echo "::group::Executing VerifyCI Gate"
         "${CMD[@]}"
         EXIT_CODE=$?

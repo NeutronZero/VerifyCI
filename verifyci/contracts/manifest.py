@@ -9,7 +9,14 @@ from typing import Any, Mapping
 from verifyci.contracts.capabilities import Capability, validate_capabilities
 from verifyci.contracts.model import Maturity, Tier
 from verifyci.contracts.reason_codes import DEFECT_REASON_CODES
+from verifyci.contracts.promotion import validate_promotion_chain
 from verifyci.evidence.canonical import canonical_json_bytes
+from verifyci.index.cache import (
+    CACHE_SAMPLE_RATE_DENOMINATOR,
+    CACHE_SAMPLE_RATE_NUMERATOR,
+    CACHE_SAMPLE_VERSION,
+    CACHE_SCHEMA_VERSION,
+)
 
 
 TOOL_VERSION = "3.1.10"
@@ -33,6 +40,20 @@ class CheckSpec:
     defect_ids: tuple[str, ...]
     reason_codes: tuple[str, ...]
     evidence_kinds: tuple[str, ...]
+    promotion_record_hash: str = ""
+    corpus_id: str = ""
+    corpus_hash: str = ""
+    heldout_corpus_hash: str = ""
+    mined_corpus_id: str = ""
+    defect_semantics_versions: Mapping[str, int] = field(default_factory=dict)
+    precision_threshold: float = 1.0
+    recall_lower_bound_threshold: float = 0.90
+    per_defect_thresholds: Mapping[str, float] = field(default_factory=dict)
+    min_cases_per_defect: int = 30
+    coverage_threshold: float = 1.0
+    witness_replay_threshold: float = 1.0
+    conclusive_rate_threshold: float = 0.80
+    toolchain_fingerprint: str = ""
     nullable_evidence: tuple[str, ...] = ()
     required_capabilities: tuple[Capability, ...] = ()
     required_toolchain: Mapping[str, str] = field(default_factory=dict)
@@ -43,12 +64,42 @@ class CheckSpec:
     supersedes: str = ""
     limitations: tuple[str, ...] = ()
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
+    def _spec_core(self) -> dict[str, Any]:
+        data = self.to_dict(include_spec_core_hash=False)
+        data.pop("maturity", None)
+        data.pop("promotion_record_hash", None)
+        return data
+
+    @property
+    def spec_core_hash(self) -> str:
+        return "sha256:" + sha256(canonical_json_bytes(self._spec_core())).hexdigest()
+
+    def to_dict(self, *, include_spec_core_hash: bool = True) -> dict[str, Any]:
+        data = {
             "check_id": self.check_id,
             "check_version": self.check_version,
             "tier": self.tier.value,
             "maturity": self.maturity.value,
+            "promotion_record_hash": self.promotion_record_hash or None,
+            "corpus_id": self.corpus_id or None,
+            "corpus_hash": self.corpus_hash or None,
+            "heldout_corpus_hash": self.heldout_corpus_hash or None,
+            "mined_corpus_id": self.mined_corpus_id or None,
+            "defect_semantics_versions": dict(
+                self.defect_semantics_versions
+                or {defect_id: 1 for defect_id in self.defect_ids}
+            ),
+            "precision_threshold": self.precision_threshold,
+            "recall_lower_bound_threshold": self.recall_lower_bound_threshold,
+            "per_defect_thresholds": dict(
+                self.per_defect_thresholds
+                or {defect_id: 0.90 for defect_id in self.defect_ids}
+            ),
+            "min_cases_per_defect": self.min_cases_per_defect,
+            "coverage_threshold": self.coverage_threshold,
+            "witness_replay_threshold": self.witness_replay_threshold,
+            "conclusive_rate_threshold": self.conclusive_rate_threshold,
+            "toolchain_fingerprint": self.toolchain_fingerprint or None,
             "method": self.method,
             "method_version": self.method_version,
             "supported_languages": list(self.supported_languages),
@@ -66,13 +117,16 @@ class CheckSpec:
             "supersedes": self.supersedes or None,
             "limitations": list(self.limitations),
         }
+        if include_spec_core_hash:
+            data["spec_core_hash"] = self.spec_core_hash
+        return data
 
 
 _GROUNDING = CheckSpec(
     check_id="grounding",
     check_version=1,
-    tier=Tier.BLOCKING,
-    maturity=Maturity.PROVISIONAL,
+    tier=Tier.ADVISORY,
+    maturity=Maturity.SHADOW,
     method="changed-hunk entity mapping and exact policy deny_changes matching",
     method_version=1,
     supported_languages=("python", "typescript", "javascript", "text"),
@@ -80,10 +134,12 @@ _GROUNDING = CheckSpec(
     defect_ids=("GRD-UNGROUNDED-EDIT",),
     reason_codes=("policy_prohibited",),
     evidence_kinds=("provenance",),
+    corpus_id="grounding-v1",
+    corpus_hash="sha256:b8fd75843271f427d7b228aeee268f2975e85e46273363745d128028945add20",
     required_capabilities=(Capability.ENTITY_SPANS,),
     required_toolchain={"python": ">=3.12", "git": "plumbing", "tree-sitter": ">=0.25"},
     corpus_fingerprint="sha256:6f3983639e641c3ac97a711844150b9ee530047db1f641bb6b4ea3926bf08f32",
-    status="provisional",
+    status="shadow",
     limitations=(
         "Python and TS/JS entity spans are enumerated; an unmapped hunk is an explicit coverage gap.",
         "Supported module-level edits are mapped to other_text with line/byte provenance.",
@@ -93,8 +149,8 @@ _GROUNDING = CheckSpec(
 _DELETION = CheckSpec(
     check_id="deletion",
     check_version=1,
-    tier=Tier.BLOCKING,
-    maturity=Maturity.PROVISIONAL,
+    tier=Tier.ADVISORY,
+    maturity=Maturity.SHADOW,
     method="removed-symbol enumeration with head reference search",
     method_version=1,
     supported_languages=("python", "typescript", "javascript"),
@@ -102,9 +158,11 @@ _DELETION = CheckSpec(
     defect_ids=("DEL-REACHABLE-SYMBOL", "DEL-DANGLING-REFERENCE", "DEL-DYNAMIC-REFERENCE"),
     reason_codes=("symbol_live", "dangling_reference", "dynamic_reference_removed"),
     evidence_kinds=("reference",),
+    corpus_id="deletion-v1",
+    corpus_hash="sha256:efbca020e17296277e9ade5d3c59e20287e1e16018f044e416f7eebfd9a408a1",
     required_capabilities=(Capability.SYMBOLS, Capability.REFERENCES),
     required_toolchain={"python": ">=3.12", "tree-sitter": ">=0.25"},
-    status="provisional",
+    status="shadow",
     limitations=(
         "Dynamic dispatch is reported as a coverage gap, never as a clean result.",
         "Reference discovery is repository-local and does not consult package indexes.",
@@ -114,8 +172,8 @@ _DELETION = CheckSpec(
 _CONTRACT = CheckSpec(
     check_id="contract",
     check_version=1,
-    tier=Tier.BLOCKING,
-    maturity=Maturity.PROVISIONAL,
+    tier=Tier.ADVISORY,
+    maturity=Maturity.SHADOW,
     method="signature/export comparison and local call-site compatibility",
     method_version=1,
     supported_languages=("python", "typescript", "javascript"),
@@ -123,9 +181,11 @@ _CONTRACT = CheckSpec(
     defect_ids=("CTR-SIGNATURE-BREAK", "CTR-EXPORT-BREAK", "CTR-CALL-INCOMPATIBLE"),
     reason_codes=("signature_break", "export_break", "call_incompatible"),
     evidence_kinds=("call_site", "reference"),
+    corpus_id="contract-v1",
+    corpus_hash="sha256:14bd93a97fb0be3eae13c99ebc4c25d1fe0e14dafb2e9db92e5e5d389043689c",
     required_capabilities=(Capability.SIGNATURE, Capability.CALLS, Capability.REFERENCES),
     required_toolchain={"python": ">=3.12", "tree-sitter": ">=0.25"},
-    status="provisional",
+    status="shadow",
     limitations=(
         "Call-site compatibility is local; unresolved dynamic calls are coverage gaps.",
         "Public API policy is exact/glob-based rather than an inferred package contract.",
@@ -137,10 +197,10 @@ _SEMANTIC = CheckSpec(
     check_version=1,
     tier=Tier.ADVISORY,
     maturity=Maturity.SHADOW,
-    method="syntactic protected-guard/error candidate discovery; no solver proof in v3.1.10",
+    method="symbolic control-flow divergence analysis with isolated concrete witness replay",
     method_version=1,
-    supported_languages=("python",),
-    supported_syntax=("python-ast",),
+    supported_languages=("python", "typescript", "javascript"),
+    supported_syntax=("python-ast", "tree-sitter-typescript", "tree-sitter-javascript"),
     defect_ids=(
         "SEM-GUARD-REMOVED",
         "SEM-GUARD-WEAKENED",
@@ -156,25 +216,28 @@ _SEMANTIC = CheckSpec(
         "exception_removed",
     ),
     evidence_kinds=("solver",),
+    corpus_id="semantic-v1",
+    corpus_hash="sha256:dd0a162bd7442a78b6e236fa207c17dcd6413e5ad73e2e4b41c4b35451b5d3ba",
     required_capabilities=(
         Capability.CFG,
         Capability.GUARDS,
         Capability.EFFECTS,
         Capability.EXCEPTIONS,
     ),
-    required_toolchain={"python": ">=3.12"},
+    required_toolchain={"python": ">=3.12", "z3-solver": ">=4.13.0"},
     status="shadow",
     limitations=(
         "Shadow only: results never affect the blocking verdict.",
-        "No solver-backed witness is emitted in v3.1.10; configured semantic scope is reported as unresolved.",
+        "Symbolic satisfiability only generates candidates; findings require isolated replay confirmation.",
+        "The authored corpus is not an independent held-out or mined-set release evaluation; this check remains shadow.",
     ),
 )
 
 _SECURITY = CheckSpec(
     check_id="security",
     check_version=1,
-    tier=Tier.BLOCKING,
-    maturity=Maturity.PROVISIONAL,
+    tier=Tier.ADVISORY,
+    maturity=Maturity.SHADOW,
     method="offline secret validation, policy forbidden calls, and unresolved taint accounting",
     method_version=1,
     supported_languages=("python", "typescript", "javascript", "text"),
@@ -187,9 +250,11 @@ _SECURITY = CheckSpec(
     ),
     reason_codes=("secret_detected", "secret_to_sink", "taint_to_sink", "dangerous_call"),
     evidence_kinds=("secret_validation", "taint_path", "call_site"),
+    corpus_id="security-v1",
+    corpus_hash="sha256:2118905b777fcda34b6e0dac04f6dd3f16966a81627af4d40007bcc022a0f9ce",
     required_capabilities=(Capability.CALLS, Capability.TAINT),
     required_toolchain={"python": ">=3.12"},
-    status="provisional",
+    status="shadow",
     limitations=(
         "Secret validation is offline and pattern-based; ambiguous candidates are coverage gaps.",
         "Taint analysis is intentionally fail-closed: configured taint scope without a resolved path is INCONCLUSIVE.",
@@ -209,7 +274,39 @@ def manifest_payload() -> dict[str, Any]:
         "schema": MANIFEST_SCHEMA,
         "tool_version": TOOL_VERSION,
         "release_validated": RELEASE_VALIDATED,
+        "cache": {
+            "schema_version": CACHE_SCHEMA_VERSION,
+            "sample_policy": {
+                "version": CACHE_SAMPLE_VERSION,
+                "rate_numerator": CACHE_SAMPLE_RATE_NUMERATOR,
+                "rate_denominator": CACHE_SAMPLE_RATE_DENOMINATOR,
+            },
+        },
+        "release_summary": release_summary(),
         "checks": [CHECK_SPECS[check_id].to_dict() for check_id in CHECK_ORDER],
+    }
+
+
+def release_summary() -> dict[str, Any]:
+    """Return the normative maturity-derived release summary (§6.4, §11.8)."""
+    blocking = [
+        check_id
+        for check_id in CHECK_ORDER
+        if CHECK_SPECS[check_id].maturity != Maturity.SHADOW
+    ]
+    shadow = [
+        check_id
+        for check_id in CHECK_ORDER
+        if CHECK_SPECS[check_id].maturity == Maturity.SHADOW
+    ]
+    return {
+        "blocking": blocking,
+        "shadow": shadow,
+        "not_shipped": [],
+        "maturity": {
+            check_id: CHECK_SPECS[check_id].maturity.value
+            for check_id in CHECK_ORDER
+        },
     }
 
 
@@ -234,6 +331,9 @@ def validate_manifest() -> list[str]:
         seen.add(check_id)
         if spec.tier == Tier.BLOCKING and spec.maturity == Maturity.SHADOW:
             errors.append(f"blocking check {check_id} cannot be shadow")
+        if spec.maturity != Maturity.SHADOW and not spec.promotion_record_hash:
+            errors.append(f"unpromoted check {check_id} cannot exceed shadow maturity")
+        errors.extend(validate_promotion_chain(spec))
         if check_id == "semantic" and spec.tier != Tier.ADVISORY:
             errors.append("semantic must be advisory/shadow in v3.1.x")
         cap_errors = validate_capabilities(spec.required_capabilities)
@@ -257,5 +357,6 @@ __all__ = [
     "manifest_bytes",
     "manifest_hash",
     "manifest_payload",
+    "release_summary",
     "validate_manifest",
 ]

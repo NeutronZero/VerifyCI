@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from hashlib import sha256
+import os
 import platform
 import time
 from pathlib import Path
@@ -14,7 +16,9 @@ from verifyci.checks.base import CheckContext, error_result
 from verifyci.contracts.manifest import (
     CHECK_ORDER,
     CHECK_SPECS,
+    RELEASE_VALIDATED,
     manifest_hash,
+    release_summary,
     validate_manifest,
 )
 from verifyci.contracts.model import (
@@ -31,6 +35,7 @@ from verifyci.contracts.model import (
 from verifyci.contracts.names import normalize_repo_path
 from verifyci.contracts.reason_codes import is_fault_code
 from verifyci.evidence.bundle import build_bundle, toolchain_fingerprint
+from verifyci.evidence.canonical import canonical_json_bytes
 from verifyci.gate.integrity import (
     CodeownersCoverage,
     gate_integrity,
@@ -47,6 +52,8 @@ from verifyci.gate.policy import (
     review_proposed_policy,
 )
 from verifyci.gate.verdict import aggregate, apply_acceptances, apply_waivers
+from verifyci.index.cache import CACHE_SCHEMA_VERSION, CacheStore
+from verifyci.index.provider import CacheIntegrityMismatch, FactProvider
 from verifyci.scm.git import GitError, GitRepo
 from verifyci.scope.entities import ChangedScope, analyze_source, build_changed_scope
 
@@ -72,6 +79,9 @@ class GateRequest:
     cache_mode: str = "none"
     allow_local_cache: bool = False
     cache_dir: str | None = None
+    cache_key: bytes | None = None
+    cache_key_id: str = "k1"
+    cache_read_only: bool = False
     jobs: int = 1
 
 
@@ -439,25 +449,11 @@ def _payload_build(
             "extra_faults": list(extra_faults),
         },
         manifest_extra={
-            "release_validated": False,
+            "release_validated": RELEASE_VALIDATED,
             "manifest_hash": manifest_hash(),
             "check_specs": [CHECK_SPECS[c].to_dict() for c in CHECK_ORDER],
             "builtin_policy_hashes": {"builtin_bootstrap_v1": BUILTIN_BOOTSTRAP_HASH},
-            "release_summary": {
-                "blocking": [
-                    c
-                    for c in CHECK_ORDER
-                    if CHECK_SPECS[c].tier == Tier.BLOCKING
-                ],
-                "shadow": [
-                    c
-                    for c in CHECK_ORDER
-                    if CHECK_SPECS[c].tier == Tier.ADVISORY
-                    or CHECK_SPECS[c].maturity.value == "shadow"
-                ],
-                "not_shipped": [],
-                "maturity": {c: CHECK_SPECS[c].maturity.value for c in CHECK_ORDER},
-            },
+            "release_summary": release_summary(),
         },
     )
 
@@ -484,6 +480,9 @@ def _augment_scope_with_repository(
     base_rev: str,
     head_rev: str,
     source_roots: Sequence[str],
+    fact_provider: FactProvider | None = None,
+    toolchain_fingerprint: str = "",
+    object_format: str = "",
 ) -> ChangedScope:
     """Add repository-local facts for reference and caller discovery.
 
@@ -504,7 +503,14 @@ def _augment_scope_with_repository(
             raw = git.read_blob(object_id)
             if b"\0" in raw:
                 continue
-            target[path] = analyze_source(path, raw.decode("utf-8", "replace"), source_roots)
+            target[path] = analyze_source(
+                path,
+                raw.decode("utf-8", "replace"),
+                source_roots,
+                fact_provider=fact_provider,
+                toolchain_fingerprint=toolchain_fingerprint,
+                blob_hash=f"{object_format}:{object_id}" if object_format else object_id,
+            )
     base_entities = frozenset(
         entity.qname for facts in base_facts.values() for entity in facts.entities
     )
@@ -659,10 +665,58 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
                         proposed = None
                         invalid_policy_detail = exc.detail
         source_roots = tuple(policy.path_classes.get("source_roots", ())) or (".",)
+        effective_cache_mode = request.cache_mode
+        cache_reason: str | None = None
+        if effective_cache_mode == "local" and not request.allow_local_cache:
+            raise GitError("invalid_cache_location", "local cache requires --allow-local-cache")
+        if effective_cache_mode == "authenticated" and not request.cache_key:
+            effective_cache_mode = "none"
+            cache_reason = "cache_key_unavailable"
+        common_dir_result = git.run(["rev-parse", "--git-common-dir"], check=True)
+        common_dir_text = common_dir_result.stdout.decode("utf-8", "replace").strip()
+        common_dir = Path(common_dir_text)
+        if not common_dir.is_absolute():
+            common_dir = git.repo / common_dir
+        cache_dir = Path(request.cache_dir).expanduser() if request.cache_dir else common_dir / "verifyci-cache" / "v3"
+        if not cache_dir.is_absolute():
+            cache_dir = git.repo / cache_dir
+        cache_dir = cache_dir.resolve(strict=False)
+        if request.cache_dir:
+            try:
+                cache_dir.relative_to(git.repo.resolve(strict=False))
+            except ValueError:
+                pass
+            else:
+                raise GitError("invalid_cache_location", "cache directory must be outside the working tree")
+        remote_result = git.run(["config", "--get", "remote.origin.url"])
+        remote_identity = remote_result.stdout.decode("utf-8", "replace").strip()
+        repository_identity = os.environ.get("GITHUB_REPOSITORY") or remote_identity or str(common_dir.resolve(strict=False))
+        namespace = sha256(
+            canonical_json_bytes(
+                {
+                    "repository": repository_identity,
+                    "key_id": request.cache_key_id,
+                    "toolchain_fingerprint": toolchain,
+                    "cache_schema_version": CACHE_SCHEMA_VERSION,
+                }
+            )
+        ).hexdigest()
+        cache_dir = cache_dir / namespace
+        cache_store = CacheStore(
+            cache_dir,
+            mode=effective_cache_mode,
+            key=request.cache_key if effective_cache_mode == "authenticated" else None,
+            key_id=request.cache_key_id,
+            read_only=request.cache_read_only,
+        )
+        fact_provider = FactProvider(cache_store)
         scope = build_changed_scope(
             entries,
             source_roots=source_roots,
             rename_limit_exceeded=rename_limit_exceeded,
+            fact_provider=fact_provider,
+            toolchain_fingerprint=toolchain,
+            object_format=object_format,
         )
         scope = _augment_scope_with_repository(
             scope,
@@ -670,6 +724,9 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             base_rev=target_base,
             head_rev=head,
             source_roots=source_roots,
+            fact_provider=fact_provider,
+            toolchain_fingerprint=toolchain,
+            object_format=object_format,
         )
         context = _context(
             git=git,
@@ -705,7 +762,10 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             review_reasons=review_reasons,
             target_drift=target_drift,
             target_drift_mode=str(policy.gate.get("target_drift", "record")),
-            extra_faults=extra_faults,
+            extra_faults=(
+                extra_faults
+                | ({"check_not_validated"} if not RELEASE_VALIDATED else set())
+            ),
         )
 
         # Policy remediation boundary: a valid proposed policy can supersede an
@@ -739,7 +799,10 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
                     review_reasons=review_reasons,
                     target_drift=target_drift,
                     target_drift_mode=str(policy.gate.get("target_drift", "record")),
-                    extra_faults=extra_faults,
+                    extra_faults=(
+                        extra_faults
+                        | ({"check_not_validated"} if not RELEASE_VALIDATED else set())
+                    ),
                 )
 
         review_cleared = bool(
@@ -757,6 +820,13 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
                     seen.add(key)
                     all_findings.append(finding.to_dict())
         diagnostics = list(waiver_diagnostics) + list(acceptance_diagnostics)
+        if not RELEASE_VALIDATED:
+            diagnostics.append(
+                {
+                    "code": "check_not_validated",
+                    "detail": "release-validation artifacts are absent; this internal build cannot emit a normal gate verdict",
+                }
+            )
         if extra_faults:
             diagnostics.append(
                 {
@@ -796,12 +866,32 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             generated_at=request.generated_at,
             duration_ms=duration_ms,
             cache={
-                "mode": request.cache_mode,
-                "authoritative": request.cache_mode != "local",
-                "stats": {},
-                "sampled_recomputations": [],
+                "mode": effective_cache_mode,
+                "authoritative": effective_cache_mode != "local",
+                "reason": cache_reason,
+                "stats": fact_provider.cache_stats(),
+                "sampled_recomputations": fact_provider.cache_stats()["sampled_recomputations"],
             },
             environment={"python": platform.python_version(), "platform": platform.system()},
+        )
+    except CacheIntegrityMismatch as exc:
+        return _fatal_bundle(
+            request=request,
+            git=git,
+            code="cache_integrity_mismatch",
+            detail=f"sampled cache entry disagreed with Git-derived recomputation: {exc.entry_key}",
+            toolchain=toolchain,
+            object_format=object_format,
+            as_of_date=as_of,
+            review_reasons=review_reasons,
+            policy=policy,
+            entries=entries,
+            target_base=target_base,
+            merge_base=merge_base,
+            head=head,
+            started=started,
+            integrity_paths=integrity_paths,
+            target_drift=target_drift,
         )
     except PolicyError as exc:
         return _fatal_bundle(
