@@ -206,7 +206,7 @@ def test_deletion_finds_live_reference_in_unchanged_file(tmp_path):
     bundle = _gate(root, base, head)
     result = _assert_check_results(bundle)["deletion"]
     assert result["outcome"] == "FAIL"
-    finding = next(f for f in result["findings"] if f["defect_id"] == "DEL-REACHABLE-SYMBOL")
+    finding = next(f for f in result["findings"] if f["defect_id"] == "DEL-DANGLING-REFERENCE")
     assert finding["evidence"]["payload"]["reference"]["path"] == "main.py"
     assert bundle.payload["verdict"]["status"] == "FAIL"
 
@@ -346,7 +346,7 @@ def test_accepted_coverage_gap_does_not_block(tmp_path):
         + 'created = "2026-10-01"\n'
         + 'expires = "2026-12-31"\n'
     )
-    root, base = _repo(tmp_path, {"app.py": "def f(a):\n    return a\n"}, policy=policy)
+    root, base = _repo(tmp_path, {"app.py": "def deco(fn):\n    return fn\n\ndef f(a):\n    return a\n"}, policy=policy)
     head = _commit(
         root,
         {"app.py": "def deco(fn):\n    return fn\n\n@deco\ndef f(a):\n    return a\n"},
