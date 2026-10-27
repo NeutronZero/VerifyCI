@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import base64
 import json
 import math
@@ -336,21 +337,144 @@ def _secret_sub(context: CheckContext) -> CheckResult:
 def _dangerous_sub(context: CheckContext) -> CheckResult:
     changed = _changed_head_lines(context)
     findings = []
+    gaps: list[CoverageGap] = []
     checked = 0
     custom = {
         rule_id: tuple(rule.get("symbols", ()))
         for rule_id, rule in context.policy.forbidden_calls.items()
     }
+    seen_call_keys: set[tuple[str, int, str]] = set()
+
     for entry in context.entries:
         path = entry.head_path
         if not path or entry.is_binary or entry.is_submodule or entry.is_symlink:
             continue
+        path_changed = changed.get(path, set())
+        if not path_changed:
+            continue
+
+        # AST syntax-aware analysis for Python files
+        if path.endswith(".py"):
+            try:
+                tree = ast.parse(entry.head_source)
+                aliases: dict[str, str] = {}
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for name in node.names:
+                            if name.asname:
+                                aliases[name.asname] = name.name
+                    elif isinstance(node, ast.ImportFrom):
+                        mod = node.module or ""
+                        for name in node.names:
+                            target = f"{mod}.{name.name}" if mod else name.name
+                            aliases[name.asname or name.name] = target
+
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Call):
+                        continue
+                    start_line = node.lineno
+                    end_line = getattr(node, "end_lineno", start_line)
+                    call_span = set(range(start_line, end_line + 1))
+                    if not (call_span & path_changed):
+                        continue
+
+                    checked += 1
+                    func = node.func
+                    resolved: str | None = None
+
+                    if isinstance(func, ast.Name):
+                        resolved = aliases.get(func.id, func.id)
+                    elif isinstance(func, ast.Attribute):
+                        base = func.value
+                        if isinstance(base, ast.Name):
+                            base_id = aliases.get(base.id, base.id)
+                            resolved = f"{base_id}.{func.attr}"
+                        elif isinstance(base, ast.Attribute):
+                            parts = [func.attr]
+                            curr = base
+                            while isinstance(curr, ast.Attribute):
+                                parts.append(curr.attr)
+                                curr = curr.value
+                            if isinstance(curr, ast.Name):
+                                parts.append(aliases.get(curr.id, curr.id))
+                                resolved = ".".join(reversed(parts))
+                        else:
+                            resolved = func.attr
+                    elif isinstance(func, (ast.Call, ast.Subscript, ast.Lambda)):
+                        gaps.append(
+                            gap(
+                                "dynamic_call",
+                                {
+                                    "check_id": "security.dangerous_calls",
+                                    "path": path,
+                                    "line": start_line,
+                                    "detail": "dynamic_callee_expression",
+                                },
+                            )
+                        )
+                        continue
+
+                    if not resolved:
+                        continue
+
+                    matched_rule: tuple[str, str] | None = None
+                    if resolved in ("eval", "exec", "compile", "innerHTML"):
+                        matched_rule = (resolved, resolved)
+                    elif resolved == "os.system" or resolved.startswith("subprocess."):
+                        matched_rule = (resolved.split(".")[0], resolved)
+                    elif resolved in ("pickle.loads", "yaml.load"):
+                        matched_rule = (resolved, resolved)
+                    else:
+                        for rule_id, symbols in custom.items():
+                            for sym in symbols:
+                                simple = sym.split(":")[-1].rsplit(".", 1)[-1]
+                                if resolved == sym or resolved == simple or resolved.endswith(f".{simple}"):
+                                    matched_rule = (rule_id, sym)
+                                    break
+                            if matched_rule:
+                                break
+
+                    if matched_rule:
+                        rule_id, symbol = matched_rule
+                        key = (path, start_line, symbol)
+                        if key not in seen_call_keys:
+                            seen_call_keys.add(key)
+                            findings.append(
+                                make_finding(
+                                    context=context,
+                                    check_id="security",
+                                    defect_id="SEC-DANGEROUS-CALL",
+                                    subject={"path": path, "line": start_line, "symbol": symbol},
+                                    premises={"rule_id": rule_id, "resolved_callee": symbol},
+                                    evidence_kind=EvidenceKind.CALL_SITE,
+                                    evidence_payload={
+                                        "identity": {
+                                            "path": path,
+                                            "line": start_line,
+                                            "rule_id": rule_id,
+                                            "callee": symbol,
+                                        },
+                                        "path": path,
+                                        "line": start_line,
+                                        "rule_id": rule_id,
+                                        "callee": symbol,
+                                        "span": {"start": start_line, "end": end_line},
+                                    },
+                                    message=f"policy-forbidden call {symbol} introduced at {path}:{start_line}",
+                                    remediation="Use a safe alternative or obtain an explicit policy exception.",
+                                )
+                            )
+            except SyntaxError:
+                pass
+
+        # Also perform line-level regex check for non-python files or non-AST patterns
         for line_number, line in enumerate(entry.head_source.splitlines(), start=1):
-            if line_number not in changed.get(path, set()):
+            if line_number not in path_changed:
                 continue
             if line.lstrip().startswith("#"):
                 continue
-            checked += 1
+            if not path.endswith(".py"):
+                checked += 1
             matched: list[tuple[str, str]] = []
             for name, pattern in _BUILTIN_DANGEROUS.items():
                 if pattern.search(line):
@@ -361,47 +485,56 @@ def _dangerous_sub(context: CheckContext) -> CheckResult:
                     if re.search(rf"\b{re.escape(simple)}\s*\(", line):
                         matched.append((rule_id, symbol))
             for rule_id, symbol in matched:
-                findings.append(
-                    make_finding(
-                        context=context,
-                        check_id="security",
-                        defect_id="SEC-DANGEROUS-CALL",
-                        subject={"path": path, "line": line_number, "symbol": symbol},
-                        premises={"rule_id": rule_id, "resolved_callee": symbol},
-                        evidence_kind=EvidenceKind.CALL_SITE,
-                        evidence_payload={
-                            "identity": {
+                key = (path, line_number, symbol)
+                if key not in seen_call_keys:
+                    seen_call_keys.add(key)
+                    findings.append(
+                        make_finding(
+                            context=context,
+                            check_id="security",
+                            defect_id="SEC-DANGEROUS-CALL",
+                            subject={"path": path, "line": line_number, "symbol": symbol},
+                            premises={"rule_id": rule_id, "resolved_callee": symbol},
+                            evidence_kind=EvidenceKind.CALL_SITE,
+                            evidence_payload={
+                                "identity": {
+                                    "path": path,
+                                    "line": line_number,
+                                    "rule_id": rule_id,
+                                    "callee": symbol,
+                                },
                                 "path": path,
                                 "line": line_number,
                                 "rule_id": rule_id,
                                 "callee": symbol,
+                                "span": {"start": line_number, "end": line_number},
                             },
-                            "path": path,
-                            "line": line_number,
-                            "rule_id": rule_id,
-                            "callee": symbol,
-                            "span": {"start": line_number, "end": line_number},
-                        },
-                        message=f"policy-forbidden call {symbol} introduced at {path}:{line_number}",
-                        remediation="Use a safe alternative or obtain an explicit policy exception.",
+                            message=f"policy-forbidden call {symbol} introduced at {path}:{line_number}",
+                            remediation="Use a safe alternative or obtain an explicit policy exception.",
+                        )
                     )
-                )
+
     if findings:
         outcome = Outcome.FAIL
+    elif gaps:
+        outcome = Outcome.INCONCLUSIVE
     elif checked == 0:
         outcome = Outcome.NOT_APPLICABLE
     else:
         outcome = Outcome.PASS
+
+    coverage = Coverage.COMPLETE if not gaps else Coverage.PARTIAL
     return _sub_result(
         context,
         suffix="dangerous_calls",
         outcome=outcome,
-        coverage=Coverage.COMPLETE,
+        coverage=coverage,
         evaluated_scope={"files": sorted(changed), "checked_lines": checked},
-        scope_enumeration={"complete": True, "checked_lines": checked},
-        candidate_discovery={"complete": True, "checked_lines": checked},
+        scope_enumeration={"complete": not gaps, "checked_lines": checked},
+        candidate_discovery={"complete": not gaps, "checked_lines": checked},
         applicability_evidence={"checked_lines": checked, "rules": sorted(context.policy.forbidden_calls)},
-        reason_codes=(),
+        reason_codes=tuple(sorted({g.reason_code for g in gaps})),
+        coverage_gaps=gaps,
         findings=findings,
     )
 
@@ -490,11 +623,15 @@ def _taint_sub(context: CheckContext) -> CheckResult:
         outcome = Outcome.NOT_APPLICABLE
     else:
         outcome = Outcome.PASS
+    if any(g.reason_code in ("unsupported_language", "parse_error") for g in gaps):
+        coverage = Coverage.UNKNOWN
+    else:
+        coverage = Coverage.COMPLETE if not gaps else Coverage.PARTIAL
     return _sub_result(
         context,
         suffix="taint",
         outcome=outcome,
-        coverage=Coverage.COMPLETE if not gaps else Coverage.PARTIAL,
+        coverage=coverage,
         evaluated_scope={"relevant_lines": relevant},
         scope_enumeration={"complete": not gaps, "relevant_lines": relevant},
         candidate_discovery={"complete": not gaps, "relevant_lines": relevant, "unresolved": unresolved},

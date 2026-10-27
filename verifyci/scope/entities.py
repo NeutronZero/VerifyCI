@@ -35,6 +35,7 @@ class CallSite:
     keywords: tuple[str, ...]
     has_starargs: bool = False
     has_kwargs: bool = False
+    is_shadowed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -44,6 +45,7 @@ class CallSite:
             "keywords": list(self.keywords),
             "has_starargs": self.has_starargs,
             "has_kwargs": self.has_kwargs,
+            "is_shadowed": self.is_shadowed,
         }
 
 
@@ -52,6 +54,8 @@ class ImportFact:
     module: str
     names: tuple[str, ...]
     line: int
+    level: int = 0
+    aliases: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,12 +158,79 @@ class _CallVisitor(ast.NodeVisitor):
         self.calls: list[CallSite] = []
         self.loads: set[str] = set()
         self.dynamic = False
+        self.scope_stack: list[set[str]] = []
+
+    def _collect_local_bindings(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda
+    ) -> set[str]:
+        locals_found: set[str] = set()
+        if hasattr(node, "args"):
+            for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
+                locals_found.add(arg.arg)
+            if node.args.vararg:
+                locals_found.add(node.args.vararg.arg)
+            if node.args.kwarg:
+                locals_found.add(node.args.kwarg.arg)
+        globals_declared: set[str] = set()
+        for child in ast.walk(node):
+            if child is node:
+                continue
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                locals_found.add(child.name)
+            elif isinstance(child, ast.Global):
+                globals_declared.update(child.names)
+            elif isinstance(child, ast.Assign):
+                for target in child.targets:
+                    for t in ast.walk(target):
+                        if isinstance(t, ast.Name):
+                            locals_found.add(t.id)
+            elif isinstance(child, (ast.AnnAssign, ast.AugAssign)):
+                for t in ast.walk(child.target):
+                    if isinstance(t, ast.Name):
+                        locals_found.add(t.id)
+            elif isinstance(child, (ast.For, ast.AsyncFor)):
+                for t in ast.walk(child.target):
+                    if isinstance(t, ast.Name):
+                        locals_found.add(t.id)
+            elif isinstance(child, (ast.With, ast.AsyncWith)):
+                for item in child.items:
+                    if item.optional_vars:
+                        for t in ast.walk(item.optional_vars):
+                            if isinstance(t, ast.Name):
+                                locals_found.add(t.id)
+            elif isinstance(child, ast.ExceptHandler):
+                if child.name:
+                    locals_found.add(child.name)
+            elif isinstance(child, ast.NamedExpr):
+                if isinstance(child.target, ast.Name):
+                    locals_found.add(child.target.id)
+        return locals_found - globals_declared
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.scope_stack.append(self._collect_local_bindings(node))
+        self.generic_visit(node)
+        self.scope_stack.pop()
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.scope_stack.append(self._collect_local_bindings(node))
+        self.generic_visit(node)
+        self.scope_stack.pop()
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self.scope_stack.append(self._collect_local_bindings(node))
+        self.generic_visit(node)
+        self.scope_stack.pop()
 
     def visit_Call(self, node: ast.Call) -> None:
         callee = _callee_name(node.func)
+        if isinstance(node.func, ast.Subscript):
+            self.dynamic = True
         if callee:
             if callee in {"getattr", "setattr", "eval", "exec", "__import__", "compile"}:
                 self.dynamic = True
+            is_shadowed = False
+            if "." not in callee:
+                is_shadowed = any(callee in scope for scope in self.scope_stack)
             self.calls.append(
                 CallSite(
                     callee=callee,
@@ -170,6 +241,7 @@ class _CallVisitor(ast.NodeVisitor):
                     ),
                     has_starargs=any(isinstance(a, ast.Starred) for a in node.args),
                     has_kwargs=any(kw.arg is None for kw in node.keywords),
+                    is_shadowed=is_shadowed,
                 )
             )
         self.generic_visit(node)
@@ -391,13 +463,25 @@ def analyze_python(path: str, source: str, source_roots: Sequence[str] = ()) -> 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                imports.append(ImportFact(alias.name, (alias.asname or alias.name,), node.lineno))
+                local = alias.asname or alias.name
+                imports.append(
+                    ImportFact(
+                        module=alias.name,
+                        names=(local,),
+                        line=node.lineno,
+                        level=0,
+                        aliases=((alias.name, local),),
+                    )
+                )
         elif isinstance(node, ast.ImportFrom):
+            aliases = tuple((alias.name, alias.asname or alias.name) for alias in node.names)
             imports.append(
                 ImportFact(
-                    node.module or "",
-                    tuple(alias.name for alias in node.names),
-                    node.lineno,
+                    module=node.module or "",
+                    names=tuple(alias.name for alias in node.names),
+                    line=node.lineno,
+                    level=node.level,
+                    aliases=aliases,
                 )
             )
     entities = _python_entities(path, source, tree, source_roots)
@@ -616,7 +700,41 @@ def analyze_typescript(path: str, source: str) -> SourceFacts:
             text = _node_text(node)
             m = re.search(r"from\s+['\"]([^'\"]+)['\"]", text)
             if m:
-                imports.append(ImportFact(m.group(1), (), node.start_point.row + 1))
+                mod = m.group(1)
+                names: list[str] = []
+                aliases: list[tuple[str, str]] = []
+                clause = text.split("from", 1)[0].replace("import", "").strip()
+                if "{" in clause and "}" in clause:
+                    specifiers = clause[clause.find("{") + 1 : clause.rfind("}")].split(",")
+                    for spec in specifiers:
+                        spec = spec.strip()
+                        if not spec:
+                            continue
+                        if " as " in spec:
+                            orig, local = spec.split(" as ", 1)
+                            orig, local = orig.strip(), local.strip()
+                            names.append(orig)
+                            aliases.append((orig, local))
+                        else:
+                            names.append(spec)
+                            aliases.append((spec, spec))
+                elif "* as " in clause:
+                    local = clause.split("* as ", 1)[1].strip()
+                    names.append(local)
+                    aliases.append(("*", local))
+                elif clause:
+                    local = clause.strip()
+                    names.append(local)
+                    aliases.append(("default", local))
+                imports.append(
+                    ImportFact(
+                        module=mod,
+                        names=(),
+                        line=node.start_point.row + 1,
+                        level=0,
+                        aliases=tuple(aliases),
+                    )
+                )
         elif node.type in ("identifier", "property_identifier"):
             loads.add(_node_text(node))
         for child in node.children:
