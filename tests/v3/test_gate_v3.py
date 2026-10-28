@@ -69,13 +69,13 @@ def _repo(tmp_path: Path, files: dict[str, str | None], policy: str = POLICY) ->
     _git(root, "config", "user.email", "test@example.com")
     _git(root, "config", "core.autocrlf", "false")
     (root / ".verifyci").mkdir()
-    (root / ".verifyci" / "policy.toml").write_text(policy, encoding="utf-8")
+    (root / ".verifyci" / "policy.toml").write_text(policy, encoding="utf-8", newline="\n")
     for path, content in files.items():
         target = root / path
         target.parent.mkdir(parents=True, exist_ok=True)
         if content is None:
             continue
-        target.write_text(content, encoding="utf-8")
+        target.write_text(content, encoding="utf-8", newline="\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "base")
     return root, _git(root, "rev-parse", "HEAD")
@@ -88,7 +88,7 @@ def _commit(root: Path, files: dict[str, str | None], message: str = "head") -> 
         if content is None:
             target.unlink(missing_ok=True)
         else:
-            target.write_text(content, encoding="utf-8")
+            target.write_text(content, encoding="utf-8", newline="\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", message)
     return _git(root, "rev-parse", "HEAD")
@@ -228,7 +228,7 @@ def test_authenticated_sampled_cache_mismatch_fails_gate_closed(tmp_path):
     git_version = subprocess.check_output(["git", "version"], text=True).strip()
     tc = toolchain_fingerprint(git_version=git_version, object_format="sha1")
     source = "VALUE = 7\n"
-    source_blob = source.encode("utf-8").replace(b"\n", b"\r\n")
+    source_blob = source.encode("utf-8")
     blob_hash = "sha1:" + git_blob_id(source_blob)
     for index in range(10000):
         candidate_path = f"cache-sample-{index}.py"
