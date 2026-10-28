@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 import posixpath
 from typing import Any
@@ -83,34 +84,31 @@ _BUILTIN_CALLS: frozenset[str] = frozenset(
 @dataclass(frozen=True, slots=True)
 class _Sig:
     params: tuple[tuple[str, str, bool], ...]
-
-    @property
-    def positional(self) -> tuple[tuple[str, str, bool], ...]:
-        return tuple(p for p in self.params if p[1] in ("posonly", "positional"))
-
-    @property
-    def required_positional(self) -> int:
-        return sum(1 for p in self.positional if not p[2])
-
-    @property
-    def has_vararg(self) -> bool:
-        return any(p[1] == "vararg" for p in self.params)
-
-    @property
-    def has_kwarg(self) -> bool:
-        return any(p[1] == "kwarg" for p in self.params)
-
-    @property
-    def keyword_names(self) -> set[str]:
-        return {p[0] for p in self.params if p[1] in ("positional", "kwonly")}
-
-    @property
-    def required_kwonly(self) -> set[str]:
-        return {p[0] for p in self.params if p[1] == "kwonly" and not p[2]}
+    positional: tuple[tuple[str, str, bool], ...]
+    required_positional: int
+    has_vararg: bool
+    has_kwarg: bool
+    keyword_names: frozenset[str]
+    required_kwonly: frozenset[str]
 
 
 def _sig(entity: Entity) -> _Sig:
-    return _Sig(tuple(entity.parameters))
+    params = tuple((p[0], p[1], bool(p[2])) for p in getattr(entity, "parameters", ()))
+    positional = tuple(p for p in params if p[1] in ("posonly", "positional"))
+    required_positional = sum(1 for p in positional if not p[2])
+    has_vararg = any(p[1] == "vararg" for p in params)
+    has_kwarg = any(p[1] == "kwarg" for p in params)
+    keyword_names = frozenset(p[0] for p in params if p[1] in ("positional", "kwonly"))
+    required_kwonly = frozenset(p[0] for p in params if p[1] == "kwonly" and not p[2])
+    return _Sig(
+        params=params,
+        positional=positional,
+        required_positional=required_positional,
+        has_vararg=has_vararg,
+        has_kwarg=has_kwarg,
+        keyword_names=keyword_names,
+        required_kwonly=required_kwonly,
+    )
 
 
 def _simple(qname: str) -> str:
@@ -176,10 +174,16 @@ def _match_callee_to_entity(
     caller_path: str,
     caller_facts: SourceFacts,
     target: Entity,
+    target_mod: str | None = None,
+    target_symbol: str | None = None,
+    target_simple: str | None = None,
 ) -> str:
-    target_mod = _normalize_mod(target.file_path)
-    target_symbol = target.qname.split(":", 1)[-1]
-    target_simple = target_symbol.rsplit(".", 1)[-1]
+    if target_mod is None:
+        target_mod = _normalize_mod(target.file_path)
+    if target_symbol is None:
+        target_symbol = target.qname.split(":", 1)[-1]
+    if target_simple is None:
+        target_simple = target_symbol.rsplit(".", 1)[-1]
 
     callee = call.callee
 
@@ -288,9 +292,10 @@ def _call_problem(call: CallSite, sig: _Sig) -> str:
     for keyword in call.keywords:
         if keyword not in sig.keyword_names:
             return f"unknown_keyword:{keyword}"
-    missing = sig.required_kwonly - set(call.keywords)
-    if missing:
-        return f"missing_required_keyword:{sorted(missing)[0]}"
+    if sig.required_kwonly:
+        missing = sig.required_kwonly - set(call.keywords)
+        if missing:
+            return f"missing_required_keyword:{sorted(missing)[0]}"
     return ""
 
 
@@ -301,8 +306,7 @@ def _changed_new_lines(context: CheckContext) -> dict[str, set[int]]:
             continue
         lines = out.setdefault(entry.head_path, set())
         for hunk in entry.hunks:
-            for line in range(hunk.new_start, hunk.new_end() + 1):
-                lines.add(line)
+            lines.update(range(hunk.new_start, hunk.new_end() + 1))
     return out
 
 
@@ -410,8 +414,20 @@ def run(context: CheckContext) -> CheckResult:
                 if old_sig.keyword_names - new_sig.keyword_names:
                     problems.append("keyword_parameters_removed")
                 matched_callers = []
+                target_mod = _normalize_mod(head.file_path)
+                target_symbol = head.qname.split(":", 1)[-1]
+                target_simple = target_symbol.rsplit(".", 1)[-1]
                 for path, facts, call in all_head_calls:
-                    res = _match_callee_to_entity(call, path, facts, head)
+                    callee = call.callee
+                    if "." in callee:
+                        if not callee.endswith(f".{target_simple}"):
+                            continue
+                    elif callee != target_simple:
+                        if not any(getattr(imp, "aliases", ()) for imp in facts.imports):
+                            continue
+                    res = _match_callee_to_entity(
+                        call, path, facts, head, target_mod, target_symbol, target_simple
+                    )
                     if res == "MATCH":
                         matched_callers.append((path, facts, call))
                     elif res == "AMBIGUOUS":
@@ -524,6 +540,11 @@ def run(context: CheckContext) -> CheckResult:
         # Added entities are not a contract break.
 
     # A caller changed in the head can break against an unchanged base callee.
+    base_by_simple: dict[str, list[Entity]] = defaultdict(list)
+    for entity in base_entities.values():
+        if entity.qname not in changed_qnames:
+            base_by_simple[_simple(entity.qname)].append(entity)
+
     for path, facts, call in all_head_calls:
         if call.line not in changed_lines.get(path, set()):
             continue
@@ -535,11 +556,19 @@ def run(context: CheckContext) -> CheckResult:
                 )
             )
             continue
+        target_key = call.callee.rsplit(".", 1)[-1]
+        candidates = list(base_by_simple.get(target_key, ()))
+        if "." not in call.callee:
+            for imp in facts.imports:
+                for orig_name, local_name in getattr(imp, "aliases", ()):
+                    if local_name == call.callee:
+                        alias_simple = orig_name.rsplit(".", 1)[-1]
+                        if alias_simple != target_key:
+                            candidates.extend(base_by_simple.get(alias_simple, ()))
+
         matched_bases = []
         ambiguous = False
-        for entity in base_entities.values():
-            if entity.qname in changed_qnames:
-                continue
+        for entity in candidates:
             res = _match_callee_to_entity(call, path, facts, entity)
             if res == "MATCH":
                 matched_bases.append(entity)

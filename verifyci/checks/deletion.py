@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 import re
-from typing import Any
+from typing import Any, Mapping
 
 from verifyci.checks.base import (
     CheckContext,
@@ -65,11 +66,27 @@ def _resolve_module(imp_module: str, importing_path: str, level: int = 0) -> str
     return imp_module
 
 
-def _head_references(context: CheckContext, entity: Any) -> list[dict[str, Any]]:
+def _head_references(
+    context: CheckContext,
+    entity: Any,
+    importers_by_symbol: Mapping[tuple[str, str], list[str]] | None = None,
+) -> list[dict[str, Any]]:
     simple = _simple_name(entity.qname)
     entity_module = _module_name(entity.file_path)
     references: list[dict[str, Any]] = []
-    for path, facts in context.scope.head_facts.items():
+
+    if importers_by_symbol is not None:
+        candidate_paths = set(importers_by_symbol.get((entity_module, simple), ()))
+        candidate_paths.add(entity.file_path)
+        path_items = [
+            (p, context.scope.head_facts[p])
+            for p in candidate_paths
+            if p in context.scope.head_facts
+        ]
+    else:
+        path_items = list(context.scope.head_facts.items())
+
+    for path, facts in path_items:
         same_module = path == entity.file_path
         imports_symbol = False
         for imp in facts.imports:
@@ -103,14 +120,31 @@ def _head_references(context: CheckContext, entity: Any) -> list[dict[str, Any]]
     return references
 
 
-def _dynamic_references(context: CheckContext, entity: Any) -> list[dict[str, Any]]:
+def _dynamic_references(
+    context: CheckContext,
+    entity: Any,
+    entries_by_head_path: Mapping[str, Any] | None = None,
+    importers_by_symbol: Mapping[tuple[str, str], list[str]] | None = None,
+) -> list[dict[str, Any]]:
     simple = _simple_name(entity.qname)
     entity_module = _module_name(entity.file_path)
     pattern = re.compile(
         rf"(?:getattr\s*\([^,\n]+,\s*['\"]{re.escape(simple)}['\"]|\[['\"]{re.escape(simple)}['\"]\])"
     )
     out: list[dict[str, Any]] = []
-    for path, facts in context.scope.head_facts.items():
+
+    if importers_by_symbol is not None:
+        candidate_paths = set(importers_by_symbol.get((entity_module, simple), ()))
+        candidate_paths.add(entity.file_path)
+        path_items = [
+            (p, context.scope.head_facts[p])
+            for p in candidate_paths
+            if p in context.scope.head_facts
+        ]
+    else:
+        path_items = list(context.scope.head_facts.items())
+
+    for path, facts in path_items:
         # Only attribute a dynamic lookup to this entity when the file is the
         # same module or imports the symbol from this entity's module.
         same_module = path == entity.file_path
@@ -120,7 +154,10 @@ def _dynamic_references(context: CheckContext, entity: Any) -> list[dict[str, An
         )
         if not same_module and not imports_symbol:
             continue
-        entry = next((e for e in context.entries if e.head_path == path), None)
+        if entries_by_head_path is not None:
+            entry = entries_by_head_path.get(path)
+        else:
+            entry = next((e for e in context.entries if e.head_path == path), None)
         if entry is None or not entry.head_source:
             continue
         for line_number, line in enumerate(entry.head_source.splitlines(), start=1):
@@ -157,19 +194,38 @@ def run(context: CheckContext) -> CheckResult:
     gaps = unsupported_scope_gaps(context, "deletion")
     references_found: list[dict[str, Any]] = []
     proven_dynamic_paths: set[str] = set()
+
+    entries_by_head_path: dict[str, Any] = {
+        e.head_path: e for e in context.entries if e.head_path
+    }
+    init_imported_symbols: set[str] = set()
+    importers_by_symbol: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for p, hf in context.scope.head_facts.items():
+        if p.endswith("__init__.py"):
+            for imp in hf.imports:
+                init_imported_symbols.update(imp.names)
+        for imp in hf.imports:
+            resolved = _resolve_module(imp.module or "", p, getattr(imp, "level", 0))
+            if resolved:
+                for name in imp.names:
+                    importers_by_symbol[(resolved, name)].append(p)
+
     for entity in removed:
         simple = _simple_name(entity.qname)
-        refs = _head_references(context, entity)
-        dynamic_refs = _dynamic_references(context, entity)
+        refs = _head_references(context, entity, importers_by_symbol=importers_by_symbol)
+        dynamic_refs = _dynamic_references(
+            context,
+            entity,
+            entries_by_head_path=entries_by_head_path,
+            importers_by_symbol=importers_by_symbol,
+        )
         facts = context.scope.base_facts.get(entity.file_path)
         is_exported = False
         if entity.file_path.endswith(".py"):
             if facts is not None and simple in facts.exports:
                 is_exported = True
-            for p, hf in context.scope.head_facts.items():
-                if p.endswith("__init__.py"):
-                    if any(simple in imp.names for imp in hf.imports):
-                        is_exported = True
+            elif simple in init_imported_symbols:
+                is_exported = True
         else:
             is_exported = bool(entity.is_export)
         is_public = is_exported or _public_policy_match(context, entity)
@@ -264,6 +320,12 @@ def run(context: CheckContext) -> CheckResult:
     removed_simple_names = {_simple_name(entity.qname) for entity in removed}
     emitted_dangling: set[tuple[str, str]] = set()
     unresolved_import_paths: set[str] = set()
+
+    base_files_by_module: dict[str, list[str]] = defaultdict(list)
+    for p in context.scope.base_facts:
+        base_files_by_module[_module_name(p)].append(p)
+    head_modules: set[str] = {_module_name(p) for p in context.scope.head_facts}
+
     for path, facts in context.scope.head_facts.items():
         if path.endswith("__init__.py"):
             continue
@@ -276,7 +338,7 @@ def run(context: CheckContext) -> CheckResult:
                     if path not in unresolved_import_paths:
                         unresolved_import_paths.add(path)
                     continue
-                base_files = [p for p in context.scope.base_facts if _module_name(p) == resolved]
+                base_files = base_files_by_module.get(resolved, [])
                 if not base_files:
                     # The imported module cannot be resolved against the base
                     # repository; report incomplete coverage instead of a
@@ -295,11 +357,9 @@ def run(context: CheckContext) -> CheckResult:
                 # ``from pkg import helper``).  Check that submodule identity
                 # before treating the import as unresolved.
                 submodule = f"{resolved}.{name}"
-                sub_files = [p for p in context.scope.base_facts if _module_name(p) == submodule]
+                sub_files = base_files_by_module.get(submodule, [])
                 if sub_files:
-                    sub_survives = any(
-                        _module_name(p) == submodule for p in context.scope.head_facts
-                    )
+                    sub_survives = submodule in head_modules
                     # A submodule import is dangling only when the module
                     # itself disappeared.  Internal symbol removals are
                     # handled as separate symbol findings.

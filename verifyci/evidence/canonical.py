@@ -3,34 +3,13 @@
 from __future__ import annotations
 
 from hashlib import sha256
+import json
 import math
 from typing import Any, Mapping
 
 
 def _serialize_str(s: str) -> bytes:
-    out = bytearray(b'"')
-    for ch in s:
-        cp = ord(ch)
-        if cp == 0x22:  # quotation mark "
-            out.extend(b'\\"')
-        elif cp == 0x5C:  # reverse solidus \
-            out.extend(b"\\\\")
-        elif cp == 0x08:  # backspace \b
-            out.extend(b"\\b")
-        elif cp == 0x0C:  # form feed \f
-            out.extend(b"\\f")
-        elif cp == 0x0A:  # line feed \n
-            out.extend(b"\\n")
-        elif cp == 0x0D:  # carriage return \r
-            out.extend(b"\\r")
-        elif cp == 0x09:  # character tabulation \t
-            out.extend(b"\\t")
-        elif cp < 0x20:  # control characters U+0000..U+001F
-            out.extend(f"\\u{cp:04x}".encode("ascii"))
-        else:
-            out.extend(ch.encode("utf-8"))
-    out.append(0x22)
-    return bytes(out)
+    return json.dumps(s, ensure_ascii=False).encode("utf-8")
 
 
 def _serialize_float(v: float) -> bytes:

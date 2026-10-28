@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import functools
+import re
 from typing import Any, Mapping
 
 from verifyci.contracts.reason_codes import (
@@ -565,14 +567,8 @@ class EvidenceBundle:
         return int(self.payload["verdict"]["exit_code"])
 
 
-def glob_match(pattern: str, value: str, *, kind: str = "path") -> bool:
-    """Match a policy glob without ever treating it as a user regex.
-
-    ``*`` stays within a path segment (or a qualified-name component); ``**``
-    crosses separators.  This is intentionally small and deterministic.
-    """
-    import re
-
+@functools.lru_cache(maxsize=2048)
+def _compile_glob(pattern: str, kind: str) -> re.Pattern[str] | None:
     sep = r"/" if kind == "path" else r"/:\."
     out: list[str] = ["^"]
     i = 0
@@ -591,9 +587,21 @@ def glob_match(pattern: str, value: str, *, kind: str = "path") -> bool:
         i += 1
     out.append("$")
     try:
-        return re.match("".join(out), value) is not None
+        return re.compile("".join(out))
     except re.error:
+        return None
+
+
+def glob_match(pattern: str, value: str, *, kind: str = "path") -> bool:
+    """Match a policy glob without ever treating it as a user regex.
+
+    ``*`` stays within a path segment (or a qualified-name component); ``**``
+    crosses separators.  This is intentionally small and deterministic.
+    """
+    regex = _compile_glob(pattern, kind)
+    if regex is None:
         return False
+    return regex.match(value) is not None
 
 
 __all__ = [

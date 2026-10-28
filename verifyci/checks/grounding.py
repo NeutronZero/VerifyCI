@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from verifyci.checks.base import CheckContext, gap, make_finding, make_result
 from verifyci.contracts.model import (
     CheckResult,
@@ -36,9 +38,12 @@ def run(context: CheckContext) -> CheckResult:
             if symbols and symbol_matches_any(symbols, symbol):
                 symbol_matches.setdefault(symbol, set()).add(rule_id)
 
+    entries_by_changed_path: dict[str, Any] = {
+        p: e for e in context.entries for p in e.changed_paths
+    }
     findings = []
     for path, rule_ids in sorted(path_matches.items()):
-        entry = next((e for e in context.entries if path in e.changed_paths), None)
+        entry = entries_by_changed_path.get(path)
         ordered_rules = sorted(rule_ids)
         primary_rule_id = ordered_rules[0]
         is_binary = entry.is_binary if entry else False
@@ -86,7 +91,7 @@ def run(context: CheckContext) -> CheckResult:
     for symbol, rule_ids in sorted(symbol_matches.items()):
         entity = context.scope.entity(symbol)
         file_path = entity.file_path if entity else ""
-        entry = next((e for e in context.entries if file_path in e.changed_paths), None)
+        entry = entries_by_changed_path.get(file_path)
         ordered_rules = sorted(rule_ids)
         primary_rule_id = ordered_rules[0]
         payload = {

@@ -40,6 +40,7 @@ class GitRepo:
     def __init__(self, repo: str | Path) -> None:
         self.repo = Path(repo).resolve()
         self._empty_config = os.devnull
+        self._blob_cache: dict[str, bytes] = {}
         env = os.environ.copy()
         env.update(
             {
@@ -150,11 +151,15 @@ class GitRepo:
     def read_blob(self, object_id: str) -> bytes:
         if not object_id or object_id.startswith("-"):
             raise GitError("missing_git_object", f"invalid blob id {object_id!r}")
+        cached = self._blob_cache.get(object_id)
+        if cached is not None:
+            return cached
         result = self.run(["cat-file", "blob", object_id])
         if result.returncode != 0:
             raise self._classify(result)
         if len(result.stdout) > _MAX_BLOB_BYTES:
             raise GitError("parse_resource_limit", f"blob {object_id} exceeds the size budget")
+        self._blob_cache[object_id] = result.stdout
         return result.stdout
 
     def path_exists_at(self, rev: str, path: str) -> bool:
@@ -176,9 +181,13 @@ class GitRepo:
         raw = listing.stdout.split(b"\0")[0]
         try:
             meta, _ = raw.split(b"\t", 1)
-            mode, obj_type, _ = meta.decode("ascii").split(" ")
+            mode, obj_type, obj_id = meta.decode("ascii").split(" ")
             if mode == "160000" or obj_type == "commit":
                 return None
+            if obj_type == "blob":
+                return self.read_blob(obj_id)
+        except GitError:
+            raise
         except Exception:
             pass
         result = self.run(["cat-file", "blob", f"{rev}:{path}"])

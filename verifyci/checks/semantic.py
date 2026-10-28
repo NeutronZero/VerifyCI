@@ -11,11 +11,12 @@ Covers five declared defect families:
 from __future__ import annotations
 
 import ast
+from collections import defaultdict
 import dataclasses
 import json
 import subprocess
 import sys
-from typing import Any, cast
+from typing import Any, Mapping, cast
 import z3
 
 from verifyci.checks.base import CheckContext, gap, make_finding, make_result
@@ -41,17 +42,18 @@ _STANDARD_TRANSPARENT_DECORATORS = frozenset(
 )
 
 
-def _is_local_identity_decorator(tree: ast.AST, dec_name: str) -> bool:
+def _local_identity_decorator_names(tree: ast.AST) -> frozenset[str]:
+    out: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == dec_name:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             args = node.args.args
             if len(args) == 1:
                 param_name = args[0].arg
                 if len(node.body) == 1 and isinstance(node.body[0], ast.Return):
                     ret_val = node.body[0].value
                     if isinstance(ret_val, ast.Name) and ret_val.id == param_name:
-                        return True
-    return False
+                        out.add(node.name)
+    return frozenset(out)
 
 _SAFE_BUILTINS: dict[str, Any] = {
     "abs": abs,
@@ -719,7 +721,7 @@ def execute_function_isolated(
 
 
 def execute_ts_function_isolated(
-    b_src: str, h_src: str, fn_name: str, target: str, model_values: dict[str, Any], timeout: float = 2.0
+    b_src: str, h_src: str, fn_name: str, target: str, model_values: dict[str, Any], timeout: float = 5.0
 ) -> tuple[bool, str]:
     """Execute base and head TypeScript functions in an isolated Node.js subprocess.
 
@@ -969,18 +971,44 @@ def _strip_docstrings(tree: ast.AST) -> None:
                 node.body = node.body[1:]
 
 
-def _find_enclosing_function(tree: ast.AST, target_node: ast.AST) -> str:
-    """Find the enclosing function name for an AST node."""
-    for node in ast.walk(tree):
+def _build_enclosing_function_map(tree: ast.AST) -> dict[int, str]:
+    """Map each AST node id to its outermost enclosing function name."""
+    mapping: dict[int, str] = {}
+    stack: list[tuple[ast.AST, str]] = [(tree, "")]
+    while stack:
+        node, current_fn = stack.pop()
+        outer_fn = current_fn
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            for child in ast.walk(node):
-                if child is target_node:
-                    return node.name
-    return ""
+            if not outer_fn:
+                outer_fn = node.name
+            mapping[id(node)] = outer_fn
+        elif outer_fn:
+            mapping[id(node)] = outer_fn
+        for child in ast.iter_child_nodes(node):
+            stack.append((child, outer_fn))
+    return mapping
 
 
-def _find_function_node(tree: ast.AST, fn_name: str) -> ast.FunctionDef | None:
+def _find_enclosing_function(
+    tree: ast.AST,
+    target_node: ast.AST,
+    enclosing_map: dict[int, str] | None = None,
+) -> str:
+    """Find the outermost enclosing function name for an AST node."""
+    if enclosing_map is not None:
+        return enclosing_map.get(id(target_node), "")
+    return _build_enclosing_function_map(tree).get(id(target_node), "")
+
+
+def _find_function_node(
+    tree: ast.AST,
+    fn_name: str,
+    funcs_by_name: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
+) -> ast.FunctionDef | None:
     """Find FunctionDef AST node matching name."""
+    if funcs_by_name is not None:
+        found = funcs_by_name.get(fn_name)
+        return cast(ast.FunctionDef, found) if isinstance(found, ast.FunctionDef) else None
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == fn_name:
             return cast(ast.FunctionDef, node)
@@ -1180,6 +1208,7 @@ def run(context: CheckContext) -> CheckResult:
             applicability_evidence={"configured": True, "relevant_paths": 0},
         )
 
+    parsed_trees: dict[tuple[int, str], ast.Module] = {}
     # --- Check B: Parser Integrity & Syntax Validation ---
     for entry in code_entries:
         path = entry.head_path or entry.base_path
@@ -1187,7 +1216,7 @@ def run(context: CheckContext) -> CheckResult:
             for side, src in (("base", entry.base_source), ("head", entry.head_source)):
                 if src:
                     try:
-                        ast.parse(src)
+                        parsed_trees[(id(entry), side)] = ast.parse(src)
                     except SyntaxError as exc:
                         return make_result(
                             context=context,
@@ -1211,7 +1240,10 @@ def run(context: CheckContext) -> CheckResult:
     for entry in code_entries:
         path = entry.head_path or entry.base_path
         if path.endswith((".py", ".pyi")) and entry.head_source:
-            tree = ast.parse(entry.head_source)
+            tree = parsed_trees.get((id(entry), "head"))
+            if tree is None:
+                tree = ast.parse(entry.head_source)
+            _identity_decorators = _local_identity_decorator_names(tree)
             for node in ast.walk(tree):
                 # Dynamic dispatch inspection
                 if isinstance(node, ast.Call):
@@ -1261,7 +1293,7 @@ def run(context: CheckContext) -> CheckResult:
                         is_transparent = (
                             dec_name in _STANDARD_TRANSPARENT_DECORATORS
                             or dec_name in context.policy.transparent_decorators
-                            or _is_local_identity_decorator(tree, dec_name)
+                            or dec_name in _identity_decorators
                         )
                         if not is_transparent and dec_name:
                             return make_result(
@@ -1413,9 +1445,17 @@ def run(context: CheckContext) -> CheckResult:
         if not path.endswith((".py", ".pyi")) or not entry.base_source or not entry.head_source:
             continue
 
-        b_tree = ast.parse(entry.base_source)
-        h_tree = ast.parse(entry.head_source)
+        b_tree = parsed_trees.get((id(entry), "base"))
+        if b_tree is None:
+            b_tree = ast.parse(entry.base_source)
+        h_tree = parsed_trees.get((id(entry), "head"))
+        if h_tree is None:
+            h_tree = ast.parse(entry.head_source)
         mod_name = path.replace(".py", "").replace("\\", "/")
+
+        b_funcs = {f.name: f for f in ast.walk(b_tree) if isinstance(f, ast.FunctionDef)}
+        h_funcs = {f.name: f for f in ast.walk(h_tree) if isinstance(f, ast.FunctionDef)}
+        h_enclosing_map = _build_enclosing_function_map(h_tree)
 
         # --- Candidate Category 1: Return Tuple Binding Swaps ---
         b_returns = [
@@ -1428,7 +1468,7 @@ def run(context: CheckContext) -> CheckResult:
             b_elts = [ast.dump(e, include_attributes=False) for e in b_returns[0].value.elts]  # ty: ignore[unresolved-attribute]
             h_elts = [ast.dump(e, include_attributes=False) for e in h_returns[0].value.elts]  # ty: ignore[unresolved-attribute]
             if len(b_elts) >= 2 and b_elts != h_elts and sorted(b_elts) == sorted(h_elts):
-                fn_name = _find_enclosing_function(h_tree, h_returns[0])
+                fn_name = _find_enclosing_function(h_tree, h_returns[0], h_enclosing_map)
                 ctx_sym = SymbolicContext()
                 b_names = [_node_to_var_name(e) for e in b_returns[0].value.elts]  # ty: ignore[unresolved-attribute]
                 h_names = [_node_to_var_name(e) for e in h_returns[0].value.elts]  # ty: ignore[unresolved-attribute]
@@ -1442,7 +1482,7 @@ def run(context: CheckContext) -> CheckResult:
                 if solver.check() == z3.sat:
                     z3_model = solver.model()
                     model = _extract_model_dict(z3_model)
-                    fn_node = _find_function_node(h_tree, fn_name)
+                    fn_node = h_funcs.get(fn_name)
                     if fn_node:
                         for arg in fn_node.args.args:
                             if arg.arg not in model and not any(k.startswith(f"{arg.arg}.") for k in model):
@@ -1518,25 +1558,33 @@ def run(context: CheckContext) -> CheckResult:
         h_calls = [
             n for n in ast.walk(h_tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         ]
+        h_calls_by_func: dict[str, list[ast.Call]] = defaultdict(list)
+        for hc in h_calls:
+            h_calls_by_func[cast(ast.Name, hc.func).id].append(hc)
+
         for bc in b_calls:
-            for hc in h_calls:
-                if bc.func.id == hc.func.id and len(bc.args) >= 2 and len(bc.args) == len(hc.args):  # ty: ignore[unresolved-attribute]
-                    b_args = [ast.dump(a, include_attributes=False) for a in bc.args]
+            callee_name = cast(ast.Name, bc.func).id
+            candidate_hcs = h_calls_by_func.get(callee_name)
+            if not candidate_hcs or len(bc.args) < 2:
+                continue
+            b_args = [ast.dump(a, include_attributes=False) for a in bc.args]
+            b_args_sorted = sorted(b_args)
+            for hc in candidate_hcs:
+                if len(bc.args) == len(hc.args):
                     h_args = [ast.dump(a, include_attributes=False) for a in hc.args]
-                    if b_args != h_args and sorted(b_args) == sorted(h_args):
+                    if b_args != h_args and b_args_sorted == sorted(h_args):
                         # Callee definition compensation check
-                        b_funcs = {f.name: f for f in ast.walk(b_tree) if isinstance(f, ast.FunctionDef)}
-                        h_funcs = {f.name: f for f in ast.walk(h_tree) if isinstance(f, ast.FunctionDef)}
-                        callee_name = bc.func.id  # ty: ignore[unresolved-attribute]
                         compensated = False
                         if callee_name in b_funcs and callee_name in h_funcs:
-                            bf_params = [a.arg for a in b_funcs[callee_name].args.args]
-                            hf_params = [a.arg for a in h_funcs[callee_name].args.args]
+                            bf = b_funcs[callee_name]
+                            hf = h_funcs[callee_name]
+                            bf_params = [a.arg for a in bf.args.args]
+                            hf_params = [a.arg for a in hf.args.args]
                             if bf_params != hf_params and sorted(bf_params) == sorted(hf_params):
                                 compensated = True
 
                         if not compensated:
-                            caller_fn = _find_enclosing_function(h_tree, hc)
+                            caller_fn = _find_enclosing_function(h_tree, hc, h_enclosing_map)
                             ctx_sym = SymbolicContext()
                             b_names = [_node_to_var_name(a) for a in bc.args]
                             h_names = [_node_to_var_name(a) for a in hc.args]
@@ -1550,7 +1598,7 @@ def run(context: CheckContext) -> CheckResult:
                             if solver.check() == z3.sat:
                                 z3_model = solver.model()
                                 model = _extract_model_dict(z3_model)
-                                fn_node = _find_function_node(h_tree, caller_fn)
+                                fn_node = h_funcs.get(caller_fn)
                                 if fn_node:
                                     for arg in fn_node.args.args:
                                         if arg.arg not in model and not any(k.startswith(f"{arg.arg}.") for k in model):
@@ -1619,23 +1667,37 @@ def run(context: CheckContext) -> CheckResult:
                                 )
                                 findings.append(finding)
 
+        # Cache target sites across Category 3 & 4 for identical functions in this file entry
+        fn_sites_cache: dict[str, tuple[list[TargetSite], list[TargetSite]]] = {}
+
+        def _get_target_sites(
+            b_fn_node: ast.FunctionDef,
+            h_fn_node: ast.FunctionDef,
+            key: str,
+            cache: dict[str, tuple[list[TargetSite], list[TargetSite]]] = fn_sites_cache,
+        ) -> tuple[list[TargetSite], list[TargetSite]]:
+            cached = cache.get(key)
+            if cached is not None:
+                return cached
+            ctx_sym = SymbolicContext()
+            b_s = collect_target_sites(b_fn_node.body, ctx_sym)
+            h_s = collect_target_sites(h_fn_node.body, ctx_sym)
+            cache[key] = (b_s, h_s)
+            return b_s, h_s
+
         # --- Candidate Category 3: Protected Exception Removed ---
         for rule_id, rule in prot_errors.items():
             paths = rule.get("paths", ())
             if paths and not path_matches_any(paths, path):
                 continue
             for exc in rule.get("raises", ()):
-                ctx_sym = SymbolicContext()
-                b_fns = [f for f in ast.walk(b_tree) if isinstance(f, ast.FunctionDef)]
-                h_fns = [f for f in ast.walk(h_tree) if isinstance(f, ast.FunctionDef)]
-                for b_fn in b_fns:
-                    h_fn = next((f for f in h_fns if f.name == b_fn.name), None)
+                for b_name, b_fn in b_funcs.items():
+                    h_fn = h_funcs.get(b_name)
                     if not h_fn:
                         continue
 
                     try:
-                        b_sites = collect_target_sites(b_fn.body, ctx_sym)
-                        h_sites = collect_target_sites(h_fn.body, ctx_sym)
+                        b_sites, h_sites = _get_target_sites(b_fn, h_fn, b_name)
                     except (UnsupportedExpressionError, UnsupportedControlFlowError) as exc_unsupp:
                         gap_reason = (
                             "unsupported_syntax_version"
@@ -1760,17 +1822,13 @@ def run(context: CheckContext) -> CheckResult:
             if paths and not path_matches_any(paths, path):
                 continue
             for eff in rule.get("effects", ()):
-                ctx_sym = SymbolicContext()
-                b_fns = [f for f in ast.walk(b_tree) if isinstance(f, ast.FunctionDef)]
-                h_fns = [f for f in ast.walk(h_tree) if isinstance(f, ast.FunctionDef)]
-                for b_fn in b_fns:
-                    h_fn = next((f for f in h_fns if f.name == b_fn.name), None)
+                for b_name, b_fn in b_funcs.items():
+                    h_fn = h_funcs.get(b_name)
                     if not h_fn:
                         continue
 
                     try:
-                        b_sites = collect_target_sites(b_fn.body, ctx_sym)
-                        h_sites = collect_target_sites(h_fn.body, ctx_sym)
+                        b_sites, h_sites = _get_target_sites(b_fn, h_fn, b_name)
                     except (UnsupportedExpressionError, UnsupportedControlFlowError) as exc_unsupp:
                         gap_reason = (
                             "unsupported_syntax_version"

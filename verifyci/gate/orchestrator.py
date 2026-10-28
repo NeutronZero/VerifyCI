@@ -311,6 +311,7 @@ def _payload(
             for e in entries
         ],
     }
+    pr_policy_changed = policy_changed(entries)
     policy_payload = {
         "authoritative_blob_hash": policy.blob_hash,
         "authoritative_policy_source": policy.source,
@@ -318,8 +319,8 @@ def _payload(
         "proposed_policy_hash": proposed.policy.effective_hash if proposed else None,
         "proposed_blob_hash": proposed.policy.blob_hash if proposed else None,
         "proposed_policy_valid": proposed is not None,
-        "pr_changed": policy_changed(entries),
-        "policy_change_review": policy_changed(entries),
+        "pr_changed": pr_policy_changed,
+        "policy_change_review": pr_policy_changed,
         "waiver_ids": sorted(policy.waivers),
         "acceptance_ids": sorted(policy.acceptances),
     }
@@ -492,25 +493,47 @@ def _augment_scope_with_repository(
     """
     base_facts = dict(scope.base_facts)
     head_facts = dict(scope.head_facts)
-    for rev, target in ((base_rev, base_facts), (head_rev, head_facts)):
-        tree = git.list_tree(rev)
-        for mode, obj_type, object_id, path in tree:
-            if mode == "160000" or mode == "120000" or obj_type != "blob":
-                continue
-            suffix = path.rsplit(".", 1)[-1].lower()
-            if suffix not in _CODE_SUFFIXES or path in target:
-                continue
-            raw = git.read_blob(object_id)
-            if b"\0" in raw:
-                continue
-            target[path] = analyze_source(
-                path,
-                raw.decode("utf-8", "replace"),
-                source_roots,
-                fact_provider=fact_provider,
-                toolchain_fingerprint=toolchain_fingerprint,
-                blob_hash=f"{object_format}:{object_id}" if object_format else object_id,
-            )
+    base_blobs: dict[str, str] = {}
+    for mode, obj_type, object_id, path in git.list_tree(base_rev):
+        if mode == "160000" or mode == "120000" or obj_type != "blob":
+            continue
+        suffix = path.rsplit(".", 1)[-1].lower()
+        if suffix not in _CODE_SUFFIXES:
+            continue
+        base_blobs[path] = object_id
+        if path in base_facts:
+            continue
+        raw = git.read_blob(object_id)
+        if b"\0" in raw:
+            continue
+        base_facts[path] = analyze_source(
+            path,
+            raw.decode("utf-8", "replace"),
+            source_roots,
+            fact_provider=fact_provider,
+            toolchain_fingerprint=toolchain_fingerprint,
+            blob_hash=f"{object_format}:{object_id}" if object_format else object_id,
+        )
+    for mode, obj_type, object_id, path in git.list_tree(head_rev):
+        if mode == "160000" or mode == "120000" or obj_type != "blob":
+            continue
+        suffix = path.rsplit(".", 1)[-1].lower()
+        if suffix not in _CODE_SUFFIXES or path in head_facts:
+            continue
+        if base_blobs.get(path) == object_id and path in base_facts:
+            head_facts[path] = base_facts[path]
+            continue
+        raw = git.read_blob(object_id)
+        if b"\0" in raw:
+            continue
+        head_facts[path] = analyze_source(
+            path,
+            raw.decode("utf-8", "replace"),
+            source_roots,
+            fact_provider=fact_provider,
+            toolchain_fingerprint=toolchain_fingerprint,
+            blob_hash=f"{object_format}:{object_id}" if object_format else object_id,
+        )
     base_entities = frozenset(
         entity.qname for facts in base_facts.values() for entity in facts.entities
     )

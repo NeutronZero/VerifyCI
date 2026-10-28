@@ -209,6 +209,8 @@ def _secret_sub(context: CheckContext) -> CheckResult:
         if path_matches_any(context.policy.secret_allowlist_paths, path):
             continue
         line_numbers = changed.get(path, set())
+        if not line_numbers:
+            continue
         for line_number, line in enumerate(entry.head_source.splitlines(), start=1):
             if line_number not in line_numbers:
                 continue
@@ -343,6 +345,11 @@ def _dangerous_sub(context: CheckContext) -> CheckResult:
         rule_id: tuple(rule.get("symbols", ()))
         for rule_id, rule in context.policy.forbidden_calls.items()
     }
+    custom_patterns: list[tuple[str, str, re.Pattern[str]]] = []
+    for rule_id, symbols in custom.items():
+        for symbol in symbols:
+            simple = symbol.split(":")[-1].rsplit(".", 1)[-1]
+            custom_patterns.append((rule_id, symbol, re.compile(rf"\b{re.escape(simple)}\s*\(")))
     seen_call_keys: set[tuple[str, int, str]] = set()
 
     for entry in context.entries:
@@ -358,6 +365,7 @@ def _dangerous_sub(context: CheckContext) -> CheckResult:
             try:
                 tree = ast.parse(entry.head_source)
                 aliases: dict[str, str] = {}
+                calls: list[ast.Call] = []
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Import):
                         for name in node.names:
@@ -368,14 +376,13 @@ def _dangerous_sub(context: CheckContext) -> CheckResult:
                         for name in node.names:
                             target = f"{mod}.{name.name}" if mod else name.name
                             aliases[name.asname or name.name] = target
+                    elif isinstance(node, ast.Call):
+                        calls.append(node)
 
-                for node in ast.walk(tree):
-                    if not isinstance(node, ast.Call):
-                        continue
+                for node in calls:
                     start_line = node.lineno
                     end_line = getattr(node, "end_lineno", start_line)
-                    call_span = set(range(start_line, end_line + 1))
-                    if not (call_span & path_changed):
+                    if not any(line_no in path_changed for line_no in range(start_line, end_line + 1)):
                         continue
 
                     checked += 1
@@ -479,11 +486,9 @@ def _dangerous_sub(context: CheckContext) -> CheckResult:
             for name, pattern in _BUILTIN_DANGEROUS.items():
                 if pattern.search(line):
                     matched.append((name, name))
-            for rule_id, symbols in custom.items():
-                for symbol in symbols:
-                    simple = symbol.split(":")[-1].rsplit(".", 1)[-1]
-                    if re.search(rf"\b{re.escape(simple)}\s*\(", line):
-                        matched.append((rule_id, symbol))
+            for rule_id, symbol, pattern in custom_patterns:
+                if pattern.search(line):
+                    matched.append((rule_id, symbol))
             for rule_id, symbol in matched:
                 key = (path, line_number, symbol)
                 if key not in seen_call_keys:

@@ -8,7 +8,7 @@ rather than mapped by guesswork.
 from __future__ import annotations
 
 import ast
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from hashlib import sha1, sha256
 import re
 from typing import Any, Callable, Mapping, Sequence
@@ -71,12 +71,26 @@ class SourceFacts:
     parse_error: str = ""
     has_dynamic_dispatch: bool = False
     has_unknown_decorator: bool = False
+    _entity_by_qname: dict[str, Entity] | None = field(
+        default=None, init=False, repr=False, compare=False, hash=False
+    )
+    _names: set[str] | None = field(
+        default=None, init=False, repr=False, compare=False, hash=False
+    )
 
     def entity_by_qname(self) -> dict[str, Entity]:
-        return {e.qname: e for e in self.entities}
+        idx = self._entity_by_qname
+        if idx is None:
+            idx = {e.qname: e for e in self.entities}
+            object.__setattr__(self, "_entity_by_qname", idx)
+        return idx
 
     def names(self) -> set[str]:
-        return {e.qname.rsplit(".", 1)[-1] for e in self.entities}
+        nms = self._names
+        if nms is None:
+            nms = {e.qname.rsplit(".", 1)[-1] for e in self.entities}
+            object.__setattr__(self, "_names", nms)
+        return nms
 
 
 def _digest(value: str) -> str:
@@ -111,9 +125,20 @@ def _py_language() -> Any:
 
 
 def _pos_to_byte(data: bytes, lineno: int, col: int) -> int:
-    lines = data.splitlines(keepends=True)
-    byte_offset = sum(len(line_bytes) for line_bytes in lines[:lineno - 1])
-    return byte_offset + col
+    # Backwards-compatible helper; callers with repeated invocations should
+    # prefer the precomputed prefix table built in _python_entities.
+    if lineno <= 1:
+        return col
+    idx = 0
+    count = 1
+    target = lineno - 1
+    while count <= target:
+        nxt = data.find(b"\n", idx)
+        if nxt == -1:
+            return len(data) + col
+        idx = nxt + 1
+        count += 1
+    return idx + col
 
 
 def _annotation(node: ast.AST | None) -> str:
@@ -156,8 +181,10 @@ def _function_params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[Para
 class _CallVisitor(ast.NodeVisitor):
     def __init__(self) -> None:
         self.calls: list[CallSite] = []
+        self.imports: list[ImportFact] = []
         self.loads: set[str] = set()
         self.dynamic = False
+        self.has_decorators = False
         self.scope_stack: list[set[str]] = []
 
     def _collect_local_bindings(
@@ -207,14 +234,48 @@ class _CallVisitor(ast.NodeVisitor):
         return locals_found - globals_declared
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        if not self.has_decorators and _decorator_names(node):
+            self.has_decorators = True
         self.scope_stack.append(self._collect_local_bindings(node))
         self.generic_visit(node)
         self.scope_stack.pop()
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        if not self.has_decorators and _decorator_names(node):
+            self.has_decorators = True
         self.scope_stack.append(self._collect_local_bindings(node))
         self.generic_visit(node)
         self.scope_stack.pop()
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        if not self.has_decorators and _decorator_names(node):
+            self.has_decorators = True
+        self.generic_visit(node)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            local = alias.asname or alias.name
+            self.imports.append(
+                ImportFact(
+                    module=alias.name,
+                    names=(local,),
+                    line=node.lineno,
+                    level=0,
+                    aliases=((alias.name, local),),
+                )
+            )
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        aliases = tuple((alias.name, alias.asname or alias.name) for alias in node.names)
+        self.imports.append(
+            ImportFact(
+                module=node.module or "",
+                names=tuple(alias.name for alias in node.names),
+                line=node.lineno,
+                level=node.level,
+                aliases=aliases,
+            )
+        )
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
         self.scope_stack.append(self._collect_local_bindings(node))
@@ -249,7 +310,6 @@ class _CallVisitor(ast.NodeVisitor):
     def visit_Name(self, node: ast.Name) -> None:
         if isinstance(node.ctx, ast.Load):
             self.loads.add(node.id)
-        self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if isinstance(node.ctx, ast.Load):
@@ -302,11 +362,13 @@ def _python_entities(
     source: str,
     tree: ast.Module,
     source_roots: Sequence[str],
+    exports: frozenset[str] | set[str] | None = None,
 ) -> tuple[Entity, ...]:
     source_bytes = source.encode("utf-8")
     blob_id = git_blob_id(source_bytes)
     module = normalize_repo_path(path).rsplit(".", 1)[0]
-    exports = _collect_all(tree)
+    if exports is None:
+        exports = _collect_all(tree)
 
     ts_parser = _py_language()
     if ts_parser is not None:
@@ -387,6 +449,23 @@ def _python_entities(
 
     entities = []
 
+    line_byte_offsets = [0]
+    pos = 0
+    while True:
+        pos = source_bytes.find(b"\n", pos)
+        if pos == -1:
+            break
+        pos += 1
+        line_byte_offsets.append(pos)
+
+    def _byte_offset(lineno: int, col: int) -> int:
+        idx = lineno - 1
+        if idx < 0:
+            idx = 0
+        elif idx >= len(line_byte_offsets):
+            idx = len(line_byte_offsets) - 1
+        return line_byte_offsets[idx] + col
+
     def walk(node: ast.AST, parent_qual: str, in_function: bool) -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             name = node.name
@@ -425,8 +504,8 @@ def _python_entities(
                     end_line=e_line,
                     start_col=s_col,
                     end_col=e_col,
-                    start_byte=_pos_to_byte(source_bytes, s_line, s_col),
-                    end_byte=_pos_to_byte(source_bytes, e_line, e_col),
+                    start_byte=_byte_offset(s_line, s_col),
+                    end_byte=_byte_offset(e_line, e_col),
                     blob_id=blob_id,
                     body_digest=_digest(body),
                     is_export=is_export,
@@ -459,53 +538,19 @@ def analyze_python(path: str, source: str, source_roots: Sequence[str] = ()) -> 
         )
     visitor = _CallVisitor()
     visitor.visit(tree)
-    imports: list[ImportFact] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                local = alias.asname or alias.name
-                imports.append(
-                    ImportFact(
-                        module=alias.name,
-                        names=(local,),
-                        line=node.lineno,
-                        level=0,
-                        aliases=((alias.name, local),),
-                    )
-                )
-        elif isinstance(node, ast.ImportFrom):
-            aliases = tuple((alias.name, alias.asname or alias.name) for alias in node.names)
-            imports.append(
-                ImportFact(
-                    module=node.module or "",
-                    names=tuple(alias.name for alias in node.names),
-                    line=node.lineno,
-                    level=node.level,
-                    aliases=aliases,
-                )
-            )
-    entities = _python_entities(path, source, tree, source_roots)
-    unknown_decorators = False
-    for entity in entities:
-        # Decorators are conservatively opaque unless policy says otherwise;
-        # the semantic check consumes this flag.
-        pass
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            if _decorator_names(node):
-                unknown_decorators = True
-                break
+    exports_set = frozenset(_collect_all(tree))
+    entities = _python_entities(path, source, tree, source_roots, exports=exports_set)
     return SourceFacts(
         path=path,
         language="python",
         supported=True,
         entities=entities,
         calls=tuple(visitor.calls),
-        imports=tuple(imports),
+        imports=tuple(visitor.imports),
         name_loads=frozenset(visitor.loads),
-        exports=frozenset(_collect_all(tree)),
+        exports=exports_set,
         has_dynamic_dispatch=visitor.dynamic,
-        has_unknown_decorator=unknown_decorators,
+        has_unknown_decorator=visitor.has_decorators,
     )
 
 
@@ -899,17 +944,13 @@ def _is_safe_constant_value(node: ast.AST) -> bool:
     return False
 
 
-def _is_safe_range(source: str, start_line: int, end_line: int) -> bool:
-    if not source:
-        return True
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return False
+def _is_safe_range_tree(tree: ast.Module, start_line: int, end_line: int) -> bool:
     for stmt in tree.body:
         s_start = getattr(stmt, "lineno", 1)
+        if s_start > end_line:
+            break
         s_end = getattr(stmt, "end_lineno", s_start)
-        if s_end < start_line or s_start > end_line:
+        if s_end < start_line:
             continue
         if isinstance(stmt, (ast.Import, ast.ImportFrom)):
             continue
@@ -925,6 +966,16 @@ def _is_safe_range(source: str, start_line: int, end_line: int) -> bool:
     return True
 
 
+def _is_safe_range(source: str, start_line: int, end_line: int) -> bool:
+    if not source:
+        return True
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    return _is_safe_range_tree(tree, start_line, end_line)
+
+
 def is_safe_module_construct(
     base_source: str,
     old_start: int,
@@ -932,6 +983,8 @@ def is_safe_module_construct(
     head_source: str,
     new_start: int,
     new_count: int,
+    base_tree: ast.Module | None = None,
+    head_tree: ast.Module | None = None,
 ) -> bool:
     """Validate that changes outside entities only touch safe module declarations.
 
@@ -940,11 +993,21 @@ def is_safe_module_construct(
     For replacements, validates both sides.
     An empty side must not pass safety validation vacuously if the other side touched unsafe code.
     """
-    if old_count > 0:
-        if not _is_safe_range(base_source, old_start, old_start + old_count - 1):
+    if old_count > 0 and (base_source or base_tree is not None):
+        if base_tree is None:
+            try:
+                base_tree = ast.parse(base_source)
+            except SyntaxError:
+                return False
+        if not _is_safe_range_tree(base_tree, old_start, old_start + old_count - 1):
             return False
-    if new_count > 0:
-        if not _is_safe_range(head_source, new_start, new_start + new_count - 1):
+    if new_count > 0 and (head_source or head_tree is not None):
+        if head_tree is None:
+            try:
+                head_tree = ast.parse(head_source)
+            except SyntaxError:
+                return False
+        if not _is_safe_range_tree(head_tree, new_start, new_start + new_count - 1):
             return False
     if old_count == 0 and new_count == 0:
         return False
@@ -1009,8 +1072,23 @@ class ChangedScope:
     mapped_hunks: tuple[Mapping[str, Any], ...] = ()
     mapped_entities: tuple[Mapping[str, Any], ...] = ()
     renames: tuple[Mapping[str, Any], ...] = ()
+    _entity_index: dict[str, Entity] | None = field(
+        default=None, init=False, repr=False, compare=False, hash=False
+    )
+
+    def __post_init__(self) -> None:
+        idx: dict[str, Entity] = {}
+        for facts in self.base_facts.values():
+            for e in facts.entities:
+                idx[e.qname] = e
+        for facts in self.head_facts.values():
+            for e in facts.entities:
+                idx[e.qname] = e
+        object.__setattr__(self, "_entity_index", idx)
 
     def entity(self, qname: str) -> Entity | None:
+        if self._entity_index is not None:
+            return self._entity_index.get(qname)
         for facts in self.head_facts.values():
             for entity in facts.entities:
                 if entity.qname == qname:
@@ -1160,6 +1238,33 @@ def build_changed_scope(
         h_ents = hf.entities if hf else ()
         b_by_qname = {e.qname: e for e in b_ents}
 
+        b_tree: ast.Module | None = None
+        h_tree: ast.Module | None = None
+        b_tree_parsed = False
+        h_tree_parsed = False
+
+        def _get_b_tree(cur_entry: DiffEntry = entry) -> ast.Module | None:
+            nonlocal b_tree, b_tree_parsed
+            if not b_tree_parsed:
+                b_tree_parsed = True
+                if cur_entry.base_source:
+                    try:
+                        b_tree = ast.parse(cur_entry.base_source)
+                    except SyntaxError:
+                        b_tree = None
+            return b_tree
+
+        def _get_h_tree(cur_entry: DiffEntry = entry) -> ast.Module | None:
+            nonlocal h_tree, h_tree_parsed
+            if not h_tree_parsed:
+                h_tree_parsed = True
+                if cur_entry.head_source:
+                    try:
+                        h_tree = ast.parse(cur_entry.head_source)
+                    except SyntaxError:
+                        h_tree = None
+            return h_tree
+
         for hunk in entry.hunks:
             m_base, base_conflict = find_matching_entity_detailed(b_ents, hunk.old_start, hunk.old_count)
             m_head, head_conflict = find_matching_entity_detailed(h_ents, hunk.new_start, hunk.new_count)
@@ -1239,6 +1344,8 @@ def build_changed_scope(
                         entry.head_source,
                         hunk.new_start,
                         hunk.new_count,
+                        base_tree=_get_b_tree(),
+                        head_tree=_get_h_tree(),
                     )
                 ):
                     mapped_hunks.append(
