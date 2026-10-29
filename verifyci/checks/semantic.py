@@ -788,7 +788,7 @@ def replay_witness(
     model_values: dict[str, Any],
     source_identity: str = "",
     language: str = "python",
-    timeout: float = 2.0,
+    timeout: float = 5.0,
     phi_base: z3.ExprRef | None = None,
     phi_head: z3.ExprRef | None = None,
     solver_model: z3.ModelRef | None = None,
@@ -803,7 +803,7 @@ def replay_witness(
     if language == "typescript" or (source_identity and source_identity.endswith(".ts")):
         try:
             confirmed, obs = execute_ts_function_isolated(
-                base_src, head_src, fn_name, target, model_values, timeout=timeout
+                base_src, head_src, fn_name, target, model_values, timeout=max(timeout, 5.0)
             )
             return ReplayResult(
                 confirmed=confirmed,
