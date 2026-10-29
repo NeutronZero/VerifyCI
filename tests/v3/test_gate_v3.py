@@ -250,6 +250,83 @@ def test_stale_release_validation_commit_mismatch_rejected(tmp_path, monkeypatch
     assert "stale release-validation evidence" in diag["detail"]
 
 
+def test_tampered_attestation_signature_fails_closed(tmp_path, monkeypatch):
+    """Tampered attestation signature is detected and fails closed with ERROR."""
+    from verifyci.contracts import release_validation
+    real_read = Path.read_bytes
+
+    def tampered_read(self):
+        if self.name == "release_validation.json":
+            raw = real_read(self)
+            data = json.loads(raw.decode("utf-8"))
+            data["attestation"]["signature"] = "deadbeef" * 8
+            return json.dumps(data).encode("utf-8")
+        return real_read(self)
+
+    monkeypatch.setattr(Path, "read_bytes", tampered_read)
+
+    ok, err = release_validation.verify_release_validation_evidence()
+    assert not ok
+    assert "invalid release attestation signature" in err
+
+    root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
+    head = _commit(root, {"app.py": "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n"})
+    bundle = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
+    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.exit_code == 3
+    assert "check_not_validated" in bundle.payload["verdict"]["fault_reason_codes"]
+    diag = next(d for d in bundle.payload["diagnostics"] if d["code"] == "check_not_validated")
+    assert "invalid release attestation signature" in diag["detail"]
+
+
+def test_tampered_measurement_payload_fails_closed(tmp_path, monkeypatch):
+    """Tampered measurements payload without re-signing fails digest verification and fails closed."""
+    from verifyci.contracts import release_validation
+    real_read = Path.read_bytes
+
+    def tampered_read(self):
+        if self.name == "release_validation.json":
+            raw = real_read(self)
+            data = json.loads(raw.decode("utf-8"))
+            data["measurements"]["benchmark"]["zero_false_blocking"] = False
+            return json.dumps(data).encode("utf-8")
+        return real_read(self)
+
+    monkeypatch.setattr(Path, "read_bytes", tampered_read)
+
+    ok, err = release_validation.verify_release_validation_evidence()
+    assert not ok
+    assert "release-validation attestation digest mismatch" in err
+
+    root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
+    head = _commit(root, {"app.py": "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n"})
+    bundle = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
+    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.exit_code == 3
+    assert "check_not_validated" in bundle.payload["verdict"]["fault_reason_codes"]
+    diag = next(d for d in bundle.payload["diagnostics"] if d["code"] == "check_not_validated")
+    assert "release-validation attestation digest mismatch" in diag["detail"]
+
+
+def test_missing_git_identity_fails_closed(tmp_path, monkeypatch):
+    """When git commit identity cannot be authoritatively resolved, validation fails closed."""
+    from verifyci.contracts import release_validation
+    monkeypatch.setattr(release_validation, "get_commit_sha", lambda root: None)
+
+    ok, err = release_validation.verify_release_validation_evidence()
+    assert not ok
+    assert "unable to establish authoritative git commit identity" in err
+
+    root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
+    head = _commit(root, {"app.py": "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n"})
+    bundle = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
+    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.exit_code == 3
+    assert "check_not_validated" in bundle.payload["verdict"]["fault_reason_codes"]
+    diag = next(d for d in bundle.payload["diagnostics"] if d["code"] == "check_not_validated")
+    assert "unable to establish authoritative git commit identity" in diag["detail"]
+
+
 def test_local_cache_reuses_pinned_facts_without_changing_payload(tmp_path):
     root, base = _repo(
         tmp_path,
