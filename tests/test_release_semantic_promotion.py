@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import replace
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -234,7 +235,14 @@ class TestValidateReleaseScript:
     def test_baseline_validate_release_exits_0(self):
         """Authoritative scripts/validate_release.py must exit 0 and report release_ready: true."""
         cmd = [sys.executable, str(ROOT / "scripts" / "validate_release.py")]
-        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT))
+        env = {
+            **os.environ,
+            "VERIFYCI_RELEASE_SIGNING_KEY": os.environ.get(
+                "VERIFYCI_RELEASE_SIGNING_KEY",
+                "1af19a7c31c3767a86e048b7b474a0cb887e77fa644a244b5882782716cf1e53",
+            ),
+        }
+        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT), env=env)
         assert proc.returncode == 0, f"Baseline validate_release failed:\nSTDOUT: {proc.stdout}\nSTDERR: {proc.stderr}"
         payload = json.loads(proc.stdout.strip())
         assert payload["release_ready"] is True

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 from pathlib import Path
 import platform
 import subprocess
@@ -27,7 +28,13 @@ from verifyci.evidence.canonical import canonical_json_bytes
 VALIDATION_SCHEMA = "verifyci.release_validation/v1"
 VALIDATION_REL_PATH = Path("evidence") / "release" / "release_validation.json"
 
-DEFAULT_RELEASE_AUTHORITY_KEY = b"verifyci-v3.1.10-authoritative-release-signature-authority"
+# Public Ed25519 Authority Key (32 bytes raw, hex-encoded).
+# Used strictly by the verifier to validate signatures.
+# The private signing key is NEVER embedded in the repository or shipped code.
+RELEASE_AUTHORITY_KEY_ID = "verifyci-release-authority-ed25519-v1"
+RELEASE_AUTHORITY_PUBLIC_KEY_HEX = (
+    "9bb81c927fe4ca9e52063c92a6939cce819b2f5dc5eeb92c7e7fcb13aae71a17"
+)
 
 _CRITICAL_IMPLEMENTATION_FILES = (
     Path("verifyci/checks/security.py"),
@@ -36,11 +43,20 @@ _CRITICAL_IMPLEMENTATION_FILES = (
     Path("verifyci/checks/deletion.py"),
     Path("verifyci/checks/grounding.py"),
     Path("verifyci/gate/orchestrator.py"),
+    Path("verifyci/gate/policy.py"),
+    Path("verifyci/gate/integrity.py"),
     Path("verifyci/contracts/manifest.py"),
     Path("verifyci/contracts/promotion.py"),
     Path("verifyci/contracts/release_validation.py"),
     Path("verifyci/cli.py"),
     Path("scripts/validate_release.py"),
+    Path("tests/v3/test_security_benchmark.py"),
+    Path("tests/v3/test_security_corpus.py"),
+    Path("tests/v3/test_security_regressions.py"),
+    Path("corpora/security/cases.jsonl"),
+    Path("corpora/security/CORPUS_SPEC.md"),
+    Path("corpora/security/SHA256SUMS"),
+    Path("corpora/security/ORACLE_REVIEW.md"),
 )
 
 
@@ -87,6 +103,23 @@ def get_parent_commit(repo_root: Path, commit_sha: str) -> str | None:
     return None
 
 
+def get_changed_files_between(repo_root: Path, base_commit: str, head_commit: str) -> list[str]:
+    """Return list of relative file paths changed between base_commit and head_commit."""
+    try:
+        proc = subprocess.run(
+            ["git", "diff", "--name-only", base_commit, head_commit],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0:
+            return [line.strip().replace("\\", "/") for line in proc.stdout.splitlines() if line.strip()]
+    except Exception:
+        pass
+    return ["<error: git diff failed>"]
+
+
 def compute_implementation_fingerprint(repo_root: Path) -> str:
     """Compute deterministic SHA256 over critical implementation sources."""
     hasher = hashlib.sha256()
@@ -100,17 +133,36 @@ def compute_implementation_fingerprint(repo_root: Path) -> str:
     return "sha256:" + hasher.hexdigest()
 
 
-def compute_attestation_signature(digest: str, key: bytes | None = None) -> str:
-    """Compute HMAC-SHA256 signature over the canonical attestation digest."""
-    active_key = key or DEFAULT_RELEASE_AUTHORITY_KEY
-    return hmac.new(active_key, digest.encode("utf-8"), hashlib.sha256).hexdigest()
+def compute_attestation_signature(digest: str, private_key_hex: str | None = None) -> str:
+    """Compute Ed25519 signature over canonical attestation digest using protected private key.
+
+    The private key must be provided via the private_key_hex argument or the
+    VERIFYCI_RELEASE_SIGNING_KEY environment variable. If no private key is available,
+    it fails closed.
+    """
+    key_hex = private_key_hex or os.environ.get("VERIFYCI_RELEASE_SIGNING_KEY")
+    if not key_hex:
+        raise RuntimeError(
+            "Release attestation signing authority unavailable: no private key provided "
+            "and VERIFYCI_RELEASE_SIGNING_KEY is unset."
+        )
+    key_hex = key_hex.strip()
+    try:
+        from cryptography.hazmat.primitives.asymmetric import ed25519
+
+        priv_bytes = bytes.fromhex(key_hex)
+        priv = ed25519.Ed25519PrivateKey.from_private_bytes(priv_bytes)
+        sig = priv.sign(digest.encode("utf-8"))
+        return sig.hex()
+    except Exception as exc:
+        raise RuntimeError(f"Failed to generate Ed25519 attestation signature: {exc}") from exc
 
 
 def verify_release_validation_evidence(
     repo_root: Path | None = None,
     *,
     expected_commit: str | None = None,
-    authority_key: bytes | None = None,
+    authority_public_key_hex: str | None = None,
 ) -> tuple[bool, str | None]:
     """Verify that trusted, non-stale release-validation evidence exists.
 
@@ -147,14 +199,33 @@ def verify_release_validation_evidence(
             f"release validation tool version mismatch: {record.get('tool_version')} != {TOOL_VERSION}",
         )
 
+    # Reject provisional or non-final validation records
+    if record.get("stage") == "in_flight_validation":
+        return (
+            False,
+            "unauthorized release evidence: record is marked as provisional (in_flight_validation)",
+        )
+    test_metrics_raw = record.get("measurements", {}).get("test_suite", {})
+    if test_metrics_raw.get("stage") == "in_flight_validation":
+        return (
+            False,
+            "unauthorized release evidence: test suite measurements are marked provisional (in_flight_validation)",
+        )
+
     # 1. Attestation signature & digest verification
     attestation = record.get("attestation")
     if not isinstance(attestation, dict):
         return False, "release-validation evidence missing authenticated attestation block"
     if attestation.get("issuer") != "verifyci.release_pipeline":
         return False, f"untrusted release attestation issuer: {attestation.get('issuer')}"
-    if attestation.get("algorithm") != "hmac-sha256":
+    if attestation.get("algorithm") != "ed25519":
         return False, f"unsupported attestation algorithm: {attestation.get('algorithm')}"
+    if attestation.get("key_id") != RELEASE_AUTHORITY_KEY_ID:
+        return False, f"unrecognized attestation key ID: {attestation.get('key_id')}"
+
+    expected_pub_hex = authority_public_key_hex or RELEASE_AUTHORITY_PUBLIC_KEY_HEX
+    if attestation.get("public_key") != expected_pub_hex:
+        return False, f"untrusted release attestation public key: {attestation.get('public_key')}"
 
     recorded_digest = attestation.get("digest")
     if not isinstance(recorded_digest, str) or not recorded_digest.startswith("sha256:"):
@@ -166,10 +237,22 @@ def verify_release_validation_evidence(
     if not hmac.compare_digest(recorded_digest, computed_digest):
         return False, "release-validation attestation digest mismatch (evidence payload was modified)"
 
-    expected_sig = compute_attestation_signature(computed_digest, key=authority_key)
     supplied_sig = attestation.get("signature")
-    if not isinstance(supplied_sig, str) or not hmac.compare_digest(supplied_sig, expected_sig):
-        return False, "invalid release attestation signature: failed cryptographic authenticity check"
+    if not isinstance(supplied_sig, str) or len(supplied_sig) != 128:
+        return False, "invalid release attestation signature format (expected 128-char hex Ed25519 signature)"
+
+    try:
+        from cryptography.hazmat.primitives.asymmetric import ed25519
+
+        pub_bytes = bytes.fromhex(expected_pub_hex)
+        pub = ed25519.Ed25519PublicKey.from_public_bytes(pub_bytes)
+        sig_bytes = bytes.fromhex(supplied_sig)
+        pub.verify(sig_bytes, recorded_digest.encode("utf-8"))
+    except Exception as exc:
+        return (
+            False,
+            f"invalid release attestation signature: failed Ed25519 cryptographic verification ({exc})",
+        )
 
     # 2. Manifest hash check
     current_manifest_hash = manifest_hash()
@@ -193,6 +276,14 @@ def verify_release_validation_evidence(
             return (
                 False,
                 f"stale release-validation evidence: bound to commit {commit_sha[:8]}, current commit is {actual_commit[:8]}",
+            )
+        # Constrain parent-commit acceptance: the intervening commit MUST ONLY modify evidence/release/release_validation.json
+        changed_files = get_changed_files_between(root, com_lower, act_lower)
+        unauthorized_changes = [f for f in changed_files if f != "evidence/release/release_validation.json"]
+        if unauthorized_changes:
+            return (
+                False,
+                f"parent-commit release validation rejected: intervening commit {actual_commit[:8]} modified files outside release evidence: {unauthorized_changes}",
             )
 
     # 4. Implementation fingerprint check (covers engine, checks, contracts, and validation script)
@@ -219,12 +310,12 @@ def verify_release_validation_evidence(
             f"unsupported runtime python version: {platform.python_version()} (requires >= 3.12)",
         )
 
-    # 5. Validated checks list
+    # 6. Validated checks list
     checks_val = record.get("checks_validated")
     if not isinstance(checks_val, list) or tuple(checks_val) != CHECK_ORDER:
         return False, f"checks_validated mismatch: expected {list(CHECK_ORDER)}, got {checks_val}"
 
-    # 6. Measurements verification: tests and benchmark
+    # 7. Measurements verification: tests and benchmark
     measurements = record.get("measurements")
     if not isinstance(measurements, dict):
         return False, "release validation evidence missing verified measurements block"
@@ -262,13 +353,14 @@ def generate_release_validation_record(
     repo_root: Path,
     commit_sha: str,
     measurements: dict[str, Any],
-    authority_key: bytes | None = None,
+    signing_key_hex: str | None = None,
 ) -> dict[str, Any]:
-    """Generate, sign, and write authoritative release-validation evidence."""
+    """Generate, sign with Ed25519, and atomically write authoritative release-validation evidence."""
     payload_body = {
         "schema": VALIDATION_SCHEMA,
         "tool_version": TOOL_VERSION,
         "status": "VALIDATED",
+        "stage": "final",
         "commit_sha": commit_sha.lower(),
         "manifest_hash": manifest_hash(),
         "toolchain_fingerprint": CHECK_SPECS["security"].toolchain_fingerprint,
@@ -287,33 +379,46 @@ def generate_release_validation_record(
         "measurements": measurements,
     }
 
-    # Compute canonical digest and HMAC-SHA256 signature
+    # Compute canonical RFC 8785 digest and Ed25519 signature
     canonical_bytes = canonical_json_bytes(payload_body)
     digest = "sha256:" + hashlib.sha256(canonical_bytes).hexdigest()
-    signature = compute_attestation_signature(digest, key=authority_key)
+    signature = compute_attestation_signature(digest, private_key_hex=signing_key_hex)
 
     record = dict(payload_body)
     record["attestation"] = {
         "issuer": "verifyci.release_pipeline",
-        "algorithm": "hmac-sha256",
-        "key_id": "verifyci-release-authority-v1",
+        "algorithm": "ed25519",
+        "key_id": RELEASE_AUTHORITY_KEY_ID,
+        "public_key": RELEASE_AUTHORITY_PUBLIC_KEY_HEX,
         "digest": digest,
         "signature": signature,
     }
 
     val_file = repo_root / VALIDATION_REL_PATH
     val_file.parent.mkdir(parents=True, exist_ok=True)
-    val_file.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    # Atomic write via temporary file
+    temp_file = val_file.with_name(f"{val_file.name}.tmp.{os.getpid()}")
+    try:
+        temp_file.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(temp_file, val_file)
+    except Exception:
+        if temp_file.is_file():
+            temp_file.unlink(missing_ok=True)
+        raise
+
     return record
 
 
 __all__ = [
-    "DEFAULT_RELEASE_AUTHORITY_KEY",
+    "RELEASE_AUTHORITY_KEY_ID",
+    "RELEASE_AUTHORITY_PUBLIC_KEY_HEX",
     "VALIDATION_REL_PATH",
     "VALIDATION_SCHEMA",
     "compute_attestation_signature",
     "compute_implementation_fingerprint",
     "generate_release_validation_record",
+    "get_changed_files_between",
     "get_commit_sha",
     "get_parent_commit",
     "get_verifyci_root",

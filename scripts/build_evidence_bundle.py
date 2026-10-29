@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 
 from verifyci.contracts.manifest import manifest_hash
 from verifyci.contracts.model import Verdict, VerdictResult
+from verifyci.contracts.release_validation import verify_release_validation_evidence
 from verifyci.evidence.bundle import build_bundle, build_payload, toolchain_fingerprint
 from verifyci.evidence.canonical import canonical_json_bytes
 
@@ -127,6 +128,9 @@ def main() -> int:
     test_digest = "sha256:" + sha256(canonical_json_bytes(test_report)).hexdigest()
     toolchain = toolchain_fingerprint(git_version=git_ver)
 
+    # Authoritative release validation check
+    is_release_validated, val_diag = verify_release_validation_evidence()
+
     # Build schema-conforming source-bound payload explicitly identifying this
     # as an M0 test-verification record rather than a PR gate diff verdict.
     payload = build_payload(
@@ -145,7 +149,7 @@ def main() -> int:
                 "skipped": total_skipped,
             },
             "tree_clean": tree_clean,
-            "release_validated": False,
+            "release_validated": is_release_validated,
         },
         scope={
             "record_type": "m0_test_verification_record",
@@ -170,10 +174,17 @@ def main() -> int:
                     "it is NOT a VerifyCI pull-request gate evaluation or code review verdict"
                 ),
             },
-            {
-                "id": "release_validation_not_established",
-                "detail": "this build is an implementation candidate, not a release-validated artifact",
-            },
+            (
+                {
+                    "id": "release_validation_established",
+                    "detail": "this build is release-validated by authoritative §15.10 attestation",
+                }
+                if is_release_validated
+                else {
+                    "id": "release_validation_not_established",
+                    "detail": f"this build is an implementation candidate, not a release-validated artifact ({val_diag})",
+                }
+            ),
             {
                 "id": "m0_verification_record",
                 "detail": "source-bound verification record demonstrating v3 gate infrastructure",
@@ -193,11 +204,11 @@ def main() -> int:
             "branch_ref": branch_ref,
             "gate_evaluation": False,
             "evaluation_target": "test_suite_only",
-            "release_validated": False,
+            "release_validated": is_release_validated,
         },
         manifest_extra={
             "record_type": "m0_test_verification_record",
-            "release_validated": False,
+            "release_validated": is_release_validated,
             "source_bound_commit": commit_sha,
             "test_digest": test_digest,
         },

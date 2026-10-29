@@ -259,7 +259,7 @@ def test_tampered_attestation_signature_fails_closed(tmp_path, monkeypatch):
         if self.name == "release_validation.json":
             raw = real_read(self)
             data = json.loads(raw.decode("utf-8"))
-            data["attestation"]["signature"] = "deadbeef" * 8
+            data["attestation"]["signature"] = "deadbeef" * 16
             return json.dumps(data).encode("utf-8")
         return real_read(self)
 
@@ -277,6 +277,61 @@ def test_tampered_attestation_signature_fails_closed(tmp_path, monkeypatch):
     assert "check_not_validated" in bundle.payload["verdict"]["fault_reason_codes"]
     diag = next(d for d in bundle.payload["diagnostics"] if d["code"] == "check_not_validated")
     assert "invalid release attestation signature" in diag["detail"]
+
+
+def test_provisional_stage_rejected_fails_closed(tmp_path, monkeypatch):
+    """Provisional in_flight_validation records are rejected and fail closed with ERROR."""
+    from verifyci.contracts import release_validation
+    real_read = Path.read_bytes
+
+    def provisional_read(self):
+        if self.name == "release_validation.json":
+            raw = real_read(self)
+            data = json.loads(raw.decode("utf-8"))
+            data["stage"] = "in_flight_validation"
+            return json.dumps(data).encode("utf-8")
+        return real_read(self)
+
+    monkeypatch.setattr(Path, "read_bytes", provisional_read)
+
+    ok, err = release_validation.verify_release_validation_evidence()
+    assert not ok
+    assert "in_flight_validation" in err
+
+    root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
+    head = _commit(root, {"app.py": "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n"})
+    bundle = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
+    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.exit_code == 3
+    assert "check_not_validated" in bundle.payload["verdict"]["fault_reason_codes"]
+    diag = next(d for d in bundle.payload["diagnostics"] if d["code"] == "check_not_validated")
+    assert "in_flight_validation" in diag["detail"]
+
+
+def test_unauthorized_parent_commit_modifications_rejected_fails_closed(tmp_path, monkeypatch):
+    """Parent-commit evidence is rejected if intervening commit touched code or tests."""
+    from verifyci.contracts import release_validation
+    monkeypatch.setattr(
+        release_validation,
+        "get_changed_files_between",
+        lambda root, base, head: [
+            "evidence/release/release_validation.json",
+            "verifyci/checks/security.py",
+        ],
+    )
+
+    ok, err = release_validation.verify_release_validation_evidence()
+    assert not ok
+    assert "parent-commit release validation rejected" in err
+
+    root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
+    head = _commit(root, {"app.py": "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n"})
+    bundle = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
+    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.exit_code == 3
+    assert "check_not_validated" in bundle.payload["verdict"]["fault_reason_codes"]
+    diag = next(d for d in bundle.payload["diagnostics"] if d["code"] == "check_not_validated")
+    assert "parent-commit release validation rejected" in diag["detail"]
 
 
 def test_tampered_measurement_payload_fails_closed(tmp_path, monkeypatch):

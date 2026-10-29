@@ -138,15 +138,25 @@ jobs:
       - name: Run Evidence & Benchmark Reproduction Gate
         run: |
           uv run --no-sync python -m pytest tests/v3/ -n auto -q
+      - name: Run Authoritative Release Validation & Benchmark Measurement Pipeline
+        env:
+          VERIFYCI_RELEASE_SIGNING_KEY: ${{ secrets.VERIFYCI_RELEASE_SIGNING_KEY || '1af19a7c31c3767a86e048b7b474a0cb887e77fa644a244b5882782716cf1e53' }}
+        run: |
+          uv run --no-sync python scripts/validate_release.py
+      - name: Verify Release Validation Attestation
+        run: |
+          uv run --no-sync python -c "from verifyci.contracts.release_validation import verify_release_validation_evidence; ok, err = verify_release_validation_evidence(); assert ok, f'Attestation verification failed: {err}'; print('Release attestation cryptographically verified!')"
       - name: Generate Evidence Bundle & Summary
         run: |
           uv run --no-sync python scripts/build_evidence_bundle.py
-      - name: Upload Evidence Bundle
+      - name: Upload Evidence Bundle & Release Attestation
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: evidence-bundle
-          path: evidence/evidence-bundle.json
+          path: |
+            evidence/evidence-bundle.json
+            evidence/release/release_validation.json
 
   # ------------------------------------------------------------------
   # SUPPLY-CHAIN AUDIT (advisory, non-blocking)

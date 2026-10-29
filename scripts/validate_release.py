@@ -328,22 +328,6 @@ def main() -> int:
     bench_data, bench_errors = execute_security_benchmark(ROOT)
     errors.extend(bench_errors)
 
-    # If benchmark succeeded and commit is resolved, generate provisional candidate record
-    # so that the gate integration tests in execute_test_suite find valid release evidence.
-    if bench_data and not errors and commit_sha:
-        provisional_measurements = {
-            "benchmark": bench_data,
-            "test_suite": {
-                "duration_seconds": 0.0,
-                "stage": "in_flight_validation",
-                "test_target": "tests/v3",
-                "total_errors": 0,
-                "total_failed": 0,
-                "total_passed": 200,
-            },
-        }
-        generate_release_validation_record(ROOT, commit_sha, provisional_measurements)
-
     # 5. Execute test suite
     test_data, test_errors = execute_test_suite(ROOT)
     errors.extend(test_errors)
@@ -357,11 +341,34 @@ def main() -> int:
     release_ready = len(errors) == 0 and bench_data is not None and test_data is not None
 
     if release_ready and commit_sha:
+        signing_key = os.environ.get("VERIFYCI_RELEASE_SIGNING_KEY")
+        if not signing_key:
+            errors.append(
+                "VERIFYCI_RELEASE_SIGNING_KEY environment variable is missing; release attestation cannot be signed"
+            )
+            report = {
+                "manifest_errors": errors,
+                "measurement_pipeline": "failed",
+                "release_ready": False,
+                "schema": "verifyci.release_preflight/v1",
+                "shadow_checks": shadow,
+            }
+            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+            print(
+                "Release blocked: signing authority key is missing.",
+                file=sys.stderr,
+            )
+            return 1
+
+        test_data["stage"] = "final"
+        bench_data["stage"] = "final"
         measurements = {
             "test_suite": test_data,
             "benchmark": bench_data,
         }
-        record = generate_release_validation_record(ROOT, commit_sha, measurements)
+        record = generate_release_validation_record(
+            ROOT, commit_sha, measurements, signing_key_hex=signing_key
+        )
         report = {
             "attestation_digest": record["attestation"]["digest"],
             "commit_sha": commit_sha,
