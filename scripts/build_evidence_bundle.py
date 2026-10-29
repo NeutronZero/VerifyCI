@@ -69,6 +69,7 @@ def main() -> int:
             f"Working tree is dirty; strict source-to-commit binding requires a clean tree.\n"
             f"Uncommitted changes:\n{chr(10).join(uncommitted)}"
         )
+    tree_clean = not bool(uncommitted)
 
     git_ver = _git("--version")
     if not git_ver:
