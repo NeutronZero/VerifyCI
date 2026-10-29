@@ -1,10 +1,10 @@
 {
   "attestation": {
     "algorithm": "hmac-sha256",
-    "digest": "sha256:26c93b44d0e2f5de2cd846ef41135d4ba5303fc1a127ecfc808ff3a647fddaac",
+    "digest": "sha256:4fd607a403fb3d7cacf9892c98bbd96851174a3e9459d198001b766b54e0efe5",
     "issuer": "verifyci.release_pipeline",
     "key_id": "verifyci-release-authority-v1",
-    "signature": "53bd37e8e0e73655749a62308df4a208b847c531861fe2501a8c41b2bafd46e5"
+    "signature": "f6966d49c1f82eb81828a00feb18127da80fd5d7a3f6ac97e95693ea8ea27bfb"
   },
   "checks_validated": [
     "grounding",
@@ -13,7 +13,7 @@
     "semantic",
     "security"
   ],
-  "commit_sha": "32ea0a1f45b9b30bfe1cd574f7eff572ef1a0aaf",
+  "commit_sha": "04bec204fce2c624737879860ec1aeac326fcaac",
   "corpora_hashes": {
     "contract": "sha256:14bd93a97fb0be3eae13c99ebc4c25d1fe0e14dafb2e9db92e5e5d389043689c",
     "deletion": "sha256:efbca020e17296277e9ade5d3c59e20287e1e16018f044e416f7eebfd9a408a1",
@@ -21,7 +21,7 @@
     "security": "sha256:8d45f911c72bfda761c21da754b235d7a58768864a1d0087d70d745eeb97b880",
     "semantic": "sha256:dd0a162bd7442a78b6e236fa207c17dcd6413e5ad73e2e4b41c4b35451b5d3ba"
   },
-  "implementation_fingerprint": "sha256:395952e61a5983c935a81273ab9b87c152a202da950adad091303f24fcbfab05",
+  "implementation_fingerprint": "sha256:c78eee0e5680fe89bf7f621b8709ac113423d8b24cef1af530535ffbd7a92584",
   "manifest_hash": "sha256:d471308bb8779a13e942d5fe2aa989bca74550132c5d4993ad4af3a5c41d6263",
   "measurements": {
     "benchmark": {
@@ -68,7 +68,7 @@
       "zero_false_blocking": true
     },
     "test_suite": {
-      "duration_seconds": 149.9,
+      "duration_seconds": 172.26,
       "test_target": "tests/v3",
       "total_errors": 0,
       "total_failed": 0,
