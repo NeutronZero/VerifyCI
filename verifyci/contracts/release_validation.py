@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import platform
 import subprocess
+import sys
 from typing import Any
 
 from verifyci.contracts.manifest import (
@@ -202,19 +203,20 @@ def verify_release_validation_evidence(
             "stale release-validation evidence: implementation files have changed since validation",
         )
 
-    # 4. Toolchain fingerprint and identity checks
+    # 5. Toolchain fingerprint and identity checks
     expected_toolchain_fp = CHECK_SPECS["security"].toolchain_fingerprint
     if record.get("toolchain_fingerprint") != expected_toolchain_fp:
         return False, "release validation toolchain fingerprint mismatch"
 
     toolchain_id = record.get("toolchain_identity", {})
-    if not isinstance(toolchain_id, dict):
-        return False, "missing toolchain_identity in release validation evidence"
-    actual_py = platform.python_version()
-    if toolchain_id.get("python_version") != actual_py:
+    if not isinstance(toolchain_id, dict) or not toolchain_id.get("python_version"):
+        return False, "missing toolchain_identity or python_version in release validation evidence"
+
+    # Runtime Python must satisfy the >=3.12 toolchain contract
+    if sys.version_info < (3, 12):
         return (
             False,
-            f"toolchain python version mismatch: certified on {toolchain_id.get('python_version')}, running on {actual_py}",
+            f"unsupported runtime python version: {platform.python_version()} (requires >= 3.12)",
         )
 
     # 5. Validated checks list

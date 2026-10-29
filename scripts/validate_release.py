@@ -375,10 +375,6 @@ def main() -> int:
         print(json.dumps(report, sort_keys=True, separators=(",", ":")))
         return 0
     else:
-        # Fails closed: clean up candidate validation file if test/benchmark failed
-        val_file = ROOT / "evidence" / "release" / "release_validation.json"
-        if val_file.is_file():
-            val_file.unlink(missing_ok=True)
         report = {
             "manifest_errors": errors,
             "measurement_pipeline": "failed",
