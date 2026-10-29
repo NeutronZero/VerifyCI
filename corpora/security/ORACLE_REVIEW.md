@@ -6,7 +6,7 @@
 
 - Governing topic: VerifyCI v3.1.10 design §11.6 and §16, including the M4 scenario list and defect/outcome semantics.
 - Scope of this contribution: corpus data, independent schema/AST validator, and checksum inventory only.
-- Cases: 18, with unique IDs and explicit base/head source snapshots.
+- Cases: 22, with unique IDs and explicit base/head source snapshots.
 - Production implementation used to generate labels: **No**.
 - Runtime oracle extraction used to generate labels: **No**.
 - Validator dependencies: Python standard library only (`ast`, `hashlib`, `json`, `re`, `pathlib`) + `pytest`; no import from `verifyci`.
@@ -30,6 +30,11 @@
   - Structural JWT token (`SEC-008`).
   - Database URI with embedded credentials (`SEC-009`).
   - Generic high-entropy assignment with secret variable naming (`SEC-010`).
+- [x] **Secret-to-sink flows**:
+  - Direct secret passed into logging sink (`SEC-019`) -> `FAIL` / `SEC-SECRET-TO-SINK`.
+  - Secret assigned to variable and propagated to sink (`SEC-020`) -> `FAIL` / `SEC-SECRET-TO-SINK`.
+  - Secret passed to imported alias of logging sink (`SEC-021`) -> `FAIL` / `SEC-SECRET-TO-SINK`.
+  - Newly introduced secret variable consumed by existing unchanged sink (`SEC-022`) -> `FAIL` / `SEC-SECRET-TO-SINK`.
 - [x] **Negative, placeholder, and allowlist controls**:
   - Placeholder secret values (`SEC-011`) ignored -> `PASS` / `COMPLETE`.
   - Policy allowlisted fixture paths (`SEC-012`) ignored -> `PASS` / `COMPLETE`.

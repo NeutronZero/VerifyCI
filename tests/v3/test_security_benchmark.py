@@ -169,7 +169,7 @@ def _execute_case(case: dict, tmp_path: Path) -> CheckResult:
 @pytest.mark.invariant
 def test_security_check_empirical_benchmark(tmp_path: Path):
     cases = load_security_cases()
-    assert len(cases) == 18, f"expected 18 cases, got {len(cases)}"
+    assert len(cases) == 22, f"expected 22 cases, got {len(cases)}"
 
     outcome_matches = 0
     coverage_matches = 0
@@ -179,6 +179,7 @@ def test_security_check_empirical_benchmark(tmp_path: Path):
 
     defects = [
         "SEC-SECRET",
+        "SEC-SECRET-TO-SINK",
         "SEC-DANGEROUS-CALL",
         "SEC-TAINT-TO-SINK",
     ]

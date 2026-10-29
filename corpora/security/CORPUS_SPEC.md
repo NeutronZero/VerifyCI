@@ -28,7 +28,7 @@ Finding witnesses conform to §11.6:
 
 ## Candidate corpus
 
-There are 18 frozen cases:
+There are 22 frozen cases:
 
 1. `SEC-001` (`aws_access_key`): AWS access key introduced -> `FAIL`, `SEC-SECRET` / `secret_detected`.
 2. `SEC-002` (`github_token`): GitHub personal access token introduced -> `FAIL`, `SEC-SECRET` / `secret_detected`.
@@ -48,6 +48,10 @@ There are 18 frozen cases:
 16. `SEC-016` (`same_line_taint_to_sink`): Untrusted request parameter passed to database query -> `FAIL`, `SEC-TAINT-TO-SINK` / `taint_to_sink`.
 17. `SEC-017` (`unresolved_taint_source_gap`): Untrusted source introduced without resolved flow to sink -> `INCONCLUSIVE`, `Coverage.PARTIAL` (`taint_path_unresolved`).
 18. `SEC-018` (`unsupported_language_taint_scope`): Relevant change in unsupported language (Go) under configured taint policy -> `INCONCLUSIVE`, `Coverage.UNKNOWN` (`unsupported_language`).
+19. `SEC-019` (`direct_secret_to_sink`): Validated secret passed directly to logging sink on changed line -> `FAIL`, `SEC-SECRET-TO-SINK` / `secret_to_sink`.
+20. `SEC-020` (`secret_variable_to_sink`): Validated secret assigned to variable on changed line and propagated to logging sink -> `FAIL`, `SEC-SECRET-TO-SINK` / `secret_to_sink`.
+21. `SEC-021` (`aliased_secret_sink`): Secret passed to imported alias of logging sink -> `FAIL`, `SEC-SECRET-TO-SINK` / `secret_to_sink`.
+22. `SEC-022` (`secret_to_unchanged_existing_sink`): Newly introduced secret variable consumed by existing unchanged sink -> `FAIL`, `SEC-SECRET-TO-SINK` / `secret_to_sink`.
 
 ## Independent validator scope
 

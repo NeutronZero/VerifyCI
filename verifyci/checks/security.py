@@ -225,12 +225,40 @@ def _secret_sub(context: CheckContext) -> CheckResult:
         if not line_numbers:
             continue
         assigned_secrets: dict[str, tuple[int, str, str]] = {}
+        sink_aliases: dict[str, str] = {}
+        if path.endswith(".py"):
+            try:
+                tree = ast.parse(entry.head_source)
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for name in node.names:
+                            if name.asname:
+                                sink_aliases[name.asname] = name.name
+                    elif isinstance(node, ast.ImportFrom):
+                        mod = node.module or ""
+                        for name in node.names:
+                            target = f"{mod}.{name.name}" if mod else name.name
+                            sink_aliases[name.asname or name.name] = target
+            except SyntaxError:
+                pass
+
         for line_number, line in enumerate(entry.head_source.splitlines(), start=1):
             if line_number not in line_numbers:
                 continue
             scanned_lines += 1
             known_secret_found = False
             sink_match = _SECRET_SINK_RE.search(line) or _TAINT_SINK_RE.search(line)
+            if not sink_match and sink_aliases:
+                for a_name, a_target in sink_aliases.items():
+                    if (
+                        a_target.startswith("logging.")
+                        or a_target.startswith("logger.")
+                        or "log" in a_target.lower()
+                        or a_target in ("print", "requests.post", "requests.get", "cursor.execute")
+                    ):
+                        if re.search(rf"\b{re.escape(a_name)}\s*\(", line):
+                            sink_match = re.search(rf"\b{re.escape(a_name)}\s*\(", line)
+                            break
             sink_text = sink_match.group(0) if sink_match else ""
 
             for kind, pattern in _SECRET_PATTERNS:
@@ -368,39 +396,80 @@ def _secret_sub(context: CheckContext) -> CheckResult:
                         if var_name.isidentifier():
                             assigned_secrets[var_name] = (line_number, "HIGH_ENTROPY_ASSIGNMENT", redacted)
 
-            # Check if any previously assigned secret variable flows into a sink on this line
-            if sink_match and not known_secret_found and assigned_secrets:
+        # Inspect whole head file (both changed and unchanged lines) for sinks consuming assigned secrets
+        if assigned_secrets:
+            seen_sink_findings: set[tuple[str, int, str]] = {
+                (f.subject["path"], f.subject["line"], f.subject.get("symbol", ""))
+                for f in findings
+                if f.defect_id == "SEC-SECRET-TO-SINK"
+            }
+            for all_line_idx, all_line in enumerate(entry.head_source.splitlines(), start=1):
+                line_sink_match = _SECRET_SINK_RE.search(all_line) or _TAINT_SINK_RE.search(all_line)
+                if not line_sink_match and sink_aliases:
+                    for a_name, a_target in sink_aliases.items():
+                        if (
+                            a_target.startswith("logging.")
+                            or a_target.startswith("logger.")
+                            or "log" in a_target.lower()
+                            or a_target in ("print", "requests.post", "requests.get", "cursor.execute")
+                        ):
+                            if re.search(rf"\b{re.escape(a_name)}\s*\(", all_line):
+                                line_sink_match = re.search(rf"\b{re.escape(a_name)}\s*\(", all_line)
+                                break
+                if not line_sink_match:
+                    continue
+
+                line_sink_text = line_sink_match.group(0)
                 for v_name, (src_line, s_kind, s_redacted) in assigned_secrets.items():
-                    if src_line != line_number and re.search(rf"\b{re.escape(v_name)}\b", line):
-                        findings.append(
-                            make_finding(
-                                context=context,
-                                check_id="security",
-                                defect_id="SEC-SECRET-TO-SINK",
-                                subject={"path": path, "line": line_number, "symbol": v_name},
-                                premises={
-                                    "source": s_kind,
-                                    "sink": sink_text,
-                                    "variable": v_name,
-                                    "redacted_secret": s_redacted,
-                                },
-                                evidence_kind=EvidenceKind.TAINT_PATH,
-                                evidence_payload={
-                                    "identity": {
-                                        "path": path,
-                                        "line": line_number,
-                                        "kind": "secret_to_sink",
+                    if all_line_idx == src_line:
+                        continue
+                    if re.search(rf"\b{re.escape(v_name)}\b", all_line):
+                        key = (path, all_line_idx, v_name)
+                        if key not in seen_sink_findings:
+                            seen_sink_findings.add(key)
+                            findings.append(
+                                make_finding(
+                                    context=context,
+                                    check_id="security",
+                                    defect_id="SEC-SECRET-TO-SINK",
+                                    subject={"path": path, "line": all_line_idx, "symbol": v_name},
+                                    premises={
+                                        "source": s_kind,
+                                        "sink": line_sink_text,
                                         "variable": v_name,
+                                        "redacted_secret": s_redacted,
                                     },
-                                    "path": path,
-                                    "source": {"line": src_line, "pattern": s_kind, "redacted": s_redacted, "variable": v_name},
-                                    "sink": {"line": line_number, "text": sink_text},
-                                    "edges": [{"line": line_number, "justification": f"variable {v_name} passed to sink"}],
-                                },
-                                message=f"validated secret from {v_name} flows to sink {sink_text} at {path}:{line_number}",
-                                remediation="Do not pass credential material to external, logging, or persistence sinks.",
+                                    evidence_kind=EvidenceKind.TAINT_PATH,
+                                    evidence_payload={
+                                        "identity": {
+                                            "path": path,
+                                            "line": all_line_idx,
+                                            "kind": "secret_to_sink",
+                                            "variable": v_name,
+                                        },
+                                        "path": path,
+                                        "source": {
+                                            "line": src_line,
+                                            "pattern": s_kind,
+                                            "redacted": s_redacted,
+                                            "variable": v_name,
+                                        },
+                                        "sink": {"line": all_line_idx, "text": line_sink_text},
+                                        "edges": [
+                                            {
+                                                "line": all_line_idx,
+                                                "justification": (
+                                                    f"variable {v_name} passed to sink"
+                                                    if all_line_idx in line_numbers
+                                                    else f"newly introduced secret {v_name} flows to existing unchanged sink"
+                                                ),
+                                            }
+                                        ],
+                                    },
+                                    message=f"validated secret from {v_name} flows to sink {line_sink_text} at {path}:{all_line_idx}",
+                                    remediation="Do not pass credential material to external, logging, or persistence sinks.",
+                                )
                             )
-                        )
 
     if findings:
         outcome = Outcome.FAIL

@@ -107,7 +107,7 @@ def test_security_corpus_checksum_inventory():
 @pytest.mark.invariant
 def test_security_cases_are_frozen_unique_and_complete():
     cases = load_cases()
-    assert len(cases) == 18, f"expected 18 cases, found {len(cases)}"
+    assert len(cases) == 22, f"expected 22 cases, found {len(cases)}"
     ids = [case.get("case_id") for case in cases]
     assert len(set(ids)) == len(ids), "duplicate case ID"
     assert all(isinstance(cid, str) and cid.startswith("SEC-") for cid in ids)
@@ -121,6 +121,7 @@ def test_security_cases_are_frozen_unique_and_complete():
     }
     assert defect_ids <= set(DEFECT_REASON), f"unexpected defect IDs: {defect_ids}"
     assert "SEC-SECRET" in defect_ids
+    assert "SEC-SECRET-TO-SINK" in defect_ids
     assert "SEC-DANGEROUS-CALL" in defect_ids
     assert "SEC-TAINT-TO-SINK" in defect_ids
 

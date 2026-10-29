@@ -353,3 +353,54 @@ def test_secret_to_sink_multiline_dataflow(tmp_path: Path):
     assert sink_findings[0].subject.get("symbol") == "AWS_KEY"
 
 
+
+
+@pytest.mark.invariant
+def test_secret_flow_to_unchanged_existing_sink(tmp_path: Path):
+    """When a secret assignment is added to an existing variable consumed by an unchanged sink, SEC-SECRET-TO-SINK is emitted."""
+    raw_secret = "AKIA1234567890ABCDEF"
+    base = {
+        "src/service.py": (
+            "import logging\n"
+            "logger = logging.getLogger(__name__)\n"
+            "API_KEY = 'PLACEHOLDER_NOT_SECRET'\n"
+            "def report():\n"
+            "    logger.info('Reporting with key: %s', API_KEY)\n"
+        )
+    }
+    head = {
+        "src/service.py": (
+            "import logging\n"
+            "logger = logging.getLogger(__name__)\n"
+            f"API_KEY = '{raw_secret}'\n"
+            "def report():\n"
+            "    logger.info('Reporting with key: %s', API_KEY)\n"
+        )
+    }
+    res = _build_and_run("secret_to_unchanged_sink", base, head, "", tmp_path)
+    assert res.outcome == Outcome.FAIL
+    sink_findings = [f for f in res.findings if f.defect_id == "SEC-SECRET-TO-SINK"]
+    assert len(sink_findings) >= 1
+    assert sink_findings[0].subject.get("symbol") == "API_KEY"
+    assert raw_secret not in json.dumps(sink_findings[0].evidence.payload)
+
+
+@pytest.mark.invariant
+def test_secret_to_aliased_sink_detected(tmp_path: Path):
+    """Secret flowing into an imported alias of a logging/print sink is detected."""
+    raw_secret = "ghp_123456789012345678901234"
+    base = {"src/alias_sink.py": "def run(): pass\n"}
+    head = {
+        "src/alias_sink.py": (
+            "from logging import error as log_err\n"
+            f"token = '{raw_secret}'\n"
+            "def run():\n"
+            "    log_err('Failed token: %s', token)\n"
+        )
+    }
+    res = _build_and_run("secret_to_aliased_sink", base, head, "", tmp_path)
+    assert res.outcome == Outcome.FAIL
+    sink_findings = [f for f in res.findings if f.defect_id == "SEC-SECRET-TO-SINK"]
+    assert len(sink_findings) >= 1
+    assert sink_findings[0].subject.get("symbol") == "token"
+    assert raw_secret not in json.dumps(sink_findings[0].evidence.payload)

@@ -101,7 +101,6 @@ def _gate(
     *,
     review_mode: str = "fail",
     generated_at: str | None = None,
-    release_validated: bool = True,
 ):
     return run_gate(
         GateRequest(
@@ -111,7 +110,6 @@ def _gate(
             as_of_date=AS_OF,
             review_mode=review_mode,
             generated_at=generated_at,
-            release_validated=release_validated,
         )
     )
 
@@ -156,14 +154,20 @@ def test_codeowners_coverage_and_noninterference():
     assert "codeowners_noninterference_unproven" in coverage.reasons
 
 
-def test_clean_gate_stays_error_until_release_validation(tmp_path):
+def test_clean_gate_stays_error_until_release_validation(tmp_path, monkeypatch):
+    from verifyci.gate import orchestrator
+    monkeypatch.setattr(
+        orchestrator,
+        "verify_release_validation_evidence",
+        lambda repo=None: (False, "release-validation artifacts are absent; this internal build cannot emit a normal gate verdict"),
+    )
     root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
     head = _commit(
         root,
         {"app.py": "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n"},
     )
-    first = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z", release_validated=False)
-    second = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z", release_validated=False)
+    first = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
+    second = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
     assert first.payload["verdict"]["status"] == "ERROR"
     assert first.exit_code == 3
     assert "check_not_validated" in first.payload["verdict"]["fault_reason_codes"]
@@ -196,6 +200,54 @@ def test_clean_gate_passes_when_release_validated(tmp_path):
     sarif = bundle_to_sarif(bundle)
     assert sarif["version"] == "2.1.0"
     assert sarif["runs"][0]["results"] == []
+
+
+def test_adversarial_cli_flags_cannot_bypass_validation(tmp_path):
+    """Passing --release-validated on the CLI is rejected by the parser as an unknown argument."""
+    from verifyci.cli import main
+    root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
+    head = _commit(root, {"app.py": "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n"})
+    with pytest.raises(SystemExit) as exc:
+        main(["gate", "--repo", str(root), "--base", base, "--head", head, "--release-validated"])
+    assert exc.value.code == 2
+
+
+def test_adversarial_env_var_cannot_bypass_validation(tmp_path, monkeypatch):
+    """Setting VERIFYCI_RELEASE_VALIDATED environment variable has no effect on unvalidated builds."""
+    from verifyci.gate import orchestrator
+    monkeypatch.setenv("VERIFYCI_RELEASE_VALIDATED", "1")
+    monkeypatch.setattr(
+        orchestrator,
+        "verify_release_validation_evidence",
+        lambda repo=None: (False, "release-validation artifacts are absent; this internal build cannot emit a normal gate verdict"),
+    )
+    root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
+    head = _commit(root, {"app.py": "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n"})
+    bundle = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
+    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.exit_code == 3
+    assert "check_not_validated" in bundle.payload["verdict"]["fault_reason_codes"]
+
+
+def test_adversarial_gate_request_rejects_release_validated_keyword(tmp_path):
+    """GateRequest does not accept caller-controlled release_validated attribute."""
+    root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
+    with pytest.raises(TypeError):
+        GateRequest(repo=root, base=base, head="HEAD", release_validated=True)  # type: ignore[call-arg]
+
+
+def test_stale_release_validation_commit_mismatch_rejected(tmp_path, monkeypatch):
+    """Release validation evidence bound to a different commit is rejected as stale, failing closed."""
+    from verifyci.contracts import release_validation
+    monkeypatch.setattr(release_validation, "get_commit_sha", lambda root: "0" * 40)
+    root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
+    head = _commit(root, {"app.py": "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n"})
+    bundle = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
+    assert bundle.payload["verdict"]["status"] == "ERROR"
+    assert bundle.exit_code == 3
+    assert "check_not_validated" in bundle.payload["verdict"]["fault_reason_codes"]
+    diag = next(d for d in bundle.payload["diagnostics"] if d["code"] == "check_not_validated")
+    assert "stale release-validation evidence" in diag["detail"]
 
 
 def test_local_cache_reuses_pinned_facts_without_changing_payload(tmp_path):
@@ -446,6 +498,8 @@ def test_secret_finding_is_redacted_and_not_duplicated(tmp_path):
 
 
 def test_shadow_secret_finding_is_not_suppressed_by_blocking_waiver(monkeypatch, tmp_path):
+    from verifyci.gate import orchestrator
+    monkeypatch.setattr(orchestrator, "verify_release_validation_evidence", lambda *args, **kwargs: (True, None))
     monkeypatch.setitem(
         CHECK_SPECS,
         "security",
@@ -493,6 +547,8 @@ def test_shadow_secret_finding_is_not_suppressed_by_blocking_waiver(monkeypatch,
 
 
 def test_coverage_acceptance_does_not_change_shadow_result(monkeypatch, tmp_path):
+    from verifyci.gate import orchestrator
+    monkeypatch.setattr(orchestrator, "verify_release_validation_evidence", lambda *args, **kwargs: (True, None))
     monkeypatch.setitem(
         CHECK_SPECS,
         "contract",
@@ -619,7 +675,6 @@ def test_policy_only_stale_waiver_remediation_respects_codeowners(tmp_path, caps
             clean_head,
             "--review-mode",
             "codeowners",
-            "--release-validated",
         ]
     )
     captured = capsys.readouterr()
@@ -652,7 +707,6 @@ def test_policy_only_stale_waiver_remediation_respects_codeowners(tmp_path, caps
             retained_head,
             "--review-mode",
             "codeowners",
-            "--release-validated",
         ]
     )
     captured = capsys.readouterr()
@@ -701,23 +755,32 @@ def test_fingerprint_ignores_volatile_line_locations():
     assert first == second
 
 
-def test_cli_formats_and_codeowners_review_mode(tmp_path, capsys):
+def test_cli_formats_and_codeowners_review_mode(tmp_path, capsys, monkeypatch):
     root, base = _repo(tmp_path, {"app.py": "x = 1\n"})
     head = _commit(root, {"app.py": "x = 2\n"})
 
     # Proving that an unvalidated build cannot return an authoritative PASS via CLI
+    from verifyci.gate import orchestrator
+    monkeypatch.setattr(
+        orchestrator,
+        "verify_release_validation_evidence",
+        lambda repo=None: (False, "release-validation artifacts are absent; this internal build cannot emit a normal gate verdict"),
+    )
     unvalidated_code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "json"])
     unvalidated_captured = capsys.readouterr()
     assert unvalidated_code == 3
     assert json.loads(unvalidated_captured.out)["payload"]["verdict"]["status"] == "ERROR"
     assert "check_not_validated" in json.loads(unvalidated_captured.out)["payload"]["verdict"]["fault_reason_codes"]
 
-    code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "json", "--release-validated"])
+    # Undo unvalidated mock to verify validated behavior
+    monkeypatch.undo()
+
+    code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "json"])
     captured = capsys.readouterr()
     assert code == 0
     assert json.loads(captured.out)["payload"]["verdict"]["status"] == "PASS"
 
-    code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "sarif", "--release-validated"])
+    code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "sarif"])
     captured = capsys.readouterr()
     assert code == 0
     assert json.loads(captured.out)["version"] == "2.1.0"
@@ -735,7 +798,6 @@ def test_cli_formats_and_codeowners_review_mode(tmp_path, capsys):
             head,
             "--cache-dir",
             str(cache_dir),
-            "--release-validated",
         ]
     )
     assert code == 3
@@ -758,7 +820,6 @@ def test_cli_formats_and_codeowners_review_mode(tmp_path, capsys):
             head2,
             "--review-mode",
             "codeowners",
-            "--release-validated",
         ]
     )
     assert code == 0

@@ -16,11 +16,11 @@ from verifyci.checks.base import CheckContext, error_result
 from verifyci.contracts.manifest import (
     CHECK_ORDER,
     CHECK_SPECS,
-    RELEASE_VALIDATED,
     manifest_hash,
     release_summary,
     validate_manifest,
 )
+from verifyci.contracts.release_validation import verify_release_validation_evidence
 from verifyci.contracts.model import (
     CheckResult,
     Coverage,
@@ -83,7 +83,6 @@ class GateRequest:
     cache_key_id: str = "k1"
     cache_read_only: bool = False
     jobs: int = 1
-    release_validated: bool = False
 
 
 def _today() -> str:
@@ -289,6 +288,7 @@ def _payload(
     target_drift: bool,
     review_cleared: bool,
     extra_faults: Sequence[str] = (),
+    is_release_validated: bool = False,
 ) -> dict[str, Any]:
     inputs = {
         "target_ref": request.base,
@@ -392,6 +392,7 @@ def _payload(
         proposed=proposed,
         review_cleared=review_cleared,
         extra_faults=extra_faults,
+        is_release_validated=is_release_validated,
     )
 
 
@@ -416,6 +417,7 @@ def _payload_build(
     proposed: ProposedReview | None,
     review_cleared: bool,
     extra_faults: Sequence[str],
+    is_release_validated: bool = False,
 ) -> dict[str, Any]:
     assumptions = _assumptions(codeowners=codeowners, policy=context.policy)
     return _build_payload(
@@ -451,7 +453,7 @@ def _payload_build(
             "extra_faults": list(extra_faults),
         },
         manifest_extra={
-            "release_validated": request.release_validated or RELEASE_VALIDATED,
+            "release_validated": is_release_validated,
             "manifest_hash": manifest_hash(),
             "check_specs": [CHECK_SPECS[c].to_dict() for c in CHECK_ORDER],
             "builtin_policy_hashes": {"builtin_bootstrap_v1": BUILTIN_BOOTSTRAP_HASH},
@@ -781,7 +783,11 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
         )
         review_reasons.update(acceptance_reviews)
 
-        is_release_validated = request.release_validated or RELEASE_VALIDATED
+        is_release_validated, val_diag = verify_release_validation_evidence()
+        if not is_release_validated and request.repo:
+            repo_path = Path(request.repo)
+            if (repo_path / "evidence" / "release" / "release_validation.json").is_file():
+                is_release_validated, val_diag = verify_release_validation_evidence(repo_path)
         verdict = aggregate(
             results,
             review_reasons=review_reasons,
@@ -849,7 +855,10 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             diagnostics.append(
                 {
                     "code": "check_not_validated",
-                    "detail": "release-validation artifacts are absent; this internal build cannot emit a normal gate verdict",
+                    "detail": (
+                        val_diag
+                        or "release-validation artifacts are absent; this internal build cannot emit a normal gate verdict"
+                    ),
                 }
             )
         if extra_faults:
@@ -884,6 +893,7 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             target_drift=target_drift,
             review_cleared=review_cleared,
             extra_faults=tuple(sorted(extra_faults)),
+            is_release_validated=is_release_validated,
         )
         duration_ms = int((time.monotonic() - started) * 1000)
         return build_bundle(

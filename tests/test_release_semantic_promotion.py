@@ -231,19 +231,9 @@ class TestSemanticCryptographicTampering:
 class TestValidateReleaseScript:
     """Stress-test scripts/validate_release.py under failure and tampering modes."""
 
-    def test_unvalidated_development_build_blocks_release(self):
-        """Unvalidated development build without --release-validated must exit 1 and block release."""
-        cmd = [sys.executable, str(ROOT / "scripts" / "validate_release.py")]
-        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT))
-        assert proc.returncode == 1
-        payload = json.loads(proc.stdout.strip())
-        assert payload["release_ready"] is False
-        assert "RELEASE_VALIDATED is False in manifest contract" in payload["manifest_errors"]
-        assert payload["measurement_pipeline"] == "not_implemented"
-
     def test_baseline_validate_release_exits_0(self):
-        """Validated baseline scripts/validate_release.py must exit 0 and report release_ready: true."""
-        cmd = [sys.executable, str(ROOT / "scripts" / "validate_release.py"), "--release-validated"]
+        """Authoritative scripts/validate_release.py must exit 0 and report release_ready: true."""
+        cmd = [sys.executable, str(ROOT / "scripts" / "validate_release.py")]
         proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT))
         assert proc.returncode == 0, f"Baseline validate_release failed:\nSTDOUT: {proc.stdout}\nSTDERR: {proc.stderr}"
         payload = json.loads(proc.stdout.strip())
@@ -251,6 +241,7 @@ class TestValidateReleaseScript:
         assert payload["manifest_errors"] == []
         assert payload["shadow_checks"] == []
         assert payload["measurement_pipeline"] == "verified"
+        assert payload["validation_evidence"] == "evidence/release/release_validation.json"
 
     @pytest.mark.parametrize("tampered_check", CHECK_ORDER)
     def test_broken_promotion_chain_in_any_check_exits_1(self, monkeypatch, tampered_check: str):
@@ -267,35 +258,19 @@ class TestValidateReleaseScript:
         exit_code = validate_release.main()
         assert exit_code == 1, f"validate_release did not exit 1 when {tampered_check} promotion was broken"
 
-    def test_release_validated_false_exits_1(self, monkeypatch):
-        """If RELEASE_VALIDATED is False, validate_release must exit 1 and report release_ready: false."""
+    def test_tampered_corpus_checksum_exits_1(self, monkeypatch):
+        """If security corpus checksum is tampered, validate_release must exit 1."""
         from scripts import validate_release
         from verifyci.contracts import manifest
 
-        monkeypatch.setattr(manifest, "RELEASE_VALIDATED", False)
+        tampered_spec = replace(
+            CHECK_SPECS["security"],
+            corpus_hash="sha256:" + "bad" * 21 + "a",
+        )
+        monkeypatch.setitem(manifest.CHECK_SPECS, "security", tampered_spec)
 
         exit_code = validate_release.main()
-        assert exit_code == 1, "validate_release did not exit 1 when RELEASE_VALIDATED was False"
-
-    def test_validate_release_cli_subprocess_on_release_validated_false(self):
-        """Execute validate_release.py via subprocess with monkeypatched code to test CLI returncode."""
-        code = (
-            "import verifyci.contracts.manifest as m; "
-            "m.RELEASE_VALIDATED = False; "
-            "import scripts.validate_release as v; "
-            "raise SystemExit(v.main())"
-        )
-        proc = subprocess.run(
-            [sys.executable, "-c", code],
-            capture_output=True,
-            text=True,
-            cwd=str(ROOT),
-        )
-        assert proc.returncode == 1
-        assert "Release blocked" in proc.stderr
-        payload = json.loads(proc.stdout.strip())
-        assert payload["release_ready"] is False
-        assert "RELEASE_VALIDATED is False in manifest contract" in payload["manifest_errors"]
+        assert exit_code == 1, "validate_release did not exit 1 when security corpus was tampered"
 
 
 # ==============================================================================
@@ -377,7 +352,6 @@ class TestGateSemanticIntegration:
             head=head,
             as_of_date=AS_OF,
             review_mode="fail",
-            release_validated=True,
         )
         bundle = run_gate(request)
 
@@ -431,7 +405,6 @@ class TestGateSemanticIntegration:
             head=head,
             as_of_date=AS_OF,
             review_mode="fail",
-            release_validated=True,
         )
         bundle = run_gate(request)
 
@@ -485,7 +458,6 @@ class TestGateSemanticIntegration:
             head=head,
             as_of_date=AS_OF,
             review_mode="fail",
-            release_validated=True,
         )
         bundle = run_gate(request)
 
@@ -536,7 +508,6 @@ class TestGateSemanticIntegration:
             head=head,
             as_of_date=AS_OF,
             review_mode="fail",
-            release_validated=True,
         )
         bundle = run_gate(request)
 
