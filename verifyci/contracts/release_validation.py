@@ -123,7 +123,7 @@ def get_changed_files_between(repo_root: Path, base_commit: str, head_commit: st
 def compute_implementation_fingerprint(repo_root: Path) -> str:
     """Compute deterministic SHA256 over critical implementation sources."""
     hasher = hashlib.sha256()
-    for rel_path in sorted(_CRITICAL_IMPLEMENTATION_FILES):
+    for rel_path in sorted(_CRITICAL_IMPLEMENTATION_FILES, key=lambda p: p.as_posix()):
         full_path = repo_root / rel_path
         if full_path.is_file():
             hasher.update(rel_path.as_posix().encode("utf-8"))
