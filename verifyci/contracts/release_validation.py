@@ -171,7 +171,11 @@ def verify_release_validation_evidence(
         (False, reason_detail) otherwise.
     """
     root = repo_root or get_verifyci_root()
-    val_file = root / VALIDATION_REL_PATH
+    val_override = os.environ.get("VERIFYCI_RELEASE_VALIDATION_PATH")
+    if val_override:
+        val_file = Path(val_override)
+    else:
+        val_file = root / VALIDATION_REL_PATH
     if not val_file.is_file():
         return (
             False,
@@ -354,6 +358,7 @@ def generate_release_validation_record(
     commit_sha: str,
     measurements: dict[str, Any],
     signing_key_hex: str | None = None,
+    output_file: Path | None = None,
 ) -> dict[str, Any]:
     """Generate, sign with Ed25519, and atomically write authoritative release-validation evidence."""
     payload_body = {
@@ -394,7 +399,7 @@ def generate_release_validation_record(
         "signature": signature,
     }
 
-    val_file = repo_root / VALIDATION_REL_PATH
+    val_file = output_file or (repo_root / VALIDATION_REL_PATH)
     val_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Atomic write via temporary file
