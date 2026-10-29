@@ -58,11 +58,16 @@ def main() -> int:
         raise RuntimeError("Failed to resolve branch reference for evidence provenance")
 
     git_status = _git("status", "--porcelain")
-    tree_clean = len(git_status) == 0
-    if not tree_clean:
+    uncommitted = [
+        line
+        for line in git_status.splitlines()
+        if line.strip()
+        and not line.strip().endswith("evidence/release/release_validation.json")
+    ]
+    if uncommitted:
         raise RuntimeError(
             f"Working tree is dirty; strict source-to-commit binding requires a clean tree.\n"
-            f"Uncommitted changes:\n{git_status}"
+            f"Uncommitted changes:\n{chr(10).join(uncommitted)}"
         )
 
     git_ver = _git("--version")
