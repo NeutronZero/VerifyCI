@@ -94,7 +94,15 @@ def _commit(root: Path, files: dict[str, str | None], message: str = "head") -> 
     return _git(root, "rev-parse", "HEAD")
 
 
-def _gate(root: Path, base: str, head: str, *, review_mode: str = "fail", generated_at: str | None = None):
+def _gate(
+    root: Path,
+    base: str,
+    head: str,
+    *,
+    review_mode: str = "fail",
+    generated_at: str | None = None,
+    release_validated: bool = True,
+):
     return run_gate(
         GateRequest(
             repo=root,
@@ -103,6 +111,7 @@ def _gate(root: Path, base: str, head: str, *, review_mode: str = "fail", genera
             as_of_date=AS_OF,
             review_mode=review_mode,
             generated_at=generated_at,
+            release_validated=release_validated,
         )
     )
 
@@ -147,16 +156,14 @@ def test_codeowners_coverage_and_noninterference():
     assert "codeowners_noninterference_unproven" in coverage.reasons
 
 
-def test_clean_gate_stays_error_until_release_validation(monkeypatch, tmp_path):
-    monkeypatch.setattr("verifyci.contracts.manifest.RELEASE_VALIDATED", False)
-    monkeypatch.setattr("verifyci.gate.orchestrator.RELEASE_VALIDATED", False)
+def test_clean_gate_stays_error_until_release_validation(tmp_path):
     root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
     head = _commit(
         root,
         {"app.py": "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n"},
     )
-    first = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
-    second = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
+    first = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z", release_validated=False)
+    second = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z", release_validated=False)
     assert first.payload["verdict"]["status"] == "ERROR"
     assert first.exit_code == 3
     assert "check_not_validated" in first.payload["verdict"]["fault_reason_codes"]
@@ -612,6 +619,7 @@ def test_policy_only_stale_waiver_remediation_respects_codeowners(tmp_path, caps
             clean_head,
             "--review-mode",
             "codeowners",
+            "--release-validated",
         ]
     )
     captured = capsys.readouterr()
@@ -644,6 +652,7 @@ def test_policy_only_stale_waiver_remediation_respects_codeowners(tmp_path, caps
             retained_head,
             "--review-mode",
             "codeowners",
+            "--release-validated",
         ]
     )
     captured = capsys.readouterr()
@@ -695,12 +704,20 @@ def test_fingerprint_ignores_volatile_line_locations():
 def test_cli_formats_and_codeowners_review_mode(tmp_path, capsys):
     root, base = _repo(tmp_path, {"app.py": "x = 1\n"})
     head = _commit(root, {"app.py": "x = 2\n"})
-    code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "json"])
+
+    # Proving that an unvalidated build cannot return an authoritative PASS via CLI
+    unvalidated_code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "json"])
+    unvalidated_captured = capsys.readouterr()
+    assert unvalidated_code == 3
+    assert json.loads(unvalidated_captured.out)["payload"]["verdict"]["status"] == "ERROR"
+    assert "check_not_validated" in json.loads(unvalidated_captured.out)["payload"]["verdict"]["fault_reason_codes"]
+
+    code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "json", "--release-validated"])
     captured = capsys.readouterr()
     assert code == 0
     assert json.loads(captured.out)["payload"]["verdict"]["status"] == "PASS"
 
-    code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "sarif"])
+    code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "sarif", "--release-validated"])
     captured = capsys.readouterr()
     assert code == 0
     assert json.loads(captured.out)["version"] == "2.1.0"
@@ -718,6 +735,7 @@ def test_cli_formats_and_codeowners_review_mode(tmp_path, capsys):
             head,
             "--cache-dir",
             str(cache_dir),
+            "--release-validated",
         ]
     )
     assert code == 3
@@ -740,6 +758,7 @@ def test_cli_formats_and_codeowners_review_mode(tmp_path, capsys):
             head2,
             "--review-mode",
             "codeowners",
+            "--release-validated",
         ]
     )
     assert code == 0

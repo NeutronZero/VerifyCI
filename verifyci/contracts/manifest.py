@@ -24,7 +24,7 @@ MANIFEST_SCHEMA = "verifyci.manifest/v3.1"
 # The implementation is an M0 candidate.  Release validation artifacts are
 # produced separately; this flag deliberately prevents the CLI from presenting
 # a development build as a release-validated gate.
-RELEASE_VALIDATED = True
+RELEASE_VALIDATED = False
 
 
 @dataclass(frozen=True, slots=True)

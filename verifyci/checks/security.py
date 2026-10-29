@@ -51,15 +51,28 @@ _PLACEHOLDER_EXACT = {
     "dummy", "test", "fake", "null", "none", "<secret>", "your-api-key",
 }
 _BUILTIN_DANGEROUS = {
-    "eval": re.compile(r"\beval\s*\("),
-    "exec": re.compile(r"\bexec\s*\("),
-    "compile": re.compile(r"\bcompile\s*\("),
+    "eval": re.compile(r"\b(?:builtins\.|__builtin__\.)?eval\s*\("),
+    "exec": re.compile(r"\b(?:builtins\.|__builtin__\.)?exec\s*\("),
+    "compile": re.compile(r"\b(?:builtins\.|__builtin__\.)?compile\s*\("),
     "os.system": re.compile(r"\bos\.system\s*\("),
     "subprocess": re.compile(r"\bsubprocess\.(?:run|call|Popen|check_output|check_call)\s*\("),
     "pickle.loads": re.compile(r"\bpickle\.loads\s*\("),
     "yaml.load": re.compile(r"\byaml\.load\s*\("),
     "innerHTML": re.compile(r"\.innerHTML\s*="),
 }
+_SECRET_SINK_RE = re.compile(
+    r"(?:logger\.(?:info|error|warn|warning|debug|critical|exception)\s*\(|"
+    r"logging\.(?:info|error|warn|warning|debug|critical|exception)\s*\(|"
+    r"console\.(?:log|warn|error|info|debug)\s*\(|"
+    r"print\s*\(|"
+    r"requests\.(?:get|post|put|delete|patch|head|request)\s*\(|"
+    r"urllib\.request|http\.client|fetch\s*\(|"
+    r"axios\.(?:get|post|put|delete)\s*\(|"
+    r"(?:cursor\.)?(?:execute|executemany)\s*\(|"
+    r"open\s*\(|"
+    r"subprocess\.|os\.system\s*\(|"
+    r"pickle\.dump|yaml\.dump)"
+)
 _TAINT_SOURCE_RE = re.compile(
     r"(?:request\.(?:args|form|json|data|values|get_json)|input\s*\(|sys\.argv|os\.environ|location\.(?:search|hash)|req\.(?:query|body|params))"
 )
@@ -211,11 +224,15 @@ def _secret_sub(context: CheckContext) -> CheckResult:
         line_numbers = changed.get(path, set())
         if not line_numbers:
             continue
+        assigned_secrets: dict[str, tuple[int, str, str]] = {}
         for line_number, line in enumerate(entry.head_source.splitlines(), start=1):
             if line_number not in line_numbers:
                 continue
             scanned_lines += 1
             known_secret_found = False
+            sink_match = _SECRET_SINK_RE.search(line) or _TAINT_SINK_RE.search(line)
+            sink_text = sink_match.group(0) if sink_match else ""
+
             for kind, pattern in _SECRET_PATTERNS:
                 for match in pattern.finditer(line):
                     raw = match.group(0)
@@ -271,12 +288,47 @@ def _secret_sub(context: CheckContext) -> CheckResult:
                             remediation="Remove the credential, rotate it, and use a secret manager.",
                         )
                     )
+                    if sink_match:
+                        findings.append(
+                            make_finding(
+                                context=context,
+                                check_id="security",
+                                defect_id="SEC-SECRET-TO-SINK",
+                                subject={"path": path, "line": line_number, "symbol": ""},
+                                premises={
+                                    "source": kind,
+                                    "sink": sink_text,
+                                    "redacted_secret": redacted,
+                                },
+                                evidence_kind=EvidenceKind.TAINT_PATH,
+                                evidence_payload={
+                                    "identity": {
+                                        "path": path,
+                                        "line": line_number,
+                                        "kind": "secret_to_sink",
+                                    },
+                                    "path": path,
+                                    "source": {"line": line_number, "pattern": kind, "redacted": redacted},
+                                    "sink": {"line": line_number, "text": sink_text},
+                                    "edges": [{"line": line_number, "justification": "direct flow to sink"}],
+                                },
+                                message=f"validated secret flows to sink {sink_text} at {path}:{line_number}",
+                                remediation="Do not pass credential material to external, logging, or persistence sinks.",
+                            )
+                        )
+                    stripped_line = line.strip()
+                    if "=" in stripped_line and not stripped_line.startswith("#"):
+                        lhs, _, _ = stripped_line.partition("=")
+                        var_name = lhs.strip().split()[-1]
+                        if var_name.isidentifier():
+                            assigned_secrets[var_name] = (line_number, kind, redacted)
                     break
             # Generic high-entropy assignment in changed text.
             stripped = line.strip()
             if not known_secret_found and "=" in stripped and not stripped.startswith("#"):
                 key, _, value = stripped.partition("=")
                 value = value.strip().strip("'\"")
+                var_name = key.strip().split()[-1]
                 if (
                     _SECRET_VAR_NAMES.search(key)
                     and len(value) >= 16
@@ -311,6 +363,42 @@ def _secret_sub(context: CheckContext) -> CheckResult:
                                     "liveness not checked"
                                 ),
                                 remediation="Remove the credential, rotate it, and use a secret manager.",
+                            )
+                        )
+                        if var_name.isidentifier():
+                            assigned_secrets[var_name] = (line_number, "HIGH_ENTROPY_ASSIGNMENT", redacted)
+
+            # Check if any previously assigned secret variable flows into a sink on this line
+            if sink_match and not known_secret_found and assigned_secrets:
+                for v_name, (src_line, s_kind, s_redacted) in assigned_secrets.items():
+                    if src_line != line_number and re.search(rf"\b{re.escape(v_name)}\b", line):
+                        findings.append(
+                            make_finding(
+                                context=context,
+                                check_id="security",
+                                defect_id="SEC-SECRET-TO-SINK",
+                                subject={"path": path, "line": line_number, "symbol": v_name},
+                                premises={
+                                    "source": s_kind,
+                                    "sink": sink_text,
+                                    "variable": v_name,
+                                    "redacted_secret": s_redacted,
+                                },
+                                evidence_kind=EvidenceKind.TAINT_PATH,
+                                evidence_payload={
+                                    "identity": {
+                                        "path": path,
+                                        "line": line_number,
+                                        "kind": "secret_to_sink",
+                                        "variable": v_name,
+                                    },
+                                    "path": path,
+                                    "source": {"line": src_line, "pattern": s_kind, "redacted": s_redacted, "variable": v_name},
+                                    "sink": {"line": line_number, "text": sink_text},
+                                    "edges": [{"line": line_number, "justification": f"variable {v_name} passed to sink"}],
+                                },
+                                message=f"validated secret from {v_name} flows to sink {sink_text} at {path}:{line_number}",
+                                remediation="Do not pass credential material to external, logging, or persistence sinks.",
                             )
                         )
 
@@ -424,18 +512,38 @@ def _dangerous_sub(context: CheckContext) -> CheckResult:
                     if not resolved:
                         continue
 
+                    canonical = resolved
+                    if canonical.startswith("builtins."):
+                        canonical = canonical[len("builtins."):]
+                    elif canonical.startswith("__builtin__."):
+                        canonical = canonical[len("__builtin__."):]
+                    elif canonical.startswith("__builtins__."):
+                        canonical = canonical[len("__builtins__."):]
+
                     matched_rule: tuple[str, str] | None = None
-                    if resolved in ("eval", "exec", "compile", "innerHTML"):
-                        matched_rule = (resolved, resolved)
-                    elif resolved == "os.system" or resolved.startswith("subprocess."):
-                        matched_rule = (resolved.split(".")[0], resolved)
-                    elif resolved in ("pickle.loads", "yaml.load"):
-                        matched_rule = (resolved, resolved)
+                    if canonical in ("eval", "exec", "compile", "innerHTML"):
+                        matched_rule = (canonical, canonical)
+                    elif (
+                        resolved == "os.system"
+                        or resolved.startswith("subprocess.")
+                        or canonical == "os.system"
+                        or canonical.startswith("subprocess.")
+                    ):
+                        matched_rule = (resolved.split(".")[0] if "." in resolved else canonical.split(".")[0], resolved)
+                    elif resolved in ("pickle.loads", "yaml.load") or canonical in ("pickle.loads", "yaml.load"):
+                        matched_rule = (canonical, canonical)
                     else:
                         for rule_id, symbols in custom.items():
                             for sym in symbols:
                                 simple = sym.split(":")[-1].rsplit(".", 1)[-1]
-                                if resolved == sym or resolved == simple or resolved.endswith(f".{simple}"):
+                                if (
+                                    resolved == sym
+                                    or resolved == simple
+                                    or resolved.endswith(f".{simple}")
+                                    or canonical == sym
+                                    or canonical == simple
+                                    or canonical.endswith(f".{simple}")
+                                ):
                                     matched_rule = (rule_id, sym)
                                     break
                             if matched_rule:

@@ -83,6 +83,7 @@ class GateRequest:
     cache_key_id: str = "k1"
     cache_read_only: bool = False
     jobs: int = 1
+    release_validated: bool = False
 
 
 def _today() -> str:
@@ -450,7 +451,7 @@ def _payload_build(
             "extra_faults": list(extra_faults),
         },
         manifest_extra={
-            "release_validated": RELEASE_VALIDATED,
+            "release_validated": request.release_validated or RELEASE_VALIDATED,
             "manifest_hash": manifest_hash(),
             "check_specs": [CHECK_SPECS[c].to_dict() for c in CHECK_ORDER],
             "builtin_policy_hashes": {"builtin_bootstrap_v1": BUILTIN_BOOTSTRAP_HASH},
@@ -780,6 +781,7 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
         )
         review_reasons.update(acceptance_reviews)
 
+        is_release_validated = request.release_validated or RELEASE_VALIDATED
         verdict = aggregate(
             results,
             review_reasons=review_reasons,
@@ -787,7 +789,7 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             target_drift_mode=str(policy.gate.get("target_drift", "record")),
             extra_faults=(
                 extra_faults
-                | ({"check_not_validated"} if not RELEASE_VALIDATED else set())
+                | ({"check_not_validated"} if not is_release_validated else set())
             ),
         )
 
@@ -824,7 +826,7 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
                     target_drift_mode=str(policy.gate.get("target_drift", "record")),
                     extra_faults=(
                         extra_faults
-                        | ({"check_not_validated"} if not RELEASE_VALIDATED else set())
+                        | ({"check_not_validated"} if not is_release_validated else set())
                     ),
                 )
 
@@ -843,7 +845,7 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
                     seen.add(key)
                     all_findings.append(finding.to_dict())
         diagnostics = list(waiver_diagnostics) + list(acceptance_diagnostics)
-        if not RELEASE_VALIDATED:
+        if not is_release_validated:
             diagnostics.append(
                 {
                     "code": "check_not_validated",

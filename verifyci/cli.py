@@ -37,6 +37,12 @@ def _parser() -> argparse.ArgumentParser:
     gate.add_argument("--cache-read-only", action="store_true", help="never write cache entries")
     gate.add_argument("--jobs", type=int, default=1)
     gate.add_argument("--review-mode", choices=("fail", "codeowners"), default="fail")
+    gate.add_argument(
+        "--release-validated",
+        action="store_true",
+        default=False,
+        help="authoritative release validation flag",
+    )
     return parser
 
 
@@ -165,6 +171,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         cache_key_id=os.environ.pop("VERIFYCI_CACHE_KEY_ID", "k1"),
         cache_read_only=args.cache_read_only,
         jobs=args.jobs,
+        release_validated=args.release_validated or bool(os.environ.get("VERIFYCI_RELEASE_VALIDATED")),
     )
     bundle = run_gate(request)
     if args.format == "sarif":

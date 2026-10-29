@@ -231,9 +231,19 @@ class TestSemanticCryptographicTampering:
 class TestValidateReleaseScript:
     """Stress-test scripts/validate_release.py under failure and tampering modes."""
 
-    def test_baseline_validate_release_exits_0(self):
-        """Untampered baseline scripts/validate_release.py must exit 0 and report release_ready: true."""
+    def test_unvalidated_development_build_blocks_release(self):
+        """Unvalidated development build without --release-validated must exit 1 and block release."""
         cmd = [sys.executable, str(ROOT / "scripts" / "validate_release.py")]
+        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT))
+        assert proc.returncode == 1
+        payload = json.loads(proc.stdout.strip())
+        assert payload["release_ready"] is False
+        assert "RELEASE_VALIDATED is False in manifest contract" in payload["manifest_errors"]
+        assert payload["measurement_pipeline"] == "not_implemented"
+
+    def test_baseline_validate_release_exits_0(self):
+        """Validated baseline scripts/validate_release.py must exit 0 and report release_ready: true."""
+        cmd = [sys.executable, str(ROOT / "scripts" / "validate_release.py"), "--release-validated"]
         proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT))
         assert proc.returncode == 0, f"Baseline validate_release failed:\nSTDOUT: {proc.stdout}\nSTDERR: {proc.stderr}"
         payload = json.loads(proc.stdout.strip())
@@ -367,6 +377,7 @@ class TestGateSemanticIntegration:
             head=head,
             as_of_date=AS_OF,
             review_mode="fail",
+            release_validated=True,
         )
         bundle = run_gate(request)
 
@@ -420,6 +431,7 @@ class TestGateSemanticIntegration:
             head=head,
             as_of_date=AS_OF,
             review_mode="fail",
+            release_validated=True,
         )
         bundle = run_gate(request)
 
@@ -473,6 +485,7 @@ class TestGateSemanticIntegration:
             head=head,
             as_of_date=AS_OF,
             review_mode="fail",
+            release_validated=True,
         )
         bundle = run_gate(request)
 
@@ -523,6 +536,7 @@ class TestGateSemanticIntegration:
             head=head,
             as_of_date=AS_OF,
             review_mode="fail",
+            release_validated=True,
         )
         bundle = run_gate(request)
 

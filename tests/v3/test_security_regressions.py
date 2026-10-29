@@ -261,3 +261,95 @@ def test_taint_sink_only_fails_closed_inconclusive(tmp_path: Path):
     assert "taint_path_unresolved" in res.reason_codes
     assert not res.findings
 
+
+@pytest.mark.invariant
+def test_aliased_builtin_eval_fails_closed(tmp_path: Path):
+    """Aliased eval imported from builtins (e.g. from builtins import eval as e) must fail with SEC-DANGEROUS-CALL."""
+    base = {"src/eval_runner.py": "def run(x): pass\n"}
+    head = {
+        "src/eval_runner.py": (
+            "from builtins import eval as e\n"
+            "def run(user_input):\n"
+            "    return e(user_input)\n"
+        )
+    }
+    res = _build_and_run("alias_eval", base, head, "", tmp_path)
+    assert res.outcome == Outcome.FAIL
+    findings = [f for f in res.findings if f.defect_id == "SEC-DANGEROUS-CALL"]
+    assert len(findings) == 1
+    assert findings[0].subject.get("symbol") == "eval"
+    assert findings[0].evidence.kind.value == "call_site"
+    assert findings[0].evidence.payload.get("callee") == "eval"
+
+
+@pytest.mark.invariant
+def test_aliased_builtin_exec_and_compile_fail_closed(tmp_path: Path):
+    """Aliased exec, compile, and qualified builtins.eval must all fail closed with SEC-DANGEROUS-CALL."""
+    base = {"src/calls.py": "def f(): pass\n"}
+    head = {
+        "src/calls.py": (
+            "import builtins as b\n"
+            "from builtins import exec as x, compile as c\n"
+            "def run(cmd):\n"
+            "    b.eval(cmd)\n"
+            "    x(cmd)\n"
+            "    c(cmd, '<string>', 'exec')\n"
+        )
+    }
+    res = _build_and_run("alias_exec_compile", base, head, "", tmp_path)
+    assert res.outcome == Outcome.FAIL
+    dangerous = [f for f in res.findings if f.defect_id == "SEC-DANGEROUS-CALL"]
+    callees = {f.evidence.payload.get("callee") for f in dangerous}
+    assert "eval" in callees
+    assert "exec" in callees
+    assert "compile" in callees
+
+
+@pytest.mark.invariant
+def test_secret_to_sink_same_line_detected_and_redacted(tmp_path: Path):
+    """Secret directly passed into a log or print sink is detected as SEC-SECRET-TO-SINK with strict redaction."""
+    raw_secret = "ghp_123456789012345678901234"
+    base = {"src/sink_test.py": "def notify(): pass\n"}
+    head = {
+        "src/sink_test.py": (
+            f"import logging\n"
+            f"logger = logging.getLogger(__name__)\n"
+            f"def notify():\n"
+            f"    logger.info('Active token: %s', '{raw_secret}')\n"
+        )
+    }
+    res = _build_and_run("secret_to_sink_direct", base, head, "", tmp_path)
+    assert res.outcome == Outcome.FAIL
+    sink_findings = [f for f in res.findings if f.defect_id == "SEC-SECRET-TO-SINK"]
+    assert len(sink_findings) >= 1
+    finding = sink_findings[0]
+    assert finding.evidence.kind.value == "taint_path"
+    assert raw_secret not in finding.message
+    assert raw_secret not in json.dumps(finding.evidence.payload)
+    assert "…" in finding.evidence.payload["source"]["redacted"]
+
+
+@pytest.mark.invariant
+def test_secret_to_sink_multiline_dataflow(tmp_path: Path):
+    """Secret assigned to variable and passed to persistence/print sink is detected as SEC-SECRET-TO-SINK."""
+    raw_secret = "AKIA1234567890ABCDEF"
+    base = {"src/flow.py": "def log_key(): pass\n"}
+    head = {
+        "src/flow.py": (
+            f"AWS_KEY = '{raw_secret}'\n"
+            f"def log_key():\n"
+            f"    print('Key is: ' + AWS_KEY)\n"
+        )
+    }
+    res = _build_and_run("secret_to_sink_flow", base, head, "", tmp_path)
+    assert res.outcome == Outcome.FAIL
+    secret_findings = [f for f in res.findings if f.defect_id == "SEC-SECRET"]
+    sink_findings = [f for f in res.findings if f.defect_id == "SEC-SECRET-TO-SINK"]
+    assert len(secret_findings) == 1
+    assert len(sink_findings) == 1
+    assert sink_findings[0].evidence.kind.value == "taint_path"
+    assert raw_secret not in sink_findings[0].message
+    assert raw_secret not in json.dumps(sink_findings[0].evidence.payload)
+    assert sink_findings[0].subject.get("symbol") == "AWS_KEY"
+
+
