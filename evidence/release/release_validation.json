@@ -1,4 +1,11 @@
 {
+  "attestation": {
+    "algorithm": "hmac-sha256",
+    "digest": "sha256:26c93b44d0e2f5de2cd846ef41135d4ba5303fc1a127ecfc808ff3a647fddaac",
+    "issuer": "verifyci.release_pipeline",
+    "key_id": "verifyci-release-authority-v1",
+    "signature": "53bd37e8e0e73655749a62308df4a208b847c531861fe2501a8c41b2bafd46e5"
+  },
   "checks_validated": [
     "grounding",
     "deletion",
@@ -6,7 +13,7 @@
     "semantic",
     "security"
   ],
-  "commit_sha": "e8fed17a9553fbfba6f68111f0629614dceb4208",
+  "commit_sha": "32ea0a1f45b9b30bfe1cd574f7eff572ef1a0aaf",
   "corpora_hashes": {
     "contract": "sha256:14bd93a97fb0be3eae13c99ebc4c25d1fe0e14dafb2e9db92e5e5d389043689c",
     "deletion": "sha256:efbca020e17296277e9ade5d3c59e20287e1e16018f044e416f7eebfd9a408a1",
@@ -14,10 +21,67 @@
     "security": "sha256:8d45f911c72bfda761c21da754b235d7a58768864a1d0087d70d745eeb97b880",
     "semantic": "sha256:dd0a162bd7442a78b6e236fa207c17dcd6413e5ad73e2e4b41c4b35451b5d3ba"
   },
-  "implementation_fingerprint": "sha256:28fa32a36fd506416bfae2b2591c7a717dbb94933306c4c7d3b0ceff5c45fab6",
+  "implementation_fingerprint": "sha256:395952e61a5983c935a81273ab9b87c152a202da950adad091303f24fcbfab05",
   "manifest_hash": "sha256:d471308bb8779a13e942d5fe2aa989bca74550132c5d4993ad4af3a5c41d6263",
+  "measurements": {
+    "benchmark": {
+      "cases_evaluated": 22,
+      "coverage_matches": 22,
+      "defects": {
+        "SEC-DANGEROUS-CALL": {
+          "false_negatives": 0,
+          "false_positives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "true_negatives": 20,
+          "true_positives": 2
+        },
+        "SEC-SECRET": {
+          "false_negatives": 0,
+          "false_positives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "true_negatives": 8,
+          "true_positives": 14
+        },
+        "SEC-SECRET-TO-SINK": {
+          "false_negatives": 0,
+          "false_positives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "true_negatives": 18,
+          "true_positives": 4
+        },
+        "SEC-TAINT-TO-SINK": {
+          "false_negatives": 0,
+          "false_positives": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "true_negatives": 21,
+          "true_positives": 1
+        }
+      },
+      "findings_matches": 22,
+      "outcome_matches": 22,
+      "reason_code_matches": 22,
+      "strict_redaction": true,
+      "zero_false_blocking": true
+    },
+    "test_suite": {
+      "duration_seconds": 149.9,
+      "test_target": "tests/v3",
+      "total_errors": 0,
+      "total_failed": 0,
+      "total_passed": 204
+    }
+  },
   "schema": "verifyci.release_validation/v1",
   "status": "VALIDATED",
   "tool_version": "3.1.10",
-  "toolchain_fingerprint": "sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9"
+  "toolchain_fingerprint": "sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9",
+  "toolchain_identity": {
+    "arch": "AMD64",
+    "platform": "Windows",
+    "python_version": "3.14.7"
+  }
 }
