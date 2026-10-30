@@ -8,7 +8,6 @@ reads, patch parsing, and evidence assembly.
 from __future__ import annotations
 
 import json
-import os
 from hashlib import sha256
 from pathlib import Path
 import subprocess
@@ -312,8 +311,7 @@ def test_provisional_stage_rejected_fails_closed(tmp_path, monkeypatch):
 def test_unauthorized_parent_commit_modifications_rejected_fails_closed(tmp_path, monkeypatch):
     """Parent-commit evidence is rejected if intervening commit touched code or tests."""
     from verifyci.contracts import release_validation
-    val_path = Path(os.environ.get("VERIFYCI_RELEASE_VALIDATION_PATH") or "evidence/release/release_validation.json")
-    recorded_commit = json.loads(val_path.read_text(encoding="utf-8"))["commit_sha"]
+    recorded_commit = json.loads(Path("evidence/release/release_validation.json").read_text(encoding="utf-8"))["commit_sha"]
     fake_child_commit = "1" * 40
     monkeypatch.setattr(release_validation, "get_commit_sha", lambda root=None: fake_child_commit)
     monkeypatch.setattr(release_validation, "get_parent_commit", lambda root=None, commit=None: recorded_commit)

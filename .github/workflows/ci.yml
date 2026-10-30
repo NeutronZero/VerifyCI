@@ -140,7 +140,7 @@ jobs:
           uv run --no-sync python -m pytest tests/v3/ -n auto -q
       - name: Run Authoritative Release Validation & Benchmark Measurement Pipeline
         env:
-          VERIFYCI_RELEASE_SIGNING_KEY: ${{ secrets.VERIFYCI_RELEASE_SIGNING_KEY || '1af19a7c31c3767a86e048b7b474a0cb887e77fa644a244b5882782716cf1e53' }}
+          VERIFYCI_RELEASE_SIGNING_KEY: ${{ secrets.VERIFYCI_RELEASE_SIGNING_KEY }}
         run: |
           uv run --no-sync python scripts/validate_release.py
       - name: Verify Release Validation Attestation

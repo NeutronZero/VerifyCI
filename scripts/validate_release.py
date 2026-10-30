@@ -13,7 +13,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -227,9 +226,15 @@ def execute_security_benchmark(root: Path) -> tuple[dict[str, Any] | None, list[
 
 
 def execute_test_suite(
-    root: Path, *, env_override: dict[str, str] | None = None
+    root: Path,
 ) -> tuple[dict[str, Any] | None, list[str]]:
-    """Execute the v3 test suite via pytest and capture authoritative pass metrics."""
+    """Execute the v3 test suite via pytest and capture authoritative pass metrics.
+
+    Security Boundary:
+    The test suite subprocess executes repository code and tests. It MUST NOT inherit
+    the release signing secret (VERIFYCI_RELEASE_SIGNING_KEY) to prevent test code
+    from having access to or exfiltrating the signing authority.
+    """
     errors = []
     started = time.monotonic()
     cmd = [
@@ -241,8 +246,9 @@ def execute_test_suite(
         "--tb=short",
     ]
     env = os.environ.copy()
-    if env_override:
-        env.update(env_override)
+    # Explicitly scrub signing key from test subprocess environment
+    env.pop("VERIFYCI_RELEASE_SIGNING_KEY", None)
+    env.pop("VERIFYCI_RELEASE_VALIDATION_PATH", None)
     env["PYTHONPATH"] = str(root) + (os.pathsep + env["PYTHONPATH"] if "PYTHONPATH" in env else "")
     proc = subprocess.run(cmd, cwd=str(root), env=env, capture_output=True, text=True)
     duration = time.monotonic() - started
@@ -358,36 +364,9 @@ def main() -> int:
         )
         return 1
 
-    # 5. Execute test suite with authenticated candidate attestation
-    tmp_val_dir = Path(tempfile.mkdtemp(prefix="vc_val_"))
-    tmp_val_file = tmp_val_dir / "release_validation.json"
-    try:
-        if bench_data and not errors and commit_sha:
-            candidate_measurements = {
-                "benchmark": bench_data,
-                "test_suite": {
-                    "duration_seconds": 0.0,
-                    "stage": "final",
-                    "test_target": "tests/v3",
-                    "total_errors": 0,
-                    "total_failed": 0,
-                    "total_passed": 206,
-                },
-            }
-            generate_release_validation_record(
-                ROOT,
-                commit_sha,
-                candidate_measurements,
-                signing_key_hex=signing_key,
-                output_file=tmp_val_file,
-            )
-        test_data, test_errors = execute_test_suite(
-            ROOT,
-            env_override={"VERIFYCI_RELEASE_VALIDATION_PATH": str(tmp_val_file)},
-        )
-        errors.extend(test_errors)
-    finally:
-        shutil.rmtree(tmp_val_dir, ignore_errors=True)
+    # 5. Execute test suite (without signing key or candidate attestation in environment)
+    test_data, test_errors = execute_test_suite(ROOT)
+    errors.extend(test_errors)
 
     release_ready = len(errors) == 0 and bench_data is not None and test_data is not None
 

@@ -33,7 +33,7 @@ VALIDATION_REL_PATH = Path("evidence") / "release" / "release_validation.json"
 # The private signing key is NEVER embedded in the repository or shipped code.
 RELEASE_AUTHORITY_KEY_ID = "verifyci-release-authority-ed25519-v1"
 RELEASE_AUTHORITY_PUBLIC_KEY_HEX = (
-    "9bb81c927fe4ca9e52063c92a6939cce819b2f5dc5eeb92c7e7fcb13aae71a17"
+    "7926b9524e2ec893f7834b9081228da255f058709fa158d77a75d7d21a3715f7"
 )
 
 _CRITICAL_IMPLEMENTATION_FILES = (
@@ -171,11 +171,7 @@ def verify_release_validation_evidence(
         (False, reason_detail) otherwise.
     """
     root = repo_root or get_verifyci_root()
-    val_override = os.environ.get("VERIFYCI_RELEASE_VALIDATION_PATH")
-    if val_override:
-        val_file = Path(val_override)
-    else:
-        val_file = root / VALIDATION_REL_PATH
+    val_file = root / VALIDATION_REL_PATH
     if not val_file.is_file():
         return (
             False,
@@ -358,7 +354,6 @@ def generate_release_validation_record(
     commit_sha: str,
     measurements: dict[str, Any],
     signing_key_hex: str | None = None,
-    output_file: Path | None = None,
 ) -> dict[str, Any]:
     """Generate, sign with Ed25519, and atomically write authoritative release-validation evidence."""
     payload_body = {
@@ -399,7 +394,7 @@ def generate_release_validation_record(
         "signature": signature,
     }
 
-    val_file = output_file or (repo_root / VALIDATION_REL_PATH)
+    val_file = repo_root / VALIDATION_REL_PATH
     val_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Atomic write via temporary file
