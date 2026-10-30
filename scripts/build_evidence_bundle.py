@@ -62,7 +62,10 @@ def main() -> int:
         line
         for line in git_status.splitlines()
         if line.strip()
-        and not line.strip().endswith("evidence/release/release_validation.json")
+        and not (
+            line.strip().endswith("evidence/release/release_validation.json")
+            or line.strip().endswith("evidence/release/measurements.json")
+        )
     ]
     if uncommitted:
         raise RuntimeError(

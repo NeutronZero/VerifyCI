@@ -279,3 +279,47 @@ def test_security_check_empirical_benchmark(tmp_path: Path):
     assert coverage_matches == len(cases)
     assert reason_matches == len(cases)
     assert findings_matches == len(cases)
+
+
+# ==============================================================================
+# Security Authority Isolation Adversarial Tests
+# ==============================================================================
+
+def test_benchmark_execution_cannot_access_signing_key(monkeypatch):
+    """Adversarial test: verify execute_security_benchmark scrubs signing credentials.
+
+    Even if the caller or environment holds VERIFYCI_RELEASE_SIGNING_KEY, the benchmark
+    worker subprocess MUST execute in a scrubbed environment without access to the secret.
+    """
+    from scripts.validate_release import ROOT, execute_security_benchmark
+
+    canary_secret = "simulated_ed25519_private_key_canary_0123456789abcdef"
+    monkeypatch.setenv("VERIFYCI_RELEASE_SIGNING_KEY", canary_secret)
+
+    bench_data, errors = execute_security_benchmark(ROOT)
+    assert errors == [], f"Benchmark execution failed with errors: {errors}"
+    assert bench_data is not None
+    assert bench_data["cases_evaluated"] == 22
+    assert bench_data["zero_false_blocking"] is True
+    assert bench_data["strict_redaction"] is True
+
+
+def test_benchmark_worker_fails_closed_if_signing_key_leaked():
+    """Adversarial test: worker directly fails closed if VERIFYCI_RELEASE_SIGNING_KEY is present."""
+    import os
+    import sys
+    import subprocess
+    from scripts.validate_release import ROOT
+
+    env = os.environ.copy()
+    env["VERIFYCI_RELEASE_SIGNING_KEY"] = "unauthorized_secret_key"
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "validate_release.py"), "--benchmark-worker"],
+        env=env,
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
+    )
+    assert proc.returncode != 0, "Worker did not fail closed when signing secret was passed"
+    assert "Security violation" in (proc.stdout + proc.stderr)
+

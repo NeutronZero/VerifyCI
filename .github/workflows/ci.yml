@@ -116,9 +116,9 @@ jobs:
           path: test-results-*.xml
 
   # ------------------------------------------------------------------
-  # TIER 3: VERIFYCI EVIDENCE GATE (Produces official evidence bundle)
+  # TIER 3: VERIFYCI MEASUREMENTS GATE (Unprivileged Benchmark & Tests)
   # ------------------------------------------------------------------
-  verifyci-evidence:
+  verifyci-measurements:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     needs: full-matrix
@@ -138,11 +138,52 @@ jobs:
       - name: Run Evidence & Benchmark Reproduction Gate
         run: |
           uv run --no-sync python -m pytest tests/v3/ -n auto -q
-      - name: Run Authoritative Release Validation & Benchmark Measurement Pipeline
+      - name: Run Unprivileged Benchmark & Test Measurements Pipeline
+        run: |
+          uv run --no-sync python scripts/validate_release.py --measure-only
+      - name: Upload Release Measurements Artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-measurements
+          path: evidence/release/measurements.json
+
+  # ------------------------------------------------------------------
+  # TIER 4: PROTECTED RELEASE SIGNING (Restricted to 'release' environment)
+  # ------------------------------------------------------------------
+  release-signing:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    needs: verifyci-measurements
+    environment: release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          lfs: true
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen --extra dev
+      - name: Download Release Measurements Artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
+        with:
+          name: release-measurements
+          path: evidence/release
+      - name: Ensure Measurements File Path
+        run: |
+          if [ ! -f evidence/release/measurements.json ]; then
+            find evidence/release -name measurements.json -exec cp {} evidence/release/measurements.json \;
+          fi
+          test -f evidence/release/measurements.json
+      - name: Run Authoritative Release Signing (Protected Environment)
         env:
           VERIFYCI_RELEASE_SIGNING_KEY: ${{ secrets.VERIFYCI_RELEASE_SIGNING_KEY }}
         run: |
-          uv run --no-sync python scripts/validate_release.py
+          uv run --no-sync python scripts/validate_release.py --sign-only
       - name: Verify Release Validation Attestation
         run: |
           uv run --no-sync python -c "from verifyci.contracts.release_validation import verify_release_validation_evidence; ok, err = verify_release_validation_evidence(); assert ok, f'Attestation verification failed: {err}'; print('Release attestation cryptographically verified!')"
@@ -157,6 +198,7 @@ jobs:
           path: |
             evidence/evidence-bundle.json
             evidence/release/release_validation.json
+            evidence/release/measurements.json
 
   # ------------------------------------------------------------------
   # SUPPLY-CHAIN AUDIT (advisory, non-blocking)
