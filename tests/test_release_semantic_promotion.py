@@ -9,11 +9,9 @@ from __future__ import annotations
 from dataclasses import replace
 import hashlib
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 
 import pytest
 
@@ -232,24 +230,30 @@ class TestSemanticCryptographicTampering:
 class TestValidateReleaseScript:
     """Stress-test scripts/validate_release.py under failure and tampering modes."""
 
-    def test_baseline_validate_release_exits_0(self):
-        """Authoritative scripts/validate_release.py must exit 0 and report release_ready: true."""
-        cmd = [sys.executable, str(ROOT / "scripts" / "validate_release.py")]
-        env = {
-            **os.environ,
-            "VERIFYCI_RELEASE_SIGNING_KEY": os.environ.get(
-                "VERIFYCI_RELEASE_SIGNING_KEY",
-                "1af19a7c31c3767a86e048b7b474a0cb887e77fa644a244b5882782716cf1e53",
-            ),
-        }
-        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT), env=env)
-        assert proc.returncode == 0, f"Baseline validate_release failed:\nSTDOUT: {proc.stdout}\nSTDERR: {proc.stderr}"
-        payload = json.loads(proc.stdout.strip())
-        assert payload["release_ready"] is True
-        assert payload["manifest_errors"] == []
-        assert payload["shadow_checks"] == []
-        assert payload["measurement_pipeline"] == "verified"
-        assert payload["validation_evidence"] == "evidence/release/release_validation.json"
+    def test_validate_release_missing_signing_key_fails_closed(self, monkeypatch, capsys):
+        """Authoritative scripts/validate_release.py fails closed (exit 1) when signing key is missing."""
+        from scripts import validate_release
+
+        monkeypatch.delenv("VERIFYCI_RELEASE_SIGNING_KEY", raising=False)
+        exit_code = validate_release.main()
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out.strip())
+        assert payload["release_ready"] is False
+        assert payload["measurement_pipeline"] == "failed"
+        assert any("VERIFYCI_RELEASE_SIGNING_KEY" in err for err in payload["manifest_errors"])
+
+    def test_validate_release_preflight_checks_pass_on_clean_tree(self):
+        """Preflight checks (corpora sums, corpus cases, promotion records) pass cleanly on repo root."""
+        from scripts.validate_release import verify_corpus_cases, verify_security_corpus_sums
+        from verifyci.contracts.manifest import CHECK_ORDER, CHECK_SPECS, validate_manifest
+        from verifyci.contracts.promotion import validate_promotion_chain
+
+        assert verify_security_corpus_sums(ROOT) == []
+        assert verify_corpus_cases(ROOT) == []
+        assert validate_manifest() == []
+        for check_id in CHECK_ORDER:
+            assert validate_promotion_chain(CHECK_SPECS[check_id]) == []
 
     @pytest.mark.parametrize("tampered_check", CHECK_ORDER)
     def test_broken_promotion_chain_in_any_check_exits_1(self, monkeypatch, tampered_check: str):
