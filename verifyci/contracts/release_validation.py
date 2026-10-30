@@ -50,6 +50,7 @@ _CRITICAL_IMPLEMENTATION_FILES = (
     Path("verifyci/contracts/release_validation.py"),
     Path("verifyci/cli.py"),
     Path("scripts/validate_release.py"),
+    Path("scripts/standalone_signer.py"),
     Path("tests/v3/test_security_benchmark.py"),
     Path("tests/v3/test_security_corpus.py"),
     Path("tests/v3/test_security_regressions.py"),
@@ -345,6 +346,12 @@ def verify_release_validation_evidence(
         spec = CHECK_SPECS[check_id]
         if spec.corpus_hash and corpora.get(check_id) != spec.corpus_hash:
             return False, f"release validation corpus hash mismatch for {check_id}"
+
+    # 9. Provenance verification
+    provenance = record.get("provenance")
+    if provenance is not None:
+        if not isinstance(provenance, dict):
+            return False, "release validation provenance block must be a dict"
 
     return True, None
 

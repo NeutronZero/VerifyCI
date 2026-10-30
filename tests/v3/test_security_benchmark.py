@@ -323,3 +323,225 @@ def test_benchmark_worker_fails_closed_if_signing_key_leaked():
     assert proc.returncode != 0, "Worker did not fail closed when signing secret was passed"
     assert "Security violation" in (proc.stdout + proc.stderr)
 
+
+# ==============================================================================
+# Provenance Authentication & Standalone Signer Adversarial Tests
+# ==============================================================================
+
+def test_standalone_signer_imports_zero_repo_code():
+    """Adversarial test: standalone_signer.py isolates execution and never imports verifyci."""
+    import subprocess
+    import sys
+    from scripts.validate_release import ROOT
+
+    code = (
+        "import scripts.standalone_signer as s; "
+        "import sys; "
+        "s.assert_no_repository_imports(); "
+        "assert 'verifyci' not in sys.modules, f'verifyci was imported: {[m for m in sys.modules if m.startswith(\"verifyci\")]}'"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=str(ROOT))
+    assert proc.returncode == 0, f"Import test failed:\n{proc.stderr}\n{proc.stdout}"
+
+
+def _make_valid_measurement_record(root: Path) -> dict:
+    import platform
+    import time
+    from scripts.standalone_signer import (
+        MEASUREMENTS_SCHEMA,
+        PINNED_CORPORA_HASHES,
+        PINNED_MANIFEST_HASH,
+        PINNED_TOOLCHAIN_FINGERPRINT,
+        compute_implementation_fingerprint,
+    )
+
+    return {
+        "schema": MEASUREMENTS_SCHEMA,
+        "collected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "manifest_hash": PINNED_MANIFEST_HASH,
+        "toolchain_fingerprint": PINNED_TOOLCHAIN_FINGERPRINT,
+        "toolchain_identity": {
+            "os": platform.system().lower(),
+            "python_version": platform.python_version(),
+        },
+        "corpora_hashes": PINNED_CORPORA_HASHES,
+        "implementation_fingerprint": compute_implementation_fingerprint(root),
+        "measurements": {
+            "benchmark": {
+                "cases_evaluated": 22,
+                "defects": {
+                    "SEC-DANGEROUS-CALL": {"precision": 1.0, "recall": 1.0},
+                    "SEC-SECRET": {"precision": 1.0, "recall": 1.0},
+                    "SEC-SECRET-TO-SINK": {"precision": 1.0, "recall": 1.0},
+                    "SEC-TAINT-TO-SINK": {"precision": 1.0, "recall": 1.0},
+                },
+                "duration_seconds": 1.0,
+                "strict_redaction": True,
+                "zero_false_blocking": True,
+            },
+            "test_suite": {
+                "duration_seconds": 1.0,
+                "stage": "final",
+                "total_errors": 0,
+                "total_failed": 0,
+                "total_passed": 235,
+            },
+        },
+    }
+
+
+def test_provenance_rejects_artifact_replacement(tmp_path, monkeypatch):
+    """Adversarial test: modifying measurements.json causes cryptographic digest mismatch."""
+    import json
+    from scripts.standalone_signer import sign_release_evidence
+    from scripts.validate_release import ROOT, generate_measurement_attestation
+
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    m_rec = _make_valid_measurement_record(ROOT)
+
+    m_file = tmp_path / "measurements.json"
+    att_file = tmp_path / "measurement_attestation.json"
+    out_file = tmp_path / "release_validation.json"
+
+    m_file.write_text(json.dumps(m_rec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    att_rec, att_errs = generate_measurement_attestation(ROOT, m_rec, att_file, measurements_file=m_file)
+    assert not att_errs
+
+    # Tamper with measurements.json after attestation was generated
+    tampered_rec = dict(m_rec)
+    tampered_rec["measurements"]["test_suite"]["total_passed"] += 1
+    m_file.write_text(json.dumps(tampered_rec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    fake_signing_key = "12" * 32
+    rec, errors = sign_release_evidence(ROOT, m_file, att_file, out_file, fake_signing_key)
+    assert rec is None
+    assert any("mismatch" in e for e in errors), f"Expected mismatch error, got {errors}"
+
+
+def test_provenance_rejects_tampered_attestation_signature(tmp_path, monkeypatch):
+    """Adversarial test: forged or corrupted ephemeral attestation signature is rejected."""
+    import json
+    from scripts.standalone_signer import sign_release_evidence
+    from scripts.validate_release import ROOT, generate_measurement_attestation
+
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    m_rec = _make_valid_measurement_record(ROOT)
+
+    m_file = tmp_path / "measurements.json"
+    att_file = tmp_path / "measurement_attestation.json"
+    out_file = tmp_path / "release_validation.json"
+
+    m_file.write_text(json.dumps(m_rec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    att_rec, att_errs = generate_measurement_attestation(ROOT, m_rec, att_file, measurements_file=m_file)
+    assert not att_errs
+
+    # Corrupt signature in attestation
+    tampered_att = dict(att_rec)
+    tampered_att["signature"] = "0" * 128
+    att_file.write_text(json.dumps(tampered_att, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    fake_signing_key = "12" * 32
+    rec, errors = sign_release_evidence(ROOT, m_file, att_file, out_file, fake_signing_key)
+    assert rec is None
+    assert any("ephemeral signature" in e for e in errors), f"Expected signature error, got {errors}"
+
+
+def test_provenance_rejects_fabricated_failed_measurements(tmp_path, monkeypatch):
+    """Adversarial test: measurement artifact with failed tests fails closed."""
+    import json
+    from scripts.standalone_signer import sign_release_evidence
+    from scripts.validate_release import ROOT, generate_measurement_attestation
+
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    m_rec = _make_valid_measurement_record(ROOT)
+
+    # Fabricate failing measurement
+    m_rec["measurements"]["test_suite"]["total_failed"] = 1
+    m_file = tmp_path / "measurements.json"
+    att_file = tmp_path / "measurement_attestation.json"
+    out_file = tmp_path / "release_validation.json"
+
+    m_file.write_text(json.dumps(m_rec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    att_rec, att_errs = generate_measurement_attestation(ROOT, m_rec, att_file, measurements_file=m_file)
+    assert not att_errs
+
+    fake_signing_key = "12" * 32
+    rec, errors = sign_release_evidence(ROOT, m_file, att_file, out_file, fake_signing_key)
+    assert rec is None
+    assert any("failing or errored" in e for e in errors), f"Expected failure rejection, got {errors}"
+
+
+def test_provenance_rejects_mismatched_run_id_in_ci(tmp_path, monkeypatch):
+    """Adversarial test: in CI environment, mismatched run ID fails closed."""
+    import json
+    from scripts.standalone_signer import sign_release_evidence, get_commit_sha
+    from scripts.validate_release import ROOT, generate_measurement_attestation
+
+    commit_sha = get_commit_sha(ROOT)
+    assert commit_sha
+
+    m_rec = _make_valid_measurement_record(ROOT)
+
+    m_file = tmp_path / "measurements.json"
+    att_file = tmp_path / "measurement_attestation.json"
+    out_file = tmp_path / "release_validation.json"
+
+    # Set CI environment variables for generation
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_RUN_ID", "10001")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    monkeypatch.setenv("GITHUB_SHA", commit_sha)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "NeutronZero/VerifyCI")
+    monkeypatch.setenv("GITHUB_TOKEN", "mock_token")
+
+    m_file.write_text(json.dumps(m_rec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    att_rec, att_errs = generate_measurement_attestation(ROOT, m_rec, att_file, measurements_file=m_file)
+    assert not att_errs
+
+    # Now alter the environment run ID at signing time
+    monkeypatch.setenv("GITHUB_RUN_ID", "10002")
+
+    fake_signing_key = "12" * 32
+    rec, errors = sign_release_evidence(ROOT, m_file, att_file, out_file, fake_signing_key)
+    assert rec is None
+    assert any("workflow run ID mismatch" in e for e in errors), f"Expected run ID mismatch, got {errors}"
+
+
+def test_provenance_rejects_unsuccessful_job_in_ci(tmp_path, monkeypatch):
+    """Adversarial test: in CI environment, uncompleted/unsuccessful measurement job fails closed."""
+    import json
+    from scripts.standalone_signer import sign_release_evidence, get_commit_sha
+    from scripts.validate_release import ROOT, generate_measurement_attestation
+
+    commit_sha = get_commit_sha(ROOT)
+    assert commit_sha
+
+    m_rec = _make_valid_measurement_record(ROOT)
+
+    m_file = tmp_path / "measurements.json"
+    att_file = tmp_path / "measurement_attestation.json"
+    out_file = tmp_path / "release_validation.json"
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_RUN_ID", "20001")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    monkeypatch.setenv("GITHUB_SHA", commit_sha)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "NeutronZero/VerifyCI")
+    monkeypatch.setenv("GITHUB_TOKEN", "mock_token")
+
+    m_file.write_text(json.dumps(m_rec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    att_rec, att_errs = generate_measurement_attestation(ROOT, m_rec, att_file, measurements_file=m_file)
+    assert not att_errs
+
+    # Custom verifier simulating GitHub API reporting job conclusion == 'failure'
+    def mock_verifier(att):
+        return None, ["measurement job 'verifyci-measurements' conclusion is 'failure' (expected 'success')"]
+
+    fake_signing_key = "12" * 32
+    rec, errors = sign_release_evidence(
+        ROOT, m_file, att_file, out_file, fake_signing_key, custom_verifier=mock_verifier
+    )
+    assert rec is None
+    assert any("conclusion is 'failure'" in e for e in errors), f"Expected conclusion failure, got {errors}"
+
+

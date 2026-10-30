@@ -145,7 +145,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-measurements
-          path: evidence/release/measurements.json
+          path: |
+            evidence/release/measurements.json
+            evidence/release/measurement_attestation.json
 
   # ------------------------------------------------------------------
   # TIER 4: PROTECTED RELEASE SIGNING (Restricted to 'release' environment)
@@ -173,17 +175,25 @@ jobs:
         with:
           name: release-measurements
           path: evidence/release
-      - name: Ensure Measurements File Path
+      - name: Ensure Measurements & Attestation File Paths
         run: |
           if [ ! -f evidence/release/measurements.json ]; then
             find evidence/release -name measurements.json -exec cp {} evidence/release/measurements.json \;
           fi
+          if [ ! -f evidence/release/measurement_attestation.json ]; then
+            find evidence/release -name measurement_attestation.json -exec cp {} evidence/release/measurement_attestation.json \;
+          fi
           test -f evidence/release/measurements.json
+          test -f evidence/release/measurement_attestation.json
+      - name: Verify Standalone Signer Integrity
+        run: |
+          echo "1a16647d52f4b1665c98e2b006ba144a9d085948e9021ebbb6a322f4e0703549  scripts/standalone_signer.py" | sha256sum -c -
       - name: Run Authoritative Release Signing (Protected Environment)
         env:
           VERIFYCI_RELEASE_SIGNING_KEY: ${{ secrets.VERIFYCI_RELEASE_SIGNING_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          uv run --no-sync python scripts/validate_release.py --sign-only
+          uv run --no-sync python scripts/standalone_signer.py
       - name: Verify Release Validation Attestation
         run: |
           uv run --no-sync python -c "from verifyci.contracts.release_validation import verify_release_validation_evidence; ok, err = verify_release_validation_evidence(); assert ok, f'Attestation verification failed: {err}'; print('Release attestation cryptographically verified!')"
@@ -199,6 +209,7 @@ jobs:
             evidence/evidence-bundle.json
             evidence/release/release_validation.json
             evidence/release/measurements.json
+            evidence/release/measurement_attestation.json
 
   # ------------------------------------------------------------------
   # SUPPLY-CHAIN AUDIT (advisory, non-blocking)

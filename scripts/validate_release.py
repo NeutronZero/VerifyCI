@@ -423,92 +423,145 @@ def collect_measurements(root: Path) -> tuple[dict[str, Any] | None, list[str]]:
     return measurement_record, []
 
 
-def sign_measurements(
+def generate_measurement_attestation(
     root: Path,
     measurement_record: dict[str, Any],
+    output_path: Path | None = None,
+    measurements_file: Path | None = None,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Generate ephemeral signed measurement attestation binding execution context."""
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+    from verifyci.evidence.canonical import canonical_json_bytes
+    from verifyci.contracts.release_validation import get_commit_sha
+    import datetime
+
+    if measurements_file and measurements_file.is_file():
+        raw_sha256 = "sha256:" + hashlib.sha256(measurements_file.read_bytes()).hexdigest()
+    else:
+        measurements_json_bytes = (json.dumps(measurement_record, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        raw_sha256 = "sha256:" + hashlib.sha256(measurements_json_bytes).hexdigest()
+    canonical_digest = "sha256:" + hashlib.sha256(canonical_json_bytes(measurement_record)).hexdigest()
+
+    is_ci = os.environ.get("GITHUB_ACTIONS") == "true"
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
+    job_name = os.environ.get("GITHUB_JOB", "verifyci-measurements")
+    github_sha = (
+        os.environ.get("GITHUB_SHA")
+        or measurement_record.get("commit_sha")
+        or get_commit_sha(root)
+    )
+
+    execution = {
+        "ci_platform": "github_actions" if is_ci else "local",
+        "workflow_run_id": str(run_id) if run_id else None,
+        "workflow_run_attempt": str(run_attempt) if run_attempt else "1",
+        "job_name": str(job_name),
+        "commit_sha": github_sha,
+    }
+
+    # Generate ephemeral keypair
+    private_key = ed25519.Ed25519PrivateKey.generate()
+    public_key_hex = private_key.public_key().public_bytes_raw().hex()
+
+    attestation_body = {
+        "schema": "verifyci.measurement_attestation/v1",
+        "issuer": "verifyci.measurement_pipeline",
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "execution": execution,
+        "measurements_digest": canonical_digest,
+        "measurements_file_sha256": raw_sha256,
+        "implementation_fingerprint": measurement_record.get("implementation_fingerprint"),
+        "manifest_hash": measurement_record.get("manifest_hash"),
+        "corpora_hashes": measurement_record.get("corpora_hashes"),
+        "summary": {
+            "benchmark_cases": measurement_record.get("measurements", {}).get("benchmark", {}).get("cases_evaluated"),
+            "test_suite_passed": measurement_record.get("measurements", {}).get("test_suite", {}).get("total_passed"),
+            "test_suite_failed": measurement_record.get("measurements", {}).get("test_suite", {}).get("total_failed"),
+            "test_suite_errors": measurement_record.get("measurements", {}).get("test_suite", {}).get("total_errors"),
+        },
+        "ephemeral_key": {
+            "algorithm": "ed25519",
+            "public_key": public_key_hex,
+        },
+    }
+
+    att_bytes = canonical_json_bytes(attestation_body)
+    sig = private_key.sign(att_bytes).hex()
+    attestation_body["signature"] = sig
+
+    att_file = output_path or (root / "evidence" / "release" / "measurement_attestation.json")
+    att_file.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = att_file.with_name(f"{att_file.name}.tmp.{os.getpid()}")
+    try:
+        temp_file.write_text(json.dumps(attestation_body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(temp_file, att_file)
+    except Exception:
+        if temp_file.is_file():
+            temp_file.unlink(missing_ok=True)
+        raise
+
+    return attestation_body, []
+
+
+def sign_measurements(
+    root: Path,
+    measurements_file: Path,
+    attestation_file: Path,
     signing_key: str,
 ) -> tuple[dict[str, Any] | None, list[str]]:
-    """Sign verified measurements with Ed25519 authority in protected environment.
-
-    Security Boundary:
-    This function consumes only a verified measurement dictionary. It DOES NOT execute
-    repository tests or benchmark code while holding the signing key.
-    """
-    from verifyci.contracts.manifest import (
-        CHECK_ORDER,
-        CHECK_SPECS,
-        manifest_hash,
-        validate_manifest,
-    )
-    from verifyci.contracts.promotion import validate_promotion_chain
-    from verifyci.contracts.release_validation import (
-        compute_implementation_fingerprint,
-        generate_release_validation_record,
-        get_commit_sha,
-    )
-
-    errors = []
-
-    # 1. Structural and manifest validation
-    errors.extend(validate_manifest())
-    for check_id in CHECK_ORDER:
-        spec = CHECK_SPECS[check_id]
-        chain_errors = validate_promotion_chain(spec)
-        for err in chain_errors:
-            if err not in errors:
-                errors.append(err)
-
-    # 2. Check commitment and fingerprint consistency
-    current_commit = get_commit_sha(root)
-    record_commit = measurement_record.get("commit_sha")
-    if not current_commit or current_commit.lower() != str(record_commit).lower():
-        errors.append(f"commit SHA mismatch between measurements ({record_commit}) and HEAD ({current_commit})")
-
-    current_manifest_hash = manifest_hash()
-    if measurement_record.get("manifest_hash") != current_manifest_hash:
-        errors.append("manifest hash mismatch between measurements and current repository")
-
-    current_impl_fingerprint = compute_implementation_fingerprint(root)
-    if measurement_record.get("implementation_fingerprint") != current_impl_fingerprint:
-        errors.append("implementation fingerprint mismatch between measurements and current repository")
-
-    # 3. Validate measurement quality gates
-    measurements = measurement_record.get("measurements", {})
-    bench_data = measurements.get("benchmark", {})
-    test_data = measurements.get("test_suite", {})
-
-    if bench_data.get("cases_evaluated", 0) < 22:
-        errors.append(f"benchmark cases evaluated insufficient: {bench_data.get('cases_evaluated')} < 22")
-    if not bench_data.get("zero_false_blocking"):
-        errors.append("benchmark violated zero_false_blocking")
-    if not bench_data.get("strict_redaction"):
-        errors.append("benchmark violated strict_redaction")
-
-    if test_data.get("total_passed", 0) < 200:
-        errors.append(f"test suite total_passed insufficient: {test_data.get('total_passed')} < 200")
-    if test_data.get("total_failed", 1) != 0 or test_data.get("total_errors", 1) != 0:
-        errors.append("test suite contains failing or errored tests")
-
-    if errors or not record_commit:
-        return None, errors
-
-    # Atomically write signed release validation record
-    record = generate_release_validation_record(
-        root,
-        record_commit,
-        measurements,
-        signing_key_hex=signing_key,
-    )
-    return record, []
+    """Sign verified measurements via standalone signer subprocess with zero repo imports."""
+    env = os.environ.copy()
+    env["VERIFYCI_RELEASE_SIGNING_KEY"] = signing_key
+    cmd = [
+        sys.executable,
+        str(root / "scripts" / "standalone_signer.py"),
+        "--measurements",
+        str(measurements_file),
+        "--attestation",
+        str(attestation_file),
+        "--output",
+        str(root / "evidence" / "release" / "release_validation.json"),
+    ]
+    proc = subprocess.run(cmd, cwd=str(root), env=env, capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None, [f"standalone signer failed (exit {proc.returncode}):\n{proc.stderr}\n{proc.stdout}"]
+    try:
+        val_file = root / "evidence" / "release" / "release_validation.json"
+        return json.loads(val_file.read_text(encoding="utf-8")), []
+    except Exception as exc:
+        return None, [f"failed to load signed release validation record: {exc}\n{proc.stdout}"]
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Authoritative release-validation pipeline for VerifyCI v3 (§15.10)")
     parser.add_argument("--benchmark-worker", action="store_true", help="Internal benchmark worker entrypoint")
     parser.add_argument("--measure-only", action="store_true", help="Execute preflight, benchmark, and test suites unprivileged")
-    parser.add_argument("--output-measurements", type=Path, default=ROOT / "evidence" / "release" / "measurements.json", help="Path to write measurements artifact")
+    parser.add_argument(
+        "--output-measurements",
+        type=Path,
+        default=ROOT / "evidence" / "release" / "measurements.json",
+        help="Path to write measurements artifact",
+    )
+    parser.add_argument(
+        "--output-attestation",
+        type=Path,
+        default=ROOT / "evidence" / "release" / "measurement_attestation.json",
+        help="Path to write measurement attestation artifact",
+    )
     parser.add_argument("--sign-only", action="store_true", help="Consume verified measurements and apply Ed25519 signature in protected release environment")
-    parser.add_argument("--input-measurements", type=Path, default=ROOT / "evidence" / "release" / "measurements.json", help="Path to read verified measurements artifact")
+    parser.add_argument(
+        "--input-measurements",
+        type=Path,
+        default=ROOT / "evidence" / "release" / "measurements.json",
+        help="Path to read verified measurements artifact",
+    )
+    parser.add_argument(
+        "--input-attestation",
+        type=Path,
+        default=ROOT / "evidence" / "release" / "measurement_attestation.json",
+        help="Path to read signed measurement attestation artifact",
+    )
     args = parser.parse_args(argv)
 
     if getattr(args, "benchmark_worker", False):
@@ -548,11 +601,30 @@ def main(argv: list[str] | None = None) -> int:
                 temp_file.unlink(missing_ok=True)
             raise
 
+        att_record, att_errors = generate_measurement_attestation(
+            ROOT,
+            measurement_record,
+            args.output_attestation,
+            measurements_file=args.output_measurements,
+        )
+        if att_errors or not att_record:
+            report = {
+                "manifest_errors": att_errors,
+                "measurement_pipeline": "failed",
+                "release_ready": False,
+                "schema": "verifyci.release_preflight/v1",
+                "shadow_checks": shadow,
+            }
+            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+            print("Release blocked: failed to generate measurement attestation.", file=sys.stderr)
+            return 1
+
         report = {
             "commit_sha": measurement_record["commit_sha"],
             "manifest_errors": [],
             "measurement_pipeline": "verified",
             "measurements_file": str(args.output_measurements.as_posix()),
+            "attestation_file": str(args.output_attestation.as_posix()),
             "release_ready": True,
             "schema": "verifyci.release_preflight/v1",
             "shadow_checks": shadow,
@@ -575,32 +647,7 @@ def main(argv: list[str] | None = None) -> int:
             print("Release blocked: signing authority key is missing.", file=sys.stderr)
             return 1
 
-        if not args.input_measurements.is_file():
-            report = {
-                "manifest_errors": [f"measurements file not found: {args.input_measurements}"],
-                "measurement_pipeline": "failed",
-                "release_ready": False,
-                "schema": "verifyci.release_preflight/v1",
-                "shadow_checks": shadow,
-            }
-            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
-            print(f"Release blocked: measurements file missing: {args.input_measurements}", file=sys.stderr)
-            return 1
-
-        try:
-            measurement_record = json.loads(args.input_measurements.read_text(encoding="utf-8"))
-        except Exception as exc:
-            report = {
-                "manifest_errors": [f"failed to parse measurements file: {exc}"],
-                "measurement_pipeline": "failed",
-                "release_ready": False,
-                "schema": "verifyci.release_preflight/v1",
-                "shadow_checks": shadow,
-            }
-            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
-            return 1
-
-        record, errors = sign_measurements(ROOT, measurement_record, signing_key)
+        record, errors = sign_measurements(ROOT, args.input_measurements, args.input_attestation, signing_key)
         if errors or not record:
             report = {
                 "manifest_errors": errors,
@@ -618,6 +665,7 @@ def main(argv: list[str] | None = None) -> int:
             "commit_sha": record["commit_sha"],
             "manifest_errors": [],
             "measurement_pipeline": "verified",
+            "provenance_verified": True,
             "release_ready": True,
             "schema": "verifyci.release_preflight/v1",
             "shadow_checks": shadow,
@@ -653,7 +701,30 @@ def main(argv: list[str] | None = None) -> int:
         print("Release blocked: independent test or benchmark measurements failed.", file=sys.stderr)
         return 1
 
-    record, errors = sign_measurements(ROOT, measurement_record, signing_key)
+    # Write measurements and attestation
+    args.output_measurements.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = args.output_measurements.with_name(f"{args.output_measurements.name}.tmp.{os.getpid()}")
+    try:
+        temp_file.write_text(json.dumps(measurement_record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(temp_file, args.output_measurements)
+    except Exception:
+        if temp_file.is_file():
+            temp_file.unlink(missing_ok=True)
+        raise
+
+    att_record, att_errors = generate_measurement_attestation(ROOT, measurement_record, args.output_attestation)
+    if att_errors or not att_record:
+        report = {
+            "manifest_errors": att_errors,
+            "measurement_pipeline": "failed",
+            "release_ready": False,
+            "schema": "verifyci.release_preflight/v1",
+            "shadow_checks": shadow,
+        }
+        print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+        return 1
+
+    record, errors = sign_measurements(ROOT, args.output_measurements, args.output_attestation, signing_key)
     if errors or not record:
         report = {
             "manifest_errors": errors,
@@ -671,6 +742,7 @@ def main(argv: list[str] | None = None) -> int:
         "commit_sha": record["commit_sha"],
         "manifest_errors": [],
         "measurement_pipeline": "verified",
+        "provenance_verified": True,
         "release_ready": True,
         "schema": "verifyci.release_preflight/v1",
         "shadow_checks": shadow,

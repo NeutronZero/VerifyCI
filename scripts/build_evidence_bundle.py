@@ -65,6 +65,7 @@ def main() -> int:
         and not (
             line.strip().endswith("evidence/release/release_validation.json")
             or line.strip().endswith("evidence/release/measurements.json")
+            or line.strip().endswith("evidence/release/measurement_attestation.json")
         )
     ]
     if uncommitted:
