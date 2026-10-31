@@ -129,10 +129,12 @@ PINNED_MEASUREMENT_JOB = "verifyci-measurements"
 PINNED_MEASUREMENT_STEPS = (
     "Run Evidence & Benchmark Reproduction Gate",
     "Run Unprivileged Benchmark & Test Measurements Pipeline",
+    "Upload Release Measurements Artifact",
 )
 
 _CRITICAL_IMPLEMENTATION_FILES = (
     Path(".github/workflows/ci.yml"),
+    Path(".github/workflows/release_signing.yml"),
     Path("pyproject.toml"),
     Path("uv.lock"),
     Path("verifyci/checks/security.py"),
@@ -297,6 +299,153 @@ def get_commit_sha(repo_root: Path) -> str | None:
     return None
 
 
+def fetch_github_oidc_jwks(timeout: int = 15) -> dict[str, Any]:
+    """Fetch GitHub Actions published RSA public keys (JWKS)."""
+    url = "https://token.actions.githubusercontent.com/.well-known/jwks"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "VerifyCI-StandaloneSigner",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _b64url_to_int(s: str) -> int:
+    import base64
+    padded = s + "=" * (-len(s) % 4)
+    raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+    return int.from_bytes(raw, byteorder="big")
+
+
+def verify_github_oidc_token(
+    token: str,
+    expected_repo: str,
+    expected_sha: str,
+    expected_run_id: str,
+    expected_run_attempt: str,
+    *,
+    jwks: dict[str, Any] | None = None,
+    current_time: float | None = None,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Cryptographically verify GitHub Actions RS256 OIDC token against GitHub's JWKS.
+
+    Validates:
+    - Token structure (header.payload.signature)
+    - Algorithm is RS256
+    - Public key lookup in JWKS by 'kid'
+    - RS256 cryptographic signature verification over header.payload
+    - Claims:
+      * iss == 'https://token.actions.githubusercontent.com'
+      * aud == 'verifyci-release-authority'
+      * exp > now (with 60s skew allowance)
+      * nbf <= now (with 60s skew allowance)
+      * repository matches expected_repo (case-insensitive)
+      * sha matches expected_sha (case-insensitive)
+      * run_id matches expected_run_id
+      * run_attempt matches expected_run_attempt
+      * job_workflow_ref starts with expected_repo/.github/workflows/ci.yml@
+    """
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives import hashes
+
+    parts = token.strip().split(".")
+    if len(parts) != 3:
+        return None, ["malformed OIDC JWT: expected 3 dot-separated segments"]
+    header_b64, payload_b64, sig_b64 = parts
+
+    try:
+        header_padded = header_b64 + "=" * (-len(header_b64) % 4)
+        header = json.loads(base64.urlsafe_b64decode(header_padded.encode("ascii")).decode("utf-8"))
+    except Exception as exc:
+        return None, [f"failed to decode OIDC header: {exc}"]
+
+    if header.get("alg") != "RS256":
+        return None, [f"unsupported OIDC algorithm: expected RS256, got {header.get('alg')}"]
+    kid = header.get("kid")
+    if not kid:
+        return None, ["OIDC JWT header missing 'kid'"]
+
+    if jwks is None:
+        try:
+            jwks = fetch_github_oidc_jwks()
+        except Exception as exc:
+            return None, [f"failed to fetch GitHub OIDC JWKS: {exc}"]
+
+    keys = jwks.get("keys", [])
+    key_entry = next((k for k in keys if k.get("kid") == kid), None)
+    if not key_entry:
+        return None, [f"OIDC signing key '{kid}' not found in GitHub JWKS"]
+    if key_entry.get("kty") != "RSA":
+        return None, [f"unsupported key type in JWKS: {key_entry.get('kty')}"]
+
+    try:
+        pub_numbers = RSAPublicNumbers(
+            e=_b64url_to_int(key_entry["e"]),
+            n=_b64url_to_int(key_entry["n"]),
+        )
+        pub_key = pub_numbers.public_key()
+    except Exception as exc:
+        return None, [f"failed to construct RSA public key from JWKS: {exc}"]
+
+    try:
+        sig_padded = sig_b64 + "=" * (-len(sig_b64) % 4)
+        sig_bytes = base64.urlsafe_b64decode(sig_padded.encode("ascii"))
+        signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
+        pub_key.verify(sig_bytes, signing_input, padding.PKCS1v15(), hashes.SHA256())
+    except Exception as exc:
+        return None, [f"OIDC cryptographic signature verification failed: {exc}"]
+
+    try:
+        payload_padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload_padded.encode("ascii")).decode("utf-8"))
+    except Exception as exc:
+        return None, [f"failed to decode OIDC payload: {exc}"]
+
+    now = time.time() if current_time is None else current_time
+    skew = 60.0
+
+    if claims.get("iss") != "https://token.actions.githubusercontent.com":
+        return None, [f"untrusted OIDC issuer: {claims.get('iss')}"]
+    if claims.get("aud") != "verifyci-release-authority":
+        return None, [f"untrusted OIDC audience: {claims.get('aud')} (expected 'verifyci-release-authority')"]
+
+    exp = claims.get("exp")
+    if exp is None or now > float(exp) + skew:
+        return None, [f"OIDC token expired (exp: {exp}, now: {now})"]
+
+    nbf = claims.get("nbf")
+    if nbf is not None and now < float(nbf) - skew:
+        return None, [f"OIDC token not yet valid (nbf: {nbf}, now: {now})"]
+
+    repo_claim = claims.get("repository", "")
+    if repo_claim.lower() != expected_repo.lower():
+        return None, [f"OIDC repository mismatch: expected '{expected_repo}', got '{repo_claim}'"]
+
+    sha_claim = claims.get("sha", "")
+    if sha_claim.lower() != expected_sha.lower():
+        return None, [f"OIDC commit SHA mismatch: expected '{expected_sha}', got '{sha_claim}'"]
+
+    run_id_claim = str(claims.get("run_id", ""))
+    if run_id_claim != str(expected_run_id):
+        return None, [f"OIDC run_id mismatch: expected '{expected_run_id}', got '{run_id_claim}'"]
+
+    run_att_claim = str(claims.get("run_attempt", ""))
+    if run_att_claim != str(expected_run_attempt):
+        return None, [f"OIDC run_attempt mismatch: expected '{expected_run_attempt}', got '{run_att_claim}'"]
+
+    job_workflow_ref = claims.get("job_workflow_ref", "")
+    expected_prefix = f"{expected_repo}/.github/workflows/ci.yml@"
+    if not job_workflow_ref.lower().startswith(expected_prefix.lower()):
+        return None, [f"OIDC job_workflow_ref mismatch: expected prefix '{expected_prefix}', got '{job_workflow_ref}'"]
+
+    return claims, []
+
+
 def parse_jwt_claims_unverified(token: str) -> dict[str, Any] | None:
     """Parse JWT claims without third-party dependencies."""
     try:
@@ -399,6 +548,28 @@ def verify_github_actions_provenance(
     if not measurements_artifact:
         return None, [f"artifact 'release-measurements' not found in workflow run {run_id}"]
 
+    if measurements_artifact.get("size_in_bytes", 0) <= 0:
+        return None, ["artifact 'release-measurements' size is 0 bytes"]
+
+    # 4. Authenticate artifact-to-job relationship window
+    art_created_raw = measurements_artifact.get("created_at")
+    job_started_raw = measurement_job.get("started_at")
+    job_completed_raw = measurement_job.get("completed_at")
+
+    if art_created_raw and job_started_raw and job_completed_raw:
+        try:
+            import datetime
+            art_dt = datetime.datetime.fromisoformat(art_created_raw.replace("Z", "+00:00"))
+            job_start_dt = datetime.datetime.fromisoformat(job_started_raw.replace("Z", "+00:00"))
+            job_comp_dt = datetime.datetime.fromisoformat(job_completed_raw.replace("Z", "+00:00"))
+            tolerance = datetime.timedelta(seconds=120)
+            if art_dt < (job_start_dt - tolerance) or art_dt > (job_comp_dt + tolerance):
+                return None, [
+                    f"artifact 'release-measurements' creation timestamp {art_created_raw} is outside job execution window [{job_started_raw}, {job_completed_raw}]"
+                ]
+        except Exception as exc:
+            return None, [f"failed to parse timestamps for artifact window validation: {exc}"]
+
     return {
         "ci_platform": "github_actions",
         "ci_verified": True,
@@ -409,7 +580,10 @@ def verify_github_actions_provenance(
         "measurement_job_started_at": measurement_job.get("started_at"),
         "measurement_job_completed_at": measurement_job.get("completed_at"),
         "artifact_id": measurements_artifact.get("id"),
+        "artifact_name": measurements_artifact.get("name"),
         "artifact_size_in_bytes": measurements_artifact.get("size_in_bytes"),
+        "artifact_created_at": measurements_artifact.get("created_at"),
+        "oidc_verified": True,
     }, []
 
 
@@ -424,6 +598,7 @@ def sign_release_evidence(
     signing_key_hex: str,
     *,
     custom_verifier: Any = None,
+    custom_jwks: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     """Validate authenticated measurement provenance and issue authoritative Ed25519 attestation."""
     isolate_execution_environment(root)
@@ -570,28 +745,20 @@ def sign_release_evidence(
             return None, [f"untrusted GitHub repository: expected '{PINNED_REPOSITORY}', got '{repo}'"]
 
         workflow_ident = attestation.get("workflow_identity", {})
-        run_token_hmac = workflow_ident.get("run_token_hmac")
-        if not run_token_hmac:
-            return None, ["measurement attestation missing run_token_hmac in CI environment"]
-        run_secret = f"{repo}:{run_id}:{run_attempt}:{commit_sha}"
-        expected_hmac = hmac.new(
-            run_secret.encode("utf-8"), computed_canonical_digest.encode("utf-8"), hashlib.sha256
-        ).hexdigest()
-        if not hmac.compare_digest(run_token_hmac, expected_hmac):
-            return None, ["measurement attestation run_token_hmac mismatch: signature does not match authenticated CI token"]
-
         oidc_tok = workflow_ident.get("oidc_token")
-        if oidc_tok:
-            claims = parse_jwt_claims_unverified(oidc_tok)
-            if claims:
-                if claims.get("iss") != "https://token.actions.githubusercontent.com":
-                    return None, [f"untrusted OIDC issuer: {claims.get('iss')}"]
-                if claims.get("repository", "").lower() != PINNED_REPOSITORY.lower():
-                    return None, [f"untrusted OIDC repository: {claims.get('repository')}"]
-                if claims.get("sha", "").lower() != commit_sha.lower():
-                    return None, [f"OIDC commit SHA mismatch: {claims.get('sha')} != {commit_sha}"]
-                if str(claims.get("run_id")) != str(run_id):
-                    return None, [f"OIDC run ID mismatch: {claims.get('run_id')} != {run_id}"]
+        if not oidc_tok:
+            return None, ["measurement attestation missing required OIDC token in CI environment"]
+
+        oidc_claims, oidc_errors = verify_github_oidc_token(
+            oidc_tok,
+            repo,
+            commit_sha,
+            run_id,
+            run_attempt,
+            jwks=custom_jwks,
+        )
+        if oidc_errors or not oidc_claims:
+            return None, [f"cryptographic OIDC verification failed: {e}" for e in oidc_errors]
 
         provenance, prov_errors = verify_github_actions_provenance(
             repo, run_id, run_attempt, commit_sha, token

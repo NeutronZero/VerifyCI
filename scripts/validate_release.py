@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import hmac
 import json
 import os
 from pathlib import Path
@@ -435,6 +434,8 @@ def generate_measurement_attestation(
     from verifyci.contracts.release_validation import get_commit_sha
     import datetime
 
+    errors: list[str] = []
+
     if measurements_file and measurements_file.is_file():
         raw_sha256 = "sha256:" + hashlib.sha256(measurements_file.read_bytes()).hexdigest()
     else:
@@ -460,16 +461,6 @@ def generate_measurement_attestation(
         "commit_sha": github_sha,
     }
 
-    github_token = os.environ.get("GITHUB_TOKEN")
-    run_secret = (
-        f"{os.environ.get('GITHUB_REPOSITORY', 'NeutronZero/VerifyCI')}:{run_id}:{run_attempt}:{github_sha}"
-        if is_ci
-        else (github_token or "local-secret")
-    )
-    run_token_hmac = hmac.new(
-        run_secret.encode("utf-8"), canonical_digest.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
-
     oidc_token = None
     id_url = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL")
     id_req_token = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
@@ -490,8 +481,17 @@ def generate_measurement_attestation(
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 oidc_token = data.get("value")
-        except Exception:
-            pass
+        except Exception as exc:
+            if is_ci:
+                errors.append(f"failed to obtain GitHub Actions OIDC token in CI: {exc}")
+    elif is_ci:
+        errors.append("ACTIONS_ID_TOKEN_REQUEST_URL or ACTIONS_ID_TOKEN_REQUEST_TOKEN missing in CI environment")
+
+    if is_ci and not oidc_token and not errors:
+        errors.append("required GitHub Actions OIDC token is missing or empty in CI environment")
+
+    if errors:
+        return None, errors
 
     workflow_identity = {
         "platform": "github_actions" if is_ci else "local",
@@ -502,7 +502,6 @@ def generate_measurement_attestation(
         "run_id": str(run_id) if run_id else None,
         "run_attempt": str(run_attempt) if run_attempt else "1",
         "commit_sha": github_sha,
-        "run_token_hmac": run_token_hmac,
         "oidc_token": oidc_token,
     }
 

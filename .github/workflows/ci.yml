@@ -9,6 +9,7 @@ on:
 permissions:
   contents: read
   id-token: write
+  actions: read
 
 jobs:
   # ------------------------------------------------------------------
@@ -153,67 +154,21 @@ jobs:
             evidence/release/measurement_attestation.json
 
   # ------------------------------------------------------------------
-  # TIER 4: PROTECTED RELEASE SIGNING (Restricted to 'release' environment)
+  # TIER 4: PROTECTED RELEASE SIGNING (Isolated Reusable Workflow)
   # ------------------------------------------------------------------
   release-signing:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
     needs: verifyci-measurements
-    environment: release
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-          lfs: true
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.12"
-      - run: uv sync --frozen --extra dev
-      - name: Download Release Measurements Artifact
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
-        with:
-          name: release-measurements
-          path: evidence/release
-      - name: Ensure Measurements & Attestation File Paths
-        run: |
-          if [ ! -f evidence/release/measurements.json ]; then
-            find evidence/release -name measurements.json -exec cp {} evidence/release/measurements.json \;
-          fi
-          if [ ! -f evidence/release/measurement_attestation.json ]; then
-            find evidence/release -name measurement_attestation.json -exec cp {} evidence/release/measurement_attestation.json \;
-          fi
-          test -f evidence/release/measurements.json
-          test -f evidence/release/measurement_attestation.json
-      - name: Verify Standalone Signer Integrity
-        run: |
-          echo "342046d8ae6eafedef479a84255ce64573ac52eeb6bf602969325c5deedad1d1  scripts/standalone_signer.py" | sha256sum -c -
-          echo "7123bc3c14d06f258e9078cf1487fe936240ea2035c898b83a2cfadce3519970  uv.lock" | sha256sum -c -
-      - name: Run Authoritative Release Signing (Protected Environment)
-        env:
-          VERIFYCI_RELEASE_SIGNING_KEY: ${{ secrets.VERIFYCI_RELEASE_SIGNING_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          uv run --no-sync python scripts/standalone_signer.py
-      - name: Verify Release Validation Attestation
-        run: |
-          uv run --no-sync python -c "from verifyci.contracts.release_validation import verify_release_validation_evidence; ok, err = verify_release_validation_evidence(require_ci=True); assert ok, f'Attestation verification failed: {err}'; print('Release attestation cryptographically verified!')"
-      - name: Generate Evidence Bundle & Summary
-        run: |
-          uv run --no-sync python scripts/build_evidence_bundle.py
-      - name: Upload Evidence Bundle & Release Attestation
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: evidence-bundle
-          path: |
-            evidence/evidence-bundle.json
-            evidence/release/release_validation.json
-            evidence/release/measurements.json
-            evidence/release/measurement_attestation.json
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/release_signing.yml
+    with:
+      commit_sha: ${{ github.sha }}
+      run_id: ${{ github.run_id }}
+      run_attempt: ${{ github.run_attempt }}
+    secrets:
+      VERIFYCI_RELEASE_SIGNING_KEY: ${{ secrets.VERIFYCI_RELEASE_SIGNING_KEY }}
 
   # ------------------------------------------------------------------
   # SUPPLY-CHAIN AUDIT (advisory, non-blocking)

@@ -38,6 +38,7 @@ RELEASE_AUTHORITY_PUBLIC_KEY_HEX = (
 
 _CRITICAL_IMPLEMENTATION_FILES = (
     Path(".github/workflows/ci.yml"),
+    Path(".github/workflows/release_signing.yml"),
     Path("pyproject.toml"),
     Path("uv.lock"),
     Path("verifyci/checks/security.py"),
@@ -364,9 +365,19 @@ def verify_release_validation_evidence(
             return False, "release validation evidence requires authenticated CI provenance (ci_verified must be true)"
         if ci_platform != "github_actions":
             return False, f"unsupported ci_platform for verified release evidence: '{ci_platform}' (expected 'github_actions')"
-        for req_field in ("workflow_run_id", "job_id", "artifact_id", "measurement_job_completed_at"):
+        for req_field in (
+            "workflow_run_id",
+            "job_id",
+            "artifact_id",
+            "measurement_job_completed_at",
+            "artifact_created_at",
+        ):
             if not provenance.get(req_field):
                 return False, f"release validation provenance missing required CI field: '{req_field}'"
+        if "oidc_verified" not in provenance:
+            return False, "release validation provenance missing required CI field: 'oidc_verified'"
+        if provenance.get("oidc_verified") is not True:
+            return False, "release validation provenance requires cryptographic OIDC verification (oidc_verified must be true)"
         prov_sha = (provenance.get("commit_sha") or "").lower()
         rec_sha = (record.get("commit_sha") or "").lower()
         if prov_sha and rec_sha and prov_sha != rec_sha:
