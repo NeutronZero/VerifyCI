@@ -1,11 +1,11 @@
 {
   "attestation": {
     "algorithm": "ed25519",
-    "digest": "sha256:598c29ec84b3f67cb0a371b3ed7749a5b64225a1ad28a3215ed312ef064d0912",
+    "digest": "sha256:6fec74317bd1dc9423a4d748a0cd1179f1e64eac9819309848aec4c9b59a0067",
     "issuer": "verifyci.release_pipeline",
     "key_id": "verifyci-release-authority-ed25519-v1",
     "public_key": "7926b9524e2ec893f7834b9081228da255f058709fa158d77a75d7d21a3715f7",
-    "signature": "be90b4e13952728797c8da63e06c996b1f7fd5a440408da3313488a0f346f53efb2bbf8f91aa71ddaa0b4fdecafda63923674bec186dcaa1c4602e3d9972f20f"
+    "signature": "5a574cc9db39af8f106c1edb1c9fc7f9d79be7a074cef14a1aae3a3b960c5566983dc914fff64fdc0a6296816cfdeaf3f1af40b0a480891eaa4c1614aa3dc003"
   },
   "checks_validated": [
     "grounding",
@@ -14,7 +14,7 @@
     "semantic",
     "security"
   ],
-  "commit_sha": "f27ae4e7f8bdcda1e04dcf1c6f66e888cdf874d2",
+  "commit_sha": "6507ce460bb77579709d999b015fae1ac7fb22a7",
   "corpora_hashes": {
     "contract": "sha256:14bd93a97fb0be3eae13c99ebc4c25d1fe0e14dafb2e9db92e5e5d389043689c",
     "deletion": "sha256:efbca020e17296277e9ade5d3c59e20287e1e16018f044e416f7eebfd9a408a1",
@@ -22,7 +22,7 @@
     "security": "sha256:8d45f911c72bfda761c21da754b235d7a58768864a1d0087d70d745eeb97b880",
     "semantic": "sha256:dd0a162bd7442a78b6e236fa207c17dcd6413e5ad73e2e4b41c4b35451b5d3ba"
   },
-  "implementation_fingerprint": "sha256:b1a2042fdc66e5bf3ed6d5a8609adc7ab6ec5e036bbd4800721a9071c8b01f25",
+  "implementation_fingerprint": "sha256:1a93705d6e85dac4e21c1f3d2d07c15fb827c9603bc8358fb3d50a5ebac1e89d",
   "manifest_hash": "sha256:d471308bb8779a13e942d5fe2aa989bca74550132c5d4993ad4af3a5c41d6263",
   "measurements": {
     "benchmark": {
@@ -70,28 +70,31 @@
       "zero_false_blocking": true
     },
     "test_suite": {
-      "duration_seconds": 12.27,
+      "duration_seconds": 9.62,
       "stage": "final",
       "test_target": "tests/v3",
       "total_errors": 0,
       "total_failed": 0,
-      "total_passed": 216
+      "total_passed": 222
     }
   },
   "provenance": {
-    "artifact_id": 13041644503,
-    "artifact_size_in_bytes": 3417,
+    "artifact_created_at": "2026-10-31T13:31:53Z",
+    "artifact_id": 13043383904,
+    "artifact_name": "release-measurements",
+    "artifact_size_in_bytes": 3348,
     "ci_platform": "github_actions",
     "ci_verified": true,
-    "commit_sha": "f27ae4e7f8bdcda1e04dcf1c6f66e888cdf874d2",
-    "job_id": 124533852581,
+    "commit_sha": "6507ce460bb77579709d999b015fae1ac7fb22a7",
+    "job_id": 124550886604,
     "job_name": "verifyci-measurements",
-    "measurement_job_completed_at": "2026-10-31T12:12:42Z",
-    "measurement_job_started_at": "2026-10-31T12:12:06Z",
-    "verified_at": "2026-10-31T12:12:53Z",
+    "measurement_job_completed_at": "2026-10-31T13:31:56Z",
+    "measurement_job_started_at": "2026-10-31T13:31:21Z",
+    "oidc_verified": true,
+    "verified_at": "2026-10-31T13:32:06Z",
     "workflow_path": ".github/workflows/ci.yml",
     "workflow_run_attempt": "1",
-    "workflow_run_id": "41199834539"
+    "workflow_run_id": "41205733022"
   },
   "schema": "verifyci.release_validation/v1",
   "stage": "final",
