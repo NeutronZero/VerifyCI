@@ -1,11 +1,11 @@
 {
   "attestation": {
     "algorithm": "ed25519",
-    "digest": "sha256:e6ad8b9f0f7eaf333fa31f297ceb143cbbd62352a2118af4d6b18cfb2414c6d3",
+    "digest": "sha256:598c29ec84b3f67cb0a371b3ed7749a5b64225a1ad28a3215ed312ef064d0912",
     "issuer": "verifyci.release_pipeline",
     "key_id": "verifyci-release-authority-ed25519-v1",
     "public_key": "7926b9524e2ec893f7834b9081228da255f058709fa158d77a75d7d21a3715f7",
-    "signature": "9be9dbf359106ac39d8aab9348c792ecda4e1e08242e29e02a01a3c1f28eaa2be4b878ea34be16415f1614f289a6196d785145ebe011adafb9e9037ff459d70a"
+    "signature": "be90b4e13952728797c8da63e06c996b1f7fd5a440408da3313488a0f346f53efb2bbf8f91aa71ddaa0b4fdecafda63923674bec186dcaa1c4602e3d9972f20f"
   },
   "checks_validated": [
     "grounding",
@@ -14,7 +14,7 @@
     "semantic",
     "security"
   ],
-  "commit_sha": "95efc8e5e06cde35d4b40b48043601d7ea3f557c",
+  "commit_sha": "f27ae4e7f8bdcda1e04dcf1c6f66e888cdf874d2",
   "corpora_hashes": {
     "contract": "sha256:14bd93a97fb0be3eae13c99ebc4c25d1fe0e14dafb2e9db92e5e5d389043689c",
     "deletion": "sha256:efbca020e17296277e9ade5d3c59e20287e1e16018f044e416f7eebfd9a408a1",
@@ -22,7 +22,7 @@
     "security": "sha256:8d45f911c72bfda761c21da754b235d7a58768864a1d0087d70d745eeb97b880",
     "semantic": "sha256:dd0a162bd7442a78b6e236fa207c17dcd6413e5ad73e2e4b41c4b35451b5d3ba"
   },
-  "implementation_fingerprint": "sha256:fa257d4568068b0f0600d407278b8ab5b5dae2cbb2b1cda14122cea576e4869d",
+  "implementation_fingerprint": "sha256:b1a2042fdc66e5bf3ed6d5a8609adc7ab6ec5e036bbd4800721a9071c8b01f25",
   "manifest_hash": "sha256:d471308bb8779a13e942d5fe2aa989bca74550132c5d4993ad4af3a5c41d6263",
   "measurements": {
     "benchmark": {
@@ -70,21 +70,28 @@
       "zero_false_blocking": true
     },
     "test_suite": {
-      "duration_seconds": 249.34,
+      "duration_seconds": 12.27,
       "stage": "final",
       "test_target": "tests/v3",
       "total_errors": 0,
       "total_failed": 0,
-      "total_passed": 214
+      "total_passed": 216
     }
   },
   "provenance": {
-    "ci_platform": "local",
-    "ci_verified": false,
-    "commit_sha": "95efc8e5e06cde35d4b40b48043601d7ea3f557c",
-    "measurement_attestation_created_at": "2026-10-30T14:05:33.701017+00:00",
-    "measurement_attestation_digest": "sha256:f8f42d39db9364c619ec952af20fcdb9f303603e685d9162c30a3d98bf96e1ed",
-    "verified_at": "2026-10-30T14:05:44Z"
+    "artifact_id": 13041644503,
+    "artifact_size_in_bytes": 3417,
+    "ci_platform": "github_actions",
+    "ci_verified": true,
+    "commit_sha": "f27ae4e7f8bdcda1e04dcf1c6f66e888cdf874d2",
+    "job_id": 124533852581,
+    "job_name": "verifyci-measurements",
+    "measurement_job_completed_at": "2026-10-31T12:12:42Z",
+    "measurement_job_started_at": "2026-10-31T12:12:06Z",
+    "verified_at": "2026-10-31T12:12:53Z",
+    "workflow_path": ".github/workflows/ci.yml",
+    "workflow_run_attempt": "1",
+    "workflow_run_id": "41199834539"
   },
   "schema": "verifyci.release_validation/v1",
   "stage": "final",
@@ -92,7 +99,7 @@
   "tool_version": "3.1.10",
   "toolchain_fingerprint": "sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9",
   "toolchain_identity": {
-    "os": "windows",
-    "python_version": "3.14.7"
+    "os": "linux",
+    "python_version": "3.12.15"
   }
 }
