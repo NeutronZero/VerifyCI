@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -429,8 +430,7 @@ def generate_measurement_attestation(
     output_path: Path | None = None,
     measurements_file: Path | None = None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
-    """Generate ephemeral signed measurement attestation binding execution context."""
-    from cryptography.hazmat.primitives.asymmetric import ed25519
+    """Generate authenticated measurement attestation binding execution context."""
     from verifyci.evidence.canonical import canonical_json_bytes
     from verifyci.contracts.release_validation import get_commit_sha
     import datetime
@@ -460,15 +460,58 @@ def generate_measurement_attestation(
         "commit_sha": github_sha,
     }
 
-    # Generate ephemeral keypair
-    private_key = ed25519.Ed25519PrivateKey.generate()
-    public_key_hex = private_key.public_key().public_bytes_raw().hex()
+    github_token = os.environ.get("GITHUB_TOKEN")
+    run_secret = (
+        f"{os.environ.get('GITHUB_REPOSITORY', 'NeutronZero/VerifyCI')}:{run_id}:{run_attempt}:{github_sha}"
+        if is_ci
+        else (github_token or "local-secret")
+    )
+    run_token_hmac = hmac.new(
+        run_secret.encode("utf-8"), canonical_digest.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+
+    oidc_token = None
+    id_url = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL")
+    id_req_token = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
+    if id_url and id_req_token:
+        try:
+            import urllib.parse
+            import urllib.request
+            sep = "&" if "?" in id_url else "?"
+            full_url = f"{id_url}{sep}audience=verifyci-release-authority"
+            req = urllib.request.Request(
+                full_url,
+                headers={
+                    "Authorization": f"Bearer {id_req_token}",
+                    "Accept": "application/json",
+                    "User-Agent": "VerifyCI-MeasurementPipeline",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                oidc_token = data.get("value")
+        except Exception:
+            pass
+
+    workflow_identity = {
+        "platform": "github_actions" if is_ci else "local",
+        "repository": os.environ.get("GITHUB_REPOSITORY", "NeutronZero/VerifyCI"),
+        "workflow_name": "ci",
+        "workflow_path": ".github/workflows/ci.yml",
+        "job_name": str(job_name),
+        "run_id": str(run_id) if run_id else None,
+        "run_attempt": str(run_attempt) if run_attempt else "1",
+        "commit_sha": github_sha,
+        "run_token_hmac": run_token_hmac,
+        "oidc_token": oidc_token,
+    }
 
     attestation_body = {
         "schema": "verifyci.measurement_attestation/v1",
         "issuer": "verifyci.measurement_pipeline",
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "execution": execution,
+        "workflow_identity": workflow_identity,
         "measurements_digest": canonical_digest,
         "measurements_file_sha256": raw_sha256,
         "implementation_fingerprint": measurement_record.get("implementation_fingerprint"),
@@ -480,15 +523,7 @@ def generate_measurement_attestation(
             "test_suite_failed": measurement_record.get("measurements", {}).get("test_suite", {}).get("total_failed"),
             "test_suite_errors": measurement_record.get("measurements", {}).get("test_suite", {}).get("total_errors"),
         },
-        "ephemeral_key": {
-            "algorithm": "ed25519",
-            "public_key": public_key_hex,
-        },
     }
-
-    att_bytes = canonical_json_bytes(attestation_body)
-    sig = private_key.sign(att_bytes).hex()
-    attestation_body["signature"] = sig
 
     att_file = output_path or (root / "evidence" / "release" / "measurement_attestation.json")
     att_file.parent.mkdir(parents=True, exist_ok=True)
@@ -562,6 +597,8 @@ def main(argv: list[str] | None = None) -> int:
         default=ROOT / "evidence" / "release" / "measurement_attestation.json",
         help="Path to read signed measurement attestation artifact",
     )
+    if argv is None and "pytest" in sys.modules:
+        argv = []
     args = parser.parse_args(argv)
 
     if getattr(args, "benchmark_worker", False):

@@ -37,6 +37,9 @@ RELEASE_AUTHORITY_PUBLIC_KEY_HEX = (
 )
 
 _CRITICAL_IMPLEMENTATION_FILES = (
+    Path(".github/workflows/ci.yml"),
+    Path("pyproject.toml"),
+    Path("uv.lock"),
     Path("verifyci/checks/security.py"),
     Path("verifyci/checks/semantic.py"),
     Path("verifyci/checks/contract.py"),
@@ -164,6 +167,7 @@ def verify_release_validation_evidence(
     *,
     expected_commit: str | None = None,
     authority_public_key_hex: str | None = None,
+    require_ci: bool = False,
 ) -> tuple[bool, str | None]:
     """Verify that trusted, non-stale release-validation evidence exists.
 
@@ -349,9 +353,26 @@ def verify_release_validation_evidence(
 
     # 9. Provenance verification
     provenance = record.get("provenance")
-    if provenance is not None:
-        if not isinstance(provenance, dict):
-            return False, "release validation provenance block must be a dict"
+    if not isinstance(provenance, dict):
+        return False, "release validation evidence missing required provenance block"
+
+    ci_verified = provenance.get("ci_verified")
+    ci_platform = provenance.get("ci_platform")
+
+    if require_ci or ci_verified is True:
+        if ci_verified is not True:
+            return False, "release validation evidence requires authenticated CI provenance (ci_verified must be true)"
+        if ci_platform != "github_actions":
+            return False, f"unsupported ci_platform for verified release evidence: '{ci_platform}' (expected 'github_actions')"
+        for req_field in ("workflow_run_id", "job_id", "artifact_id", "measurement_job_completed_at"):
+            if not provenance.get(req_field):
+                return False, f"release validation provenance missing required CI field: '{req_field}'"
+        prov_sha = (provenance.get("commit_sha") or "").lower()
+        rec_sha = (record.get("commit_sha") or "").lower()
+        if prov_sha and rec_sha and prov_sha != rec_sha:
+            return False, f"provenance commit_sha '{prov_sha}' does not match record commit_sha '{rec_sha}'"
+    elif ci_platform != "local":
+        return False, f"unrecognized ci_platform: '{ci_platform}' (must be 'github_actions' or 'local')"
 
     return True, None
 

@@ -328,20 +328,90 @@ def test_benchmark_worker_fails_closed_if_signing_key_leaked():
 # Provenance Authentication & Standalone Signer Adversarial Tests
 # ==============================================================================
 
-def test_standalone_signer_imports_zero_repo_code():
-    """Adversarial test: standalone_signer.py isolates execution and never imports verifyci."""
+def test_standalone_signer_entrypoint_isolation_and_path_clearing():
+    """Adversarial test: standalone_signer.py entrypoint isolates sys.path and never imports repo code."""
     import subprocess
     import sys
     from scripts.validate_release import ROOT
 
-    code = (
-        "import scripts.standalone_signer as s; "
-        "import sys; "
-        "s.assert_no_repository_imports(); "
-        "assert 'verifyci' not in sys.modules, f'verifyci was imported: {[m for m in sys.modules if m.startswith(\"verifyci\")]}'"
+    # 1. Test execution of the real signer entrypoint as __main__
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "standalone_signer.py"), "--help"],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
     )
-    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=str(ROOT))
-    assert proc.returncode == 0, f"Import test failed:\n{proc.stderr}\n{proc.stdout}"
+    assert proc.returncode == 0, f"Signer entrypoint execution failed:\n{proc.stderr}\n{proc.stdout}"
+
+    # 2. Test that isolated execution environment purges repo paths and verifyci is absent
+    code = (
+        "import scripts.standalone_signer as s\n"
+        "import sys, pathlib\n"
+        "s.assert_no_repository_imports()\n"
+        "root = pathlib.Path.cwd().resolve()\n"
+        "assert 'verifyci' not in sys.modules, 'verifyci imported'\n"
+        "for p in sys.path:\n"
+        "    if not p or p == '.':\n"
+        "        continue\n"
+        "    pr = pathlib.Path(p).resolve()\n"
+        "    if (pr == root or pr.is_relative_to(root)) and 'site-packages' not in pr.parts and 'dist-packages' not in pr.parts:\n"
+        "        raise AssertionError(f'unpurged repo path: {p}')\n"
+    )
+    proc2 = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=str(ROOT))
+    assert proc2.returncode == 0, f"Isolation test failed:\n{proc2.stderr}\n{proc2.stdout}"
+
+
+def test_standalone_signer_rejects_shadow_packages_and_protects_key(tmp_path):
+    """Adversarial test: standalone_signer.py prevents shadow packages from executing or exfiltrating the signing key."""
+    import os
+    import shutil
+    import subprocess
+    import sys
+    from scripts.validate_release import ROOT
+
+    # Create simulated candidate repository
+    sim_repo = tmp_path / "candidate_repo"
+    sim_repo.mkdir()
+    sim_scripts = sim_repo / "scripts"
+    sim_scripts.mkdir()
+
+    # Copy standalone_signer.py to simulated repo scripts
+    real_signer = ROOT / "scripts" / "standalone_signer.py"
+    target_signer = sim_scripts / "standalone_signer.py"
+    shutil.copyfile(real_signer, target_signer)
+
+    # Place a malicious shadow package 'scripts/cryptography'
+    shadow_pkg = sim_scripts / "cryptography"
+    shadow_pkg.mkdir()
+    exfil_file = tmp_path / "key_exfiltrated.txt"
+    (shadow_pkg / "__init__.py").write_text(
+        f"""
+import os
+from pathlib import Path
+key = os.environ.get("VERIFYCI_RELEASE_SIGNING_KEY")
+Path({repr(str(exfil_file))}).write_text(f"STOLEN_KEY: {{key}}")
+raise RuntimeError("Malicious shadow package executed!")
+""",
+        encoding="utf-8",
+    )
+
+    # Execute signer with canary key in environment
+    canary_key = "secret_canary_key_0123456789abcdef"
+    env = dict(os.environ)
+    env["VERIFYCI_RELEASE_SIGNING_KEY"] = canary_key
+
+    proc = subprocess.run(
+        [sys.executable, str(target_signer), "--help"],
+        cwd=str(sim_repo),
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    # Security proof: The shadow package code was NEVER executed and key was NEVER exfiltrated
+    assert not exfil_file.exists(), "CRITICAL SECURITY LEAK: Malicious shadow package executed and exfiltrated key!"
+    assert "Malicious shadow package executed!" not in proc.stderr
+    assert "Malicious shadow package executed!" not in proc.stdout
 
 
 def _make_valid_measurement_record(root: Path) -> dict:
@@ -418,15 +488,23 @@ def test_provenance_rejects_artifact_replacement(tmp_path, monkeypatch):
     assert any("mismatch" in e for e in errors), f"Expected mismatch error, got {errors}"
 
 
-def test_provenance_rejects_tampered_attestation_signature(tmp_path, monkeypatch):
-    """Adversarial test: forged or corrupted ephemeral attestation signature is rejected."""
+def test_provenance_rejects_tampered_run_token_hmac_in_ci(tmp_path, monkeypatch):
+    """Adversarial test: forged or corrupted token HMAC in CI measurement attestation is rejected."""
     import json
-    from scripts.standalone_signer import sign_release_evidence
+    from scripts.standalone_signer import sign_release_evidence, get_commit_sha
     from scripts.validate_release import ROOT, generate_measurement_attestation
 
-    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    m_rec = _make_valid_measurement_record(ROOT)
+    commit_sha = get_commit_sha(ROOT)
+    assert commit_sha
 
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_RUN_ID", "10001")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    monkeypatch.setenv("GITHUB_SHA", commit_sha)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "NeutronZero/VerifyCI")
+    monkeypatch.setenv("GITHUB_TOKEN", "valid_ci_token")
+
+    m_rec = _make_valid_measurement_record(ROOT)
     m_file = tmp_path / "measurements.json"
     att_file = tmp_path / "measurement_attestation.json"
     out_file = tmp_path / "release_validation.json"
@@ -435,15 +513,68 @@ def test_provenance_rejects_tampered_attestation_signature(tmp_path, monkeypatch
     att_rec, att_errs = generate_measurement_attestation(ROOT, m_rec, att_file, measurements_file=m_file)
     assert not att_errs
 
-    # Corrupt signature in attestation
+    # Tamper with run_token_hmac in attestation
     tampered_att = dict(att_rec)
-    tampered_att["signature"] = "0" * 128
+    tampered_att["workflow_identity"]["run_token_hmac"] = "0" * 64
     att_file.write_text(json.dumps(tampered_att, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     fake_signing_key = "12" * 32
     rec, errors = sign_release_evidence(ROOT, m_file, att_file, out_file, fake_signing_key)
     assert rec is None
-    assert any("ephemeral signature" in e for e in errors), f"Expected signature error, got {errors}"
+    assert any("run_token_hmac" in e for e in errors), f"Expected HMAC error, got {errors}"
+
+
+def test_verify_release_validation_enforces_ci_provenance(tmp_path, monkeypatch):
+    """Adversarial test: verify_release_validation_evidence rejects unauthenticated CI provenance when require_ci=True."""
+    from scripts.validate_release import ROOT
+    from verifyci.contracts import release_validation
+
+    # 1. Evidence with local provenance must fail when require_ci=True
+    raw_evidence = json.loads((ROOT / "evidence" / "release" / "release_validation.json").read_text(encoding="utf-8"))
+    recorded_commit = raw_evidence["commit_sha"]
+    recorded_fp = raw_evidence["implementation_fingerprint"]
+    local_record = dict(raw_evidence)
+    local_record["provenance"] = {
+        "ci_platform": "local",
+        "ci_verified": False,
+        "commit_sha": recorded_commit,
+    }
+    real_read = Path.read_bytes
+    monkeypatch.setattr(
+        Path,
+        "read_bytes",
+        lambda self: json.dumps(local_record).encode("utf-8") if self.name == "release_validation.json" else real_read(self),
+    )
+    monkeypatch.setattr(release_validation.hmac, "compare_digest", lambda a, b: True)
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    monkeypatch.setattr(Ed25519PublicKey, "verify", lambda *args, **kwargs: None)
+    monkeypatch.setattr(release_validation, "compute_implementation_fingerprint", lambda root: recorded_fp)
+    monkeypatch.setattr(release_validation, "get_commit_sha", lambda root=None: recorded_commit)
+
+    ok, err = release_validation.verify_release_validation_evidence(require_ci=True)
+    assert not ok
+    assert "ci_verified must be true" in err
+
+    # 2. Incomplete CI provenance must fail
+    mock_record = dict(raw_evidence)
+    mock_record["provenance"] = {
+        "ci_platform": "github_actions",
+        "ci_verified": True,
+        # missing workflow_run_id, job_id, artifact_id, etc.
+    }
+    real_read = Path.read_bytes
+    monkeypatch.setattr(
+        Path,
+        "read_bytes",
+        lambda self: json.dumps(mock_record).encode("utf-8") if self.name == "release_validation.json" else real_read(self),
+    )
+    monkeypatch.setattr(release_validation.hmac, "compare_digest", lambda a, b: True)
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    monkeypatch.setattr(Ed25519PublicKey, "verify", lambda *args, **kwargs: None)
+
+    ok2, err2 = release_validation.verify_release_validation_evidence(require_ci=True)
+    assert not ok2
+    assert "missing required CI field" in err2
 
 
 def test_provenance_rejects_fabricated_failed_measurements(tmp_path, monkeypatch):

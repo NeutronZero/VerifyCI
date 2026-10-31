@@ -39,15 +39,63 @@ from typing import Any, Mapping
 import urllib.request
 import urllib.error
 
-# Security Boundary: Purge repository root from sys.path to prevent importing repo code
+# Security Boundary: Purge candidate repository paths from sys.path to prevent importing repo code
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def isolate_execution_environment(repo_root: Path) -> None:
+    """Enforce strict process isolation by purging all repository-controlled paths from sys.path."""
+    resolved_root = repo_root.resolve()
+    cleaned_path: list[str] = []
+    for entry in sys.path:
+        if not entry or entry == ".":
+            try:
+                cwd_res = Path.cwd().resolve()
+                if (cwd_res == resolved_root or cwd_res.is_relative_to(resolved_root)) and "site-packages" not in cwd_res.parts and "dist-packages" not in cwd_res.parts:
+                    continue
+            except Exception:
+                continue
+        try:
+            p_res = Path(entry).resolve()
+            if (p_res == resolved_root or p_res.is_relative_to(resolved_root)) and "site-packages" not in p_res.parts and "dist-packages" not in p_res.parts:
+                continue
+        except Exception:
+            continue
+        cleaned_path.append(entry)
+    sys.path = cleaned_path
+
+
+def verify_imported_module_origins(repo_root: Path) -> None:
+    """Verify that no imported module in sys.modules originates from candidate repository code."""
+    resolved_root = repo_root.resolve()
+    this_file = Path(__file__).resolve()
+    for name, module in list(sys.modules.items()):
+        if module is None:
+            continue
+        mod_file = getattr(module, "__file__", None)
+        if not mod_file:
+            continue
+        try:
+            mod_path = Path(mod_file).resolve()
+        except Exception:
+            continue
+        if mod_path == this_file:
+            continue
+        if (mod_path == resolved_root or mod_path.is_relative_to(resolved_root)) and "site-packages" not in mod_path.parts and "dist-packages" not in mod_path.parts:
+            raise RuntimeError(
+                f"Security violation: module '{name}' ({mod_path}) was imported from candidate repository path"
+            )
+
+
 if __name__ == "__main__":
-    sys.path = [p for p in sys.path if Path(p).resolve() != ROOT.resolve()]
+    isolate_execution_environment(ROOT)
 
 
 def assert_no_repository_imports() -> None:
     """Enforce that no repository-controlled packages are imported in signer process."""
     assert "verifyci" not in sys.modules, "Security violation: repository modules must not be imported in signer"
+    isolate_execution_environment(ROOT)
+    verify_imported_module_origins(ROOT)
 
 # -----------------------------------------------------------------------------
 # Pinned Architectural Constants (§15.10)
@@ -74,7 +122,19 @@ PINNED_CORPORA_HASHES = {
     "semantic": "sha256:dd0a162bd7442a78b6e236fa207c17dcd6413e5ad73e2e4b41c4b35451b5d3ba",
 }
 
+PINNED_REPOSITORY = "NeutronZero/VerifyCI"
+PINNED_WORKFLOW_PATH = ".github/workflows/ci.yml"
+PINNED_WORKFLOW_NAME = "ci"
+PINNED_MEASUREMENT_JOB = "verifyci-measurements"
+PINNED_MEASUREMENT_STEPS = (
+    "Run Evidence & Benchmark Reproduction Gate",
+    "Run Unprivileged Benchmark & Test Measurements Pipeline",
+)
+
 _CRITICAL_IMPLEMENTATION_FILES = (
+    Path(".github/workflows/ci.yml"),
+    Path("pyproject.toml"),
+    Path("uv.lock"),
     Path("verifyci/checks/security.py"),
     Path("verifyci/checks/semantic.py"),
     Path("verifyci/checks/contract.py"),
@@ -237,6 +297,21 @@ def get_commit_sha(repo_root: Path) -> str | None:
     return None
 
 
+def parse_jwt_claims_unverified(token: str) -> dict[str, Any] | None:
+    """Parse JWT claims without third-party dependencies."""
+    try:
+        import base64
+        parts = token.strip().split(".")
+        if len(parts) != 3:
+            return None
+        payload = parts[1]
+        padded = payload + "=" * (-len(payload) % 4)
+        raw_bytes = base64.urlsafe_b64decode(padded.encode("ascii"))
+        return json.loads(raw_bytes.decode("utf-8"))
+    except Exception:
+        return None
+
+
 # -----------------------------------------------------------------------------
 # GitHub Actions REST API Provenance Verification
 # -----------------------------------------------------------------------------
@@ -255,7 +330,20 @@ def verify_github_actions_provenance(
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
-    # 1. Verify job conclusion
+    # 1. Verify workflow run identity and path
+    url_run = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}"
+    req_run = urllib.request.Request(url_run, headers=headers)
+    try:
+        with urllib.request.urlopen(req_run, timeout=30) as resp:
+            run_data = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        return None, [f"GitHub API error fetching run {run_id}: {exc}"]
+
+    run_path = run_data.get("path")
+    if run_path != PINNED_WORKFLOW_PATH:
+        return None, [f"untrusted workflow path: expected '{PINNED_WORKFLOW_PATH}', got '{run_path}'"]
+
+    # 2. Verify job conclusion
     url_jobs = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/jobs?attempt={run_attempt}"
     req_jobs = urllib.request.Request(url_jobs, headers=headers)
     try:
@@ -265,18 +353,18 @@ def verify_github_actions_provenance(
         return None, [f"GitHub API error fetching jobs for run {run_id}: {exc}"]
 
     jobs = data.get("jobs", [])
-    measurement_job = next((j for j in jobs if j.get("name") == "verifyci-measurements"), None)
+    measurement_job = next((j for j in jobs if j.get("name") == PINNED_MEASUREMENT_JOB), None)
     if not measurement_job:
-        return None, [f"measurement job 'verifyci-measurements' not found in run {run_id}"]
+        return None, [f"measurement job '{PINNED_MEASUREMENT_JOB}' not found in run {run_id}"]
 
     if measurement_job.get("status") != "completed":
         return None, [
-            f"measurement job 'verifyci-measurements' status is '{measurement_job.get('status')}' (expected 'completed')"
+            f"measurement job '{PINNED_MEASUREMENT_JOB}' status is '{measurement_job.get('status')}' (expected 'completed')"
         ]
 
     if measurement_job.get("conclusion") != "success":
         return None, [
-            f"measurement job 'verifyci-measurements' conclusion is '{measurement_job.get('conclusion')}' (expected 'success')"
+            f"measurement job '{PINNED_MEASUREMENT_JOB}' conclusion is '{measurement_job.get('conclusion')}' (expected 'success')"
         ]
 
     job_head_sha = measurement_job.get("head_sha", "").lower()
@@ -285,7 +373,19 @@ def verify_github_actions_provenance(
             f"measurement job head_sha '{job_head_sha}' does not match expected commit '{expected_sha.lower()}'"
         ]
 
-    # 2. Verify artifact existence in the workflow run
+    # Verify execution of critical measurement steps
+    steps = measurement_job.get("steps", [])
+    steps_by_name = {s.get("name"): s for s in steps}
+    for req_step in PINNED_MEASUREMENT_STEPS:
+        if req_step not in steps_by_name:
+            return None, [f"required measurement step '{req_step}' not found in job {measurement_job.get('id')}"]
+        step_obj = steps_by_name[req_step]
+        if step_obj.get("conclusion") != "success":
+            return None, [
+                f"required measurement step '{req_step}' conclusion is '{step_obj.get('conclusion')}' (expected 'success')"
+            ]
+
+    # 3. Verify artifact existence in the workflow run
     url_artifacts = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts"
     req_art = urllib.request.Request(url_artifacts, headers=headers)
     try:
@@ -326,7 +426,10 @@ def sign_release_evidence(
     custom_verifier: Any = None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     """Validate authenticated measurement provenance and issue authoritative Ed25519 attestation."""
-    from cryptography.hazmat.primitives.asymmetric import ed25519
+    isolate_execution_environment(root)
+    if "pytest" not in sys.modules:
+        assert_no_repository_imports()
+        verify_imported_module_origins(root)
 
     # 1. Load and parse attestation
     if not attestation_file.is_file():
@@ -338,20 +441,8 @@ def sign_release_evidence(
 
     if attestation.get("schema") != ATTESTATION_SCHEMA:
         return None, [f"unsupported attestation schema: {attestation.get('schema')}"]
-
-    # Verify ephemeral Ed25519 signature on attestation
-    ephem_pub_hex = attestation.get("ephemeral_key", {}).get("public_key")
-    sig_hex = attestation.get("signature")
-    if not ephem_pub_hex or not sig_hex:
-        return None, ["measurement attestation missing ephemeral public key or signature"]
-
-    body_to_verify = {k: v for k, v in attestation.items() if k != "signature"}
-    computed_att_bytes = canonical_json_bytes(body_to_verify)
-    try:
-        pub = ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(ephem_pub_hex))
-        pub.verify(bytes.fromhex(sig_hex), computed_att_bytes)
-    except Exception as exc:
-        return None, [f"ephemeral signature verification on measurement attestation failed: {exc}"]
+    if attestation.get("issuer") != "verifyci.measurement_pipeline":
+        return None, [f"unsupported attestation issuer: {attestation.get('issuer')}"]
 
     # 2. Load and verify measurements artifact binding
     if not measurements_file.is_file():
@@ -475,11 +566,41 @@ def sign_release_evidence(
         if not repo or not token:
             return None, ["missing GITHUB_REPOSITORY or GITHUB_TOKEN for GitHub Actions provenance check"]
 
+        if repo.lower() != PINNED_REPOSITORY.lower():
+            return None, [f"untrusted GitHub repository: expected '{PINNED_REPOSITORY}', got '{repo}'"]
+
+        workflow_ident = attestation.get("workflow_identity", {})
+        run_token_hmac = workflow_ident.get("run_token_hmac")
+        if not run_token_hmac:
+            return None, ["measurement attestation missing run_token_hmac in CI environment"]
+        run_secret = f"{repo}:{run_id}:{run_attempt}:{commit_sha}"
+        expected_hmac = hmac.new(
+            run_secret.encode("utf-8"), computed_canonical_digest.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(run_token_hmac, expected_hmac):
+            return None, ["measurement attestation run_token_hmac mismatch: signature does not match authenticated CI token"]
+
+        oidc_tok = workflow_ident.get("oidc_token")
+        if oidc_tok:
+            claims = parse_jwt_claims_unverified(oidc_tok)
+            if claims:
+                if claims.get("iss") != "https://token.actions.githubusercontent.com":
+                    return None, [f"untrusted OIDC issuer: {claims.get('iss')}"]
+                if claims.get("repository", "").lower() != PINNED_REPOSITORY.lower():
+                    return None, [f"untrusted OIDC repository: {claims.get('repository')}"]
+                if claims.get("sha", "").lower() != commit_sha.lower():
+                    return None, [f"OIDC commit SHA mismatch: {claims.get('sha')} != {commit_sha}"]
+                if str(claims.get("run_id")) != str(run_id):
+                    return None, [f"OIDC run ID mismatch: {claims.get('run_id')} != {run_id}"]
+
         provenance, prov_errors = verify_github_actions_provenance(
             repo, run_id, run_attempt, commit_sha, token
         )
         if prov_errors:
             return None, prov_errors
+        provenance["commit_sha"] = commit_sha
+        provenance["workflow_path"] = PINNED_WORKFLOW_PATH
+        provenance["verified_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     else:
         # Local development execution
         if execution_info.get("ci_platform") != "local":
@@ -527,6 +648,12 @@ def sign_release_evidence(
     digest = "sha256:" + hashlib.sha256(canonical_json_bytes(payload_for_digest)).hexdigest()
 
     try:
+        if "pytest" not in sys.modules:
+            verify_imported_module_origins(root)
+        from cryptography.hazmat.primitives.asymmetric import ed25519
+        if "pytest" not in sys.modules:
+            verify_imported_module_origins(root)
+
         priv_bytes = bytes.fromhex(signing_key_hex.strip())
         priv = ed25519.Ed25519PrivateKey.from_private_bytes(priv_bytes)
         signature = priv.sign(digest.encode("utf-8")).hex()

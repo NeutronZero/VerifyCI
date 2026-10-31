@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   # ------------------------------------------------------------------
@@ -139,6 +140,8 @@ jobs:
         run: |
           uv run --no-sync python -m pytest tests/v3/ -n auto -q
       - name: Run Unprivileged Benchmark & Test Measurements Pipeline
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           uv run --no-sync python scripts/validate_release.py --measure-only
       - name: Upload Release Measurements Artifact
@@ -187,7 +190,8 @@ jobs:
           test -f evidence/release/measurement_attestation.json
       - name: Verify Standalone Signer Integrity
         run: |
-          echo "1a16647d52f4b1665c98e2b006ba144a9d085948e9021ebbb6a322f4e0703549  scripts/standalone_signer.py" | sha256sum -c -
+          echo "342046d8ae6eafedef479a84255ce64573ac52eeb6bf602969325c5deedad1d1  scripts/standalone_signer.py" | sha256sum -c -
+          echo "7123bc3c14d06f258e9078cf1487fe936240ea2035c898b83a2cfadce3519970  uv.lock" | sha256sum -c -
       - name: Run Authoritative Release Signing (Protected Environment)
         env:
           VERIFYCI_RELEASE_SIGNING_KEY: ${{ secrets.VERIFYCI_RELEASE_SIGNING_KEY }}
@@ -196,7 +200,7 @@ jobs:
           uv run --no-sync python scripts/standalone_signer.py
       - name: Verify Release Validation Attestation
         run: |
-          uv run --no-sync python -c "from verifyci.contracts.release_validation import verify_release_validation_evidence; ok, err = verify_release_validation_evidence(); assert ok, f'Attestation verification failed: {err}'; print('Release attestation cryptographically verified!')"
+          uv run --no-sync python -c "from verifyci.contracts.release_validation import verify_release_validation_evidence; ok, err = verify_release_validation_evidence(require_ci=True); assert ok, f'Attestation verification failed: {err}'; print('Release attestation cryptographically verified!')"
       - name: Generate Evidence Bundle & Summary
         run: |
           uv run --no-sync python scripts/build_evidence_bundle.py
