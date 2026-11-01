@@ -1,11 +1,11 @@
 {
   "attestation": {
     "algorithm": "ed25519",
-    "digest": "sha256:6fec74317bd1dc9423a4d748a0cd1179f1e64eac9819309848aec4c9b59a0067",
+    "digest": "sha256:d35fe43f5eb2ad8b22212e681d0e273bff7b84233909bb314e8cf37c78d5331a",
     "issuer": "verifyci.release_pipeline",
     "key_id": "verifyci-release-authority-ed25519-v1",
     "public_key": "7926b9524e2ec893f7834b9081228da255f058709fa158d77a75d7d21a3715f7",
-    "signature": "5a574cc9db39af8f106c1edb1c9fc7f9d79be7a074cef14a1aae3a3b960c5566983dc914fff64fdc0a6296816cfdeaf3f1af40b0a480891eaa4c1614aa3dc003"
+    "signature": "89c5d52d0eb45a04df2592e601da4801ef9e11cc9bf47c7f1d138bdabd869468b77699678352319017833d7bccd53757587665c8f949c054c9f7e34a670dcf0f"
   },
   "checks_validated": [
     "grounding",
@@ -14,7 +14,7 @@
     "semantic",
     "security"
   ],
-  "commit_sha": "6507ce460bb77579709d999b015fae1ac7fb22a7",
+  "commit_sha": "9262e63a269f4beb639570fabaa81519ad852ff2",
   "corpora_hashes": {
     "contract": "sha256:14bd93a97fb0be3eae13c99ebc4c25d1fe0e14dafb2e9db92e5e5d389043689c",
     "deletion": "sha256:efbca020e17296277e9ade5d3c59e20287e1e16018f044e416f7eebfd9a408a1",
@@ -22,7 +22,7 @@
     "security": "sha256:8d45f911c72bfda761c21da754b235d7a58768864a1d0087d70d745eeb97b880",
     "semantic": "sha256:dd0a162bd7442a78b6e236fa207c17dcd6413e5ad73e2e4b41c4b35451b5d3ba"
   },
-  "implementation_fingerprint": "sha256:1a93705d6e85dac4e21c1f3d2d07c15fb827c9603bc8358fb3d50a5ebac1e89d",
+  "implementation_fingerprint": "sha256:6ab601427caede4d1091409346296767022ce54d5da9a90546d3a9ad1ed98aee",
   "manifest_hash": "sha256:d471308bb8779a13e942d5fe2aa989bca74550132c5d4993ad4af3a5c41d6263",
   "measurements": {
     "benchmark": {
@@ -70,31 +70,56 @@
       "zero_false_blocking": true
     },
     "test_suite": {
-      "duration_seconds": 9.62,
+      "duration_seconds": 12.72,
       "stage": "final",
       "test_target": "tests/v3",
       "total_errors": 0,
       "total_failed": 0,
-      "total_passed": 222
+      "total_passed": 253
     }
   },
   "provenance": {
-    "artifact_created_at": "2026-10-31T13:31:53Z",
-    "artifact_id": 13043383904,
+    "artifact_created_at": "2026-11-01T12:14:34Z",
+    "artifact_digest": "sha256:ede538ee0c0efad46d2c2ee36b06bc288cdf0547f6f5802c095ea0f4082b02f0",
+    "artifact_id": 13082554138,
     "artifact_name": "release-measurements",
-    "artifact_size_in_bytes": 3348,
+    "artifact_size_in_bytes": 6906,
+    "artifact_zip_sha256": "sha256:ede538ee0c0efad46d2c2ee36b06bc288cdf0547f6f5802c095ea0f4082b02f0",
+    "candidate_ref": "refs/heads/feat/v3.1.10-m4-security",
     "ci_platform": "github_actions",
     "ci_verified": true,
-    "commit_sha": "6507ce460bb77579709d999b015fae1ac7fb22a7",
-    "job_id": 124550886604,
-    "job_name": "verifyci-measurements",
-    "measurement_job_completed_at": "2026-10-31T13:31:56Z",
-    "measurement_job_started_at": "2026-10-31T13:31:21Z",
+    "commit_sha": "9262e63a269f4beb639570fabaa81519ad852ff2",
+    "job_id": 124844939546,
+    "job_name": "trusted-measurements / verifyci-measurements",
+    "measurement_job_completed_at": "2026-11-01T12:14:37Z",
+    "measurement_job_started_at": "2026-11-01T12:14:13Z",
+    "measurement_steps": [
+      "Set up job",
+      "Validate Candidate Commit Input",
+      "Checkout Candidate Source",
+      "Setup Python",
+      "Setup uv",
+      "Install Candidate Dependencies (Unprivileged)",
+      "Verify Trusted Measurement Harness Integrity",
+      "Run Trusted Measurement Pipeline",
+      "Upload Release Measurements Artifact",
+      "Post Setup uv",
+      "Post Setup Python",
+      "Post Checkout Candidate Source",
+      "Complete job"
+    ],
+    "measurement_workflow_ref": "NeutronZero/VerifyCI/.github/workflows/release_measurements.yml@fb54ffd642b41cd052f054765b594664a65a7cec",
+    "measurement_workflow_sha": "fb54ffd642b41cd052f054765b594664a65a7cec",
     "oidc_verified": true,
-    "verified_at": "2026-10-31T13:32:06Z",
+    "trusted_signing_ref": "refs/heads/release-authority",
+    "trusted_signing_run_attempt": "1",
+    "trusted_signing_run_id": "41305742782",
+    "trusted_signing_workflow_ref": "NeutronZero/VerifyCI/.github/workflows/release_signing.yml@refs/heads/release-authority",
+    "trusted_signing_workflow_sha": "fb54ffd642b41cd052f054765b594664a65a7cec",
+    "verified_at": "2026-11-01T12:17:49Z",
     "workflow_path": ".github/workflows/ci.yml",
     "workflow_run_attempt": "1",
-    "workflow_run_id": "41205733022"
+    "workflow_run_id": "41305309000"
   },
   "schema": "verifyci.release_validation/v1",
   "stage": "final",
