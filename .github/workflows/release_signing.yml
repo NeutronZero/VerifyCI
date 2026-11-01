@@ -1,24 +1,32 @@
 name: Release Signing Authority
 
+# Authoritative release signer.
+#
+# Trust boundary:
+# - This workflow is loaded only from the protected `release-authority` ref.
+# - It is triggered manually (workflow_dispatch) by a maintainer.
+# - It checks out only trusted source at this ref; it never checks out, imports,
+#   installs, builds, tests, or executes candidate-controlled code.
+# - The candidate source tree is downloaded as an archive and consumed strictly
+#   as data for fingerprint recomputation.
+# - The signing key exists only in the `release` environment, which is restricted
+#   to this ref and requires reviewer approval.
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
-      commit_sha:
+      candidate_sha:
         required: true
         type: string
-        description: "Authoritative candidate commit SHA to verify and sign"
-      run_id:
+        description: "Full 40-character candidate commit SHA that was measured"
+      measurement_run_id:
         required: true
         type: string
-        description: "GitHub Actions workflow run ID"
-      run_attempt:
+        description: "GitHub Actions run ID that contains the measurement job/artifact"
+      measurement_run_attempt:
         required: false
         type: string
         default: "1"
-        description: "GitHub Actions workflow run attempt"
-    secrets:
-      VERIFYCI_RELEASE_SIGNING_KEY:
-        required: true
+        description: "Measurement run attempt"
 
 permissions:
   contents: read
@@ -30,93 +38,214 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     steps:
-      - name: Checkout Candidate Code
+      - name: Enforce Trusted Workflow Ref
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          MEASUREMENT_RUN_ID: ${{ inputs.measurement_run_id }}
+          MEASUREMENT_RUN_ATTEMPT: ${{ inputs.measurement_run_attempt }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/release-authority"
+          test "$GITHUB_REPOSITORY" = "NeutronZero/VerifyCI"
+          test "$GITHUB_WORKFLOW_REF" = "NeutronZero/VerifyCI/.github/workflows/release_signing.yml@refs/heads/release-authority"
+          case "$CANDIDATE_SHA" in
+            (*[!0-9a-f]*|"") echo "invalid candidate SHA: $CANDIDATE_SHA" >&2; exit 1 ;;
+          esac
+          test "${#CANDIDATE_SHA}" -eq 40
+          case "$MEASUREMENT_RUN_ID" in
+            (*[!0-9]*|"") echo "invalid measurement run ID: $MEASUREMENT_RUN_ID" >&2; exit 1 ;;
+          esac
+          case "$MEASUREMENT_RUN_ATTEMPT" in
+            (*[!0-9]*|"") echo "invalid measurement run attempt: $MEASUREMENT_RUN_ATTEMPT" >&2; exit 1 ;;
+          esac
+
+      - name: Checkout Trusted Signing Authority
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 0
-          lfs: true
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
 
-      - name: Setup Isolated Python Runtime
+      - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
       - name: Install Pure Cryptography Only (Isolated Environment)
-        # Security Boundary (§15.10):
-        # DO NOT run uv sync or install candidate dependencies from uv.lock/pyproject.toml.
-        # Only cryptography is installed; repo packages are strictly purged from sys.path.
+        # Security boundary: never run uv sync, candidate dependency installation,
+        # package hooks, build scripts, tests, or repository scripts in this job.
         run: |
+          set -euo pipefail
           python -m pip install --no-cache-dir --upgrade pip
-          python -m pip install --no-cache-dir "cryptography>=44.0.0"
+          python -m pip install --no-cache-dir --only-binary=:all: "cryptography==50.0.2"
 
-      - name: Download Release Measurements Artifact
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
-        with:
-          name: release-measurements
-          path: evidence/release
-
-      - name: Ensure Measurements & Attestation File Paths
+      - name: Verify Trusted Signer Integrity
         run: |
-          if [ ! -f evidence/release/measurements.json ]; then
-            find evidence/release -name measurements.json -exec cp {} evidence/release/measurements.json \;
-          fi
-          if [ ! -f evidence/release/measurement_attestation.json ]; then
-            find evidence/release -name measurement_attestation.json -exec cp {} evidence/release/measurement_attestation.json \;
-          fi
-          test -f evidence/release/measurements.json
-          test -f evidence/release/measurement_attestation.json
+          set -euo pipefail
+          echo "b6d4fdd5c5d4b2ed006507562e6eb0678a06df74593f2e959cdf913d3241a991  scripts/standalone_signer.py" | sha256sum -c -
 
-      - name: Verify Standalone Signer Integrity
+      - name: Download Candidate Source as Untrusted Data
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "f09d00ebcf614cc1c7450f74abd00de63109ea9bc079ca71c511517669233f97  scripts/standalone_signer.py" | sha256sum -c -
+          set -euo pipefail
+          curl -fsSL --max-filesize 52428800 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/tarball/$CANDIDATE_SHA" \
+            -o candidate-source.tar.gz
+          python - <<'PY'
+          import pathlib
+          import shutil
+          import tarfile
 
-      - name: Run Authoritative Release Signing (Protected Authority)
+          archive = pathlib.Path("candidate-source.tar.gz")
+          if archive.stat().st_size <= 0 or archive.stat().st_size > 50 * 1024 * 1024:
+              raise SystemExit("candidate source archive size is invalid")
+          unpack = pathlib.Path("candidate-unpacked")
+          with tarfile.open(archive, "r:gz") as tf:
+              members = tf.getmembers()
+              if len(members) > 20000:
+                  raise SystemExit("candidate source archive contains too many entries")
+              if sum(m.size for m in members) > 200 * 1024 * 1024:
+                  raise SystemExit("candidate source archive expands beyond the size limit")
+              tf.extractall(unpack, members=members, filter="data")
+          roots = [p for p in unpack.iterdir() if p.is_dir()]
+          if len(roots) != 1:
+              raise SystemExit(f"expected exactly one candidate source root, found {len(roots)}")
+          shutil.move(str(roots[0]), "candidate-source")
+          PY
+
+      - name: Resolve Measurement Artifact Metadata
+        id: artifact
+        env:
+          MEASUREMENT_RUN_ID: ${{ inputs.measurement_run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$MEASUREMENT_RUN_ID/artifacts?per_page=100" > artifacts.json
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          data = json.loads(pathlib.Path("artifacts.json").read_text(encoding="utf-8"))
+          artifacts = data.get("artifacts")
+          if not isinstance(artifacts, list) or data.get("total_count") != len(artifacts):
+              raise SystemExit("incomplete artifact metadata")
+          matches = [a for a in artifacts if a.get("name") == "release-measurements"]
+          if len(matches) != 1:
+              raise SystemExit(f"expected exactly one release-measurements artifact, found {len(matches)}")
+          artifact = matches[0]
+          if artifact.get("expired") is not False:
+              raise SystemExit("measurement artifact is expired or expiry state is unknown")
+          if int(artifact.get("size_in_bytes") or 0) <= 0:
+              raise SystemExit("measurement artifact is empty")
+          digest = artifact.get("digest")
+          if not isinstance(digest, str) or not digest.startswith("sha256:") or len(digest) != 71:
+              raise SystemExit("measurement artifact digest is missing or malformed")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"artifact_id={artifact['id']}\n")
+              out.write(f"digest={digest}\n")
+          PY
+
+      - name: Wait for Measurement Run Completion
+        env:
+          MEASUREMENT_RUN_ID: ${{ inputs.measurement_run_id }}
+          MEASUREMENT_RUN_ATTEMPT: ${{ inputs.measurement_run_attempt }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            state=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$MEASUREMENT_RUN_ID" --jq '[.status,.conclusion,.run_attempt] | @tsv')
+            status=$(printf '%s' "$state" | cut -f1)
+            conclusion=$(printf '%s' "$state" | cut -f2)
+            attempt=$(printf '%s' "$state" | cut -f3)
+            if [ "$attempt" != "$MEASUREMENT_RUN_ATTEMPT" ]; then
+              echo "measurement run attempt mismatch: $attempt != $MEASUREMENT_RUN_ATTEMPT" >&2
+              exit 1
+            fi
+            if [ "$status" = "completed" ]; then
+              if [ "$conclusion" != "success" ]; then
+                echo "measurement run conclusion is $conclusion, not success" >&2
+                exit 1
+              fi
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "measurement run did not complete within the timeout" >&2
+          exit 1
+
+      - name: Download Measurement Artifact by ID
+        env:
+          ARTIFACT_ID: ${{ steps.artifact.outputs.artifact_id }}
+          ARTIFACT_DIGEST: ${{ steps.artifact.outputs.digest }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" \
+            -o measurement-artifact.zip
+          actual="sha256:$(sha256sum measurement-artifact.zip | cut -d' ' -f1)"
+          test "$actual" = "$ARTIFACT_DIGEST"
+
+      - name: Run Trusted Release Signer
         env:
           VERIFYCI_RELEASE_SIGNING_KEY: ${{ secrets.VERIFYCI_RELEASE_SIGNING_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_RUN_ID: ${{ inputs.run_id }}
-          GITHUB_RUN_ATTEMPT: ${{ inputs.run_attempt }}
-          GITHUB_SHA: ${{ inputs.commit_sha }}
+          VERIFYCI_MEASUREMENT_RUN_ID: ${{ inputs.measurement_run_id }}
+          VERIFYCI_MEASUREMENT_RUN_ATTEMPT: ${{ inputs.measurement_run_attempt }}
+          VERIFYCI_ARTIFACT_ID: ${{ steps.artifact.outputs.artifact_id }}
+          VERIFYCI_ARTIFACT_DIGEST: ${{ steps.artifact.outputs.digest }}
+          VERIFYCI_ARTIFACT_ZIP: measurement-artifact.zip
+          VERIFYCI_SOURCE_ROOT: candidate-source
+          VERIFYCI_COMMIT_SHA: ${{ inputs.candidate_sha }}
+          VERIFYCI_TRUSTED_WORKFLOW_SHA: ${{ github.sha }}
+          VERIFYCI_TRUSTED_WORKFLOW_REF: refs/heads/release-authority
         run: |
+          set -euo pipefail
           python scripts/standalone_signer.py
 
       - name: Standalone Cryptographic Verification of Release Validation Evidence
         run: |
-          python -c '
+          set -euo pipefail
+          python - <<'PY'
           import json
-          from cryptography.hazmat.primitives.asymmetric import ed25519
           from pathlib import Path
 
-          p = Path("evidence/release/release_validation.json")
-          assert p.is_file(), "release_validation.json missing"
-          data = json.loads(p.read_text(encoding="utf-8"))
-          schema = data.get("schema")
-          assert schema == "verifyci.release_validation/v1", f"schema mismatch: {schema}"
-          status = data.get("status")
-          assert status == "VALIDATED", f"status not VALIDATED: {status}"
-          stage = data.get("stage")
-          assert stage == "final", f"stage not final: {stage}"
+          from cryptography.hazmat.primitives.asymmetric import ed25519
 
+          data = json.loads(Path("evidence/release/release_validation.json").read_text(encoding="utf-8"))
+          assert data.get("schema") == "verifyci.release_validation/v1"
+          assert data.get("status") == "VALIDATED"
+          assert data.get("stage") == "final"
           prov = data.get("provenance", {})
-          assert prov.get("ci_verified") is True, "ci_verified is not True"
-          platform = prov.get("ci_platform")
-          assert platform == "github_actions", f"ci_platform mismatch: {platform}"
-          assert prov.get("oidc_verified") is True, "oidc_verified is not True"
-          assert str(prov.get("workflow_run_id")) == "${{ inputs.run_id }}", "workflow_run_id mismatch"
-          assert str(prov.get("commit_sha", "")).lower() == "${{ inputs.commit_sha }}".lower(), "commit_sha mismatch"
-
-          att = data.get("attestation", {})
-          pub_hex = att.get("public_key")
-          sig_hex = att.get("signature")
-          digest = att.get("digest")
-          assert pub_hex and sig_hex and digest, "missing attestation cryptographic fields"
-          pub = ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pub_hex))
-          pub.verify(bytes.fromhex(sig_hex), digest.encode("utf-8"))
-          print("SUCCESS: Authoritative release validation cryptographically verified standalone!")
-          '
+          assert prov.get("ci_verified") is True
+          assert prov.get("oidc_verified") is True
+          assert prov.get("ci_platform") == "github_actions"
+          assert str(prov.get("workflow_run_id")) == "${{ inputs.measurement_run_id }}"
+          assert str(prov.get("workflow_run_attempt")) == "${{ inputs.measurement_run_attempt }}"
+          assert str(prov.get("commit_sha", "")).lower() == "${{ inputs.candidate_sha }}".lower()
+          assert str(prov.get("artifact_id")) == "${{ steps.artifact.outputs.artifact_id }}"
+          assert prov.get("artifact_digest") == "${{ steps.artifact.outputs.digest }}"
+          assert prov.get("artifact_zip_sha256") == "${{ steps.artifact.outputs.digest }}"
+          assert prov.get("measurement_workflow_sha") == "${{ github.sha }}"
+          assert prov.get("trusted_signing_workflow_sha") == "${{ github.sha }}"
+          assert prov.get("trusted_signing_workflow_ref", "").endswith("@refs/heads/release-authority")
+          att = data["attestation"]
+          pub = ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(att["public_key"]))
+          pub.verify(bytes.fromhex(att["signature"]), att["digest"].encode("utf-8"))
+          print("SUCCESS: trusted release evidence cryptographically verified")
+          PY
 
       - name: Upload Evidence Bundle & Release Attestation
-        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: evidence-bundle
@@ -124,3 +253,6 @@ jobs:
             evidence/release/release_validation.json
             evidence/release/measurements.json
             evidence/release/measurement_attestation.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

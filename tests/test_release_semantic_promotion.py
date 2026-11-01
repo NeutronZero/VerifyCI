@@ -293,6 +293,19 @@ class TestValidateReleaseScript:
 class TestGateSemanticIntegration:
     """Test that run_gate detects real semantic defects and emits Verdict.FAIL."""
 
+    @pytest.fixture(autouse=True)
+    def _isolate_release_evidence_state(self, monkeypatch):
+        """Semantic behavior must not depend on the repository's signed evidence.
+
+        Authentic signed evidence is verified by the dedicated
+        `requires_release_evidence` integration test and the release signer.
+        """
+        from verifyci.gate import orchestrator
+
+        monkeypatch.setattr(
+            orchestrator, "verify_release_validation_evidence", lambda *args, **kwargs: (True, None)
+        )
+
     def _setup_git_repo(self, tmp_path: Path, files_base: dict[str, str], files_head: dict[str, str], policy: str = POLICY) -> tuple[Path, str, str]:
         repo_dir = tmp_path / "gate_repo"
         repo_dir.mkdir(parents=True)

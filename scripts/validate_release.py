@@ -307,6 +307,11 @@ def execute_test_suite(
         "tests/v3",
         "-q",
         "--tb=short",
+        # The signed-evidence integration test requires evidence that can only be
+        # produced after this measurement run. It is executed by the normal CI
+        # matrix at the evidence commit, where the signed record is present.
+        "-m",
+        "not benchmark and not performance and not requires_release_evidence",
     ]
     env = os.environ.copy()
     # Explicitly scrub signing key from test subprocess environment
@@ -459,6 +464,7 @@ def generate_measurement_attestation(
         "workflow_run_attempt": str(run_attempt) if run_attempt else "1",
         "job_name": str(job_name),
         "commit_sha": github_sha,
+        "ref": os.environ.get("GITHUB_REF") if is_ci else None,
     }
 
     oidc_token = None
@@ -496,12 +502,15 @@ def generate_measurement_attestation(
     workflow_identity = {
         "platform": "github_actions" if is_ci else "local",
         "repository": os.environ.get("GITHUB_REPOSITORY", "NeutronZero/VerifyCI"),
-        "workflow_name": "ci",
-        "workflow_path": ".github/workflows/ci.yml",
+        "workflow_name": "release_measurements",
+        "workflow_path": ".github/workflows/release_measurements.yml",
+        "workflow_ref": os.environ.get("GITHUB_WORKFLOW_REF") if is_ci else None,
+        "workflow_sha": os.environ.get("GITHUB_WORKFLOW_SHA") if is_ci else None,
         "job_name": str(job_name),
         "run_id": str(run_id) if run_id else None,
         "run_attempt": str(run_attempt) if run_attempt else "1",
         "commit_sha": github_sha,
+        "ref": os.environ.get("GITHUB_REF") if is_ci else None,
         "oidc_token": oidc_token,
     }
 

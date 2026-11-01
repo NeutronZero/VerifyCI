@@ -114,6 +114,19 @@ def _gate(
     )
 
 
+def _allow_release_validation(monkeypatch) -> None:
+    """Isolate gate-behavior tests from the repository's signed evidence state.
+
+    Evidence authenticity and freshness are covered by the dedicated
+    `requires_release_evidence` integration test and the release signer itself.
+    """
+    from verifyci.gate import orchestrator
+
+    monkeypatch.setattr(
+        orchestrator, "verify_release_validation_evidence", lambda *args, **kwargs: (True, None)
+    )
+
+
 def _assert_check_results(bundle) -> dict[str, dict]:
     results = bundle.payload["check_results"]
     assert [item["check_id"] for item in results] == [
@@ -182,6 +195,7 @@ def test_clean_gate_stays_error_until_release_validation(tmp_path, monkeypatch):
     assert sarif["runs"][0]["results"] == []
 
 
+@pytest.mark.requires_release_evidence
 def test_clean_gate_passes_when_release_validated(tmp_path):
     root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
     head = _commit(
@@ -489,7 +503,8 @@ def test_authenticated_sampled_cache_mismatch_fails_gate_closed(tmp_path):
     assert "cache_integrity_mismatch" in result.payload["verdict"]["fault_reason_codes"]
 
 
-def test_module_level_edit_is_grounded_without_symbol_match(tmp_path):
+def test_module_level_edit_is_grounded_without_symbol_match(tmp_path, monkeypatch):
+    _allow_release_validation(monkeypatch)
     policy = POLICY + '[deny_changes.protect]\nsymbols = ["app:f"]\nreason = "protected"\n'
     root, base = _repo(
         tmp_path,
@@ -506,7 +521,8 @@ def test_module_level_edit_is_grounded_without_symbol_match(tmp_path):
     assert grounding["evaluated_scope"]["other_text_hunks"]
 
 
-def test_deny_changes_emits_one_finding_for_multiple_matching_rules(tmp_path):
+def test_deny_changes_emits_one_finding_for_multiple_matching_rules(tmp_path, monkeypatch):
+    _allow_release_validation(monkeypatch)
     policy = (
         POLICY
         + '[deny_changes.core_a]\npaths = ["src/core/**"]\nreason = "core a"\n'
@@ -526,7 +542,8 @@ def test_deny_changes_emits_one_finding_for_multiple_matching_rules(tmp_path):
     assert finding["evidence"]["payload"]["rule_ids"] == ["core_a", "core_b"]
 
 
-def test_deletion_finds_live_reference_in_unchanged_file(tmp_path):
+def test_deletion_finds_live_reference_in_unchanged_file(tmp_path, monkeypatch):
+    _allow_release_validation(monkeypatch)
     root, base = _repo(
         tmp_path,
         {
@@ -578,7 +595,8 @@ def test_contract_finds_incompatible_caller_in_unchanged_file(tmp_path):
     assert finding["premises"]["base_blob"].startswith("sha1:")
 
 
-def test_contract_finds_unchanged_caller_when_parameter_is_removed(tmp_path):
+def test_contract_finds_unchanged_caller_when_parameter_is_removed(tmp_path, monkeypatch):
+    _allow_release_validation(monkeypatch)
     root, base = _repo(
         tmp_path,
         {
@@ -595,7 +613,8 @@ def test_contract_finds_unchanged_caller_when_parameter_is_removed(tmp_path):
     assert bundle.exit_code == 1
 
 
-def test_contract_changed_callsite_against_unchanged_callee(tmp_path):
+def test_contract_changed_callsite_against_unchanged_callee(tmp_path, monkeypatch):
+    _allow_release_validation(monkeypatch)
     root, base = _repo(
         tmp_path,
         {
@@ -721,7 +740,8 @@ def test_coverage_acceptance_does_not_change_shadow_result(monkeypatch, tmp_path
     assert bundle.payload["accepted_gaps"] == []
 
 
-def test_configured_taint_without_resolved_path_is_inconclusive(tmp_path):
+def test_configured_taint_without_resolved_path_is_inconclusive(tmp_path, monkeypatch):
+    _allow_release_validation(monkeypatch)
     policy = (
         POLICY
         + '[taint]\nsources = ["request.args"]\n'
@@ -736,7 +756,8 @@ def test_configured_taint_without_resolved_path_is_inconclusive(tmp_path):
     assert "taint_path_unresolved" in result["reason_codes"]
 
 
-def test_vendored_path_does_not_suppress_dangerous_call_scan(tmp_path):
+def test_vendored_path_does_not_suppress_dangerous_call_scan(tmp_path, monkeypatch):
+    _allow_release_validation(monkeypatch)
     policy = POLICY + '[paths]\nvendored = ["vendor/**"]\n'
     root, base = _repo(tmp_path, {"app.py": "x = 1\n"}, policy=policy)
     head = _commit(root, {"vendor/new_tool.py": 'eval("1 + 1")\n'})
@@ -747,7 +768,8 @@ def test_vendored_path_does_not_suppress_dangerous_call_scan(tmp_path):
     assert any(f["defect_id"] == "SEC-DANGEROUS-CALL" for f in result["findings"])
 
 
-def test_policy_change_requires_review_and_invalid_policy_is_error(tmp_path):
+def test_policy_change_requires_review_and_invalid_policy_is_error(tmp_path, monkeypatch):
+    _allow_release_validation(monkeypatch)
     root, base = _repo(tmp_path, {"app.py": "x = 1\n"})
     review_head = _commit(
         root,
@@ -773,7 +795,8 @@ def test_policy_change_requires_review_and_invalid_policy_is_error(tmp_path):
     assert len(error.payload["check_results"]) == 5
 
 
-def test_gate_integrity_workflow_change_requires_review(tmp_path):
+def test_gate_integrity_workflow_change_requires_review(tmp_path, monkeypatch):
+    _allow_release_validation(monkeypatch)
     root, base = _repo(tmp_path, {"app.py": "x = 1\n"})
     head = _commit(root, {".github/workflows/ci.yml": "name: CI\n"})
     bundle = _gate(root, base, head)
@@ -782,7 +805,8 @@ def test_gate_integrity_workflow_change_requires_review(tmp_path):
     assert "gate_integrity_review" in bundle.payload["verdict"]["reason_codes"]
 
 
-def test_policy_only_stale_waiver_remediation_respects_codeowners(tmp_path, capsys):
+def test_policy_only_stale_waiver_remediation_respects_codeowners(tmp_path, capsys, monkeypatch):
+    _allow_release_validation(monkeypatch)
     expired = (
         POLICY
         + "[waivers.old]\n"
@@ -850,7 +874,8 @@ def test_policy_only_stale_waiver_remediation_respects_codeowners(tmp_path, caps
     assert "waiver_review" in captured.out
 
 
-def test_unsupported_language_change_is_inconclusive(tmp_path):
+def test_unsupported_language_change_is_inconclusive(tmp_path, monkeypatch):
+    _allow_release_validation(monkeypatch)
     root, base = _repo(tmp_path, {"app.py": "x = 1\n"})
     head = _commit(root, {"main.go": "package main\n\nfunc main() {}\n"})
     bundle = _gate(root, base, head)
@@ -908,8 +933,9 @@ def test_cli_formats_and_codeowners_review_mode(tmp_path, capsys, monkeypatch):
     assert json.loads(unvalidated_captured.out)["payload"]["verdict"]["status"] == "ERROR"
     assert "check_not_validated" in json.loads(unvalidated_captured.out)["payload"]["verdict"]["fault_reason_codes"]
 
-    # Undo unvalidated mock to verify validated behavior
+    # Verify validated behavior without depending on the repository evidence state.
     monkeypatch.undo()
+    _allow_release_validation(monkeypatch)
 
     code = main(["gate", "--repo", str(root), "--base", base, "--head", head, "--format", "json"])
     captured = capsys.readouterr()
@@ -1052,8 +1078,9 @@ def test_accepted_gap_with_incomplete_scope_or_discovery_remains_inconclusive() 
     assert res2.outcome == Outcome.INCONCLUSIVE
 
 
-def test_git_submodule_lifecycle(tmp_path: Path) -> None:
+def test_git_submodule_lifecycle(tmp_path: Path, monkeypatch) -> None:
     """Gitlink (submodule 160000) add, update, and delete are handled without reading blobs."""
+    _allow_release_validation(monkeypatch)
     from verifyci.scm.git import GitRepo
 
     root = tmp_path / "sub_repo"

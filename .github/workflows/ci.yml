@@ -5,10 +5,14 @@ on:
     branches: [main, "feat/*", "benchmarks/*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      verify_release_evidence:
+        description: "Run the signed release-evidence integration gate"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
-  id-token: write
   actions: read
 
 jobs:
@@ -109,7 +113,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --frozen --extra dev
-      - run: uv run --no-sync python -m pytest tests/ -n auto -q --junitxml=test-results-${{ matrix.os }}-${{ matrix.python-version }}.xml
+      - run: uv run --no-sync python -m pytest tests/ -n auto -q -m "not benchmark and not performance and not requires_release_evidence" --junitxml=test-results-${{ matrix.os }}-${{ matrix.python-version }}.xml
       - name: Upload Matrix Test Results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -118,12 +122,36 @@ jobs:
           path: test-results-*.xml
 
   # ------------------------------------------------------------------
-  # TIER 3: VERIFYCI MEASUREMENTS GATE (Unprivileged Benchmark & Tests)
+  # TIER 3: TRUSTED VERIFYCI MEASUREMENTS (Unprivileged, no secrets)
+  #
+  # The measurement workflow lives on the protected `release-authority` branch
+  # and is referenced by full immutable commit SHA. Candidate code cannot edit,
+  # replace, or pass secrets to it. Signing happens separately from the trusted
+  # workflow after this measurement run succeeds.
   # ------------------------------------------------------------------
-  verifyci-measurements:
+  trusted-measurements:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
     needs: full-matrix
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    uses: NeutronZero/VerifyCI/.github/workflows/release_measurements.yml@0000000000000000000000000000000000000000
+    with:
+      candidate_sha: ${{ github.sha }}
+
+  # ------------------------------------------------------------------
+  # RELEASE EVIDENCE GATE (manual, after evidence is committed)
+  #
+  # The measurement run cannot execute this test: evidence for the code
+  # commit does not exist until after signing. Dispatch with
+  # verify_release_evidence=true at the evidence commit.
+  # ------------------------------------------------------------------
+  release-evidence:
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_release_evidence
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -137,38 +165,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync --frozen --extra dev
-      - name: Run Evidence & Benchmark Reproduction Gate
-        run: |
-          uv run --no-sync python -m pytest tests/v3/ -n auto -q
-      - name: Run Unprivileged Benchmark & Test Measurements Pipeline
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          uv run --no-sync python scripts/validate_release.py --measure-only
-      - name: Upload Release Measurements Artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: release-measurements
-          path: |
-            evidence/release/measurements.json
-            evidence/release/measurement_attestation.json
-
-  # ------------------------------------------------------------------
-  # TIER 4: PROTECTED RELEASE SIGNING (Isolated Reusable Workflow)
-  # ------------------------------------------------------------------
-  release-signing:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    needs: verifyci-measurements
-    permissions:
-      contents: read
-      actions: read
-    uses: ./.github/workflows/release_signing.yml
-    with:
-      commit_sha: ${{ github.sha }}
-      run_id: ${{ github.run_id }}
-      run_attempt: ${{ github.run_attempt }}
-    secrets:
-      VERIFYCI_RELEASE_SIGNING_KEY: ${{ secrets.VERIFYCI_RELEASE_SIGNING_KEY }}
+      - name: Verify signed release evidence
+        run: uv run --no-sync python -m pytest tests/v3/test_gate_v3.py -q -n 0 -m requires_release_evidence
 
   # ------------------------------------------------------------------
   # SUPPLY-CHAIN AUDIT (advisory, non-blocking)

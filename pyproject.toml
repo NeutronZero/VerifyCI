@@ -78,6 +78,7 @@ markers = [
     "integration: Multi-component end-to-end integration tests",
     "performance: Regression benchmark tests with latency thresholds",
     "adversarial: Adversarial boundary and edge-case validation suites",
+    "requires_release_evidence: Integration checks that depend on the checked-in signed release evidence",
 ]
 filterwarnings = [
     # Third-party import-time noise: typer re-exports click utilities

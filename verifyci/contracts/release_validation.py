@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import subprocess
 import sys
 from typing import Any
@@ -28,6 +29,11 @@ from verifyci.evidence.canonical import canonical_json_bytes
 VALIDATION_SCHEMA = "verifyci.release_validation/v1"
 VALIDATION_REL_PATH = Path("evidence") / "release" / "release_validation.json"
 
+PINNED_REPOSITORY = "NeutronZero/VerifyCI"
+PINNED_MEASUREMENT_WORKFLOW_PATH = ".github/workflows/release_measurements.yml"
+PINNED_SIGNING_WORKFLOW_PATH = ".github/workflows/release_signing.yml"
+PINNED_TRUSTED_REF = "refs/heads/release-authority"
+
 # Public Ed25519 Authority Key (32 bytes raw, hex-encoded).
 # Used strictly by the verifier to validate signatures.
 # The private signing key is NEVER embedded in the repository or shipped code.
@@ -38,6 +44,7 @@ RELEASE_AUTHORITY_PUBLIC_KEY_HEX = (
 
 _CRITICAL_IMPLEMENTATION_FILES = (
     Path(".github/workflows/ci.yml"),
+    Path(".github/workflows/release_measurements.yml"),
     Path(".github/workflows/release_signing.yml"),
     Path("pyproject.toml"),
     Path("uv.lock"),
@@ -55,6 +62,7 @@ _CRITICAL_IMPLEMENTATION_FILES = (
     Path("verifyci/cli.py"),
     Path("scripts/validate_release.py"),
     Path("scripts/standalone_signer.py"),
+    Path("tests/v3/test_release_trust_boundary.py"),
     Path("tests/v3/test_security_benchmark.py"),
     Path("tests/v3/test_security_corpus.py"),
     Path("tests/v3/test_security_regressions.py"),
@@ -367,10 +375,21 @@ def verify_release_validation_evidence(
             return False, f"unsupported ci_platform for verified release evidence: '{ci_platform}' (expected 'github_actions')"
         for req_field in (
             "workflow_run_id",
+            "workflow_run_attempt",
             "job_id",
             "artifact_id",
+            "artifact_name",
+            "artifact_digest",
+            "artifact_zip_sha256",
             "measurement_job_completed_at",
             "artifact_created_at",
+            "candidate_ref",
+            "measurement_workflow_ref",
+            "measurement_workflow_sha",
+            "trusted_signing_workflow_ref",
+            "trusted_signing_workflow_sha",
+            "trusted_signing_ref",
+            "trusted_signing_run_id",
         ):
             if not provenance.get(req_field):
                 return False, f"release validation provenance missing required CI field: '{req_field}'"
@@ -380,8 +399,43 @@ def verify_release_validation_evidence(
             return False, "release validation provenance requires cryptographic OIDC verification (oidc_verified must be true)"
         prov_sha = (provenance.get("commit_sha") or "").lower()
         rec_sha = (record.get("commit_sha") or "").lower()
-        if prov_sha and rec_sha and prov_sha != rec_sha:
+        if not prov_sha or not re.fullmatch(r"[0-9a-f]{40}", prov_sha):
+            return False, "release validation provenance commit_sha is missing or malformed"
+        if prov_sha != rec_sha:
             return False, f"provenance commit_sha '{prov_sha}' does not match record commit_sha '{rec_sha}'"
+        if provenance.get("artifact_name") != "release-measurements":
+            return False, f"unexpected measurement artifact name: {provenance.get('artifact_name')!r}"
+        artifact_digest = str(provenance.get("artifact_digest") or "")
+        artifact_zip_digest = str(provenance.get("artifact_zip_sha256") or "")
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", artifact_digest):
+            return False, "release validation provenance artifact_digest is malformed"
+        if not hmac.compare_digest(artifact_digest, artifact_zip_digest):
+            return False, "release validation provenance artifact digest does not match downloaded archive digest"
+        if not isinstance(provenance.get("artifact_id"), int) or provenance["artifact_id"] <= 0:
+            return False, "release validation provenance artifact_id is missing or malformed"
+        if not isinstance(provenance.get("job_id"), int) or provenance["job_id"] <= 0:
+            return False, "release validation provenance job_id is missing or malformed"
+        candidate_ref = str(provenance.get("candidate_ref") or "")
+        if not candidate_ref.startswith("refs/"):
+            return False, f"release validation provenance candidate_ref is malformed: {candidate_ref!r}"
+        measurement_ref = str(provenance.get("measurement_workflow_ref") or "")
+        measurement_path, _, measurement_rev = measurement_ref.rpartition("@")
+        if measurement_path != f"{PINNED_REPOSITORY}/{PINNED_MEASUREMENT_WORKFLOW_PATH}":
+            return False, f"unexpected measurement workflow identity: {measurement_ref!r}"
+        measurement_sha = str(provenance.get("measurement_workflow_sha") or "").lower()
+        if not re.fullmatch(r"[0-9a-f]{40}", measurement_sha):
+            return False, "release validation provenance measurement_workflow_sha is missing or malformed"
+        if measurement_rev != PINNED_TRUSTED_REF and measurement_rev.lower() != measurement_sha:
+            return False, f"measurement workflow revision is not trusted: {measurement_rev!r}"
+        signing_ref = str(provenance.get("trusted_signing_workflow_ref") or "")
+        signing_path, _, signing_rev = signing_ref.rpartition("@")
+        if signing_path != f"{PINNED_REPOSITORY}/{PINNED_SIGNING_WORKFLOW_PATH}" or signing_rev != PINNED_TRUSTED_REF:
+            return False, f"untrusted signing workflow identity: {signing_ref!r}"
+        signing_sha = str(provenance.get("trusted_signing_workflow_sha") or "").lower()
+        if not re.fullmatch(r"[0-9a-f]{40}", signing_sha):
+            return False, "release validation provenance trusted_signing_workflow_sha is missing or malformed"
+        if provenance.get("trusted_signing_ref") != PINNED_TRUSTED_REF:
+            return False, f"untrusted signing ref: {provenance.get('trusted_signing_ref')!r}"
     elif ci_platform != "local":
         return False, f"unrecognized ci_platform: '{ci_platform}' (must be 'github_actions' or 'local')"
 

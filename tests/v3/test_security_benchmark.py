@@ -20,6 +20,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import time
 
 import pytest
 
@@ -532,59 +533,75 @@ def _create_signed_jwt(priv_key, header: dict, payload: dict) -> str:
     return f"{h_b64}.{p_b64}.{sig_b64}"
 
 
-def test_oidc_verification_valid_signature_and_claims_passes():
-    """Adversarial test: authentic RSA-signed OIDC token passes cryptographic verification."""
-    import time
-    from scripts.standalone_signer import verify_github_oidc_token
+OIDC_CANDIDATE_SHA = "a" * 40
+OIDC_TRUSTED_SHA = "b" * 40
+OIDC_CANDIDATE_REF = "refs/heads/feat/v3.1.10-m4-security"
 
-    priv, jwks = _generate_test_rsa_jwks()
-    header = {"alg": "RS256", "kid": "test-kid-1", "typ": "JWT"}
-    payload = {
+
+def _trusted_oidc_payload() -> dict:
+    now = time.time()
+    return {
         "iss": "https://token.actions.githubusercontent.com",
         "aud": "verifyci-release-authority",
-        "exp": time.time() + 300,
-        "nbf": time.time() - 10,
+        "exp": now + 300,
+        "nbf": now - 10,
+        "iat": now - 20,
         "repository": "NeutronZero/VerifyCI",
-        "sha": "a" * 40,
+        "repository_owner": "NeutronZero",
+        "sha": OIDC_CANDIDATE_SHA,
+        "ref": OIDC_CANDIDATE_REF,
+        "ref_type": "branch",
+        "event_name": "push",
         "run_id": "10001",
         "run_attempt": "1",
-        "job_workflow_ref": "NeutronZero/VerifyCI/.github/workflows/ci.yml@refs/heads/feat/v3.1.10-m4-security",
+        "job_workflow_ref": (
+            "NeutronZero/VerifyCI/.github/workflows/release_measurements.yml"
+            "@refs/heads/release-authority"
+        ),
+        "job_workflow_sha": OIDC_TRUSTED_SHA,
+        "workflow_ref": f"NeutronZero/VerifyCI/.github/workflows/ci.yml@{OIDC_CANDIDATE_REF}",
+        "workflow_sha": OIDC_CANDIDATE_SHA,
+        "sub": f"repo:NeutronZero/VerifyCI:ref:{OIDC_CANDIDATE_REF}",
     }
-    token = _create_signed_jwt(priv, header, payload)
-    claims, errors = verify_github_oidc_token(
-        token, "NeutronZero/VerifyCI", "a" * 40, "10001", "1", jwks=jwks
+
+
+def _verify_trusted_oidc(token, jwks):
+    from scripts.standalone_signer import verify_github_oidc_token
+
+    return verify_github_oidc_token(
+        token,
+        "NeutronZero/VerifyCI",
+        OIDC_CANDIDATE_SHA,
+        "10001",
+        "1",
+        jwks=jwks,
+        expected_workflow_sha=OIDC_TRUSTED_SHA,
+        expected_ref=OIDC_CANDIDATE_REF,
     )
+
+
+def test_oidc_verification_valid_signature_and_claims_passes():
+    """Adversarial test: authentic RSA-signed OIDC token passes cryptographic verification."""
+    priv, jwks = _generate_test_rsa_jwks()
+    header = {"alg": "RS256", "kid": "test-kid-1", "typ": "JWT"}
+    token = _create_signed_jwt(priv, header, _trusted_oidc_payload())
+    claims, errors = _verify_trusted_oidc(token, jwks)
     assert not errors, f"Unexpected errors: {errors}"
     assert claims is not None
     assert claims["run_id"] == "10001"
+    assert claims["job_workflow_sha"] == OIDC_TRUSTED_SHA
 
 
 def test_oidc_verification_rejects_tampered_signature():
     """Adversarial test: forged or modified OIDC signature is cryptographically rejected."""
-    import time
-    from scripts.standalone_signer import verify_github_oidc_token
-
     priv, jwks = _generate_test_rsa_jwks()
     header = {"alg": "RS256", "kid": "test-kid-1", "typ": "JWT"}
-    payload = {
-        "iss": "https://token.actions.githubusercontent.com",
-        "aud": "verifyci-release-authority",
-        "exp": time.time() + 300,
-        "nbf": time.time() - 10,
-        "repository": "NeutronZero/VerifyCI",
-        "sha": "a" * 40,
-        "run_id": "10001",
-        "run_attempt": "1",
-        "job_workflow_ref": "NeutronZero/VerifyCI/.github/workflows/ci.yml@refs/heads/feat/v3.1.10-m4-security",
-    }
-    token = _create_signed_jwt(priv, header, payload)
+    token = _create_signed_jwt(priv, header, _trusted_oidc_payload())
     parts = token.split(".")
     tampered_sig = ("B" if parts[2][0] != "B" else "C") + parts[2][1:]
     tampered_token = f"{parts[0]}.{parts[1]}.{tampered_sig}"
 
-    claims, errors = verify_github_oidc_token(
-        tampered_token, "NeutronZero/VerifyCI", "a" * 40, "10001", "1", jwks=jwks
-    )
+    claims, errors = _verify_trusted_oidc(tampered_token, jwks)
     assert claims is None
     assert any("signature verification failed" in e for e in errors)
 
@@ -593,76 +610,49 @@ def test_oidc_verification_rejects_tampered_payload():
     """Adversarial test: modified claims without matching signature fail closed."""
     import base64
     import json
-    import time
-    from scripts.standalone_signer import verify_github_oidc_token
 
     priv, jwks = _generate_test_rsa_jwks()
     header = {"alg": "RS256", "kid": "test-kid-1", "typ": "JWT"}
-    payload = {
-        "iss": "https://token.actions.githubusercontent.com",
-        "aud": "verifyci-release-authority",
-        "exp": time.time() + 300,
-        "nbf": time.time() - 10,
-        "repository": "NeutronZero/VerifyCI",
-        "sha": "a" * 40,
-        "run_id": "10001",
-        "run_attempt": "1",
-        "job_workflow_ref": "NeutronZero/VerifyCI/.github/workflows/ci.yml@refs/heads/feat/v3.1.10-m4-security",
-    }
+    payload = _trusted_oidc_payload()
     token = _create_signed_jwt(priv, header, payload)
     parts = token.split(".")
     payload["run_id"] = "99999"  # Tamper with run_id
     tampered_payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii").rstrip("=")
     tampered_token = f"{parts[0]}.{tampered_payload_b64}.{parts[2]}"
 
-    claims, errors = verify_github_oidc_token(
-        tampered_token, "NeutronZero/VerifyCI", "a" * 40, "10001", "1", jwks=jwks
-    )
+    claims, errors = _verify_trusted_oidc(tampered_token, jwks)
     assert claims is None
     assert any("signature verification failed" in e for e in errors)
 
 
 def test_oidc_verification_rejects_expired_and_untrusted_claims():
     """Adversarial test: expired tokens, untrusted issuers, wrong audience, or wrong repo fail closed."""
-    import time
-    from scripts.standalone_signer import verify_github_oidc_token
-
     priv, jwks = _generate_test_rsa_jwks()
     header = {"alg": "RS256", "kid": "test-kid-1", "typ": "JWT"}
-    base_payload = {
-        "iss": "https://token.actions.githubusercontent.com",
-        "aud": "verifyci-release-authority",
-        "exp": time.time() + 300,
-        "nbf": time.time() - 10,
-        "repository": "NeutronZero/VerifyCI",
-        "sha": "a" * 40,
-        "run_id": "10001",
-        "run_attempt": "1",
-        "job_workflow_ref": "NeutronZero/VerifyCI/.github/workflows/ci.yml@refs/heads/feat/v3.1.10-m4-security",
-    }
+    base_payload = _trusted_oidc_payload()
 
     # 1. Expired token
     p_exp = dict(base_payload, exp=time.time() - 100)
     t_exp = _create_signed_jwt(priv, header, p_exp)
-    c1, e1 = verify_github_oidc_token(t_exp, "NeutronZero/VerifyCI", "a" * 40, "10001", "1", jwks=jwks)
+    c1, e1 = _verify_trusted_oidc(t_exp, jwks)
     assert c1 is None and any("expired" in e for e in e1)
 
     # 2. Untrusted issuer
     p_iss = dict(base_payload, iss="https://evil.token.actions.com")
     t_iss = _create_signed_jwt(priv, header, p_iss)
-    c2, e2 = verify_github_oidc_token(t_iss, "NeutronZero/VerifyCI", "a" * 40, "10001", "1", jwks=jwks)
+    c2, e2 = _verify_trusted_oidc(t_iss, jwks)
     assert c2 is None and any("untrusted OIDC issuer" in e for e in e2)
 
     # 3. Untrusted audience
     p_aud = dict(base_payload, aud="evil-audience")
     t_aud = _create_signed_jwt(priv, header, p_aud)
-    c3, e3 = verify_github_oidc_token(t_aud, "NeutronZero/VerifyCI", "a" * 40, "10001", "1", jwks=jwks)
+    c3, e3 = _verify_trusted_oidc(t_aud, jwks)
     assert c3 is None and any("untrusted OIDC audience" in e for e in e3)
 
     # 4. Repository mismatch
     p_repo = dict(base_payload, repository="Attacker/VerifyCI")
     t_repo = _create_signed_jwt(priv, header, p_repo)
-    c4, e4 = verify_github_oidc_token(t_repo, "NeutronZero/VerifyCI", "a" * 40, "10001", "1", jwks=jwks)
+    c4, e4 = _verify_trusted_oidc(t_repo, jwks)
     assert c4 is None and any("repository mismatch" in e for e in e4)
 
 
@@ -681,6 +671,14 @@ def test_standalone_signer_rejects_missing_oidc_token_in_ci(tmp_path, monkeypatc
     monkeypatch.setenv("GITHUB_SHA", commit_sha)
     monkeypatch.setenv("GITHUB_REPOSITORY", "NeutronZero/VerifyCI")
     monkeypatch.setenv("GITHUB_TOKEN", "mock_ci_token")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/release-authority")
+    monkeypatch.setenv(
+        "GITHUB_WORKFLOW_REF",
+        "NeutronZero/VerifyCI/.github/workflows/release_signing.yml@refs/heads/release-authority",
+    )
+    monkeypatch.setenv("GITHUB_WORKFLOW_SHA", commit_sha)
+    monkeypatch.setenv("VERIFYCI_TRUSTED_WORKFLOW_SHA", "b" * 40)
+    monkeypatch.setenv("VERIFYCI_TRUSTED_WORKFLOW_REF", "refs/heads/release-authority")
 
     m_rec = _make_valid_measurement_record(ROOT)
     m_file = tmp_path / "measurements.json"
@@ -702,6 +700,7 @@ def test_standalone_signer_rejects_missing_oidc_token_in_ci(tmp_path, monkeypatc
             "workflow_run_id": "10001",
             "workflow_run_attempt": "1",
             "commit_sha": commit_sha,
+            "ref": "refs/heads/feat/v3.1.10-m4-security",
         },
         "workflow_identity": {
             "platform": "github_actions",
@@ -783,10 +782,27 @@ def test_verify_release_validation_enforces_ci_provenance(tmp_path, monkeypatch)
         "ci_platform": "github_actions",
         "ci_verified": True,
         "workflow_run_id": "123",
-        "job_id": "456",
-        "artifact_id": "789",
+        "workflow_run_attempt": "1",
+        "job_id": 456,
+        "artifact_id": 789,
+        "artifact_name": "release-measurements",
+        "artifact_digest": "sha256:" + "a" * 64,
+        "artifact_zip_sha256": "sha256:" + "a" * 64,
         "measurement_job_completed_at": "2026-10-31T12:00:00Z",
         "artifact_created_at": "2026-10-31T12:00:00Z",
+        "candidate_ref": "refs/heads/feat/v3.1.10-m4-security",
+        "measurement_workflow_ref": (
+            "NeutronZero/VerifyCI/.github/workflows/release_measurements.yml"
+            "@refs/heads/release-authority"
+        ),
+        "measurement_workflow_sha": "b" * 40,
+        "trusted_signing_workflow_ref": (
+            "NeutronZero/VerifyCI/.github/workflows/release_signing.yml"
+            "@refs/heads/release-authority"
+        ),
+        "trusted_signing_workflow_sha": "b" * 40,
+        "trusted_signing_ref": "refs/heads/release-authority",
+        "trusted_signing_run_id": "999",
         "oidc_verified": False,
         "commit_sha": recorded_commit,
     }
@@ -851,6 +867,7 @@ def test_provenance_rejects_mismatched_run_id_in_ci(tmp_path, monkeypatch):
     att_rec["execution"]["workflow_run_id"] = "10001"
     att_rec["execution"]["workflow_run_attempt"] = "1"
     att_rec["execution"]["commit_sha"] = commit_sha
+    att_rec["execution"]["ref"] = "refs/heads/feat/v3.1.10-m4-security"
     att_file.write_text(json.dumps(att_rec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     # Set CI environment variables for signing with a mismatched run ID
@@ -860,6 +877,12 @@ def test_provenance_rejects_mismatched_run_id_in_ci(tmp_path, monkeypatch):
     monkeypatch.setenv("GITHUB_SHA", commit_sha)
     monkeypatch.setenv("GITHUB_REPOSITORY", "NeutronZero/VerifyCI")
     monkeypatch.setenv("GITHUB_TOKEN", "mock_token")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/release-authority")
+    monkeypatch.setenv(
+        "GITHUB_WORKFLOW_REF",
+        "NeutronZero/VerifyCI/.github/workflows/release_signing.yml@refs/heads/release-authority",
+    )
+    monkeypatch.setenv("GITHUB_WORKFLOW_SHA", commit_sha)
 
     fake_signing_key = "12" * 32
     rec, errors = sign_release_evidence(ROOT, m_file, att_file, out_file, fake_signing_key)
@@ -912,124 +935,144 @@ def test_provenance_rejects_unsuccessful_job_in_ci(tmp_path, monkeypatch):
     assert any("conclusion is 'failure'" in e for e in errors), f"Expected conclusion failure, got {errors}"
 
 
-def test_provenance_rejects_artifact_window_out_of_bounds():
-    """Adversarial test: artifact creation timestamp outside job execution window fails closed."""
-    from scripts.standalone_signer import verify_github_actions_provenance
-    import unittest.mock as mock
-
-    # Mock urllib response for run, jobs, and artifacts
-    run_response = {"path": ".github/workflows/ci.yml"}
+def _complete_provenance_responses(steps=None, artifact_created_at="2026-10-31T12:04:00Z"):
+    digest = "sha256:" + "c" * 64
+    candidate_sha = "a" * 40
+    run_response = {
+        "id": 1,
+        "run_attempt": 1,
+        "head_sha": candidate_sha,
+        "head_branch": "feat/v3.1.10-m4-security",
+        "path": ".github/workflows/ci.yml",
+        "status": "completed",
+        "conclusion": "success",
+        "event": "push",
+        "repository": {"full_name": "NeutronZero/VerifyCI"},
+    }
+    if steps is None:
+        steps = [
+            {"name": "Checkout Candidate Source", "status": "completed", "conclusion": "success"},
+            {
+                "name": "Verify Trusted Measurement Harness Integrity",
+                "status": "completed",
+                "conclusion": "success",
+            },
+            {
+                "name": "Run Trusted Measurement Pipeline",
+                "status": "completed",
+                "conclusion": "success",
+            },
+            {
+                "name": "Upload Release Measurements Artifact",
+                "status": "completed",
+                "conclusion": "success",
+            },
+        ]
     jobs_response = {
+        "total_count": 1,
         "jobs": [
             {
                 "id": 100,
                 "name": "verifyci-measurements",
                 "status": "completed",
                 "conclusion": "success",
-                "head_sha": "a" * 40,
+                "head_sha": candidate_sha,
                 "started_at": "2026-10-31T12:00:00Z",
                 "completed_at": "2026-10-31T12:05:00Z",
-                "steps": [
-                    {"name": "Run Evidence & Benchmark Reproduction Gate", "conclusion": "success"},
-                    {"name": "Run Unprivileged Benchmark & Test Measurements Pipeline", "conclusion": "success"},
-                    {"name": "Upload Release Measurements Artifact", "conclusion": "success"},
-                ],
+                "steps": steps,
             }
-        ]
+        ],
     }
-    # Artifact created at 12:20:00Z (15 minutes after job completed)
     artifacts_response = {
+        "total_count": 1,
         "artifacts": [
             {
                 "id": 200,
                 "name": "release-measurements",
                 "size_in_bytes": 5000,
-                "created_at": "2026-10-31T12:20:00Z",
+                "digest": digest,
+                "expired": False,
+                "created_at": artifact_created_at,
+                "workflow_run": {
+                    "id": 1,
+                    "head_sha": candidate_sha,
+                    "head_branch": "feat/v3.1.10-m4-security",
+                },
             }
-        ]
+        ],
     }
+    return run_response, jobs_response, artifacts_response, digest
 
-    class MockResp:
-        def __init__(self, data):
-            self.data = json.dumps(data).encode("utf-8")
 
-        def read(self):
-            return self.data
+class MockResp:
+    def __init__(self, data):
+        self.data = json.dumps(data).encode("utf-8")
 
-        def __enter__(self):
-            return self
+    def read(self):
+        return self.data
 
-        def __exit__(self, *args):
-            pass
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+
+def _verify_provenance_with_responses(monkeypatch, run_response, jobs_response, artifacts_response, digest):
+    from scripts.standalone_signer import verify_github_actions_provenance
 
     def mock_urlopen(req, timeout=30):
         url = req.full_url
         if "/jobs" in url:
             return MockResp(jobs_response)
-        elif "/artifacts" in url:
+        if "/artifacts" in url:
             return MockResp(artifacts_response)
-        elif "/runs/" in url:
+        if "/runs/" in url:
             return MockResp(run_response)
         raise ValueError(f"Unknown URL {url}")
 
-    with mock.patch("urllib.request.urlopen", side_effect=mock_urlopen):
-        prov, errors = verify_github_actions_provenance(
-            "NeutronZero/VerifyCI", "1", "1", "a" * 40, "mock_token"
-        )
+    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen)
+    return verify_github_actions_provenance(
+        "NeutronZero/VerifyCI",
+        "1",
+        "1",
+        "a" * 40,
+        "mock_token",
+        expected_ref="refs/heads/feat/v3.1.10-m4-security",
+        expected_artifact_id=200,
+        expected_artifact_digest=digest,
+        artifact_zip_sha256=digest,
+    )
+
+
+def test_provenance_rejects_artifact_window_out_of_bounds(monkeypatch):
+    """Adversarial test: artifact creation timestamp outside job execution window fails closed."""
+    run_response, jobs_response, artifacts_response, digest = _complete_provenance_responses(
+        artifact_created_at="2026-10-31T12:20:00Z"
+    )
+    prov, errors = _verify_provenance_with_responses(
+        monkeypatch, run_response, jobs_response, artifacts_response, digest
+    )
     assert prov is None
     assert any("outside job execution window" in e for e in errors)
 
 
-def test_provenance_rejects_missing_measurement_step():
+def test_provenance_rejects_missing_measurement_step(monkeypatch):
     """Adversarial test: job missing required measurement step fails closed."""
-    from scripts.standalone_signer import verify_github_actions_provenance
-    import unittest.mock as mock
-
-    run_response = {"path": ".github/workflows/ci.yml"}
-    jobs_response = {
-        "jobs": [
-            {
-                "id": 100,
-                "name": "verifyci-measurements",
-                "status": "completed",
-                "conclusion": "success",
-                "head_sha": "a" * 40,
-                "started_at": "2026-10-31T12:00:00Z",
-                "completed_at": "2026-10-31T12:05:00Z",
-                "steps": [
-                    # Missing "Upload Release Measurements Artifact" step
-                    {"name": "Run Evidence & Benchmark Reproduction Gate", "conclusion": "success"},
-                    {"name": "Run Unprivileged Benchmark & Test Measurements Pipeline", "conclusion": "success"},
-                ],
-            }
-        ]
-    }
-
-    class MockResp:
-        def __init__(self, data):
-            self.data = json.dumps(data).encode("utf-8")
-
-        def read(self):
-            return self.data
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-    def mock_urlopen(req, timeout=30):
-        url = req.full_url
-        if "/jobs" in url:
-            return MockResp(jobs_response)
-        elif "/runs/" in url:
-            return MockResp(run_response)
-        raise ValueError(f"Unknown URL {url}")
-
-    with mock.patch("urllib.request.urlopen", side_effect=mock_urlopen):
-        prov, errors = verify_github_actions_provenance(
-            "NeutronZero/VerifyCI", "1", "1", "a" * 40, "mock_token"
-        )
+    steps = [
+        {"name": "Checkout Candidate Source", "status": "completed", "conclusion": "success"},
+        {
+            "name": "Verify Trusted Measurement Harness Integrity",
+            "status": "completed",
+            "conclusion": "success",
+        },
+        {"name": "Run Trusted Measurement Pipeline", "status": "completed", "conclusion": "success"},
+        # Missing "Upload Release Measurements Artifact" step
+    ]
+    run_response, jobs_response, artifacts_response, digest = _complete_provenance_responses(steps=steps)
+    prov, errors = _verify_provenance_with_responses(
+        monkeypatch, run_response, jobs_response, artifacts_response, digest
+    )
     assert prov is None
     assert any("required measurement step" in e for e in errors)
 
