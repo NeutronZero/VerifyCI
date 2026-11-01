@@ -1,0 +1,66 @@
+name: Build Worker Image
+
+on:
+  workflow_call:
+    inputs:
+      image_tag:
+        type: string
+        required: false
+        default: "latest"
+        description: "Tag for the published worker image"
+    outputs:
+      image_digest:
+        description: "Immutable OCI image digest"
+        value: ${{ jobs.build-worker-image.outputs.image_digest }}
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+jobs:
+  build-worker-image:
+    name: build-worker-image
+    runs-on: ubuntu-latest
+    outputs:
+      image_digest: ${{ steps.build-push.outputs.digest }}
+    steps:
+      - name: Validate Caller Environment
+        run: |
+          set -euo pipefail
+          test "${{ github.repository }}" = "NeutronZero/VerifyCI"
+          test "${{ github.ref }}" = "refs/heads/release-authority"
+
+      - name: Checkout Trusted Authority
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/heads/release-authority
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Worker Image
+        id: build-push
+        uses: docker/build-push-action@4f58ea79222b3b150c895db3559223071855e562 # v6
+        with:
+          context: docker/worker
+          file: docker/worker/Dockerfile
+          push: true
+          tags: ghcr.io/neutronzero/verifyci-worker:${{ inputs.image_tag }}
+
+      - name: Attest Build Provenance
+        uses: actions/attest-build-provenance@c074443f1a5fb4a4829628ad837759902d16be6c # v2
+        with:
+          subject-name: ghcr.io/neutronzero/verifyci-worker
+          subject-digest: ${{ steps.build-push.outputs.digest }}
+          push-to-registry: true

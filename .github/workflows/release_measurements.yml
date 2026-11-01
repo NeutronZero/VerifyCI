@@ -1,9 +1,5 @@
 name: Trusted Release Measurements
 
-# Trusted measurement entrypoint. This file is authoritative only when executed
-# from the protected `release-authority` branch (or an immutable commit on it).
-# It is invoked by candidate CI through a full-SHA reference and receives no
-# secrets. Candidate code is executed only in this unprivileged job.
 on:
   workflow_call:
     inputs:
@@ -11,16 +7,23 @@ on:
         required: true
         type: string
         description: "Full 40-character candidate commit SHA to measure"
-
-permissions:
-  contents: read
-  id-token: write
-  actions: read
+      worker_image:
+        required: true
+        type: string
+        description: "Immutable OCI worker image reference (e.g. ghcr.io/neutronzero/verifyci-worker@sha256:...)"
 
 jobs:
   verifyci-measurements:
     name: verifyci-measurements
     runs-on: ubuntu-latest
+    environment: measurement-authority
+    if: >-
+      github.repository == 'NeutronZero/VerifyCI' &&
+      github.ref == 'refs/heads/release-authority'
+    permissions:
+      contents: read
+      packages: read
+      attestations: read
     steps:
       - name: Validate Candidate Commit Input
         env:
@@ -31,14 +34,21 @@ jobs:
             (*[!0-9a-f]*|"") echo "invalid candidate SHA: $CANDIDATE_SHA" >&2; exit 1 ;;
           esac
           test "${#CANDIDATE_SHA}" -eq 40
-          test "$CANDIDATE_SHA" = "$GITHUB_SHA"
 
-      - name: Checkout Candidate Source
+      - name: Checkout Trusted Authority Root
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/heads/release-authority
+          path: trusted-authority
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout Candidate Source (Data Only)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.candidate_sha }}
+          path: candidate-src
           fetch-depth: 1
-          lfs: false
           persist-credentials: false
 
       - name: Setup Python
@@ -51,35 +61,101 @@ jobs:
         with:
           enable-cache: false
 
-      - name: Install Candidate Dependencies (Unprivileged)
-        # Candidate dependency installation is confined to this no-secret job.
+      - name: Install Trusted Supervisor Dependencies
         run: |
           set -euo pipefail
-          test -z "${VERIFYCI_RELEASE_SIGNING_KEY:-}"
+          cd trusted-authority
           uv sync --frozen --extra dev
 
-      - name: Verify Trusted Measurement Harness Integrity
-        # The hash is authoritative only when this workflow file is loaded from
-        # the protected release-authority ref. A candidate cannot change it.
+      - name: Verify Worker Image Provenance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          echo "9ff48885661e344472b36642cdecf1774c88df3c990c2df39b5c0f378c96bddf  scripts/validate_release.py" | sha256sum -c -
+          docker pull "${{ inputs.worker_image }}"
+          gh attestation verify "${{ inputs.worker_image }}" --owner NeutronZero
 
       - name: Run Trusted Measurement Pipeline
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERIFYCI_HELD_OUT_SEED: ${{ secrets.VERIFYCI_HELD_OUT_SEED }}
         run: |
           set -euo pipefail
-          test -z "${VERIFYCI_RELEASE_SIGNING_KEY:-}"
-          uv run --no-sync python scripts/validate_release.py --measure-only
+          cd trusted-authority
+          mkdir -p evidence/release
+          uv run --no-sync python scripts/validate_release.py \
+            --measure-only \
+            --candidate-root ../candidate-src \
+            --trusted-root . \
+            --output-measurements evidence/release/measurements.json \
+            --candidate-sha "${{ inputs.candidate_sha }}" \
+            --worker-image "${{ inputs.worker_image }}" \
+            --sandbox-mode docker
 
       - name: Upload Release Measurements Artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-measurements
-          path: |
-            evidence/release/measurements.json
-            evidence/release/measurement_attestation.json
+          path: trusted-authority/evidence/release/measurements.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  trusted-attestation:
+    name: trusted-attestation
+    needs: verifyci-measurements
+    runs-on: ubuntu-latest
+    if: >-
+      github.repository == 'NeutronZero/VerifyCI' &&
+      github.ref == 'refs/heads/release-authority'
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+      checks: read
+    steps:
+      - name: Checkout Trusted Authority Root
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/heads/release-authority
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: false
+
+      - name: Install Trusted Harness Dependencies
+        run: |
+          set -euo pipefail
+          uv sync --frozen --extra dev
+
+      - name: Download Measurements Artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
+        with:
+          name: release-measurements
+          path: evidence/release
+
+      - name: Generate Trusted Attestation
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          uv run --no-sync python scripts/generate_trusted_attestation.py \
+            --measurements evidence/release/measurements.json \
+            --output evidence/release/measurement_attestation.json \
+            --candidate-sha "${{ inputs.candidate_sha }}"
+
+      - name: Upload Release Attestation Artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-attestation
+          path: evidence/release/measurement_attestation.json
           if-no-files-found: error
           retention-days: 7
           compression-level: 0

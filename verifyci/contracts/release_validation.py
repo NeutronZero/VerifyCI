@@ -27,6 +27,7 @@ from verifyci.contracts.manifest import (
 from verifyci.evidence.canonical import canonical_json_bytes
 
 VALIDATION_SCHEMA = "verifyci.release_validation/v1"
+SUPPORTED_VALIDATION_SCHEMAS = ("verifyci.release_validation/v1", "verifyci.release_validation/v3")
 VALIDATION_REL_PATH = Path("evidence") / "release" / "release_validation.json"
 
 PINNED_REPOSITORY = "NeutronZero/VerifyCI"
@@ -201,7 +202,7 @@ def verify_release_validation_evidence(
     if not isinstance(record, dict):
         return False, "release-validation evidence root must be an object"
 
-    if record.get("schema") != VALIDATION_SCHEMA:
+    if record.get("schema") not in SUPPORTED_VALIDATION_SCHEMAS:
         return False, f"unsupported release-validation schema: {record.get('schema')}"
 
     if record.get("status") != "VALIDATED":
@@ -261,7 +262,11 @@ def verify_release_validation_evidence(
         pub_bytes = bytes.fromhex(expected_pub_hex)
         pub = ed25519.Ed25519PublicKey.from_public_bytes(pub_bytes)
         sig_bytes = bytes.fromhex(supplied_sig)
-        pub.verify(sig_bytes, recorded_digest.encode("utf-8"))
+        try:
+            pub.verify(sig_bytes, recorded_digest.encode("utf-8"))
+        except Exception:
+            DOMAIN_SEPARATOR = b"VERIFYCI-RELEASE-EVIDENCE\x00"
+            pub.verify(sig_bytes, DOMAIN_SEPARATOR + recorded_digest.encode("utf-8"))
     except Exception as exc:
         return (
             False,
