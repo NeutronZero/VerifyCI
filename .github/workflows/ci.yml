@@ -136,7 +136,7 @@ jobs:
       contents: read
       id-token: write
       actions: read
-    uses: NeutronZero/VerifyCI/.github/workflows/release_measurements.yml@0000000000000000000000000000000000000000
+    uses: NeutronZero/VerifyCI/.github/workflows/release_measurements.yml@fb54ffd642b41cd052f054765b594664a65a7cec
     with:
       candidate_sha: ${{ github.sha }}
 
