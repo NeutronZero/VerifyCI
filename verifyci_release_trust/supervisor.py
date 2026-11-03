@@ -189,9 +189,16 @@ def run_supervisor_measurement_pipeline(
 
     public_benchmark = aggregate_benchmark_metrics(case_results)
 
-    # 4. Private held-out evaluation
+    # 4. Private held-out evaluation (mandatory for authoritative PASS verdict)
     held_out_metrics: dict[str, Any] = {}
-    if held_out_seed:
+    if not held_out_seed:
+        errors.append("held-out evaluation failed closed: missing mandatory VERIFYCI_HELD_OUT_SEED")
+        held_out_metrics = {
+            "status": "MISSING_SEED",
+            "cases_evaluated": 0,
+            "error": "mandatory held-out evaluation seed not provided",
+        }
+    else:
         held_out_cases, commitment, epoch = generate_held_out_scenarios(held_out_seed, public_cases, count=10)
         ho_results: list[dict[str, Any]] = []
         for case in held_out_cases:
@@ -211,8 +218,10 @@ def run_supervisor_measurement_pipeline(
                     staging_temp, Path(repo_dir), worker_image_digest, worker_args
                 )
                 if res.data:
-                    _, _, m = grade_case_result(case, res.data)
+                    ok_case, case_errs, m = grade_case_result(case, res.data)
                     ho_results.append(m)
+                    if not ok_case:
+                        errors.extend(case_errs)
             elif sandbox_mode == "subprocess-isolated":
                 launcher = trust_res / "docker" / "worker" / "launch_candidate.py"
                 cmd = [
@@ -228,17 +237,30 @@ def run_supervisor_measurement_pipeline(
                 if proc.returncode in (0, 1):
                     try:
                         ho_resp = json.loads(proc.stdout)
-                        _, _, m = grade_case_result(case, ho_resp)
+                        ok_case, case_errs, m = grade_case_result(case, ho_resp)
                         ho_results.append(m)
-                    except Exception:
-                        pass
+                        if not ok_case:
+                            errors.extend(case_errs)
+                    except Exception as exc:
+                        errors.append(f"{cid}: failed to parse held-out worker response: {exc}")
+                else:
+                    errors.append(f"{cid}: held-out worker subprocess failed with return code {proc.returncode}")
+
         ho_agg = aggregate_benchmark_metrics(ho_results)
+        if len(ho_results) != len(held_out_cases):
+            errors.append(f"held-out evaluation incomplete: {len(ho_results)}/{len(held_out_cases)} cases completed")
+        if not ho_agg.get("zero_false_blocking"):
+            errors.append("held-out evaluation violated zero_false_blocking invariant")
+        if not ho_agg.get("strict_redaction"):
+            errors.append("held-out evaluation violated strict_redaction invariant")
+
         held_out_metrics = {
             "epoch": epoch,
             "commitment": commitment,
             "cases_evaluated": ho_agg.get("cases_evaluated", 0),
             "coverage_matches": ho_agg.get("coverage_matches", 0),
             "zero_false_blocking": ho_agg.get("zero_false_blocking", True),
+            "strict_redaction": ho_agg.get("strict_redaction", True),
         }
 
     # 5. Recompute post-execution staging fingerprint to assert immutability
@@ -248,7 +270,16 @@ def run_supervisor_measurement_pipeline(
 
     completed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-    overall_verdict = "PASS" if not errors else ("FAIL" if any("mismatch" in e or "outcome" in e for e in errors) else "INCONCLUSIVE")
+    has_fatal_errors = any(
+        "failed" in e or "mismatch" in e or "violated" in e or "blocking" in e or "unredacted" in e
+        for e in errors
+    )
+    if not errors and held_out_seed and held_out_metrics.get("cases_evaluated") == len(held_out_cases):
+        overall_verdict = "PASS"
+    elif has_fatal_errors:
+        overall_verdict = "FAIL"
+    else:
+        overall_verdict = "INCONCLUSIVE"
 
     measurements_record = {
         "schema": "verifyci.measurements/v3",

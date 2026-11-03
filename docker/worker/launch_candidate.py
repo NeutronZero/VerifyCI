@@ -11,6 +11,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import time
 
 
 def parse_args():
@@ -23,6 +24,8 @@ def parse_args():
     case_cmd.add_argument("--base", required=True, help="Base commit SHA")
     case_cmd.add_argument("--head", required=True, help="Head commit SHA")
     case_cmd.add_argument("--policy-toml", default="", help="Policy configuration TOML")
+    case_cmd.add_argument("--as-of-date", default=None, help="Authoritative evaluation as-of date (YYYY-MM-DD)")
+    case_cmd.add_argument("--toolchain-fingerprint", default=None, help="Trusted toolchain fingerprint")
 
     gate_cmd = sub.add_parser("gate", help="Execute candidate gate CLI")
     gate_cmd.add_argument("--candidate-root", default="/candidate", help="Path to mounted candidate source")
@@ -62,17 +65,19 @@ def main():
             )
             policy = parse_policy_bytes(args.policy_toml.encode("utf-8"))
 
+            eval_date = args.as_of_date or time.strftime("%Y-%m-%d", time.gmtime())
+            eval_toolchain = args.toolchain_fingerprint or "sha256:a053a0d6a509c1b5fcafba6b0c580ec69174533a70903be4ca9d3462b47ebea9"
             ctx = CheckContext(
                 git=repo,
                 policy=policy,
                 entries=tuple(entries),
                 scope=scope,
-                as_of_date="2026-10-21",
+                as_of_date=eval_date,
                 target_base_commit=args.base,
                 merge_base_commit=args.base,
                 head_commit=args.head,
                 object_format="sha1",
-                toolchain_fingerprint="test",
+                toolchain_fingerprint=eval_toolchain,
                 source_roots=(),
             )
             res = run_security(ctx)

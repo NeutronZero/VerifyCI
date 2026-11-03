@@ -90,8 +90,22 @@ def enumerate_tree(repo_root: Path, tree_sha: str) -> list[TreeEntry]:
     return entries
 
 
+ALLOWED_TYPE_MODES = {
+    ("blob", "100644"),
+    ("blob", "100755"),
+    ("symlink", "120000"),
+}
+
+MAX_TREE_ENTRIES = 20_000
+MAX_SINGLE_BLOB_SIZE = 50 * 1024 * 1024
+MAX_TOTAL_TREE_SIZE = 200 * 1024 * 1024
+
+
 def validate_tree_paths(entries: list[TreeEntry]) -> None:
     """Enforce strict tree security policy: no absolute paths, no traversal, no .git, no escaping symlinks."""
+    if len(entries) > MAX_TREE_ENTRIES:
+        raise ValueError(f"tree entry count {len(entries)} exceeds maximum allowed ({MAX_TREE_ENTRIES})")
+
     for entry in entries:
         p = Path(entry.rel_path)
         if p.is_absolute():
@@ -103,8 +117,8 @@ def validate_tree_paths(entries: list[TreeEntry]) -> None:
             raise ValueError(f"tree contains forbidden .git component: {entry.rel_path}")
         if entry.entry_type == "commit":
             raise ValueError(f"unpinned or unauthorized submodule entry: {entry.rel_path}")
-        if entry.entry_type not in ("blob", "symlink") and entry.mode not in ("100644", "100755", "120000"):
-            raise ValueError(f"forbidden object type/mode: {entry.entry_type} ({entry.mode}) for {entry.rel_path}")
+        if (entry.entry_type, entry.mode) not in ALLOWED_TYPE_MODES:
+            raise ValueError(f"forbidden object type/mode pair: {entry.entry_type} ({entry.mode}) for {entry.rel_path}")
 
 
 def materialize_tree_to_staging(
@@ -123,6 +137,7 @@ def materialize_tree_to_staging(
     # Sort entries by relative posix path for deterministic manifest
     sorted_entries = sorted(entries, key=lambda e: e.rel_path)
     manifest_lines: list[str] = []
+    total_tree_size = 0
 
     # Two-pass extraction: first pass writes regular/executable files; second pass handles symlinks
     regular_entries = [e for e in sorted_entries if e.mode != "120000"]
@@ -148,6 +163,12 @@ def materialize_tree_to_staging(
             raise RuntimeError(f"failed to read blob {entry.object_sha} for {entry.rel_path}")
 
         content = proc.stdout
+        if len(content) > MAX_SINGLE_BLOB_SIZE:
+            raise ValueError(f"blob {entry.rel_path} exceeds maximum size ({len(content)} > {MAX_SINGLE_BLOB_SIZE})")
+        total_tree_size += len(content)
+        if total_tree_size > MAX_TOTAL_TREE_SIZE:
+            raise ValueError(f"cumulative tree size exceeds limit ({total_tree_size} > {MAX_TOTAL_TREE_SIZE})")
+
         # Check for Git LFS pointer
         if content.startswith(b"version https://git-lfs.github.com/spec/v1"):
             raise ValueError(f"unresolved Git LFS pointer forbidden in release evaluation: {entry.rel_path}")
@@ -181,7 +202,7 @@ def materialize_tree_to_staging(
         if proc.returncode != 0:
             raise RuntimeError(f"failed to read symlink target {entry.object_sha} for {entry.rel_path}")
 
-        target_str = proc.stdout.decode("utf-8", errors="strict").strip("\r\n")
+        target_str = proc.stdout.decode("utf-8", errors="strict")
         # Validate that symlink does not escape staging root
         target_path = (dest_path.parent / target_str).resolve(strict=False)
         try:
@@ -191,9 +212,8 @@ def materialize_tree_to_staging(
 
         try:
             os.symlink(target_str, dest_path)
-        except (OSError, NotImplementedError):
-            # On platforms where unprivileged symlinks are unsupported, write text with sentinel mode
-            dest_path.write_text(target_str, encoding="utf-8")
+        except OSError as exc:
+            raise OSError(f"symlink materialization failed for {entry.rel_path} -> {target_str}: {exc}") from exc
 
         target_sha256 = hashlib.sha256(target_str.encode("utf-8")).hexdigest()
         manifest_lines.append(f"{entry.mode} symlink {target_sha256} {entry.rel_path}")

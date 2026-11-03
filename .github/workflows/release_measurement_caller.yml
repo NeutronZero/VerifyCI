@@ -30,4 +30,3 @@ jobs:
     with:
       candidate_sha: ${{ inputs.candidate_sha }}
       worker_image: ${{ inputs.worker_image }}
-    secrets: inherit

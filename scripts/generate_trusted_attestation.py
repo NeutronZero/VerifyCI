@@ -37,10 +37,10 @@ def _api_get(url: str, token: str) -> dict:
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate authenticated release attestation")
     parser.add_argument("--candidate-sha", required=True, help="Candidate commit SHA")
-    parser.add_argument("--measurement-run-id", required=True, help="GitHub Actions run ID for measurements")
-    parser.add_argument("--measurement-run-attempt", default="1", help="Measurement run attempt")
-    parser.add_argument("--measurements-file", type=Path, default=Path("evidence/release/measurements.json"))
-    parser.add_argument("--output-attestation", type=Path, default=Path("evidence/release/measurement_attestation.json"))
+    parser.add_argument("--measurement-run-id", default=os.environ.get("GITHUB_RUN_ID"), help="GitHub Actions run ID for measurements")
+    parser.add_argument("--measurement-run-attempt", default=os.environ.get("GITHUB_RUN_ATTEMPT", "1"), help="Measurement run attempt")
+    parser.add_argument("--measurements", "--measurements-file", dest="measurements_file", type=Path, default=Path("evidence/release/measurements.json"))
+    parser.add_argument("--output", "--output-attestation", dest="output_attestation", type=Path, default=Path("evidence/release/measurement_attestation.json"))
     return parser.parse_args()
 
 
@@ -70,8 +70,12 @@ def main():
     measurement_artifact_digest = None
     attestation_check_run_id = None
     oidc_token = None
+    caller_sha = None
 
     if is_ci and gh_token:
+        if not args.measurement_run_id:
+            sys.exit("measurement run ID missing in CI environment")
+
         # Query jobs for measurement run
         jobs_url = f"https://api.github.com/repos/{repo}/actions/runs/{args.measurement_run_id}/jobs?attempt={args.measurement_run_attempt}"
         jobs_data = _api_get(jobs_url, gh_token)
@@ -81,8 +85,13 @@ def main():
             sys.exit(f"measurement job not found in run {args.measurement_run_id}")
         if m_job.get("status") != "completed" or m_job.get("conclusion") != "success":
             sys.exit(f"measurement job failed or not completed: status={m_job.get('status')}, conclusion={m_job.get('conclusion')}")
-        if m_job.get("head_sha", "").lower() != cand_sha:
-            sys.exit(f"measurement job head_sha mismatch: {m_job.get('head_sha')} != {cand_sha}")
+
+        # In manual-dispatch, m_job.head_sha is the caller commit on release-authority,
+        # while parsed_measurements records the measured candidate_sha.
+        m_rec_cand_sha = parsed_measurements.get("candidate_sha", "").lower()
+        if m_rec_cand_sha and m_rec_cand_sha != cand_sha:
+            sys.exit(f"measurement record candidate_sha mismatch: {m_rec_cand_sha} != {cand_sha}")
+        caller_sha = m_job.get("head_sha", "").lower()
 
         measurement_job_id = m_job.get("id")
         measurement_check_run_id = m_job.get("check_run_url", "").split("/")[-1] if m_job.get("check_run_url") else None
@@ -128,11 +137,23 @@ def main():
                 sys.stderr.write(f"Sleeping {wait_sec}s until OIDC token expires with safety margin...\n")
                 time.sleep(wait_sec)
 
+    created_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    impl_fp = (
+        parsed_measurements.get("candidate_implementation_fingerprint")
+        or parsed_measurements.get("implementation_fingerprint")
+    )
+    manifest_h = parsed_measurements.get("manifest_hash")
+
     attestation_record = {
         "schema": "verifyci.measurement_attestation/v3",
+        "issuer": "verifyci.measurement_pipeline",
         "tool_version": "3.1.10",
+        "created_at": created_iso,
         "candidate_sha": cand_sha,
-        "measurement_run_id": args.measurement_run_id,
+        "caller_workflow_sha": caller_sha,
+        "implementation_fingerprint": impl_fp,
+        "manifest_hash": manifest_h,
+        "measurement_run_id": str(args.measurement_run_id) if args.measurement_run_id else None,
         "measurement_run_attempt": str(args.measurement_run_attempt),
         "measurement_job_id": measurement_job_id,
         "measurement_check_run_id": str(measurement_check_run_id) if measurement_check_run_id else None,
@@ -140,8 +161,21 @@ def main():
         "measurement_artifact_digest": measurement_artifact_digest,
         "measurements_file_sha256": raw_file_sha256,
         "measurements_canonical_digest": canonical_digest,
+        "measurements_digest": canonical_digest,
         "attestation_check_run_id": attestation_check_run_id,
         "raw_oidc_jwt": oidc_token,
+        "execution": {
+            "ci_platform": "github_actions" if is_ci else "local",
+            "workflow_run_id": str(args.measurement_run_id) if args.measurement_run_id else None,
+            "workflow_run_attempt": str(args.measurement_run_attempt),
+            "commit_sha": cand_sha,
+        },
+        "workflow_identity": {
+            "platform": "github_actions" if is_ci else "local",
+            "repository": repo,
+            "commit_sha": cand_sha,
+            "oidc_token": oidc_token,
+        },
     }
 
     args.output_attestation.parent.mkdir(parents=True, exist_ok=True)

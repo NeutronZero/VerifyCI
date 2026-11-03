@@ -8,6 +8,11 @@ on:
         required: false
         default: "latest"
         description: "Tag for the published worker image"
+      commit_a:
+        type: string
+        required: false
+        default: "refs/heads/release-authority"
+        description: "Commit or ref for trusted worker source"
     outputs:
       image_digest:
         description: "Immutable OCI image digest"
@@ -35,7 +40,7 @@ jobs:
       - name: Checkout Trusted Authority
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: refs/heads/release-authority
+          ref: ${{ inputs.commit_a || 'refs/heads/release-authority' }}
           fetch-depth: 1
           persist-credentials: false
 

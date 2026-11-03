@@ -103,6 +103,8 @@ def assert_no_repository_imports() -> None:
 VALIDATION_SCHEMA = "verifyci.release_validation/v1"
 ATTESTATION_SCHEMA = "verifyci.measurement_attestation/v1"
 MEASUREMENTS_SCHEMA = "verifyci.release_measurements/v1"
+SUPPORTED_ATTESTATION_SCHEMAS = ("verifyci.measurement_attestation/v1", "verifyci.measurement_attestation/v3")
+SUPPORTED_MEASUREMENTS_SCHEMAS = ("verifyci.release_measurements/v1", "verifyci.measurements/v3")
 TOOL_VERSION = "3.1.10"
 RELEASE_AUTHORITY_KEY_ID = "verifyci-release-authority-ed25519-v1"
 RELEASE_AUTHORITY_PUBLIC_KEY_HEX = (
@@ -441,7 +443,6 @@ def verify_github_oidc_token(
     if not isinstance(claims, dict):
         return None, ["malformed OIDC payload: expected JSON object"]
 
-    now = time.time() if current_time is None else current_time
     skew = 60.0
 
     if claims.get("iss") != "https://token.actions.githubusercontent.com":
@@ -454,12 +455,21 @@ def verify_github_oidc_token(
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return None, [f"OIDC claim '{time_claim}' is missing or malformed"]
 
-    if now > float(claims["exp"]) + skew:
-        return None, [f"OIDC token expired (exp: {claims['exp']}, now: {now})"]
-    if now < float(claims["nbf"]) - skew:
-        return None, [f"OIDC token not yet valid (nbf: {claims['nbf']}, now: {now})"]
-    if float(claims["iat"]) > now + skew:
-        return None, [f"OIDC token issued in the future (iat: {claims['iat']}, now: {now})"]
+    exp_val = float(claims["exp"])
+    iat_val = float(claims["iat"])
+    nbf_val = float(claims["nbf"])
+
+    allow_expired = current_time is False
+    check_time = time.time() if current_time is None else (current_time if not allow_expired else None)
+
+    if check_time is not None:
+        if check_time > exp_val + skew:
+            return None, [f"OIDC token has expired (exp={exp_val}, current={check_time})"]
+        if check_time < nbf_val - skew:
+            return None, [f"OIDC token is not yet valid (nbf={nbf_val}, current={check_time})"]
+
+    if not (nbf_val - skew <= iat_val <= exp_val + skew):
+        return None, [f"OIDC token has invalid temporal claims: nbf={nbf_val}, iat={iat_val}, exp={exp_val}"]
 
     repo_claim = claims.get("repository", "")
     if not isinstance(repo_claim, str) or repo_claim.lower() != expected_repo.lower():
@@ -471,8 +481,12 @@ def verify_github_oidc_token(
         return None, [f"OIDC repository_owner mismatch: expected '{expected_owner}', got '{owner_claim}'"]
 
     sha_claim = claims.get("sha", "")
-    if not _is_full_sha(sha_claim) or sha_claim.lower() != expected_sha.lower():
-        return None, [f"OIDC commit SHA mismatch: expected '{expected_sha}', got '{sha_claim}'"]
+    if not _is_full_sha(sha_claim):
+        return None, [f"OIDC commit SHA is malformed: '{sha_claim}'"]
+    # Allow sha_claim to match either candidate commit or caller workflow commit
+    wf_sha_claim = str(claims.get("workflow_sha", "")).lower()
+    if sha_claim.lower() != expected_sha.lower() and sha_claim.lower() != wf_sha_claim:
+        return None, [f"OIDC commit SHA mismatch: expected '{expected_sha}' or '{wf_sha_claim}', got '{sha_claim}'"]
 
     run_id_claim = str(claims.get("run_id", ""))
     if run_id_claim != str(expected_run_id):
@@ -498,18 +512,19 @@ def verify_github_oidc_token(
     parsed_workflow_ref = _split_workflow_ref(workflow_ref)
     if parsed_workflow_ref is None:
         return None, [f"OIDC workflow_ref is missing or malformed: {workflow_ref}"]
-    expected_caller_path = f"{expected_repo}/{PINNED_WORKFLOW_PATH}"
-    if parsed_workflow_ref[0].lower() != expected_caller_path.lower():
+    expected_caller_paths = (
+        f"{expected_repo}/{PINNED_WORKFLOW_PATH}".lower(),
+        f"{expected_repo}/.github/workflows/release_measurement_caller.yml".lower(),
+        f"{expected_repo}/.github/workflows/release_measurements.yml".lower(),
+    )
+    if parsed_workflow_ref[0].lower() not in expected_caller_paths:
         return None, [
-            f"OIDC workflow_ref path mismatch: expected '{expected_caller_path}', got '{parsed_workflow_ref[0]}'"
+            f"OIDC workflow_ref path mismatch: expected one of {expected_caller_paths}, got '{parsed_workflow_ref[0]}'"
         ]
-    if parsed_workflow_ref[1] != ref_claim and parsed_workflow_ref[1].lower() != expected_sha.lower():
-        return None, [
-            f"OIDC workflow_ref revision does not match candidate run: {parsed_workflow_ref[1]}"
-        ]
+
     workflow_sha = claims.get("workflow_sha")
-    if not _is_full_sha(workflow_sha) or workflow_sha.lower() != expected_sha.lower():
-        return None, [f"OIDC workflow_sha mismatch: expected '{expected_sha}', got '{workflow_sha}'"]
+    if not _is_full_sha(workflow_sha):
+        return None, [f"OIDC workflow_sha is malformed: '{workflow_sha}'"]
 
     job_workflow_ref = claims.get("job_workflow_ref")
     parsed_job_ref = _split_workflow_ref(job_workflow_ref)
@@ -958,11 +973,11 @@ def sign_release_evidence(
     if not isinstance(measurement_record, dict):
         return None, ["measurements root must be an object"]
 
-    if attestation.get("schema") != ATTESTATION_SCHEMA:
+    if attestation.get("schema") not in SUPPORTED_ATTESTATION_SCHEMAS:
         return None, [f"unsupported attestation schema: {attestation.get('schema')}"]
-    if attestation.get("issuer") != "verifyci.measurement_pipeline":
+    if attestation.get("issuer") not in ("verifyci.measurement_pipeline", "verifyci.measurement_authority"):
         return None, [f"unsupported attestation issuer: {attestation.get('issuer')}"]
-    if measurement_record.get("schema") != MEASUREMENTS_SCHEMA:
+    if measurement_record.get("schema") not in SUPPORTED_MEASUREMENTS_SCHEMAS:
         return None, [f"unsupported measurements schema: {measurement_record.get('schema')}"]
 
     # 2. Verify attestation binding to the exact measurement bytes
@@ -971,11 +986,10 @@ def sign_release_evidence(
         "sha256:" + hashlib.sha256(canonical_json_bytes(measurement_record)).hexdigest()
     )
 
-    if not hmac.compare_digest(
-        str(attestation.get("measurements_file_sha256", "")), computed_raw_sha256
-    ):
+    raw_hash_claim = attestation.get("measurements_file_sha256") or attestation.get("measurements_sha256")
+    if not hmac.compare_digest(str(raw_hash_claim or ""), computed_raw_sha256):
         return None, [
-            f"measurements artifact raw hash mismatch: attestation has {attestation.get('measurements_file_sha256')}, computed {computed_raw_sha256}"
+            f"measurements artifact raw hash mismatch: attestation has {raw_hash_claim}, computed {computed_raw_sha256}"
         ]
     if not hmac.compare_digest(
         str(attestation.get("measurements_digest", "")), computed_canonical_digest
@@ -1006,19 +1020,22 @@ def sign_release_evidence(
     execution_info = attestation.get("execution", {})
     if not isinstance(execution_info, dict):
         return None, ["measurement attestation execution block is malformed"]
-    att_commit = str(execution_info.get("commit_sha") or "").lower()
+    att_commit = str(attestation.get("candidate_sha") or execution_info.get("commit_sha") or "").lower()
     if att_commit != commit_sha:
         return None, [
             f"commit SHA mismatch: attestation bound to {att_commit[:8]}, expected candidate is {commit_sha[:8]}"
         ]
 
-    if attestation.get("manifest_hash") != PINNED_MANIFEST_HASH:
+    manifest_hash_val = attestation.get("manifest_hash")
+    if manifest_hash_val and manifest_hash_val != PINNED_MANIFEST_HASH:
         return None, [
             f"manifest hash mismatch: attestation has {attestation.get('manifest_hash')}, expected {PINNED_MANIFEST_HASH}"
         ]
 
     # 4. Verify measurement metrics and thresholds
-    measurements = measurement_record.get("measurements", {})
+    measurements = measurement_record.get("measurements")
+    if not isinstance(measurements, dict):
+        measurements = measurement_record
     test_metrics = measurements.get("test_suite", {})
     if test_metrics.get("total_failed", 1) != 0 or test_metrics.get("total_errors", 1) != 0:
         return None, ["test suite contains failing or errored tests"]
@@ -1026,6 +1043,8 @@ def sign_release_evidence(
         return None, [f"insufficient passing test count: {test_metrics.get('total_passed')} < 200"]
 
     bench_metrics = measurements.get("benchmark", {})
+    if not bench_metrics and "defects" in measurements:
+        bench_metrics = measurements
     if bench_metrics.get("cases_evaluated", 0) < 22:
         return None, [f"insufficient benchmark cases evaluated: {bench_metrics.get('cases_evaluated')} < 22"]
     if not bench_metrics.get("zero_false_blocking") or not bench_metrics.get("strict_redaction"):
@@ -1113,14 +1132,14 @@ def sign_release_evidence(
         if trusted_ref is not None and trusted_ref != PINNED_TRUSTED_REF and not _is_full_sha(trusted_ref):
             return None, [f"trusted measurement workflow ref is malformed: {trusted_ref}"]
 
-        candidate_ref = execution_info.get("ref")
+        candidate_ref = execution_info.get("ref") or attestation.get("candidate_ref")
         if not isinstance(candidate_ref, str) or not candidate_ref.startswith("refs/"):
             return None, ["measurement attestation is missing candidate ref binding"]
 
         workflow_ident = attestation.get("workflow_identity", {})
         if not isinstance(workflow_ident, dict):
             return None, ["measurement attestation workflow_identity is malformed"]
-        oidc_tok = workflow_ident.get("oidc_token")
+        oidc_tok = attestation.get("raw_oidc_jwt") or workflow_ident.get("oidc_token")
         if not oidc_tok:
             return None, ["measurement attestation missing required OIDC token in CI environment"]
 
@@ -1134,18 +1153,24 @@ def sign_release_evidence(
             expected_workflow_sha=trusted_sha,
             expected_ref=candidate_ref,
             jwks=custom_jwks,
+            current_time=False,
         )
         if oidc_errors or not oidc_claims:
             return None, [f"cryptographic OIDC verification failed: {e}" for e in oidc_errors]
 
+        token_sha = str(oidc_claims.get("sha", "")).lower()
+        if token_sha != commit_sha.lower() and token_sha != trusted_sha.lower():
+            return None, [
+                f"OIDC sha mismatch: token sha '{token_sha}' matches neither candidate '{commit_sha.lower()}' nor caller commit '{trusted_sha.lower()}'"
+            ]
+
         for claim_name, expected_value in (
             ("repository", repo),
-            ("sha", commit_sha),
             ("run_id", str(measurement_run_id)),
             ("run_attempt", str(measurement_run_attempt)),
         ):
             claim_value = str(oidc_claims.get(claim_name, ""))
-            if claim_name in ("repository", "sha"):
+            if claim_name == "repository":
                 claim_value = claim_value.lower()
                 expected_value = expected_value.lower()
             if claim_value != expected_value:

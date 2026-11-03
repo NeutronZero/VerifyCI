@@ -90,7 +90,8 @@ def grade_case_result(
         errors.append(f"{cid}: defect findings {cand_findings} != expected {exp_findings}")
 
     # False blocking invariant: clean control cases (expected != FAIL) must never return FAIL
-    if exp_outcome != "FAIL" and cand_outcome == "FAIL":
+    is_false_blocking = (exp_outcome != "FAIL" and cand_outcome == "FAIL")
+    if is_false_blocking:
         errors.append(f"{cid}: false blocking failure on non-defective control case")
 
     # Strict redaction check: findings message and subject must not leak raw secrets
@@ -106,9 +107,11 @@ def grade_case_result(
         "case_id": cid,
         "matched": len(errors) == 0,
         "cand_outcome": cand_outcome,
+        "exp_outcome": exp_outcome,
         "cand_findings": cand_findings,
         "exp_findings": exp_findings,
         "strict_redaction": strict_redaction,
+        "false_blocking": is_false_blocking,
     }
     return len(errors) == 0, errors, case_metrics
 
@@ -119,9 +122,12 @@ def aggregate_benchmark_metrics(case_results: list[dict[str, Any]]) -> dict[str,
     confusion = {d: {"TP": 0, "FP": 0, "FN": 0, "TN": 0} for d in defects}
 
     total_cases = len(case_results)
-    matched_cases = sum(1 for c in case_results if c["matched"])
+    matched_cases = sum(1 for c in case_results if c.get("matched", False))
     strict_redaction_all = all(c.get("strict_redaction", True) for c in case_results)
-    zero_false_blocking = not any(c.get("false_blocking", False) for c in case_results)
+    zero_false_blocking = not any(
+        c.get("false_blocking", False) or (c.get("exp_outcome") != "FAIL" and c.get("cand_outcome") == "FAIL")
+        for c in case_results
+    )
 
     for c in case_results:
         cand_set = set(c["cand_findings"])
@@ -180,7 +186,8 @@ def generate_held_out_scenarios(
     rng = random.Random(seed_bytes)
     scenarios: list[dict[str, Any]] = []
 
-    # Deterministically permute/mutate variable names and whitespace without altering semantics
+    var_targets = ["temp_var", "result", "payload", "token", "item", "secret_value", "data"]
+
     for i in range(count):
         source_case = rng.choice(base_cases)
         mutated_case = {
@@ -190,11 +197,21 @@ def generate_held_out_scenarios(
             "policy": dict(source_case.get("policy", {})),
             "expected": dict(source_case["expected"]),
         }
-        # Variable name mutation on head files
         suffix = f"_{rng.randint(1000, 9999)}"
         new_head: dict[str, str] = {}
         for fname, content in mutated_case["head_files"].items():
-            new_head[fname] = content.replace("temp_var", f"temp_var{suffix}")
+            mod_content = content
+            # Metamorphic mutation 1: variable identifier renaming
+            for v in var_targets:
+                if v in mod_content and f"def {v}" not in mod_content:
+                    mod_content = mod_content.replace(v, f"{v}{suffix}")
+            # Metamorphic mutation 2: benign comments & docstrings
+            comment_marker = f"# verifyci-metamorphic: epoch={epoch} idx={i} salt={rng.randint(100, 999)}\n"
+            mod_content = comment_marker + mod_content
+            # Metamorphic mutation 3: inert helper function insertion
+            inert_fn = f"\ndef _inert_helper_{suffix}():\n    return {rng.randint(1, 100)}\n"
+            mod_content += inert_fn
+            new_head[fname] = mod_content
         mutated_case["head_files"] = new_head
         scenarios.append(mutated_case)
 

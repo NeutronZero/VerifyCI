@@ -100,6 +100,41 @@ def verify_active_container_security(cid: str) -> tuple[bool, str | None]:
         if not ("ALL" in cap_drop or "all" in cap_drop):
             return False, f"capabilities not fully dropped: {cap_drop}"
 
+        # Resource limits verification
+        mem = cfg.get("Memory", 0)
+        if mem > 0 and mem > 2 * 1024 * 1024 * 1024:
+            return False, f"memory limit exceeds 2GB maximum: {mem}"
+
+        pids = cfg.get("PidsLimit", 0)
+        if pids > 0 and pids > 256:
+            return False, f"pids limit exceeds 256 maximum: {pids}"
+
+        # Logging configuration verification
+        log_cfg = cfg.get("LogConfig", {})
+        log_type = log_cfg.get("Type", "")
+        if log_type and log_type not in ("json-file", "local", "none"):
+            return False, f"untrusted logging driver: {log_type}"
+
+        # Verify mounts via separate inspect query
+        m_proc = subprocess.run(
+            ["docker", "inspect", cid, "--format", "{{json .Mounts}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if m_proc.returncode == 0 and m_proc.stdout.strip():
+            try:
+                mounts = json.loads(m_proc.stdout)
+                for m in mounts:
+                    dest = m.get("Destination", "")
+                    rw = m.get("RW", True)
+                    # Candidate and repo mounts MUST be read-only
+                    if dest in ("/candidate", "/repo") and rw:
+                        return False, f"mount {dest} is mounted read-write instead of read-only"
+            except Exception:
+                pass
+
         return True, None
     except Exception as exc:
         return False, f"failed to inspect container security profiles: {exc}"

@@ -19,7 +19,9 @@ jobs:
     environment: measurement-authority
     if: >-
       github.repository == 'NeutronZero/VerifyCI' &&
-      github.ref == 'refs/heads/release-authority'
+      github.workflow_sha == vars.VERIFYCI_RELEASE_CALLER_SHA &&
+      github.ref == 'refs/heads/release-authority' &&
+      github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
       packages: read
@@ -106,7 +108,9 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       github.repository == 'NeutronZero/VerifyCI' &&
-      github.ref == 'refs/heads/release-authority'
+      github.workflow_sha == vars.VERIFYCI_RELEASE_CALLER_SHA &&
+      github.ref == 'refs/heads/release-authority' &&
+      github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
       id-token: write
@@ -149,13 +153,26 @@ jobs:
           uv run --no-sync python scripts/generate_trusted_attestation.py \
             --measurements evidence/release/measurements.json \
             --output evidence/release/measurement_attestation.json \
-            --candidate-sha "${{ inputs.candidate_sha }}"
+            --candidate-sha "${{ inputs.candidate_sha }}" \
+            --measurement-run-id "${{ github.run_id }}" \
+            --measurement-run-attempt "${{ github.run_attempt }}"
 
       - name: Upload Release Attestation Artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-attestation
           path: evidence/release/measurement_attestation.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload Complete Measurement Artifact Bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: measurement-artifact
+          path: |
+            evidence/release/measurements.json
+            evidence/release/measurement_attestation.json
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
