@@ -82,7 +82,7 @@ jobs:
           set -euo pipefail
           cd trusted-authority
           mkdir -p evidence/release
-          uv run --no-sync python scripts/validate_release.py \
+          uv run --no-sync python -m verifyci_release_trust.supervisor \
             --measure-only \
             --candidate-root ../candidate-src \
             --trusted-root . \

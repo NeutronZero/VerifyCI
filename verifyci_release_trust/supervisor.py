@@ -279,3 +279,52 @@ def run_supervisor_measurement_pipeline(
         pass
 
     return measurements_record, errors
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(description="Authoritative VerifyCI release measurement supervisor")
+    parser.add_argument("--measure-only", action="store_true", help="Execute measurement pipeline and emit measurements.json")
+    parser.add_argument("--candidate-root", type=Path, default=Path.cwd(), help="Path to candidate repository checkout")
+    parser.add_argument("--trusted-root", type=Path, default=Path.cwd(), help="Path to trusted authority root")
+    parser.add_argument("--output-measurements", type=Path, default=Path("evidence/release/measurements.json"), help="Path to write measurements.json")
+    parser.add_argument("--candidate-sha", default=None, help="Explicit 40-char candidate commit SHA")
+    parser.add_argument("--worker-image", default="sha256:0000000000000000000000000000000000000000000000000000000000000000", help="OCI image digest")
+    parser.add_argument("--sandbox-mode", choices=("docker", "subprocess-isolated"), default="docker", help="Worker sandbox execution mode")
+
+    args = parser.parse_args(argv)
+
+    cand_sha = args.candidate_sha or os.environ.get("GITHUB_SHA")
+    if not cand_sha:
+        proc = subprocess.run(["git", "-C", str(args.candidate_root), "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+        cand_sha = proc.stdout.strip() if proc.returncode == 0 else "0" * 40
+
+    seed = os.environ.get("VERIFYCI_HELD_OUT_SEED")
+
+    record, errors = run_supervisor_measurement_pipeline(
+        args.candidate_root.resolve(),
+        args.trusted_root.resolve(),
+        args.output_measurements,
+        cand_sha,
+        worker_image_digest=args.worker_image,
+        sandbox_mode=args.sandbox_mode,
+        held_out_seed=seed,
+    )
+
+    if errors or not record:
+        sys.stderr.write(f"Measurement failed with errors: {errors}\n")
+        return 1
+
+    report = {
+        "status": record.get("verdict"),
+        "measurements_file": str(args.output_measurements.as_posix()),
+        "candidate_sha": cand_sha,
+        "candidate_fingerprint": record.get("candidate_implementation_fingerprint"),
+        "benchmark_cases": record.get("benchmark", {}).get("cases_evaluated"),
+    }
+    sys.stdout.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    return 0 if record.get("verdict") == "PASS" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
