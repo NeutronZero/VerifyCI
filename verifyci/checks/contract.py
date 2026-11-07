@@ -399,6 +399,13 @@ def run(context: CheckContext) -> CheckResult:
             for k in simple_keys:
                 head_calls_by_simple[k].append(tup)
 
+    if len(all_head_calls) > context.budget.max_references:
+        return budget_exhausted_result(
+            context,
+            "contract",
+            f"max_references limit exceeded ({len(all_head_calls)} > {context.budget.max_references})",
+        )
+
     findings = []
     gaps = unsupported_scope_gaps(context, "contract")
     relevant = False

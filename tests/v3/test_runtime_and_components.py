@@ -327,3 +327,127 @@ def test_entity_to_dict_memoization():
     assert d1 == d2
     assert d1 is not d2  # defensive copy prevents external mutation from polluting cache
 
+
+def test_semantic_solver_unknown_fail_closed():
+    from verifyci.checks import semantic
+    from verifyci.checks.base import CheckContext
+    from verifyci.contracts.model import DiffEntry, Outcome
+    from verifyci.gate.policy import parse_policy_bytes
+    from verifyci.runtime.budget import WorkBudget
+    from verifyci.scope.entities import build_changed_scope
+
+    # Policy protecting effect 'dangerous_call' in mod.py
+    policy_bytes = b"""
+    [protected_guards.rule1]
+    paths = ["mod.py"]
+    effects = ["dangerous_call"]
+    reason = "protect dangerous call"
+    """
+    base_src = "def foo():\n    if role == 'admin':\n        dangerous_call()\n"
+    head_src = "def foo():\n    dangerous_call()\n"
+    entry = DiffEntry(
+        status="M",
+        base_path="mod.py",
+        head_path="mod.py",
+        base_blob="1" * 40,
+        head_blob="2" * 40,
+        base_mode="100644",
+        head_mode="100644",
+        base_source=base_src,
+        head_source=head_src,
+    )
+    scope = build_changed_scope([entry])
+    # Set solver_rlimit=1 to force Z3 to return unknown / timeout
+    budget = WorkBudget(solver_rlimit=1)
+    ctx = CheckContext(
+        git=None,
+        policy=parse_policy_bytes(policy_bytes),
+        entries=(entry,),
+        scope=scope,
+        as_of_date="2026-10-22",
+        object_format="sha1",
+        target_base_commit="b" * 40,
+        merge_base_commit="m" * 40,
+        head_commit="h" * 40,
+        toolchain_fingerprint="sha256:" + "0" * 64,
+        budget=budget,
+    )
+    res = semantic.run(ctx)
+    assert res.outcome == Outcome.INCONCLUSIVE
+    assert "solver_unknown" in res.reason_codes
+    assert any(g.reason_code == "solver_unknown" for g in res.coverage_gaps)
+
+
+def test_typescript_budget_limits():
+    from verifyci.scope.entities import analyze_typescript
+    from verifyci.runtime.budget import WorkBudget
+
+    code = "function test(): void {\n  const x = 1 + 2;\n  console.log(x);\n}\n"
+    # File bytes limit
+    f_bytes = analyze_typescript("test.ts", code, budget=WorkBudget(max_file_bytes=10))
+    assert not f_bytes.supported
+    assert "parse_resource_limit" in f_bytes.parse_error
+
+    # AST nodes limit
+    f_nodes = analyze_typescript("test.ts", code, budget=WorkBudget(max_ast_nodes=3))
+    assert not f_nodes.supported
+    assert "parse_resource_limit" in f_nodes.parse_error
+
+
+def test_build_changed_scope_honors_budget():
+    from verifyci.contracts.model import DiffEntry
+    from verifyci.runtime.budget import WorkBudget
+    from verifyci.scope.entities import build_changed_scope
+
+    entry = DiffEntry(
+        status="M",
+        base_path="large.py",
+        head_path="large.py",
+        base_blob="1" * 40,
+        head_blob="2" * 40,
+        base_mode="100644",
+        head_mode="100644",
+        base_source="a = 1\n",
+        head_source="a = 1\n",
+    )
+    scope = build_changed_scope([entry], budget=WorkBudget(max_file_bytes=2))
+    assert not scope.head_facts["large.py"].supported
+    assert "parse_resource_limit" in scope.head_facts["large.py"].parse_error
+
+
+def test_contract_max_references_exhaustion():
+    import dataclasses
+    from verifyci.checks import contract
+    from verifyci.checks.base import CheckContext
+    from verifyci.contracts.model import Outcome
+    from verifyci.gate.policy import parse_policy_bytes
+    from verifyci.runtime.budget import WorkBudget
+    from verifyci.scope.entities import build_changed_scope, SourceFacts, CallSite
+
+    facts = SourceFacts(
+        path="foo.py",
+        language="python",
+        supported=True,
+        calls=tuple(CallSite(callee=f"func_{i}", line=i, positional=0, keywords=()) for i in range(20)),
+    )
+    scope = build_changed_scope([])
+    # Inject 20 calls into head_facts using dataclasses.replace
+    scope_with_calls = dataclasses.replace(scope, head_facts={"foo.py": facts})
+    ctx = CheckContext(
+        git=None,
+        policy=parse_policy_bytes(b""),
+        entries=(),
+        scope=scope_with_calls,
+        as_of_date="2026-10-22",
+        object_format="sha1",
+        target_base_commit="b" * 40,
+        merge_base_commit="m" * 40,
+        head_commit="h" * 40,
+        toolchain_fingerprint="sha256:" + "0" * 64,
+        budget=WorkBudget(max_references=10),
+    )
+    res = contract.run(ctx)
+    assert res.outcome == Outcome.INCONCLUSIVE
+    assert "budget_exhausted" in res.reason_codes
+
+

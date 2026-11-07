@@ -109,21 +109,25 @@ def git_blob_id(data: bytes) -> str:
 _PY_LANG_OBJECT: Any = None
 _PY_LANG_INITIALIZED: bool = False
 _PY_LOCAL = threading.local()
+_LANG_LOCK = threading.Lock()
 
 
 def _py_language() -> Any:
     global _PY_LANG_OBJECT, _PY_LANG_INITIALIZED
     if not _PY_LANG_INITIALIZED:
-        _PY_LANG_INITIALIZED = True
-        try:
-            import tree_sitter_python as tp
-            from tree_sitter import Language
+        with _LANG_LOCK:
+            if not _PY_LANG_INITIALIZED:
+                try:
+                    import tree_sitter_python as tp
+                    from tree_sitter import Language
 
-            fn: Callable[[], Any] | None = getattr(tp, "language", None) or getattr(tp, "language_python", None)
-            if fn is not None:
-                _PY_LANG_OBJECT = Language(fn())  # ty: ignore[deprecated]
-        except Exception:
-            _PY_LANG_OBJECT = None
+                    fn: Callable[[], Any] | None = getattr(tp, "language", None) or getattr(tp, "language_python", None)
+                    if fn is not None:
+                        _PY_LANG_OBJECT = Language(fn())  # ty: ignore[deprecated]
+                except Exception:
+                    _PY_LANG_OBJECT = None
+                finally:
+                    _PY_LANG_INITIALIZED = True
     if _PY_LANG_OBJECT is None:
         return None
     parser = getattr(_PY_LOCAL, "parser", None)
@@ -504,7 +508,8 @@ def _python_entities(
                 first_dec = node.decorator_list[0]
                 s_line = first_dec.lineno
                 line_offset = line_byte_offsets[s_line - 1] if s_line - 1 < len(line_byte_offsets) else 0
-                at_pos = source_bytes.find(b"@", line_offset)
+                next_line_offset = line_byte_offsets[s_line] if s_line < len(line_byte_offsets) else len(source_bytes)
+                at_pos = source_bytes.find(b"@", line_offset, next_line_offset)
                 s_col = at_pos - line_offset if at_pos != -1 else getattr(first_dec, "col_offset", 0)
                 s_byte = at_pos if at_pos != -1 else _byte_offset(s_line, s_col)
             else:
@@ -608,33 +613,35 @@ _TS_LOCAL = threading.local()
 
 def _ts_language(language: str) -> Any:
     if language not in _TS_LANG_OBJECTS:
-        try:
-            if language == "typescript":
-                import tree_sitter_typescript as ts
+        with _LANG_LOCK:
+            if language not in _TS_LANG_OBJECTS:
+                try:
+                    if language == "typescript":
+                        import tree_sitter_typescript as ts
 
-                fn: Callable[[], Any] | None = getattr(ts, "language_typescript", None) or getattr(ts, "language", None)
-                if fn is None:
-                    raise RuntimeError("tree-sitter typescript language unavailable")
-                capsule = fn()
-            elif language == "tsx":
-                import tree_sitter_typescript as ts
+                        fn: Callable[[], Any] | None = getattr(ts, "language_typescript", None) or getattr(ts, "language", None)
+                        if fn is None:
+                            raise RuntimeError("tree-sitter typescript language unavailable")
+                        capsule = fn()
+                    elif language == "tsx":
+                        import tree_sitter_typescript as ts
 
-                fn: Callable[[], Any] | None = getattr(ts, "language_tsx", None) or getattr(ts, "language", None)
-                if fn is None:
-                    raise RuntimeError("tree-sitter typescript language unavailable")
-                capsule = fn()
-            else:
-                import tree_sitter_javascript as js
+                        fn: Callable[[], Any] | None = getattr(ts, "language_tsx", None) or getattr(ts, "language", None)
+                        if fn is None:
+                            raise RuntimeError("tree-sitter typescript language unavailable")
+                        capsule = fn()
+                    else:
+                        import tree_sitter_javascript as js
 
-                fn: Callable[[], Any] | None = getattr(js, "language", None)
-                if fn is None:
-                    raise RuntimeError("tree-sitter javascript language unavailable")
-                capsule = fn()
-            from tree_sitter import Language
+                        fn: Callable[[], Any] | None = getattr(js, "language", None)
+                        if fn is None:
+                            raise RuntimeError("tree-sitter javascript language unavailable")
+                        capsule = fn()
+                    from tree_sitter import Language
 
-            _TS_LANG_OBJECTS[language] = Language(capsule)  # ty: ignore[deprecated]
-        except Exception:
-            _TS_LANG_OBJECTS[language] = None
+                    _TS_LANG_OBJECTS[language] = Language(capsule)  # ty: ignore[deprecated]
+                except Exception:
+                    _TS_LANG_OBJECTS[language] = None
 
     lang_obj = _TS_LANG_OBJECTS.get(language)
     if lang_obj is None:
@@ -692,17 +699,22 @@ def _ts_signature(node: Any) -> tuple[tuple[str, str, bool], ...]:
     return tuple(out)
 
 
-def _ts_entities(path: str, source: str, blob_hash: str = "") -> tuple[Entity, ...] | None:
+def _ts_entities(
+    path: str, source: str, blob_hash: str = "", tree: Any = None
+) -> tuple[Entity, ...] | None:
     suffix = path.rsplit(".", 1)[-1].lower()
     language = "tsx" if suffix == "tsx" else ("typescript" if suffix in ("ts", "mts", "cts") else "javascript")
-    parser = _ts_language(language)
-    if parser is None:
-        return None
-    source_bytes = source.encode("utf-8")
-    try:
-        tree = parser.parse(source_bytes)
-    except Exception:
-        return None
+    if tree is None:
+        parser = _ts_language(language)
+        if parser is None:
+            return None
+        source_bytes = source.encode("utf-8")
+        try:
+            tree = parser.parse(source_bytes)
+        except Exception:
+            return None
+    else:
+        source_bytes = source.encode("utf-8")
     module = normalize_repo_path(path).rsplit(".", 1)[0]
     if blob_hash:
         blob_id = blob_hash.split(":", 1)[1] if ":" in blob_hash else blob_hash
@@ -768,12 +780,57 @@ def _ts_entities(path: str, source: str, blob_hash: str = "") -> tuple[Entity, .
     return tuple(entities)
 
 
-def analyze_typescript(path: str, source: str, blob_hash: str = "") -> SourceFacts:
-    entities = _ts_entities(path, source, blob_hash=blob_hash)
+def analyze_typescript(
+    path: str,
+    source: str,
+    blob_hash: str = "",
+    budget: WorkBudget = DEFAULT_BUDGET,
+) -> SourceFacts:
+    suffix = path.rsplit(".", 1)[-1].lower()
+    language = "tsx" if suffix == "tsx" else ("typescript" if suffix in ("ts", "mts", "cts") else "javascript")
+    parser = _ts_language(language)
+    if parser is None:
+        return SourceFacts(
+            path=path,
+            language=language,
+            supported=False,
+            parse_error="tree-sitter TypeScript/JavaScript grammar unavailable",
+        )
+    source_bytes = source.encode("utf-8")
+    if len(source_bytes) > budget.max_file_bytes:
+        return SourceFacts(
+            path=path,
+            language=language,
+            supported=False,
+            parse_error=f"parse_resource_limit: file size {len(source_bytes)} exceeds max_file_bytes {budget.max_file_bytes}",
+        )
+    try:
+        tree = parser.parse(source_bytes)
+    except Exception as exc:
+        return SourceFacts(
+            path=path,
+            language=language,
+            supported=False,
+            parse_error=f"line 1: {exc}",
+        )
+    node_count = 0
+    stack = [tree.root_node]
+    while stack:
+        cur = stack.pop()
+        node_count += 1
+        stack.extend(cur.children)
+    if node_count > budget.max_ast_nodes:
+        return SourceFacts(
+            path=path,
+            language=language,
+            supported=False,
+            parse_error=f"parse_resource_limit: AST node count {node_count} exceeds max_ast_nodes {budget.max_ast_nodes}",
+        )
+    entities = _ts_entities(path, source, blob_hash=blob_hash, tree=tree)
     if entities is None:
         return SourceFacts(
             path=path,
-            language="typescript",
+            language=language,
             supported=False,
             parse_error="tree-sitter TypeScript/JavaScript grammar unavailable",
         )
@@ -781,10 +838,6 @@ def analyze_typescript(path: str, source: str, blob_hash: str = "") -> SourceFac
     imports: list[ImportFact] = []
     loads: set[str] = set()
     dynamic = False
-    suffix = path.rsplit(".", 1)[-1].lower()
-    language = "tsx" if suffix == "tsx" else ("typescript" if suffix in ("ts", "mts", "cts") else "javascript")
-    parser = _ts_language(language)
-    tree = parser.parse(source.encode("utf-8"))
     def walk(node: Any) -> None:
         nonlocal dynamic
         if node.type == "call_expression":
@@ -893,7 +946,9 @@ def _analyze_source_uncached(
             path, source, source_roots, blob_hash=blob_hash, budget=budget
         )
     if suffix in ("ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"):
-        return analyze_typescript(path, source, blob_hash=blob_hash)
+        return analyze_typescript(
+            path, source, blob_hash=blob_hash, budget=budget
+        )
     if suffix in _TEXT_SUFFIXES or "/" not in path and "." not in path:
         return SourceFacts(path=path, language="text", supported=True)
     return SourceFacts(
@@ -1006,7 +1061,9 @@ def analyze_source(
         return _facts_from_cache(cached)
     except (KeyError, TypeError, ValueError):
         # A malformed local entry is not evidence. Rebuild from the pinned blob.
-        facts = _analyze_source_uncached(path, source, source_roots, blob_hash=blob_hash)
+        facts = _analyze_source_uncached(
+            path, source, source_roots, blob_hash=blob_hash, budget=budget
+        )
         fact_provider.cache_store.put("symbol_facts", components, _facts_to_cache(facts))
         return facts
 
@@ -1207,6 +1264,7 @@ def build_changed_scope(
     fact_provider=None,
     toolchain_fingerprint: str = "",
     object_format: str = "",
+    budget: WorkBudget = DEFAULT_BUDGET,
 ) -> ChangedScope:
     base_facts: dict[str, SourceFacts] = {}
     head_facts: dict[str, SourceFacts] = {}
@@ -1227,6 +1285,7 @@ def build_changed_scope(
                 fact_provider=fact_provider,
                 toolchain_fingerprint=toolchain_fingerprint,
                 blob_hash=f"{object_format}:{entry.base_blob}" if object_format and entry.base_blob else "",
+                budget=budget,
             )
             base_facts[entry.base_path] = bf
             base_entities.update(e.qname for e in bf.entities)
@@ -1238,6 +1297,7 @@ def build_changed_scope(
                 fact_provider=fact_provider,
                 toolchain_fingerprint=toolchain_fingerprint,
                 blob_hash=f"{object_format}:{entry.head_blob}" if object_format and entry.head_blob else "",
+                budget=budget,
             )
             head_facts[entry.head_path] = hf
             head_entities.update(e.qname for e in hf.entities)

@@ -244,21 +244,22 @@ class GitRepo:
             "--batch",
         ]
         try:
-            proc = subprocess.Popen(
+            with subprocess.Popen(
                 command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 bufsize=-1,
                 env=self.env,
-            )
-            stdout, stderr = proc.communicate(input_data)
+            ) as proc:
+                stdout, stderr = proc.communicate(input_data)
+                returncode = proc.returncode
         except FileNotFoundError as exc:
             raise GitError("internal_fault", "git executable was not found") from exc
         except Exception as exc:
             raise GitError("internal_fault", f"cat-file --batch failed: {exc}") from exc
 
-        if proc.returncode != 0 and not stdout:
+        if returncode != 0 and not stdout:
             text = stderr.decode("utf-8", "replace").strip()
             raise GitError("missing_git_object", text or "git cat-file --batch failed")
 

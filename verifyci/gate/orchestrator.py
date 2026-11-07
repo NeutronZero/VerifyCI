@@ -764,6 +764,7 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             fact_provider=fact_provider,
             toolchain_fingerprint=toolchain,
             object_format=object_format,
+            budget=request.budget,
         )
         cold = policy.gate.get("cold_deadline_seconds")
         deadline = (

@@ -1154,7 +1154,10 @@ def _analyze_typescript_guard(
         solver = z3.Solver()
         solver.set("rlimit", solver_rlimit)
         solver.add(delta)
-        if solver.check() == z3.sat:
+        solver_res = solver.check()
+        if solver_res == z3.unknown:
+            raise BudgetExhaustedError(f"solver_unknown: {solver.reason_unknown()}")
+        if solver_res == z3.sat:
             z3_model = solver.model()
             model_values: dict[str, Any] = {}
             for d in z3_model.decls():
@@ -1383,12 +1386,35 @@ def run(context: CheckContext) -> CheckResult:
                     continue
                 for eff in rule.get("effects", ()):
                     if eff in b_src and eff in h_src:
-                        analysis = _analyze_typescript_guard(
-                            b_src,
-                            h_src,
-                            eff,
-                            solver_rlimit=context.budget.solver_rlimit,
-                        )
+                        try:
+                            analysis = _analyze_typescript_guard(
+                                b_src,
+                                h_src,
+                                eff,
+                                solver_rlimit=context.budget.solver_rlimit,
+                            )
+                        except BudgetExhaustedError as exc_budget:
+                            return make_result(
+                                context=context,
+                                check_id="semantic",
+                                outcome=Outcome.INCONCLUSIVE,
+                                coverage=Coverage.PARTIAL,
+                                evaluated_scope={"path": path},
+                                scope_enumeration={"complete": True},
+                                candidate_discovery={"complete": True},
+                                applicability_evidence={"solver_status": "unknown", "detail": str(exc_budget)},
+                                reason_codes=("solver_unknown",),
+                                coverage_gaps=[
+                                    gap(
+                                        "solver_unknown",
+                                        {
+                                            "path": path,
+                                            "detail": str(exc_budget),
+                                            "reason_code": "solver_unknown",
+                                        },
+                                    )
+                                ],
+                            )
                         if analysis is not None:
                             b_fn_name, h_fn_name, phi_base, phi_head, model_values, line_num, guard_desc = analysis
                             fn_name = h_fn_name or b_fn_name
@@ -1462,6 +1488,7 @@ def run(context: CheckContext) -> CheckResult:
                             findings.append(finding)
 
     # 2. Python files
+    path_counter: list[int] = [0]
     for entry in code_entries:
         if context.deadline is not None and time.monotonic() > context.deadline:
             return budget_exhausted_result(context, "semantic", "cold_deadline_seconds exceeded")
@@ -1503,7 +1530,32 @@ def run(context: CheckContext) -> CheckResult:
                 diff_pairs = [bv != hv for bv, hv in zip(b_vars, h_vars) if bv is not hv]
                 delta_bind = z3.Or(*diff_pairs) if diff_pairs else z3.BoolVal(False)
                 solver.add(delta_bind)
-                if solver.check() == z3.sat:
+                solver_res = solver.check()
+                if solver_res == z3.unknown:
+                    return make_result(
+                        context=context,
+                        check_id="semantic",
+                        outcome=Outcome.INCONCLUSIVE,
+                        coverage=Coverage.PARTIAL,
+                        evaluated_scope={"path": path, "symbol": f"{mod_name}:{fn_name}", "line": h_returns[0].lineno},
+                        scope_enumeration={"complete": True},
+                        candidate_discovery={"complete": True},
+                        applicability_evidence={"solver_status": "unknown", "reason": solver.reason_unknown()},
+                        reason_codes=("solver_unknown",),
+                        coverage_gaps=[
+                            gap(
+                                "solver_unknown",
+                                {
+                                    "path": path,
+                                    "line": h_returns[0].lineno,
+                                    "symbol": f"{mod_name}:{fn_name}",
+                                    "reason": solver.reason_unknown(),
+                                    "reason_code": "solver_unknown",
+                                },
+                            )
+                        ],
+                    )
+                if solver_res == z3.sat:
                     z3_model = solver.model()
                     model = _extract_model_dict(z3_model)
                     fn_node = h_funcs.get(fn_name)
@@ -1619,7 +1671,32 @@ def run(context: CheckContext) -> CheckResult:
                             diff_pairs = [bv != hv for bv, hv in zip(b_vars, h_vars) if bv is not hv]
                             delta_bind = z3.Or(*diff_pairs) if diff_pairs else z3.BoolVal(False)
                             solver.add(delta_bind)
-                            if solver.check() == z3.sat:
+                            solver_res = solver.check()
+                            if solver_res == z3.unknown:
+                                return make_result(
+                                    context=context,
+                                    check_id="semantic",
+                                    outcome=Outcome.INCONCLUSIVE,
+                                    coverage=Coverage.PARTIAL,
+                                    evaluated_scope={"path": path, "symbol": f"{mod_name}:{caller_fn}", "line": hc.lineno},
+                                    scope_enumeration={"complete": True},
+                                    candidate_discovery={"complete": True},
+                                    applicability_evidence={"solver_status": "unknown", "reason": solver.reason_unknown()},
+                                    reason_codes=("solver_unknown",),
+                                    coverage_gaps=[
+                                        gap(
+                                            "solver_unknown",
+                                            {
+                                                "path": path,
+                                                "line": hc.lineno,
+                                                "symbol": f"{mod_name}:{caller_fn}",
+                                                "reason": solver.reason_unknown(),
+                                                "reason_code": "solver_unknown",
+                                            },
+                                        )
+                                    ],
+                                )
+                            if solver_res == z3.sat:
                                 z3_model = solver.model()
                                 model = _extract_model_dict(z3_model)
                                 fn_node = h_funcs.get(caller_fn)
@@ -1693,7 +1770,6 @@ def run(context: CheckContext) -> CheckResult:
 
         # Cache target sites across Category 3 & 4 for identical functions in this file entry
         fn_sites_cache: dict[str, tuple[list[TargetSite], list[TargetSite]]] = {}
-        path_counter: list[int] = [0]
 
         def _get_target_sites(
             b_fn_node: ast.FunctionDef,
@@ -1780,7 +1856,31 @@ def run(context: CheckContext) -> CheckResult:
                         solver = z3.Solver()
                         solver.set("rlimit", context.budget.solver_rlimit)
                         solver.add(delta_err)
-                        if solver.check() == z3.sat:
+                        solver_res = solver.check()
+                        if solver_res == z3.unknown:
+                            return make_result(
+                                context=context,
+                                check_id="semantic",
+                                outcome=Outcome.INCONCLUSIVE,
+                                coverage=Coverage.PARTIAL,
+                                evaluated_scope={"path": path, "symbol": f"{mod_name}:{h_fn.name}"},
+                                scope_enumeration={"complete": True},
+                                candidate_discovery={"complete": True},
+                                applicability_evidence={"solver_status": "unknown", "reason": solver.reason_unknown()},
+                                reason_codes=("solver_unknown",),
+                                coverage_gaps=[
+                                    gap(
+                                        "solver_unknown",
+                                        {
+                                            "path": path,
+                                            "symbol": f"{mod_name}:{h_fn.name}",
+                                            "reason": solver.reason_unknown(),
+                                            "reason_code": "solver_unknown",
+                                        },
+                                    )
+                                ],
+                            )
+                        if solver_res == z3.sat:
                             branch_line = h_fn.lineno
                             for stmt in h_fn.body:
                                 if isinstance(stmt, ast.If):
@@ -1910,6 +2010,8 @@ def run(context: CheckContext) -> CheckResult:
                     if not b_eff_sites or not h_eff_sites:
                         continue
 
+                    symbol = f"{mod_name}:{h_fn.name}"
+
                     phi_base_eff = z3.Or(*[s.condition for s in b_eff_sites]) if len(b_eff_sites) > 1 else b_eff_sites[0].condition
                     phi_head_eff = z3.Or(*[s.condition for s in h_eff_sites]) if len(h_eff_sites) > 1 else h_eff_sites[0].condition
 
@@ -1924,6 +2026,30 @@ def run(context: CheckContext) -> CheckResult:
                     if solver_res == z3.unsat:
                         # Proven safe (strengthened guard, dead code removed, equivalent refactor)
                         continue
+
+                    if solver_res == z3.unknown:
+                        return make_result(
+                            context=context,
+                            check_id="semantic",
+                            outcome=Outcome.INCONCLUSIVE,
+                            coverage=Coverage.PARTIAL,
+                            evaluated_scope={"path": path, "symbol": symbol},
+                            scope_enumeration={"complete": True},
+                            candidate_discovery={"complete": True},
+                            applicability_evidence={"solver_status": "unknown", "reason": solver.reason_unknown()},
+                            reason_codes=("solver_unknown",),
+                            coverage_gaps=[
+                                gap(
+                                    "solver_unknown",
+                                    {
+                                        "path": path,
+                                        "symbol": symbol,
+                                        "reason": solver.reason_unknown(),
+                                        "reason_code": "solver_unknown",
+                                    },
+                                )
+                            ],
+                        )
 
                     if solver_res == z3.sat:
                         z3_model = solver.model()
