@@ -14,14 +14,17 @@ from pathlib import Path
 from typing import Any
 
 
+from verifyci.evidence.canonical import _serialize_float
+
+
 def canonical_jcs_bytes(obj: Any) -> bytes:
     """Serialize object to deterministic canonical JSON according to RFC 8785 (JCS)."""
-    if isinstance(obj, (int, bool)) or obj is None:
+    if isinstance(obj, bool) or obj is None:
         return json.dumps(obj, separators=(",", ":")).encode("utf-8")
+    elif isinstance(obj, int):
+        return str(obj).encode("ascii")
     elif isinstance(obj, float):
-        if not (-1e15 < obj < 1e15) or obj != obj:
-            raise ValueError(f"unsupported float for RFC 8785 canonicalization: {obj}")
-        return json.dumps(obj, separators=(",", ":")).encode("utf-8")
+        return _serialize_float(obj)
     elif isinstance(obj, decimal.Decimal):
         if not obj.is_finite():
             raise ValueError(f"non-finite Decimal: {obj}")
@@ -32,8 +35,8 @@ def canonical_jcs_bytes(obj: Any) -> bytes:
         # Strict escape rules of JSON
         return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     elif isinstance(obj, dict):
-        # Keys MUST be sorted lexicographically by UTF-16 code units (equivalent to Unicode codepoints for BMP)
-        sorted_keys = sorted(obj.keys())
+        # Keys MUST be sorted lexicographically by UTF-16 code units (RFC 8785 Section 3.2.3)
+        sorted_keys = sorted(obj.keys(), key=lambda k: k.encode("utf-16-be"))
         parts: list[bytes] = []
         for k in sorted_keys:
             key_bytes = json.dumps(k, ensure_ascii=False, separators=(",", ":")).encode("utf-8")

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ast
 import base64
+import collections
+from functools import lru_cache
 import json
 import math
 import re
@@ -87,12 +89,15 @@ def _redact(token: str) -> str:
     return f"{token[:4]}…{token[-2:]} (len={len(token)})"
 
 
+@lru_cache(maxsize=4096)
 def _entropy(value: str) -> float:
     if not value:
         return 0.0
+    length = len(value)
+    counts = collections.Counter(value)
     out = 0.0
-    for count in (value.count(ch) for ch in set(value)):
-        p = count / len(value)
+    for count in counts.values():
+        p = count / length
         out -= p * math.log2(p)
     return out
 
@@ -190,7 +195,41 @@ def _sub_result(
     )
 
 
-def _secret_sub(context: CheckContext) -> CheckResult:
+def _get_lines(entry: Any, cache: dict[int, list[str]] | None) -> list[str]:
+    if cache is not None:
+        lines = cache.get(id(entry))
+        if lines is None:
+            lines = entry.head_source.splitlines() if entry.head_source else []
+            cache[id(entry)] = lines
+        return lines
+    return entry.head_source.splitlines() if entry.head_source else []
+
+
+def _get_ast(entry: Any, cache: dict[int, ast.Module | None] | None) -> ast.Module | None:
+    if cache is not None:
+        if id(entry) in cache:
+            return cache[id(entry)]
+        tree = None
+        if entry.head_source:
+            try:
+                tree = ast.parse(entry.head_source)
+            except SyntaxError:
+                tree = None
+        cache[id(entry)] = tree
+        return tree
+    if entry.head_source:
+        try:
+            return ast.parse(entry.head_source)
+        except SyntaxError:
+            return None
+    return None
+
+
+def _secret_sub(
+    context: CheckContext,
+    lines_cache: dict[int, list[str]] | None = None,
+    ast_cache: dict[int, ast.Module | None] | None = None,
+) -> CheckResult:
     changed = _changed_head_lines(context)
     text_entries = [
         entry for entry in context.entries
@@ -227,8 +266,8 @@ def _secret_sub(context: CheckContext) -> CheckResult:
         assigned_secrets: dict[str, tuple[int, str, str]] = {}
         sink_aliases: dict[str, str] = {}
         if path.endswith(".py"):
-            try:
-                tree = ast.parse(entry.head_source)
+            tree = _get_ast(entry, ast_cache)
+            if tree is not None:
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Import):
                         for name in node.names:
@@ -239,10 +278,9 @@ def _secret_sub(context: CheckContext) -> CheckResult:
                         for name in node.names:
                             target = f"{mod}.{name.name}" if mod else name.name
                             sink_aliases[name.asname or name.name] = target
-            except SyntaxError:
-                pass
 
-        for line_number, line in enumerate(entry.head_source.splitlines(), start=1):
+        entry_lines = _get_lines(entry, lines_cache)
+        for line_number, line in enumerate(entry_lines, start=1):
             if line_number not in line_numbers:
                 continue
             scanned_lines += 1
@@ -403,7 +441,7 @@ def _secret_sub(context: CheckContext) -> CheckResult:
                 for f in findings
                 if f.defect_id == "SEC-SECRET-TO-SINK"
             }
-            for all_line_idx, all_line in enumerate(entry.head_source.splitlines(), start=1):
+            for all_line_idx, all_line in enumerate(entry_lines, start=1):
                 line_sink_match = _SECRET_SINK_RE.search(all_line) or _TAINT_SINK_RE.search(all_line)
                 if not line_sink_match and sink_aliases:
                     for a_name, a_target in sink_aliases.items():
@@ -493,7 +531,11 @@ def _secret_sub(context: CheckContext) -> CheckResult:
     )
 
 
-def _dangerous_sub(context: CheckContext) -> CheckResult:
+def _dangerous_sub(
+    context: CheckContext,
+    lines_cache: dict[int, list[str]] | None = None,
+    ast_cache: dict[int, ast.Module | None] | None = None,
+) -> CheckResult:
     changed = _changed_head_lines(context)
     findings = []
     gaps: list[CoverageGap] = []
@@ -517,10 +559,12 @@ def _dangerous_sub(context: CheckContext) -> CheckResult:
         if not path_changed:
             continue
 
+        entry_lines = _get_lines(entry, lines_cache)
+
         # AST syntax-aware analysis for Python files
         if path.endswith(".py"):
-            try:
-                tree = ast.parse(entry.head_source)
+            tree = _get_ast(entry, ast_cache)
+            if tree is not None:
                 aliases: dict[str, str] = {}
                 calls: list[ast.Call] = []
                 for node in ast.walk(tree):
@@ -648,11 +692,8 @@ def _dangerous_sub(context: CheckContext) -> CheckResult:
                                     remediation="Use a safe alternative or obtain an explicit policy exception.",
                                 )
                             )
-            except SyntaxError:
-                pass
-
         # Also perform line-level regex check for non-python files or non-AST patterns
-        for line_number, line in enumerate(entry.head_source.splitlines(), start=1):
+        for line_number, line in enumerate(entry_lines, start=1):
             if line_number not in path_changed:
                 continue
             if line.lstrip().startswith("#"):
@@ -729,7 +770,10 @@ def _taint_excluded(policy, path: str) -> bool:
     return False
 
 
-def _taint_sub(context: CheckContext) -> CheckResult:
+def _taint_sub(
+    context: CheckContext,
+    lines_cache: dict[int, list[str]] | None = None,
+) -> CheckResult:
     if not context.policy.taint_sources or not context.policy.taint_sinks:
         return _sub_result(
             context,
@@ -758,7 +802,8 @@ def _taint_sub(context: CheckContext) -> CheckResult:
             continue
         if _taint_excluded(context.policy, path):
             continue
-        for line_number, line in enumerate(entry.head_source.splitlines(), start=1):
+        entry_lines = _get_lines(entry, lines_cache)
+        for line_number, line in enumerate(entry_lines, start=1):
             if line_number not in changed.get(path, set()):
                 continue
             has_source = bool(_TAINT_SOURCE_RE.search(line))
@@ -840,7 +885,13 @@ _COVERAGE_ORDER = {Coverage.UNKNOWN: 3, Coverage.PARTIAL: 2, Coverage.COMPLETE: 
 
 
 def run(context: CheckContext) -> CheckResult:
-    subs = [_secret_sub(context), _dangerous_sub(context), _taint_sub(context)]
+    lines_cache: dict[int, list[str]] = {}
+    ast_cache: dict[int, ast.Module | None] = {}
+    subs = [
+        _secret_sub(context, lines_cache=lines_cache, ast_cache=ast_cache),
+        _dangerous_sub(context, lines_cache=lines_cache, ast_cache=ast_cache),
+        _taint_sub(context, lines_cache=lines_cache),
+    ]
     invalid = False
     for sub in subs:
         if sub.validate():

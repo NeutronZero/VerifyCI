@@ -125,6 +125,7 @@ def _dynamic_references(
     entity: Any,
     entries_by_head_path: Mapping[str, Any] | None = None,
     importers_by_symbol: Mapping[tuple[str, str], list[str]] | None = None,
+    lines_by_path: dict[str, list[str]] | None = None,
 ) -> list[dict[str, Any]]:
     simple = _simple_name(entity.qname)
     entity_module = _module_name(entity.file_path)
@@ -160,7 +161,14 @@ def _dynamic_references(
             entry = next((e for e in context.entries if e.head_path == path), None)
         if entry is None or not entry.head_source:
             continue
-        for line_number, line in enumerate(entry.head_source.splitlines(), start=1):
+        if lines_by_path is not None:
+            lines = lines_by_path.get(path)
+            if lines is None:
+                lines = entry.head_source.splitlines()
+                lines_by_path[path] = lines
+        else:
+            lines = entry.head_source.splitlines()
+        for line_number, line in enumerate(lines, start=1):
             if "__all__" in line:
                 continue
             if pattern.search(line):
@@ -210,6 +218,7 @@ def run(context: CheckContext) -> CheckResult:
                 for name in imp.names:
                     importers_by_symbol[(resolved, name)].append(p)
 
+    dynamic_lines_cache: dict[str, list[str]] = {}
     for entity in removed:
         simple = _simple_name(entity.qname)
         refs = _head_references(context, entity, importers_by_symbol=importers_by_symbol)
@@ -218,6 +227,7 @@ def run(context: CheckContext) -> CheckResult:
             entity,
             entries_by_head_path=entries_by_head_path,
             importers_by_symbol=importers_by_symbol,
+            lines_by_path=dynamic_lines_cache,
         )
         facts = context.scope.base_facts.get(entity.file_path)
         is_exported = False
@@ -417,14 +427,14 @@ def run(context: CheckContext) -> CheckResult:
                         if name not in (imp.names or ()):
                             continue
                         cand = _resolve_module(imp.module or "", package_init, getattr(imp, "level", 0))
-                        if cand and any(_module_name(p) == cand for p in context.scope.base_facts):
+                        if cand and cand in base_files_by_module:
                             candidate_modules.add(cand)
                     if not candidate_modules:
                         continue
                     base_matches = [
                         entity
-                        for p in context.scope.base_facts
-                        if _module_name(p) in candidate_modules
+                        for mod in candidate_modules
+                        for p in base_files_by_module.get(mod, ())
                         for entity in context.scope.base_facts[p].entities
                         if _simple_name(entity.qname) == name
                     ]
@@ -468,6 +478,7 @@ def run(context: CheckContext) -> CheckResult:
 
     # Direct calls to a removed symbol with no head definition are also
     # dangling references, including calls to private helpers.
+    removed_by_path_and_simple = {(e.file_path, _simple_name(e.qname)) for e in removed}
     for path, facts in context.scope.head_facts.items():
         if path.endswith("__init__.py"):
             continue
@@ -480,10 +491,7 @@ def run(context: CheckContext) -> CheckResult:
             # Only treat a call as dangling when a removed entity with that
             # name existed in the same file as the call.  A same-named symbol
             # in an unrelated scope does not make the call safe.
-            if not any(
-                _simple_name(entity.qname) == simple and entity.file_path == path
-                for entity in removed
-            ):
+            if (path, simple) not in removed_by_path_and_simple:
                 continue
             if (path, simple) in emitted_dangling:
                 continue

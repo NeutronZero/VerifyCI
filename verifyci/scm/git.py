@@ -41,6 +41,9 @@ class GitRepo:
         self.repo = Path(repo).resolve()
         self._empty_config = os.devnull
         self._blob_cache: dict[str, bytes] = {}
+        self._tree_cache: dict[str, dict[str, tuple[str, str, str, str]]] = {}
+        self._batch_proc: subprocess.Popen[bytes] | None = None
+        self._object_format_cached: str | None = None
         env = os.environ.copy()
         env.update(
             {
@@ -57,6 +60,66 @@ class GitRepo:
             }
         )
         self.env = env
+
+    def close(self) -> None:
+        if self._batch_proc is not None:
+            proc = self._batch_proc
+            self._batch_proc = None
+            try:
+                if proc.stdin:
+                    proc.stdin.close()
+                proc.terminate()
+                proc.wait(timeout=1)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+    def __del__(self) -> None:
+        self.close()
+
+    def __enter__(self) -> GitRepo:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+    def _get_batch_reader(self) -> subprocess.Popen[bytes]:
+        if self._batch_proc is not None and self._batch_proc.poll() is None:
+            return self._batch_proc
+        command = [
+            "git",
+            "-C",
+            str(self.repo),
+            "--no-pager",
+            "-c",
+            "core.quotepath=false",
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.safecrlf=false",
+            "-c",
+            "core.hooksPath=",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            f"core.attributesFile={self._empty_config}",
+            "cat-file",
+            "--batch",
+        ]
+        try:
+            self._batch_proc = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=-1,
+                env=self.env,
+            )
+        except FileNotFoundError as exc:
+            raise GitError("internal_fault", "git executable was not found") from exc
+        return self._batch_proc
 
     # ------------------------------------------------------------------
     # Plumbing
@@ -122,11 +185,14 @@ class GitRepo:
         return result.stdout.decode("ascii", "replace").strip()
 
     def object_format(self) -> str:
+        if self._object_format_cached is not None:
+            return self._object_format_cached
         result = self.run(["rev-parse", "--show-object-format"])
         if result.returncode != 0:
             raise self._classify(result)
         value = result.stdout.decode("ascii", "replace").strip()
-        return value if value in ("sha1", "sha256") else "sha1"
+        self._object_format_cached = value if value in ("sha1", "sha256") else "sha1"
+        return self._object_format_cached
 
     def merge_base(self, base: str, head: str, explicit: str | None = None) -> str:
         if explicit:
@@ -148,54 +214,130 @@ class GitRepo:
         result = self.run(["merge-base", "--is-ancestor", ancestor, descendant])
         return result.returncode == 0
 
+    def read_blobs(self, object_ids: Sequence[str]) -> dict[str, bytes]:
+        needed = [oid for oid in object_ids if oid and oid not in self._blob_cache]
+        if not needed:
+            return {oid: self._blob_cache[oid] for oid in object_ids if oid in self._blob_cache}
+        for oid in needed:
+            if oid.startswith("-") or "\n" in oid or "\r" in oid:
+                raise GitError("missing_git_object", f"invalid blob id {oid!r}")
+
+        input_data = b"".join(f"{oid}\n".encode("utf-8") for oid in needed)
+        command = [
+            "git",
+            "-C",
+            str(self.repo),
+            "--no-pager",
+            "-c",
+            "core.quotepath=false",
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.safecrlf=false",
+            "-c",
+            "core.hooksPath=",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            f"core.attributesFile={self._empty_config}",
+            "cat-file",
+            "--batch",
+        ]
+        try:
+            proc = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=-1,
+                env=self.env,
+            )
+            stdout, stderr = proc.communicate(input_data)
+        except FileNotFoundError as exc:
+            raise GitError("internal_fault", "git executable was not found") from exc
+        except Exception as exc:
+            raise GitError("internal_fault", f"cat-file --batch failed: {exc}") from exc
+
+        if proc.returncode != 0 and not stdout:
+            text = stderr.decode("utf-8", "replace").strip()
+            raise GitError("missing_git_object", text or "git cat-file --batch failed")
+
+        idx = 0
+        total_len = len(stdout)
+        for oid in needed:
+            if idx >= total_len:
+                break
+            nl = stdout.find(b"\n", idx)
+            if nl == -1:
+                break
+            header = stdout[idx:nl].decode("ascii", "replace").strip()
+            idx = nl + 1
+            if header.endswith("missing") or "bad object" in header.lower() or "not a valid object" in header.lower():
+                continue
+            parts = header.split(" ")
+            if len(parts) < 3:
+                continue
+            obj_sha, obj_type, size_str = parts[0], parts[1], parts[2]
+            try:
+                size = int(size_str)
+            except ValueError:
+                raise GitError("internal_fault", f"invalid size in cat-file --batch header: {header!r}")
+            if obj_type != "blob":
+                idx += size + 1
+                continue
+            if size > _MAX_BLOB_BYTES:
+                raise GitError("parse_resource_limit", f"blob {oid} exceeds the size budget")
+            data = stdout[idx : idx + size]
+            idx += size + 1
+            self._blob_cache[oid] = data
+            if obj_sha and obj_sha != oid:
+                self._blob_cache[obj_sha] = data
+        return {oid: self._blob_cache[oid] for oid in object_ids if oid in self._blob_cache}
+
     def read_blob(self, object_id: str) -> bytes:
-        if not object_id or object_id.startswith("-"):
+        if not object_id or object_id.startswith("-") or "\n" in object_id or "\r" in object_id:
             raise GitError("missing_git_object", f"invalid blob id {object_id!r}")
         cached = self._blob_cache.get(object_id)
         if cached is not None:
             return cached
-        result = self.run(["cat-file", "blob", object_id])
-        if result.returncode != 0:
-            raise self._classify(result)
-        if len(result.stdout) > _MAX_BLOB_BYTES:
-            raise GitError("parse_resource_limit", f"blob {object_id} exceeds the size budget")
-        self._blob_cache[object_id] = result.stdout
-        return result.stdout
+        self.read_blobs([object_id])
+        cached = self._blob_cache.get(object_id)
+        if cached is None:
+            raise GitError("missing_git_object", f"blob {object_id!r} not found")
+        return cached
 
     def path_exists_at(self, rev: str, path: str) -> bool:
         path = normalize_repo_path(path)
         if not is_safe_repo_path(path):
             return False
-        result = self.run(["cat-file", "-e", f"{rev}:{path}"])
-        return result.returncode == 0
+        cached_tree = self._tree_cache.get(rev)
+        if cached_tree is not None:
+            return path in cached_tree
+        return self.read_path_at(rev, path) is not None
 
     def read_path_at(self, rev: str, path: str) -> bytes | None:
         path = normalize_repo_path(path)
         if not is_safe_repo_path(path):
             return None
-        listing = self.run(["ls-tree", "-z", rev, "--", path])
-        if listing.returncode != 0:
-            raise self._classify(listing)
-        if not listing.stdout:
-            return None
-        raw = listing.stdout.split(b"\0")[0]
-        try:
-            meta, _ = raw.split(b"\t", 1)
-            mode, obj_type, obj_id = meta.decode("ascii").split(" ")
+
+        cached_tree = self._tree_cache.get(rev)
+        if cached_tree is not None:
+            record = cached_tree.get(path)
+            if record is None:
+                return None
+            mode, obj_type, obj_id, _ = record
             if mode == "160000" or obj_type == "commit":
                 return None
             if obj_type == "blob":
                 return self.read_blob(obj_id)
-        except GitError:
+            return None
+
+        try:
+            return self.read_blob(f"{rev}:{path}")
+        except GitError as exc:
+            if exc.code == "missing_git_object":
+                return None
             raise
-        except Exception:
-            pass
-        result = self.run(["cat-file", "blob", f"{rev}:{path}"])
-        if result.returncode != 0:
-            raise self._classify(result)
-        if len(result.stdout) > _MAX_BLOB_BYTES:
-            raise GitError("parse_resource_limit", f"path {path} exceeds the size budget")
-        return result.stdout
 
     def list_tree(self, rev: str, path: str = "") -> list[tuple[str, str, str, str]]:
         """Return (mode, object_type, object_id, path) for a tree."""
@@ -215,35 +357,21 @@ class GitRepo:
             except ValueError:
                 continue
             records.append((mode, obj_type, obj_id, p.decode("utf-8", "replace")))
+        if not path:
+            self._tree_cache[rev] = {record[3]: record for record in records}
         return records
 
     # ------------------------------------------------------------------
     # Diff
     # ------------------------------------------------------------------
     def diff_entries(self, merge_base: str, head: str) -> tuple[list[DiffEntry], bool]:
-        raw = self.run(
+        combined = self.run(
             [
                 "diff-tree",
                 "-r",
-                "-z",
-                "--no-commit-id",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--no-color",
-                "--find-renames=60%",
-                "-l2000",
-                merge_base,
-                head,
-                "--",
-            ]
-        )
-        if raw.returncode != 0:
-            raise self._classify(raw)
-        patch = self.run(
-            [
-                "diff-tree",
-                "-r",
+                "--raw",
                 "-p",
+                "-z",
                 "-U0",
                 "--no-commit-id",
                 "--no-ext-diff",
@@ -256,13 +384,20 @@ class GitRepo:
                 "--",
             ]
         )
-        if patch.returncode != 0:
-            raise self._classify(patch)
-        hunks_by_path = _parse_patch_hunks(patch.stdout)
-        records = _parse_raw(raw.stdout)
+        if combined.returncode != 0:
+            raise self._classify(combined)
+
+        if b"\0\0" in combined.stdout:
+            raw_bytes, patch_bytes = combined.stdout.split(b"\0\0", 1)
+        else:
+            raw_bytes = combined.stdout
+            patch_bytes = b""
+
+        hunks_by_path = _parse_patch_hunks(patch_bytes)
+        records = _parse_raw(raw_bytes)
         add_candidates = sum(1 for r in records if r[6].startswith("A") or not r[4])
         del_candidates = sum(1 for r in records if r[6].startswith("D") or not r[5])
-        stderr_text = (raw.stderr + patch.stderr).decode("utf-8", "replace").lower()
+        stderr_text = combined.stderr.decode("utf-8", "replace").lower()
         both_sides_have_candidates = add_candidates > 0 and del_candidates > 0
         rename_limit_exceeded = (
             (both_sides_have_candidates and (add_candidates + del_candidates > 2000))
@@ -270,6 +405,15 @@ class GitRepo:
             or ("inexact rename detection was skipped" in stderr_text)
             or ("too many files" in stderr_text)
         )
+        # Pre-fetch diff blobs in one cat-file --batch call
+        needed_blobs = [
+            r[4] for r in records if r[2] != "160000" and r[4]
+        ] + [
+            r[5] for r in records if r[3] != "160000" and r[5]
+        ]
+        if needed_blobs:
+            self.read_blobs(needed_blobs)
+
         entries: list[DiffEntry] = []
         for record in records:
             base_path, head_path, base_mode, head_mode, base_blob, head_blob, status = record

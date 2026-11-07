@@ -10,7 +10,7 @@ import hashlib
 import os
 from pathlib import Path
 import subprocess
-from typing import NamedTuple
+from typing import NamedTuple, Sequence
 
 
 class TreeEntry(NamedTuple):
@@ -121,6 +121,56 @@ def validate_tree_paths(entries: list[TreeEntry]) -> None:
             raise ValueError(f"forbidden object type/mode pair: {entry.entry_type} ({entry.mode}) for {entry.rel_path}")
 
 
+def _read_blobs_batch(repo_root: Path, shas: Sequence[str]) -> dict[str, bytes]:
+    unique_shas = [s for s in dict.fromkeys(shas) if s]
+    if not unique_shas:
+        return {}
+    input_data = "".join(f"{s}\n" for s in unique_shas).encode("ascii")
+    try:
+        proc = subprocess.Popen(
+            ["git", "-C", str(repo_root), "cat-file", "--batch"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        stdout, stderr = proc.communicate(input_data)
+        if proc.returncode != 0:
+            return {}
+        blobs: dict[str, bytes] = {}
+        idx = 0
+        total = len(stdout)
+        for sha in unique_shas:
+            newline = stdout.find(b"\n", idx)
+            if newline == -1:
+                break
+            header = stdout[idx:newline].decode("ascii", "replace").strip()
+            idx = newline + 1
+            if header.endswith("missing") or "bad object" in header.lower() or "not a valid object" in header.lower():
+                continue
+            parts = header.split()
+            if len(parts) < 3:
+                continue
+            obj_sha, obj_type, size_str = parts[0], parts[1], parts[2]
+            try:
+                size = int(size_str)
+            except ValueError:
+                continue
+            if obj_type != "blob" or idx + size > total:
+                idx += size + 1
+                continue
+            data = stdout[idx : idx + size]
+            idx += size
+            if idx < total and stdout[idx : idx + 1] == b"\n":
+                idx += 1
+            elif idx < total and stdout[idx : idx + 2] == b"\r\n":
+                idx += 2
+            blobs[sha] = data
+            blobs[obj_sha] = data
+        return blobs
+    except Exception:
+        return {}
+
+
 def materialize_tree_to_staging(
     repo_root: Path,
     commit_sha: str,
@@ -143,6 +193,10 @@ def materialize_tree_to_staging(
     regular_entries = [e for e in sorted_entries if e.mode != "120000"]
     symlink_entries = [e for e in sorted_entries if e.mode == "120000"]
 
+    all_shas = [e.object_sha for e in regular_entries] + [e.object_sha for e in symlink_entries]
+    fetched_blobs = _read_blobs_batch(repo_root, all_shas)
+    created_dirs: set[Path] = set()
+
     for entry in regular_entries:
         dest_path = resolved_staging / entry.rel_path
         # Defensive check against escaping
@@ -151,18 +205,22 @@ def materialize_tree_to_staging(
         except ValueError:
             raise ValueError(f"path escapes staging root: {entry.rel_path}")
 
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        if dest_path.parent not in created_dirs:
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            created_dirs.add(dest_path.parent)
 
         # Read blob content directly from git object database
-        proc = subprocess.run(
-            ["git", "-C", str(repo_root), "cat-file", "-p", entry.object_sha],
-            capture_output=True,
-            check=False,
-        )
-        if proc.returncode != 0:
-            raise RuntimeError(f"failed to read blob {entry.object_sha} for {entry.rel_path}")
+        content = fetched_blobs.get(entry.object_sha)
+        if content is None:
+            proc = subprocess.run(
+                ["git", "-C", str(repo_root), "cat-file", "-p", entry.object_sha],
+                capture_output=True,
+                check=False,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(f"failed to read blob {entry.object_sha} for {entry.rel_path}")
+            content = proc.stdout
 
-        content = proc.stdout
         if len(content) > MAX_SINGLE_BLOB_SIZE:
             raise ValueError(f"blob {entry.rel_path} exceeds maximum size ({len(content)} > {MAX_SINGLE_BLOB_SIZE})")
         total_tree_size += len(content)
@@ -192,17 +250,22 @@ def materialize_tree_to_staging(
     # Second pass: symlinks
     for entry in symlink_entries:
         dest_path = resolved_staging / entry.rel_path
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        if dest_path.parent not in created_dirs:
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            created_dirs.add(dest_path.parent)
 
-        proc = subprocess.run(
-            ["git", "-C", str(repo_root), "cat-file", "-p", entry.object_sha],
-            capture_output=True,
-            check=False,
-        )
-        if proc.returncode != 0:
-            raise RuntimeError(f"failed to read symlink target {entry.object_sha} for {entry.rel_path}")
+        target_bytes = fetched_blobs.get(entry.object_sha)
+        if target_bytes is None:
+            proc = subprocess.run(
+                ["git", "-C", str(repo_root), "cat-file", "-p", entry.object_sha],
+                capture_output=True,
+                check=False,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(f"failed to read symlink target {entry.object_sha} for {entry.rel_path}")
+            target_bytes = proc.stdout
 
-        target_str = proc.stdout.decode("utf-8", errors="strict")
+        target_str = target_bytes.decode("utf-8", errors="strict")
         # Validate that symlink does not escape staging root
         target_path = (dest_path.parent / target_str).resolve(strict=False)
         try:

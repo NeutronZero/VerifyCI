@@ -381,9 +381,19 @@ def run(context: CheckContext) -> CheckResult:
 
     changed_lines = _changed_new_lines(context)
     all_head_calls: list[tuple[str, SourceFacts, CallSite]] = []
+    head_calls_by_simple: dict[str, list[tuple[str, SourceFacts, CallSite]]] = defaultdict(list)
     for path, facts in context.scope.head_facts.items():
         for call in facts.calls:
-            all_head_calls.append((path, facts, call))
+            tup = (path, facts, call)
+            all_head_calls.append(tup)
+            simple_keys = {call.callee.rsplit(".", 1)[-1]}
+            if "." not in call.callee:
+                for imp in facts.imports:
+                    for orig_name, local_name in getattr(imp, "aliases", ()):
+                        if local_name == call.callee:
+                            simple_keys.add(orig_name.rsplit(".", 1)[-1])
+            for k in simple_keys:
+                head_calls_by_simple[k].append(tup)
 
     findings = []
     gaps = unsupported_scope_gaps(context, "contract")
@@ -417,7 +427,8 @@ def run(context: CheckContext) -> CheckResult:
                 target_mod = _normalize_mod(head.file_path)
                 target_symbol = head.qname.split(":", 1)[-1]
                 target_simple = target_symbol.rsplit(".", 1)[-1]
-                for path, facts, call in all_head_calls:
+                candidate_calls = head_calls_by_simple.get(target_simple, ())
+                for path, facts, call in candidate_calls:
                     callee = call.callee
                     if "." in callee:
                         if not callee.endswith(f".{target_simple}"):

@@ -76,13 +76,14 @@ def verify_active_container_security(cid: str) -> tuple[bool, str | None]:
     """Inspect active container to confirm security controls were applied by the Docker daemon."""
     try:
         proc = subprocess.run(
-            ["docker", "inspect", cid, "--format", "{{json .HostConfig}}"],
+            ["docker", "inspect", cid, "--format", '{"HostConfig":{{json .HostConfig}},"Mounts":{{json .Mounts}}}'],
             capture_output=True,
             text=True,
             timeout=10,
             check=True,
         )
-        cfg = json.loads(proc.stdout)
+        data = json.loads(proc.stdout)
+        cfg = data.get("HostConfig", {})
         if cfg.get("PidMode") not in ("private", ""):
             return False, f"untrusted PidMode: {cfg.get('PidMode')!r}"
         if cfg.get("IpcMode") != "private":
@@ -115,25 +116,14 @@ def verify_active_container_security(cid: str) -> tuple[bool, str | None]:
         if log_type and log_type not in ("json-file", "local", "none"):
             return False, f"untrusted logging driver: {log_type}"
 
-        # Verify mounts via separate inspect query
-        m_proc = subprocess.run(
-            ["docker", "inspect", cid, "--format", "{{json .Mounts}}"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        if m_proc.returncode == 0 and m_proc.stdout.strip():
-            try:
-                mounts = json.loads(m_proc.stdout)
-                for m in mounts:
-                    dest = m.get("Destination", "")
-                    rw = m.get("RW", True)
-                    # Candidate and repo mounts MUST be read-only
-                    if dest in ("/candidate", "/repo") and rw:
-                        return False, f"mount {dest} is mounted read-write instead of read-only"
-            except Exception:
-                pass
+        # Verify mounts from the same inspect query
+        mounts = data.get("Mounts") or []
+        for m in mounts:
+            dest = m.get("Destination", "")
+            rw = m.get("RW", True)
+            # Candidate and repo mounts MUST be read-only
+            if dest in ("/candidate", "/repo") and rw:
+                return False, f"mount {dest} is mounted read-write instead of read-only"
 
         return True, None
     except Exception as exc:

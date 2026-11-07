@@ -69,9 +69,15 @@ def should_sample(key_hex: str) -> bool:
     return int.from_bytes(sample, "big") < (CACHE_SAMPLE_RATE_NUMERATOR * (1 << 256)) // CACHE_SAMPLE_RATE_DENOMINATOR
 
 
+def entry_digest_and_bytes(object_type: str, components: dict[str, Any]) -> tuple[str, bytes]:
+    comp_bytes = canonical_json_bytes(components)
+    payload = object_type.encode("utf-8") + b"\x00" + comp_bytes
+    return hashlib.sha256(payload).hexdigest(), comp_bytes
+
+
 def entry_digest(object_type: str, components: dict[str, Any]) -> str:
-    payload = object_type.encode("utf-8") + b"\x00" + canonical_json_bytes(components)
-    return hashlib.sha256(payload).hexdigest()
+    digest, _ = entry_digest_and_bytes(object_type, components)
+    return digest
 
 
 def compute_hmac(
@@ -80,13 +86,15 @@ def compute_hmac(
     object_type: str,
     components: dict[str, Any],
     value_digest: str,
+    components_bytes: bytes | None = None,
 ) -> str:
+    comp_bytes = components_bytes if components_bytes is not None else canonical_json_bytes(components)
     message = (
         key_id.encode("utf-8")
         + b"\x00"
         + object_type.encode("utf-8")
         + b"\x00"
-        + canonical_json_bytes(components)
+        + comp_bytes
         + b"\x00"
         + value_digest.encode("utf-8")
     )
@@ -116,9 +124,15 @@ class CacheStore:
         self.key = key
         self.key_id = key_id
         self.read_only = read_only
+        self._created_shards: set[str] = set()
         if self.mode != "none":
             if not self.read_only:
                 self.cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    def _ensure_shard(self, shard: str) -> None:
+        if shard not in self._created_shards:
+            (self.cache_dir / shard).mkdir(parents=True, exist_ok=True)
+            self._created_shards.add(shard)
 
     def _path_for_key(self, key_hex: str) -> Path:
         shard = key_hex[:2]
@@ -142,7 +156,7 @@ class CacheStore:
 
         validate_key_schema(object_type, components)
 
-        k_hex = entry_digest(object_type, components)
+        k_hex, comp_bytes = entry_digest_and_bytes(object_type, components)
         path = self._path_for_key(k_hex)
         if not path.is_file():
             return None, False
@@ -174,7 +188,12 @@ class CacheStore:
             if record.get("key_id") != self.key_id:
                 return None, False
             expected_hmac = compute_hmac(
-                self.key, self.key_id, object_type, components, val_digest
+                self.key,
+                self.key_id,
+                object_type,
+                components,
+                val_digest,
+                components_bytes=comp_bytes,
             )
             supplied_hmac = record.get("hmac")
             if not isinstance(supplied_hmac, str) or not hmac.compare_digest(supplied_hmac, expected_hmac):
@@ -203,9 +222,10 @@ class CacheStore:
         if self.mode == "authenticated" and not self.key:
             return False
 
-        k_hex = entry_digest(object_type, components)
-        path = self._path_for_key(k_hex)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        k_hex, comp_bytes = entry_digest_and_bytes(object_type, components)
+        shard = k_hex[:2]
+        self._ensure_shard(shard)
+        path = self.cache_dir / shard / f"{k_hex}.json"
 
         val_bytes = canonical_json_bytes(value)
         val_digest = hashlib.sha256(val_bytes).hexdigest()
@@ -220,7 +240,12 @@ class CacheStore:
 
         if self.mode == "authenticated" and self.key:
             record["hmac"] = compute_hmac(
-                self.key, self.key_id, object_type, components, val_digest
+                self.key,
+                self.key_id,
+                object_type,
+                components,
+                val_digest,
+                components_bytes=comp_bytes,
             )
             record["key_id"] = self.key_id
 

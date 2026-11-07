@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 from collections import defaultdict
+import copy
 import dataclasses
 import json
 import subprocess
@@ -397,16 +398,6 @@ def collect_target_sites(
 # ---------------------------------------------------------------------------
 # 4. Isolated & Sandboxed Concrete Replay Evaluator
 # ---------------------------------------------------------------------------
-
-class ValueBox:
-    def __init__(self, **kwargs: Any) -> None:
-        self.__dict__.update(kwargs)
-
-    def __getattr__(self, name: str) -> Any:
-        return self.__dict__.get(name, False)
-
-    def __repr__(self) -> str:
-        return f"ValueBox({self.__dict__})"
 
 
 class ExecutionTrace:
@@ -1324,8 +1315,10 @@ def run(context: CheckContext) -> CheckResult:
     for entry in code_entries:
         path = entry.head_path or entry.base_path
         if path.endswith((".py", ".pyi")):
-            b_tree = ast.parse(entry.base_source)
-            h_tree = ast.parse(entry.head_source)
+            b_orig = parsed_trees.get((id(entry), "base"))
+            b_tree = copy.deepcopy(b_orig) if b_orig is not None else ast.parse(entry.base_source)
+            h_orig = parsed_trees.get((id(entry), "head"))
+            h_tree = copy.deepcopy(h_orig) if h_orig is not None else ast.parse(entry.head_source)
             _strip_docstrings(b_tree)
             _strip_docstrings(h_tree)
             if ast.dump(b_tree, include_attributes=False) != ast.dump(

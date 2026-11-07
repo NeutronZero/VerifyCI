@@ -120,14 +120,19 @@ class DiffEntry:
     is_lfs: bool = False
     is_submodule: bool = False
     is_symlink: bool = False
+    changed_paths: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.changed_paths:
+            object.__setattr__(
+                self,
+                "changed_paths",
+                tuple(p for p in (self.base_path, self.head_path) if p),
+            )
 
     @property
     def path(self) -> str:
         return self.head_path or self.base_path
-
-    @property
-    def changed_paths(self) -> tuple[str, ...]:
-        return tuple(p for p in (self.base_path, self.head_path) if p)
 
     @property
     def is_added(self) -> bool:

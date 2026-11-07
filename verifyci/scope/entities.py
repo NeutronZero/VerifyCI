@@ -8,9 +8,11 @@ rather than mapped by guesswork.
 from __future__ import annotations
 
 import ast
+import collections
 from dataclasses import asdict, dataclass, field
 from hashlib import sha1, sha256
 import re
+import threading
 from typing import Any, Callable, Mapping, Sequence
 
 from verifyci.contracts.model import DiffEntry, Entity, Hunk
@@ -103,25 +105,33 @@ def git_blob_id(data: bytes) -> str:
     return h.hexdigest()
 
 
-_PY_PARSER: Any = None
-_PY_PARSER_INITIALIZED: bool = False
+_PY_LANG_OBJECT: Any = None
+_PY_LANG_INITIALIZED: bool = False
+_PY_LOCAL = threading.local()
 
 
 def _py_language() -> Any:
-    global _PY_PARSER, _PY_PARSER_INITIALIZED
-    if _PY_PARSER_INITIALIZED:
-        return _PY_PARSER
-    _PY_PARSER_INITIALIZED = True
-    try:
-        import tree_sitter_python as tp
-        from tree_sitter import Language, Parser
+    global _PY_LANG_OBJECT, _PY_LANG_INITIALIZED
+    if not _PY_LANG_INITIALIZED:
+        _PY_LANG_INITIALIZED = True
+        try:
+            import tree_sitter_python as tp
+            from tree_sitter import Language
 
-        fn: Callable[[], Any] | None = getattr(tp, "language", None) or getattr(tp, "language_python", None)
-        if fn is not None:
-            _PY_PARSER = Parser(Language(fn()))  # ty: ignore[deprecated]
-    except Exception:
-        _PY_PARSER = None
-    return _PY_PARSER
+            fn: Callable[[], Any] | None = getattr(tp, "language", None) or getattr(tp, "language_python", None)
+            if fn is not None:
+                _PY_LANG_OBJECT = Language(fn())  # ty: ignore[deprecated]
+        except Exception:
+            _PY_LANG_OBJECT = None
+    if _PY_LANG_OBJECT is None:
+        return None
+    parser = getattr(_PY_LOCAL, "parser", None)
+    if parser is None:
+        from tree_sitter import Parser
+
+        parser = Parser(_PY_LANG_OBJECT)
+        _PY_LOCAL.parser = parser
+    return parser
 
 
 def _pos_to_byte(data: bytes, lineno: int, col: int) -> int:
@@ -199,11 +209,12 @@ class _CallVisitor(ast.NodeVisitor):
             if node.args.kwarg:
                 locals_found.add(node.args.kwarg.arg)
         globals_declared: set[str] = set()
-        for child in ast.walk(node):
-            if child is node:
-                continue
+        todo = collections.deque(ast.iter_child_nodes(node))
+        while todo:
+            child = todo.popleft()
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 locals_found.add(child.name)
+                continue
             elif isinstance(child, ast.Global):
                 globals_declared.update(child.names)
             elif isinstance(child, ast.Assign):
@@ -231,6 +242,7 @@ class _CallVisitor(ast.NodeVisitor):
             elif isinstance(child, ast.NamedExpr):
                 if isinstance(child.target, ast.Name):
                     locals_found.add(child.target.id)
+            todo.extend(ast.iter_child_nodes(child))
         return locals_found - globals_declared
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -363,9 +375,13 @@ def _python_entities(
     tree: ast.Module,
     source_roots: Sequence[str],
     exports: frozenset[str] | set[str] | None = None,
+    blob_hash: str = "",
 ) -> tuple[Entity, ...]:
     source_bytes = source.encode("utf-8")
-    blob_id = git_blob_id(source_bytes)
+    if blob_hash:
+        blob_id = blob_hash.split(":", 1)[1] if ":" in blob_hash else blob_hash
+    else:
+        blob_id = git_blob_id(source_bytes)
     module = normalize_repo_path(path).rsplit(".", 1)[0]
     if exports is None:
         exports = _collect_all(tree)
@@ -526,7 +542,9 @@ def _python_entities(
     return tuple(entities)
 
 
-def analyze_python(path: str, source: str, source_roots: Sequence[str] = ()) -> SourceFacts:
+def analyze_python(
+    path: str, source: str, source_roots: Sequence[str] = (), blob_hash: str = ""
+) -> SourceFacts:
     try:
         tree = ast.parse(source, filename=path)
     except SyntaxError as exc:
@@ -539,7 +557,9 @@ def analyze_python(path: str, source: str, source_roots: Sequence[str] = ()) -> 
     visitor = _CallVisitor()
     visitor.visit(tree)
     exports_set = frozenset(_collect_all(tree))
-    entities = _python_entities(path, source, tree, source_roots, exports=exports_set)
+    entities = _python_entities(
+        path, source, tree, source_roots, exports=exports_set, blob_hash=blob_hash
+    )
     return SourceFacts(
         path=path,
         language="python",
@@ -558,41 +578,55 @@ def analyze_python(path: str, source: str, source_roots: Sequence[str] = ()) -> 
 # TS / JS
 # ---------------------------------------------------------------------------
 
-_TS_LANGUAGE_CACHE: dict[str, Any] = {}
+_TS_LANG_OBJECTS: dict[str, Any] = {}
+_TS_LOCAL = threading.local()
 
 
 def _ts_language(language: str) -> Any:
-    if language in _TS_LANGUAGE_CACHE:
-        return _TS_LANGUAGE_CACHE[language]
-    try:
-        if language == "typescript":
-            import tree_sitter_typescript as ts
+    if language not in _TS_LANG_OBJECTS:
+        try:
+            if language == "typescript":
+                import tree_sitter_typescript as ts
 
-            fn: Callable[[], Any] | None = getattr(ts, "language_typescript", None) or getattr(ts, "language", None)
-            if fn is None:
-                raise RuntimeError("tree-sitter typescript language unavailable")
-            capsule = fn()
-        elif language == "tsx":
-            import tree_sitter_typescript as ts
+                fn: Callable[[], Any] | None = getattr(ts, "language_typescript", None) or getattr(ts, "language", None)
+                if fn is None:
+                    raise RuntimeError("tree-sitter typescript language unavailable")
+                capsule = fn()
+            elif language == "tsx":
+                import tree_sitter_typescript as ts
 
-            fn: Callable[[], Any] | None = getattr(ts, "language_tsx", None) or getattr(ts, "language", None)
-            if fn is None:
-                raise RuntimeError("tree-sitter typescript language unavailable")
-            capsule = fn()
-        else:
-            import tree_sitter_javascript as js
+                fn: Callable[[], Any] | None = getattr(ts, "language_tsx", None) or getattr(ts, "language", None)
+                if fn is None:
+                    raise RuntimeError("tree-sitter typescript language unavailable")
+                capsule = fn()
+            else:
+                import tree_sitter_javascript as js
 
-            fn: Callable[[], Any] | None = getattr(js, "language", None)
-            if fn is None:
-                raise RuntimeError("tree-sitter javascript language unavailable")
-            capsule = fn()
-        from tree_sitter import Language, Parser
+                fn: Callable[[], Any] | None = getattr(js, "language", None)
+                if fn is None:
+                    raise RuntimeError("tree-sitter javascript language unavailable")
+                capsule = fn()
+            from tree_sitter import Language
 
-        result = Parser(Language(capsule))  # ty: ignore[deprecated]
-    except Exception:
-        result = None
-    _TS_LANGUAGE_CACHE[language] = result
-    return result
+            _TS_LANG_OBJECTS[language] = Language(capsule)  # ty: ignore[deprecated]
+        except Exception:
+            _TS_LANG_OBJECTS[language] = None
+
+    lang_obj = _TS_LANG_OBJECTS.get(language)
+    if lang_obj is None:
+        return None
+
+    parsers = getattr(_TS_LOCAL, "parsers", None)
+    if parsers is None:
+        parsers = {}
+        _TS_LOCAL.parsers = parsers
+    parser = parsers.get(language)
+    if parser is None:
+        from tree_sitter import Parser
+
+        parser = Parser(lang_obj)
+        parsers[language] = parser
+    return parser
 
 
 def _node_text(node: Any) -> str:
@@ -634,7 +668,7 @@ def _ts_signature(node: Any) -> tuple[tuple[str, str, bool], ...]:
     return tuple(out)
 
 
-def _ts_entities(path: str, source: str) -> tuple[Entity, ...] | None:
+def _ts_entities(path: str, source: str, blob_hash: str = "") -> tuple[Entity, ...] | None:
     suffix = path.rsplit(".", 1)[-1].lower()
     language = "tsx" if suffix == "tsx" else ("typescript" if suffix in ("ts", "mts", "cts") else "javascript")
     parser = _ts_language(language)
@@ -646,7 +680,10 @@ def _ts_entities(path: str, source: str) -> tuple[Entity, ...] | None:
     except Exception:
         return None
     module = normalize_repo_path(path).rsplit(".", 1)[0]
-    blob_id = git_blob_id(source_bytes)
+    if blob_hash:
+        blob_id = blob_hash.split(":", 1)[1] if ":" in blob_hash else blob_hash
+    else:
+        blob_id = git_blob_id(source_bytes)
     entities: list[Entity] = []
 
     def walk(node: Any, parent_class: str = "") -> None:
@@ -707,8 +744,8 @@ def _ts_entities(path: str, source: str) -> tuple[Entity, ...] | None:
     return tuple(entities)
 
 
-def analyze_typescript(path: str, source: str) -> SourceFacts:
-    entities = _ts_entities(path, source)
+def analyze_typescript(path: str, source: str, blob_hash: str = "") -> SourceFacts:
+    entities = _ts_entities(path, source, blob_hash=blob_hash)
     if entities is None:
         return SourceFacts(
             path=path,
@@ -811,12 +848,14 @@ _TEXT_SUFFIXES = {
 }
 
 
-def _analyze_source_uncached(path: str, source: str, source_roots: Sequence[str] = ()) -> SourceFacts:
+def _analyze_source_uncached(
+    path: str, source: str, source_roots: Sequence[str] = (), blob_hash: str = ""
+) -> SourceFacts:
     suffix = path.rsplit(".", 1)[-1].lower()
     if suffix == "py":
-        return analyze_python(path, source, source_roots)
+        return analyze_python(path, source, source_roots, blob_hash=blob_hash)
     if suffix in ("ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"):
-        return analyze_typescript(path, source)
+        return analyze_typescript(path, source, blob_hash=blob_hash)
     if suffix in _TEXT_SUFFIXES or "/" not in path and "." not in path:
         return SourceFacts(path=path, language="text", supported=True)
     return SourceFacts(path=path, language=suffix or "unknown", supported=False, parse_error="unsupported language frontend")
@@ -896,7 +935,7 @@ def analyze_source(
     blob_hash: str = "",
 ) -> SourceFacts:
     if fact_provider is None or not toolchain_fingerprint or not blob_hash:
-        return _analyze_source_uncached(path, source, source_roots)
+        return _analyze_source_uncached(path, source, source_roots, blob_hash=blob_hash)
     from verifyci.index.provider import FactProvider
 
     language_id, frontend_version = _frontend_identity(path)
@@ -911,13 +950,15 @@ def analyze_source(
     cached = fact_provider.get_or_compute(
         "symbol_facts",
         components,
-        lambda: _facts_to_cache(_analyze_source_uncached(path, source, source_roots)),
+        lambda: _facts_to_cache(
+            _analyze_source_uncached(path, source, source_roots, blob_hash=blob_hash)
+        ),
     )
     try:
         return _facts_from_cache(cached)
     except (KeyError, TypeError, ValueError):
         # A malformed local entry is not evidence. Rebuild from the pinned blob.
-        facts = _analyze_source_uncached(path, source, source_roots)
+        facts = _analyze_source_uncached(path, source, source_roots, blob_hash=blob_hash)
         fact_provider.cache_store.put("symbol_facts", components, _facts_to_cache(facts))
         return facts
 
@@ -1035,6 +1076,14 @@ def find_matching_entity_detailed(
         return None, False
     if len(overlapping) == 1:
         return overlapping[0], False
+    if len(overlapping) == 2:
+        e0, e1 = overlapping[0], overlapping[1]
+        len0 = e0.end_line - e0.start_line
+        len1 = e1.end_line - e1.start_line
+        outer, inner = (e0, e1) if len0 >= len1 else (e1, e0)
+        if outer.start_line <= inner.start_line and inner.end_line <= outer.end_line:
+            return inner, False
+        return None, True
 
     # Multiple entities overlap. Verify if they form a strict nesting chain.
     overlapping.sort(key=lambda e: (e.end_line - e.start_line), reverse=True)
@@ -1073,10 +1122,12 @@ class ChangedScope:
     mapped_entities: tuple[Mapping[str, Any], ...] = ()
     renames: tuple[Mapping[str, Any], ...] = ()
     _entity_index: dict[str, Entity] | None = field(
-        default=None, init=False, repr=False, compare=False, hash=False
+        default=None, repr=False, compare=False, hash=False
     )
 
     def __post_init__(self) -> None:
+        if self._entity_index is not None:
+            return
         idx: dict[str, Entity] = {}
         for facts in self.base_facts.values():
             for e in facts.entities:
@@ -1415,6 +1466,14 @@ def build_changed_scope(
             item["is_export"] = True
         entities_out.append(item)
 
+    idx: dict[str, Entity] = {}
+    for facts in base_facts.values():
+        for e in facts.entities:
+            idx[e.qname] = e
+    for facts in head_facts.values():
+        for e in facts.entities:
+            idx[e.qname] = e
+
     return ChangedScope(
         base_facts=base_facts,
         head_facts=head_facts,
@@ -1426,6 +1485,7 @@ def build_changed_scope(
         mapped_hunks=tuple(mapped_hunks),
         mapped_entities=tuple(entities_out),
         renames=tuple(renames),
+        _entity_index=idx,
     )
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Sequence
 
 from verifyci.contracts.manifest import CHECK_SPECS
@@ -46,6 +46,16 @@ class CheckContext:
     gate_integrity_paths: tuple[str, ...] = ()
     target_drift: bool = False
     release_validated: bool = False
+    _entries_by_path: dict[str, DiffEntry] | None = field(
+        default=None, repr=False, compare=False, hash=False
+    )
+
+    def entry_for_path(self, path: str) -> DiffEntry | None:
+        idx = self._entries_by_path
+        if idx is None:
+            idx = {p: entry for entry in self.entries for p in entry.changed_paths}
+            object.__setattr__(self, "_entries_by_path", idx)
+        return idx.get(path)
 
 
 def make_finding(
@@ -86,10 +96,7 @@ def make_finding(
         "head_span",
         {"start_line": line, "end_line": line} if isinstance(line, int) else None,
     )
-    entry = next(
-        (candidate for candidate in context.entries if path in candidate.changed_paths),
-        None,
-    )
+    entry = context.entry_for_path(path)
     def object_id(value: str | None) -> str | None:
         return f"{context.object_format}:{value}" if value else None
 

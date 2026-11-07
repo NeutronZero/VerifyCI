@@ -213,6 +213,3 @@ def run(context: CheckContext) -> CheckResult:
 
 
 __all__ = ["run"]
-
-
-__all__ = ["run"]
