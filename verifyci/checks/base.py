@@ -25,6 +25,7 @@ from verifyci.contracts.reason_codes import (
     EVIDENCE_KINDS_BY_DEFECT,
     GAPS,
 )
+from verifyci.runtime.budget import DEFAULT_BUDGET, WorkBudget
 from verifyci.scope.entities import ChangedScope
 from verifyci.scm.git import GitRepo
 
@@ -46,6 +47,8 @@ class CheckContext:
     gate_integrity_paths: tuple[str, ...] = ()
     target_drift: bool = False
     release_validated: bool = False
+    budget: WorkBudget = DEFAULT_BUDGET
+    deadline: float | None = None
     _entries_by_path: dict[str, DiffEntry] | None = field(
         default=None, repr=False, compare=False, hash=False
     )
@@ -152,11 +155,12 @@ def unsupported_scope_gaps(
         facts = context.scope.head_facts.get(path) or context.scope.base_facts.get(path)
         if facts is None or facts.supported:
             continue
-        reason = (
-            "parse_error"
-            if facts.language in {"python", "typescript", "javascript"}
-            else "unsupported_language"
-        )
+        if facts.parse_error.startswith("parse_resource_limit"):
+            reason = "parse_resource_limit"
+        elif facts.language in {"python", "typescript", "javascript"}:
+            reason = "parse_error"
+        else:
+            reason = "unsupported_language"
         gaps.append(
             gap(
                 reason,
@@ -244,8 +248,40 @@ def gap(reason_code: str, subject: Mapping[str, Any]) -> CoverageGap:
     return CoverageGap(reason_code=reason_code, subject=dict(subject))
 
 
+def budget_exhausted_result(
+    context: CheckContext,
+    check_id: str,
+    detail: str = "cold/warm deadline elapsed",
+) -> CheckResult:
+    spec = CHECK_SPECS[check_id]
+    return CheckResult(
+        check_id=check_id,
+        check_version=spec.check_version,
+        tier=spec.tier,
+        maturity=spec.maturity,
+        outcome=Outcome.INCONCLUSIVE,
+        coverage=Coverage.PARTIAL,
+        evaluated_scope={},
+        scope_enumeration={"complete": False},
+        candidate_discovery={"complete": False},
+        applicability_evidence={},
+        method=spec.method,
+        method_version=spec.method_version,
+        reason_codes=("budget_exhausted",),
+        coverage_gaps=(
+            CoverageGap(
+                reason_code="budget_exhausted",
+                subject={"check_id": check_id},
+            ),
+        ),
+        diagnostics=({"code": "budget_exhausted", "detail": detail},),
+        toolchain_fingerprint=context.toolchain_fingerprint,
+    )
+
+
 __all__ = [
     "CheckContext",
+    "budget_exhausted_result",
     "error_result",
     "gap",
     "make_finding",

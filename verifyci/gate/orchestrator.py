@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from verifyci.checks import contract, deletion, grounding, security, semantic
-from verifyci.checks.base import CheckContext, error_result
+from verifyci.checks.base import CheckContext, budget_exhausted_result, error_result
+from verifyci.runtime.budget import DEFAULT_BUDGET, WorkBudget
+from verifyci.runtime.scheduler import run_deterministic_batch
 from verifyci.contracts.manifest import (
     CHECK_ORDER,
     CHECK_SPECS,
@@ -23,12 +25,9 @@ from verifyci.contracts.manifest import (
 from verifyci.contracts.release_validation import verify_release_validation_evidence
 from verifyci.contracts.model import (
     CheckResult,
-    Coverage,
-    CoverageGap,
     DiffEntry,
     Entity,
     EvidenceBundle,
-    Outcome,
     Policy,
     Tier,
     Verdict,
@@ -56,7 +55,7 @@ from verifyci.gate.verdict import aggregate, apply_acceptances, apply_waivers
 from verifyci.index.cache import CACHE_SCHEMA_VERSION, CacheStore
 from verifyci.index.provider import CacheIntegrityMismatch, FactProvider
 from verifyci.scm.git import GitError, GitRepo
-from verifyci.scope.entities import ChangedScope, analyze_source, build_changed_scope
+from verifyci.scope.entities import ChangedScope, SourceFacts, analyze_source, build_changed_scope
 
 
 _CHECK_RUNNERS: dict[str, Callable[[CheckContext], CheckResult]] = {
@@ -84,6 +83,7 @@ class GateRequest:
     cache_key_id: str = "k1"
     cache_read_only: bool = False
     jobs: int = 1
+    budget: WorkBudget = DEFAULT_BUDGET
 
 
 def _today() -> str:
@@ -116,6 +116,8 @@ def _context(
     rename_limit_exceeded: bool,
     integrity_paths: Sequence[str],
     target_drift: bool,
+    budget: WorkBudget = DEFAULT_BUDGET,
+    deadline: float | None = None,
 ) -> CheckContext:
     return CheckContext(
         git=git,
@@ -133,6 +135,8 @@ def _context(
         gate_integrity_paths=tuple(integrity_paths),
         target_drift=target_drift,
         release_validated=False,
+        budget=budget,
+        deadline=deadline,
     )
 
 
@@ -488,6 +492,8 @@ def _augment_scope_with_repository(
     fact_provider: FactProvider | None = None,
     toolchain_fingerprint: str = "",
     object_format: str = "",
+    budget: WorkBudget = DEFAULT_BUDGET,
+    jobs: int = 1,
 ) -> ChangedScope:
     """Add repository-local facts for reference and caller discovery.
 
@@ -527,39 +533,49 @@ def _augment_scope_with_repository(
 
     fetched_blobs = git.read_blobs(needed_blobs) if needed_blobs else {}
 
-    for _, _, object_id, path in base_tree_entries:
-        if path in base_facts:
-            continue
+    def _parse_entry(item: tuple[str, str]) -> tuple[str, SourceFacts | None]:
+        object_id, path = item
         raw = fetched_blobs.get(object_id)
         if raw is None:
             raw = git.read_blob(object_id)
         if b"\0" in raw:
-            continue
-        base_facts[path] = analyze_source(
+            return path, None
+        facts = analyze_source(
             path,
             raw.decode("utf-8", "replace"),
             source_roots,
             fact_provider=fact_provider,
             toolchain_fingerprint=toolchain_fingerprint,
             blob_hash=f"{object_format}:{object_id}" if object_format else object_id,
+            budget=budget,
         )
+        return path, facts
+
+    base_to_parse = [
+        (object_id, path)
+        for _, _, object_id, path in base_tree_entries
+        if path not in base_facts
+    ]
+    parsed_base = run_deterministic_batch(
+        base_to_parse, _parse_entry, max_workers=jobs
+    )
+    for path, facts in parsed_base:
+        if facts is not None:
+            base_facts[path] = facts
+
+    head_to_parse = []
     for _, _, object_id, path in head_tree_entries:
         if base_blobs.get(path) == object_id and path in base_facts:
             head_facts[path] = base_facts[path]
-            continue
-        raw = fetched_blobs.get(object_id)
-        if raw is None:
-            raw = git.read_blob(object_id)
-        if b"\0" in raw:
-            continue
-        head_facts[path] = analyze_source(
-            path,
-            raw.decode("utf-8", "replace"),
-            source_roots,
-            fact_provider=fact_provider,
-            toolchain_fingerprint=toolchain_fingerprint,
-            blob_hash=f"{object_format}:{object_id}" if object_format else object_id,
-        )
+        elif path not in head_facts:
+            head_to_parse.append((object_id, path))
+    parsed_head = run_deterministic_batch(
+        head_to_parse, _parse_entry, max_workers=jobs
+    )
+    for path, facts in parsed_head:
+        if facts is not None:
+            head_facts[path] = facts
+
     base_entities_set: set[str] = set()
     head_entities_set: set[str] = set()
     idx: dict[str, Entity] = {}
@@ -587,50 +603,25 @@ def _augment_scope_with_repository(
     )
 
 
-def _run_checks(context: CheckContext, deadline: float | None = None) -> list[CheckResult]:
-    results: list[CheckResult] = []
-    for check_id in CHECK_ORDER:
+def _run_checks(
+    context: CheckContext, deadline: float | None = None, jobs: int = 1
+) -> list[CheckResult]:
+    def _execute_check(check_id: str) -> CheckResult:
         if deadline is not None and time.monotonic() > deadline:
-            spec = CHECK_SPECS[check_id]
-            results.append(
-                CheckResult(
-                    check_id=check_id,
-                    check_version=spec.check_version,
-                    tier=spec.tier,
-                    maturity=spec.maturity,
-                    outcome=Outcome.INCONCLUSIVE,
-                    coverage=Coverage.PARTIAL,
-                    evaluated_scope={},
-                    scope_enumeration={"complete": False},
-                    candidate_discovery={"complete": False},
-                    applicability_evidence={},
-                    method=spec.method,
-                    method_version=spec.method_version,
-                    reason_codes=("budget_exhausted",),
-                    coverage_gaps=(
-                        CoverageGap(
-                            reason_code="budget_exhausted",
-                            subject={"check_id": check_id},
-                        ),
-                    ),
-                    diagnostics=({"code": "budget_exhausted", "detail": "cold/warm deadline elapsed"},),
-                    toolchain_fingerprint=context.toolchain_fingerprint,
-                )
-            )
-            continue
+            return budget_exhausted_result(context, check_id)
         runner = _CHECK_RUNNERS[check_id]
         try:
-            result = runner(context)
+            return runner(context)
         except Exception as exc:  # fail closed; preserve the traceback as a diagnostic
-            result = error_result(
+            return error_result(
                 context=context,
                 check_id=check_id,
                 detail=f"{type(exc).__name__}: {exc}",
                 reason_code="internal_fault",
                 diagnostic_code="internal_fault",
             )
-        results.append(result)
-    return results
+
+    return run_deterministic_batch(list(CHECK_ORDER), _execute_check, max_workers=jobs)
 
 
 def run_gate(request: GateRequest) -> EvidenceBundle:
@@ -774,6 +765,12 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             toolchain_fingerprint=toolchain,
             object_format=object_format,
         )
+        cold = policy.gate.get("cold_deadline_seconds")
+        deadline = (
+            started + float(cold)
+            if isinstance(cold, (int, float)) and cold > 0
+            else None
+        )
         scope = _augment_scope_with_repository(
             scope,
             git=git,
@@ -783,6 +780,8 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             fact_provider=fact_provider,
             toolchain_fingerprint=toolchain,
             object_format=object_format,
+            budget=request.budget,
+            jobs=request.jobs,
         )
         context = _context(
             git=git,
@@ -799,10 +798,10 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             rename_limit_exceeded=rename_limit_exceeded,
             integrity_paths=integrity_paths,
             target_drift=target_drift,
+            budget=request.budget,
+            deadline=deadline,
         )
-        cold = policy.gate.get("cold_deadline_seconds")
-        deadline = started + float(cold) if isinstance(cold, (int, float)) and cold > 0 else None
-        results = _run_checks(context, deadline)
+        results = _run_checks(context, deadline, jobs=request.jobs)
 
         results, applied_waivers, waiver_reviews, waiver_diagnostics = apply_waivers(
             results, policy, as_of_date=as_of

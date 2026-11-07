@@ -9,10 +9,12 @@ from functools import lru_cache
 import json
 import math
 import re
+import time
 from typing import Any, Mapping, Sequence
 
 from verifyci.checks.base import (
     CheckContext,
+    budget_exhausted_result,
     gap,
     make_finding,
     make_result,
@@ -255,6 +257,8 @@ def _secret_sub(
     ambiguous = 0
     scanned_lines = 0
     for entry in context.entries:
+        if context.deadline is not None and time.monotonic() > context.deadline:
+            raise TimeoutError("cold_deadline_seconds exceeded")
         path = entry.head_path
         if not path or entry.is_binary or entry.is_submodule or entry.is_symlink:
             continue
@@ -552,6 +556,8 @@ def _dangerous_sub(
     seen_call_keys: set[tuple[str, int, str]] = set()
 
     for entry in context.entries:
+        if context.deadline is not None and time.monotonic() > context.deadline:
+            raise TimeoutError("cold_deadline_seconds exceeded")
         path = entry.head_path
         if not path or entry.is_binary or entry.is_submodule or entry.is_symlink:
             continue
@@ -795,6 +801,8 @@ def _taint_sub(
     relevant = 0
     unresolved = 0
     for entry in context.entries:
+        if context.deadline is not None and time.monotonic() > context.deadline:
+            raise TimeoutError("cold_deadline_seconds exceeded")
         path = entry.head_path
         if not path or entry.is_binary or entry.is_submodule or entry.is_symlink:
             continue
@@ -885,13 +893,18 @@ _COVERAGE_ORDER = {Coverage.UNKNOWN: 3, Coverage.PARTIAL: 2, Coverage.COMPLETE: 
 
 
 def run(context: CheckContext) -> CheckResult:
+    if context.deadline is not None and time.monotonic() > context.deadline:
+        return budget_exhausted_result(context, "security", "cold_deadline_seconds exceeded")
     lines_cache: dict[int, list[str]] = {}
     ast_cache: dict[int, ast.Module | None] = {}
-    subs = [
-        _secret_sub(context, lines_cache=lines_cache, ast_cache=ast_cache),
-        _dangerous_sub(context, lines_cache=lines_cache, ast_cache=ast_cache),
-        _taint_sub(context, lines_cache=lines_cache),
-    ]
+    try:
+        subs = [
+            _secret_sub(context, lines_cache=lines_cache, ast_cache=ast_cache),
+            _dangerous_sub(context, lines_cache=lines_cache, ast_cache=ast_cache),
+            _taint_sub(context, lines_cache=lines_cache),
+        ]
+    except TimeoutError as exc:
+        return budget_exhausted_result(context, "security", str(exc))
     invalid = False
     for sub in subs:
         if sub.validate():

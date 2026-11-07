@@ -244,3 +244,86 @@ def test_analysis_stubs():
     assert t is not None
     s = FunctionSummary("mod:func")
     assert s.qualified_name == "mod:func"
+
+
+def test_scheduler_parallel_batch():
+    items = list(range(100))
+    res1 = run_deterministic_batch(items, lambda x: x * x, max_workers=1)
+    res4 = run_deterministic_batch(items, lambda x: x * x, max_workers=4)
+    assert res1 == res4
+    assert res4 == [x * x for x in range(100)]
+
+
+def test_budget_file_and_node_limits():
+    from verifyci.scope.entities import analyze_source
+
+    code = "def foo():\n    a = 1 + 2\n    return a\n"
+    # File bytes limit
+    facts_bytes = analyze_source("test.py", code, budget=WorkBudget(max_file_bytes=5))
+    assert not facts_bytes.supported
+    assert "parse_resource_limit" in facts_bytes.parse_error
+
+    # AST nodes limit
+    facts_nodes = analyze_source("test.py", code, budget=WorkBudget(max_ast_nodes=2))
+    assert not facts_nodes.supported
+    assert "parse_resource_limit" in facts_nodes.parse_error
+
+    # Normal budget
+    facts_normal = analyze_source("test.py", code, budget=DEFAULT_BUDGET)
+    assert facts_normal.supported
+
+
+def test_budget_exhausted_deadline():
+    import time
+    from verifyci.checks.base import CheckContext
+    from verifyci.checks import grounding, deletion, contract, security
+    from verifyci.contracts.model import Outcome
+    from verifyci.gate.policy import parse_policy_bytes
+    from verifyci.scope.entities import build_changed_scope
+
+    ctx = CheckContext(
+        git=None,
+        policy=parse_policy_bytes(b""),
+        entries=(),
+        scope=build_changed_scope([]),
+        as_of_date="2026-10-22",
+        object_format="sha1",
+        target_base_commit="b" * 40,
+        merge_base_commit="m" * 40,
+        head_commit="h" * 40,
+        toolchain_fingerprint="sha256:" + "0" * 64,
+        deadline=time.monotonic() - 10.0,
+    )
+
+    res_g = grounding.run(ctx)
+    assert res_g.outcome == Outcome.INCONCLUSIVE
+    assert "budget_exhausted" in res_g.reason_codes
+
+    res_d = deletion.run(ctx)
+    assert res_d.outcome == Outcome.INCONCLUSIVE
+    assert "budget_exhausted" in res_d.reason_codes
+
+    res_c = contract.run(ctx)
+    assert res_c.outcome == Outcome.INCONCLUSIVE
+    assert "budget_exhausted" in res_c.reason_codes
+
+    res_s = security.run(ctx)
+    assert res_s.outcome == Outcome.INCONCLUSIVE
+    assert "budget_exhausted" in res_s.reason_codes
+
+
+def test_entity_to_dict_memoization():
+    from verifyci.contracts.model import Entity
+
+    e = Entity(
+        file_path="foo.py",
+        qname="foo:bar",
+        kind="function",
+        start_line=1,
+        end_line=5,
+    )
+    d1 = e.to_dict()
+    d2 = e.to_dict()
+    assert d1 == d2
+    assert d1 is not d2  # defensive copy prevents external mutation from polluting cache
+

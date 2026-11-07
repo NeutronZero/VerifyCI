@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
-from verifyci.checks.base import CheckContext, gap, make_finding, make_result
+from verifyci.checks.base import (
+    CheckContext,
+    budget_exhausted_result,
+    gap,
+    make_finding,
+    make_result,
+)
 from verifyci.contracts.model import (
     CheckResult,
     Coverage,
@@ -20,6 +27,8 @@ def _fact_for_path(context: CheckContext, path: str):
 
 
 def run(context: CheckContext) -> CheckResult:
+    if context.deadline is not None and time.monotonic() > context.deadline:
+        return budget_exhausted_result(context, "grounding", "cold_deadline_seconds exceeded")
     rules = context.policy.deny_changes
     changed_paths = sorted(
         {p for entry in context.entries for p in entry.changed_paths}
@@ -43,6 +52,8 @@ def run(context: CheckContext) -> CheckResult:
     }
     findings = []
     for path, rule_ids in sorted(path_matches.items()):
+        if context.deadline is not None and time.monotonic() > context.deadline:
+            return budget_exhausted_result(context, "grounding")
         entry = entries_by_changed_path.get(path)
         ordered_rules = sorted(rule_ids)
         primary_rule_id = ordered_rules[0]
@@ -89,6 +100,8 @@ def run(context: CheckContext) -> CheckResult:
             )
         )
     for symbol, rule_ids in sorted(symbol_matches.items()):
+        if context.deadline is not None and time.monotonic() > context.deadline:
+            return budget_exhausted_result(context, "grounding")
         entity = context.scope.entity(symbol)
         file_path = entity.file_path if entity else ""
         entry = entries_by_changed_path.get(file_path)

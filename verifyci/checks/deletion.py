@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 import re
+import time
 from typing import Any, Mapping
 
 from verifyci.checks.base import (
     CheckContext,
+    budget_exhausted_result,
     gap,
     make_finding,
     make_result,
@@ -184,6 +186,8 @@ def _dynamic_references(
 
 
 def run(context: CheckContext) -> CheckResult:
+    if context.deadline is not None and time.monotonic() > context.deadline:
+        return budget_exhausted_result(context, "deletion", "cold_deadline_seconds exceeded")
     excluded_patterns = []
     for key in ("generated", "vendored"):
         excluded_patterns.extend(context.policy.path_classes.get(key, ()))
@@ -220,6 +224,8 @@ def run(context: CheckContext) -> CheckResult:
 
     dynamic_lines_cache: dict[str, list[str]] = {}
     for entity in removed:
+        if context.deadline is not None and time.monotonic() > context.deadline:
+            return budget_exhausted_result(context, "deletion", "cold_deadline_seconds exceeded")
         simple = _simple_name(entity.qname)
         refs = _head_references(context, entity, importers_by_symbol=importers_by_symbol)
         dynamic_refs = _dynamic_references(
@@ -243,6 +249,12 @@ def run(context: CheckContext) -> CheckResult:
             reachable_removed.add((entity.file_path, simple))
         if refs and is_public:
             references_found.extend(refs)
+            if len(references_found) > context.budget.max_references:
+                return budget_exhausted_result(
+                    context,
+                    "deletion",
+                    f"max_references limit exceeded ({len(references_found)} > {context.budget.max_references})",
+                )
             primary = refs[0]
             findings.append(
                 make_finding(
@@ -337,6 +349,8 @@ def run(context: CheckContext) -> CheckResult:
     head_modules: set[str] = {_module_name(p) for p in context.scope.head_facts}
 
     for path, facts in context.scope.head_facts.items():
+        if context.deadline is not None and time.monotonic() > context.deadline:
+            return budget_exhausted_result(context, "deletion", "cold_deadline_seconds exceeded")
         if path.endswith("__init__.py"):
             continue
         for imp in facts.imports:
@@ -480,6 +494,8 @@ def run(context: CheckContext) -> CheckResult:
     # dangling references, including calls to private helpers.
     removed_by_path_and_simple = {(e.file_path, _simple_name(e.qname)) for e in removed}
     for path, facts in context.scope.head_facts.items():
+        if context.deadline is not None and time.monotonic() > context.deadline:
+            return budget_exhausted_result(context, "deletion", "cold_deadline_seconds exceeded")
         if path.endswith("__init__.py"):
             continue
         for call in facts.calls:

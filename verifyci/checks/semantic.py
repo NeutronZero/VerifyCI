@@ -17,10 +17,12 @@ import dataclasses
 import json
 import subprocess
 import sys
+import time
 from typing import Any, Mapping, cast
 import z3
 
-from verifyci.checks.base import CheckContext, gap, make_finding, make_result
+from verifyci.checks.base import CheckContext, budget_exhausted_result, gap, make_finding, make_result
+from verifyci.runtime.budget import WorkBudget
 from verifyci.contracts.model import (
     CheckResult,
     Coverage,
@@ -105,6 +107,10 @@ class UnsupportedControlFlowError(Exception):
 
 
 class ReplaySafetyViolation(Exception):
+    pass
+
+
+class BudgetExhaustedError(Exception):
     pass
 
 
@@ -280,6 +286,9 @@ def collect_target_sites(
     stmts: list[ast.stmt],
     ctx: SymbolicContext,
     initial_cond: z3.ExprRef | None = None,
+    budget: WorkBudget | None = None,
+    path_counter: list[int] | None = None,
+    deadline: float | None = None,
 ) -> list[TargetSite]:
     if initial_cond is None:
         initial_cond = z3.BoolVal(True)
@@ -289,8 +298,12 @@ def collect_target_sites(
     def walk_block(
         block: list[ast.stmt], current_cond: z3.ExprRef, enclosing_conds: list[z3.ExprRef]
     ) -> z3.ExprRef:
+        if deadline is not None and time.monotonic() > deadline:
+            raise BudgetExhaustedError("cold_deadline_seconds exceeded")
         cont_cond = current_cond
         for stmt in block:
+            if deadline is not None and time.monotonic() > deadline:
+                raise BudgetExhaustedError("cold_deadline_seconds exceeded")
             if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
                 call = stmt.value
                 callee = getattr(call.func, "id", "")
@@ -344,6 +357,12 @@ def collect_target_sites(
                 break
 
             elif isinstance(stmt, ast.If):
+                if path_counter is not None and budget is not None:
+                    path_counter[0] += 1
+                    if path_counter[0] > budget.max_symbolic_paths:
+                        raise BudgetExhaustedError(
+                            f"max_symbolic_paths limit exceeded ({path_counter[0]} > {budget.max_symbolic_paths})"
+                        )
                 test_cond = ast_to_z3(stmt.test, ctx)
                 then_cond = z3.And(cont_cond, test_cond)
                 else_cond = z3.And(cont_cond, z3.Not(test_cond))
@@ -1049,6 +1068,7 @@ def _analyze_typescript_guard(
     b_src: str,
     h_src: str,
     eff: str,
+    solver_rlimit: int = 100000,
 ) -> tuple[str, str, z3.ExprRef, z3.ExprRef, dict[str, Any], int, str] | None:
     """Analyze TypeScript file using tree-sitter AST to extract function, guard condition, and Z3 model."""
     try:
@@ -1132,7 +1152,7 @@ def _analyze_typescript_guard(
         delta = z3.And(phi_head, z3.Not(phi_base))
 
         solver = z3.Solver()
-        solver.set("rlimit", 100000)
+        solver.set("rlimit", solver_rlimit)
         solver.add(delta)
         if solver.check() == z3.sat:
             z3_model = solver.model()
@@ -1154,6 +1174,8 @@ def _analyze_typescript_guard(
 # ---------------------------------------------------------------------------
 
 def run(context: CheckContext) -> CheckResult:
+    if context.deadline is not None and time.monotonic() > context.deadline:
+        return budget_exhausted_result(context, "semantic", "cold_deadline_seconds exceeded")
     # --- Check A: Strict Unsupported Language Check on Code Scope ---
     code_entries = []
     for entry in context.entries:
@@ -1348,6 +1370,8 @@ def run(context: CheckContext) -> CheckResult:
 
     # 1. TypeScript files
     for entry in code_entries:
+        if context.deadline is not None and time.monotonic() > context.deadline:
+            return budget_exhausted_result(context, "semantic", "cold_deadline_seconds exceeded")
         path = entry.head_path or entry.base_path
         if path.endswith((".ts", ".tsx", ".js", ".jsx")) and entry.base_source and entry.head_source:
             b_src = entry.base_source
@@ -1359,7 +1383,12 @@ def run(context: CheckContext) -> CheckResult:
                     continue
                 for eff in rule.get("effects", ()):
                     if eff in b_src and eff in h_src:
-                        analysis = _analyze_typescript_guard(b_src, h_src, eff)
+                        analysis = _analyze_typescript_guard(
+                            b_src,
+                            h_src,
+                            eff,
+                            solver_rlimit=context.budget.solver_rlimit,
+                        )
                         if analysis is not None:
                             b_fn_name, h_fn_name, phi_base, phi_head, model_values, line_num, guard_desc = analysis
                             fn_name = h_fn_name or b_fn_name
@@ -1434,6 +1463,8 @@ def run(context: CheckContext) -> CheckResult:
 
     # 2. Python files
     for entry in code_entries:
+        if context.deadline is not None and time.monotonic() > context.deadline:
+            return budget_exhausted_result(context, "semantic", "cold_deadline_seconds exceeded")
         path = entry.head_path or entry.base_path
         if not path.endswith((".py", ".pyi")) or not entry.base_source or not entry.head_source:
             continue
@@ -1468,7 +1499,7 @@ def run(context: CheckContext) -> CheckResult:
                 b_vars = [ctx_sym.get_var(n, "string") for n in b_names]
                 h_vars = [ctx_sym.get_var(n, "string") for n in h_names]
                 solver = z3.Solver()
-                solver.set("rlimit", 100000)
+                solver.set("rlimit", context.budget.solver_rlimit)
                 diff_pairs = [bv != hv for bv, hv in zip(b_vars, h_vars) if bv is not hv]
                 delta_bind = z3.Or(*diff_pairs) if diff_pairs else z3.BoolVal(False)
                 solver.add(delta_bind)
@@ -1584,7 +1615,7 @@ def run(context: CheckContext) -> CheckResult:
                             b_vars = [ctx_sym.get_var(n, "string") for n in b_names]
                             h_vars = [ctx_sym.get_var(n, "string") for n in h_names]
                             solver = z3.Solver()
-                            solver.set("rlimit", 100000)
+                            solver.set("rlimit", context.budget.solver_rlimit)
                             diff_pairs = [bv != hv for bv, hv in zip(b_vars, h_vars) if bv is not hv]
                             delta_bind = z3.Or(*diff_pairs) if diff_pairs else z3.BoolVal(False)
                             solver.add(delta_bind)
@@ -1662,19 +1693,33 @@ def run(context: CheckContext) -> CheckResult:
 
         # Cache target sites across Category 3 & 4 for identical functions in this file entry
         fn_sites_cache: dict[str, tuple[list[TargetSite], list[TargetSite]]] = {}
+        path_counter: list[int] = [0]
 
         def _get_target_sites(
             b_fn_node: ast.FunctionDef,
             h_fn_node: ast.FunctionDef,
             key: str,
             cache: dict[str, tuple[list[TargetSite], list[TargetSite]]] = fn_sites_cache,
+            counter: list[int] = path_counter,
         ) -> tuple[list[TargetSite], list[TargetSite]]:
             cached = cache.get(key)
             if cached is not None:
                 return cached
             ctx_sym = SymbolicContext()
-            b_s = collect_target_sites(b_fn_node.body, ctx_sym)
-            h_s = collect_target_sites(h_fn_node.body, ctx_sym)
+            b_s = collect_target_sites(
+                b_fn_node.body,
+                ctx_sym,
+                budget=context.budget,
+                path_counter=counter,
+                deadline=context.deadline,
+            )
+            h_s = collect_target_sites(
+                h_fn_node.body,
+                ctx_sym,
+                budget=context.budget,
+                path_counter=counter,
+                deadline=context.deadline,
+            )
             cache[key] = (b_s, h_s)
             return b_s, h_s
 
@@ -1685,12 +1730,16 @@ def run(context: CheckContext) -> CheckResult:
                 continue
             for exc in rule.get("raises", ()):
                 for b_name, b_fn in b_funcs.items():
+                    if context.deadline is not None and time.monotonic() > context.deadline:
+                        return budget_exhausted_result(context, "semantic", "cold_deadline_seconds exceeded")
                     h_fn = h_funcs.get(b_name)
                     if not h_fn:
                         continue
 
                     try:
                         b_sites, h_sites = _get_target_sites(b_fn, h_fn, b_name)
+                    except BudgetExhaustedError as exc_budget:
+                        return budget_exhausted_result(context, "semantic", str(exc_budget))
                     except (UnsupportedExpressionError, UnsupportedControlFlowError) as exc_unsupp:
                         gap_reason = (
                             "unsupported_syntax_version"
@@ -1729,7 +1778,7 @@ def run(context: CheckContext) -> CheckResult:
                         delta_err = z3.And(phi_base_raise, z3.Not(phi_head_raise))
 
                         solver = z3.Solver()
-                        solver.set("rlimit", 100000)
+                        solver.set("rlimit", context.budget.solver_rlimit)
                         solver.add(delta_err)
                         if solver.check() == z3.sat:
                             branch_line = h_fn.lineno
@@ -1816,12 +1865,16 @@ def run(context: CheckContext) -> CheckResult:
                 continue
             for eff in rule.get("effects", ()):
                 for b_name, b_fn in b_funcs.items():
+                    if context.deadline is not None and time.monotonic() > context.deadline:
+                        return budget_exhausted_result(context, "semantic", "cold_deadline_seconds exceeded")
                     h_fn = h_funcs.get(b_name)
                     if not h_fn:
                         continue
 
                     try:
                         b_sites, h_sites = _get_target_sites(b_fn, h_fn, b_name)
+                    except BudgetExhaustedError as exc_budget:
+                        return budget_exhausted_result(context, "semantic", str(exc_budget))
                     except (UnsupportedExpressionError, UnsupportedControlFlowError) as exc_unsupp:
                         gap_reason = (
                             "unsupported_syntax_version"
@@ -1864,7 +1917,7 @@ def run(context: CheckContext) -> CheckResult:
                     delta_e = z3.And(phi_head_eff, z3.Not(phi_base_eff))
 
                     solver = z3.Solver()
-                    solver.set("rlimit", 100000)
+                    solver.set("rlimit", context.budget.solver_rlimit)
                     solver.add(delta_e)
                     solver_res = solver.check()
 

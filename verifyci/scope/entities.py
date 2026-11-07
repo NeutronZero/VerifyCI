@@ -17,6 +17,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from verifyci.contracts.model import DiffEntry, Entity, Hunk
 from verifyci.contracts.names import normalize_repo_path, qualify
+from verifyci.runtime.budget import DEFAULT_BUDGET, WorkBudget
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,8 +133,6 @@ def _py_language() -> Any:
         parser = Parser(_PY_LANG_OBJECT)
         _PY_LOCAL.parser = parser
     return parser
-
-
 def _pos_to_byte(data: bytes, lineno: int, col: int) -> int:
     # Backwards-compatible helper; callers with repeated invocations should
     # prefer the precomputed prefix table built in _python_entities.
@@ -482,16 +481,10 @@ def _python_entities(
             idx = len(line_byte_offsets) - 1
         return line_byte_offsets[idx] + col
 
-    def walk(node: ast.AST, parent_qual: str, in_function: bool) -> None:
+    def walk(node: ast.AST, parent_qual: str) -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             name = node.name
-            if parent_qual:
-                if in_function:
-                    qname = f"{parent_qual}.<locals>.{name}"
-                else:
-                    qname = f"{parent_qual}.{name}"
-            else:
-                qname = name
+            qname = f"{parent_qual}.{name}" if parent_qual else name
             params = _function_params(node) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else ()
             kind = "function" if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else "class"
             body = ast.dump(node, annotate_fields=False, include_attributes=False)
@@ -501,16 +494,28 @@ def _python_entities(
                 "async": isinstance(node, ast.AsyncFunctionDef),
                 "decorators": list(_decorator_names(node)),
             }
-            top_level = "." not in qname and "<locals>" not in qname
+            top_level = "." not in qname
             is_export = bool(
                 (top_level and not name.startswith("_"))
                 or name in exports
                 or (top_level and name in exports)
             )
-            s_line = getattr(node, "lineno", 1)
+            if node.decorator_list:
+                first_dec = node.decorator_list[0]
+                s_line = first_dec.lineno
+                line_offset = line_byte_offsets[s_line - 1] if s_line - 1 < len(line_byte_offsets) else 0
+                at_pos = source_bytes.find(b"@", line_offset)
+                s_col = at_pos - line_offset if at_pos != -1 else getattr(first_dec, "col_offset", 0)
+                s_byte = at_pos if at_pos != -1 else _byte_offset(s_line, s_col)
+            else:
+                s_line = getattr(node, "lineno", 1)
+                s_col = getattr(node, "col_offset", 0)
+                s_byte = _byte_offset(s_line, s_col)
+
             e_line = getattr(node, "end_lineno", s_line)
-            s_col = getattr(node, "col_offset", 0)
             e_col = getattr(node, "end_col_offset", 0)
+            e_byte = _byte_offset(e_line, e_col)
+
             entities.append(
                 Entity(
                     file_path=path,
@@ -520,8 +525,8 @@ def _python_entities(
                     end_line=e_line,
                     start_col=s_col,
                     end_col=e_col,
-                    start_byte=_byte_offset(s_line, s_col),
-                    end_byte=_byte_offset(e_line, e_col),
+                    start_byte=s_byte,
+                    end_byte=e_byte,
                     blob_id=blob_id,
                     body_digest=_digest(body),
                     is_export=is_export,
@@ -531,20 +536,31 @@ def _python_entities(
                     returns=_annotation(node.returns) if not isinstance(node, ast.ClassDef) else "",
                 )
             )
-            child_in_function = in_function or isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             for child in ast.iter_child_nodes(node):
-                walk(child, qname, child_in_function)
+                walk(child, qname)
             return
         for child in ast.iter_child_nodes(node):
-            walk(child, parent_qual, in_function)
+            walk(child, parent_qual)
 
-    walk(tree, "", False)
+    walk(tree, "")
     return tuple(entities)
 
 
 def analyze_python(
-    path: str, source: str, source_roots: Sequence[str] = (), blob_hash: str = ""
+    path: str,
+    source: str,
+    source_roots: Sequence[str] = (),
+    blob_hash: str = "",
+    budget: WorkBudget = DEFAULT_BUDGET,
 ) -> SourceFacts:
+    encoded = source.encode("utf-8")
+    if len(encoded) > budget.max_file_bytes:
+        return SourceFacts(
+            path=path,
+            language="python",
+            supported=False,
+            parse_error=f"parse_resource_limit: file size {len(encoded)} exceeds max_file_bytes {budget.max_file_bytes}",
+        )
     try:
         tree = ast.parse(source, filename=path)
     except SyntaxError as exc:
@@ -553,6 +569,14 @@ def analyze_python(
             language="python",
             supported=False,
             parse_error=f"line {exc.lineno}: {exc.msg}",
+        )
+    node_count = sum(1 for _ in ast.walk(tree))
+    if node_count > budget.max_ast_nodes:
+        return SourceFacts(
+            path=path,
+            language="python",
+            supported=False,
+            parse_error=f"parse_resource_limit: AST node count {node_count} exceeds max_ast_nodes {budget.max_ast_nodes}",
         )
     visitor = _CallVisitor()
     visitor.visit(tree)
@@ -849,16 +873,35 @@ _TEXT_SUFFIXES = {
 
 
 def _analyze_source_uncached(
-    path: str, source: str, source_roots: Sequence[str] = (), blob_hash: str = ""
+    path: str,
+    source: str,
+    source_roots: Sequence[str] = (),
+    blob_hash: str = "",
+    budget: WorkBudget = DEFAULT_BUDGET,
 ) -> SourceFacts:
+    encoded = source.encode("utf-8")
+    if len(encoded) > budget.max_file_bytes:
+        return SourceFacts(
+            path=path,
+            language=path.rsplit(".", 1)[-1].lower() if "." in path else "unknown",
+            supported=False,
+            parse_error=f"parse_resource_limit: file size {len(encoded)} exceeds max_file_bytes {budget.max_file_bytes}",
+        )
     suffix = path.rsplit(".", 1)[-1].lower()
     if suffix == "py":
-        return analyze_python(path, source, source_roots, blob_hash=blob_hash)
+        return analyze_python(
+            path, source, source_roots, blob_hash=blob_hash, budget=budget
+        )
     if suffix in ("ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"):
         return analyze_typescript(path, source, blob_hash=blob_hash)
     if suffix in _TEXT_SUFFIXES or "/" not in path and "." not in path:
         return SourceFacts(path=path, language="text", supported=True)
-    return SourceFacts(path=path, language=suffix or "unknown", supported=False, parse_error="unsupported language frontend")
+    return SourceFacts(
+        path=path,
+        language=suffix or "unknown",
+        supported=False,
+        parse_error="unsupported language frontend",
+    )
 
 
 def _facts_to_cache(facts: SourceFacts) -> dict[str, Any]:
@@ -933,9 +976,12 @@ def analyze_source(
     fact_provider=None,
     toolchain_fingerprint: str = "",
     blob_hash: str = "",
+    budget: WorkBudget = DEFAULT_BUDGET,
 ) -> SourceFacts:
     if fact_provider is None or not toolchain_fingerprint or not blob_hash:
-        return _analyze_source_uncached(path, source, source_roots, blob_hash=blob_hash)
+        return _analyze_source_uncached(
+            path, source, source_roots, blob_hash=blob_hash, budget=budget
+        )
     from verifyci.index.provider import FactProvider
 
     language_id, frontend_version = _frontend_identity(path)
@@ -951,7 +997,9 @@ def analyze_source(
         "symbol_facts",
         components,
         lambda: _facts_to_cache(
-            _analyze_source_uncached(path, source, source_roots, blob_hash=blob_hash)
+            _analyze_source_uncached(
+                path, source, source_roots, blob_hash=blob_hash, budget=budget
+            )
         ),
     )
     try:

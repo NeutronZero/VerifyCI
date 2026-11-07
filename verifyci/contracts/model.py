@@ -192,20 +192,25 @@ class Entity:
         }
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "file": self.file_path,
-            "qname": self.qname,
-            "kind": self.kind,
-            "start_line": self.start_line,
-            "end_line": self.end_line,
-            "start_col": self.start_col,
-            "end_col": self.end_col,
-            "start_byte": self.start_byte,
-            "end_byte": self.end_byte,
-            "blob_id": self.blob_id,
-            "is_export": self.is_export,
-            "is_async": self.is_async,
-        }
+        return _entity_to_dict(self).copy()
+
+
+@functools.lru_cache(maxsize=16384)
+def _entity_to_dict(entity: Entity) -> dict[str, Any]:
+    return {
+        "file": entity.file_path,
+        "qname": entity.qname,
+        "kind": entity.kind,
+        "start_line": entity.start_line,
+        "end_line": entity.end_line,
+        "start_col": entity.start_col,
+        "end_col": entity.end_col,
+        "start_byte": entity.start_byte,
+        "end_byte": entity.end_byte,
+        "blob_id": entity.blob_id,
+        "is_export": entity.is_export,
+        "is_async": entity.is_async,
+    }
 
 
 @dataclass(frozen=True, slots=True)

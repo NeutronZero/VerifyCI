@@ -5,10 +5,12 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 import posixpath
+import time
 from typing import Any
 
 from verifyci.checks.base import (
     CheckContext,
+    budget_exhausted_result,
     gap,
     make_finding,
     make_result,
@@ -372,6 +374,8 @@ def _finding_call(
 
 
 def run(context: CheckContext) -> CheckResult:
+    if context.deadline is not None and time.monotonic() > context.deadline:
+        return budget_exhausted_result(context, "contract", "cold_deadline_seconds exceeded")
     base_entities: dict[str, Entity] = {}
     head_entities: dict[str, Entity] = {}
     for facts in context.scope.base_facts.values():
@@ -402,6 +406,8 @@ def run(context: CheckContext) -> CheckResult:
 
     changed_qnames = set(context.scope.changed_entities)
     for qname in sorted(changed_qnames):
+        if context.deadline is not None and time.monotonic() > context.deadline:
+            return budget_exhausted_result(context, "contract", "cold_deadline_seconds exceeded")
         base = base_entities.get(qname)
         head = head_entities.get(qname)
         if base is None and head is None:
@@ -557,6 +563,8 @@ def run(context: CheckContext) -> CheckResult:
             base_by_simple[_simple(entity.qname)].append(entity)
 
     for path, facts, call in all_head_calls:
+        if context.deadline is not None and time.monotonic() > context.deadline:
+            return budget_exhausted_result(context, "contract", "cold_deadline_seconds exceeded")
         if call.line not in changed_lines.get(path, set()):
             continue
         if call.has_starargs or call.has_kwargs:
