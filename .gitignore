@@ -2,14 +2,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .verifyci/
-!benchmarks/patch_real/cap005/base/.verifyci/invariants.yaml
-storage/verifyci.db
-storage/vuln_cache.db
-storage/embedding_cache_*.json
-.verifyci/embedding_cache_*.json
-benchmarks/beir/embedding_cache_*.json
-benchmarks/beir/corpus_h1_*.json
-benchmarks/beir/__pycache__/
 .ruff_cache/
 .coverage
 *.tmp
