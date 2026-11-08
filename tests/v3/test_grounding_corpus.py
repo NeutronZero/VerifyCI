@@ -56,7 +56,7 @@ def _get_grounding_repo(case_id: str, *, corrupt_int: bool = False) -> tuple[Git
         return _BUILT_GROUNDING_REPOS[key]
 
     corpus_hash = hashlib.sha256(SUMS_FILE.read_bytes()).hexdigest()[:12]
-    cache_root = Path(tempfile.gettempdir()) / f"vc_grounding_{corpus_hash}"
+    cache_root = Path(os.environ.get("VERIFYCI_TEST_CACHE_DIR") or tempfile.gettempdir()) / f"vc_grounding_{corpus_hash}"
     cache_root.mkdir(parents=True, exist_ok=True)
     target_dir = cache_root / key
     marker = target_dir / ".ready.json"

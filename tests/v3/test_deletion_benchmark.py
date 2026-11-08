@@ -55,7 +55,7 @@ def _build_case_repo(case: dict, target_dir: Path) -> tuple[GitRepo, str, str, s
         return _BUILT_DELETION_REPOS[case_id]
 
     corpus_hash = hashlib.sha256(CASES_FILE.read_bytes()).hexdigest()[:12]
-    cache_root = Path(tempfile.gettempdir()) / f"vc_deletion_{corpus_hash}"
+    cache_root = Path(os.environ.get("VERIFYCI_TEST_CACHE_DIR") or tempfile.gettempdir()) / f"vc_deletion_{corpus_hash}"
     cache_root.mkdir(parents=True, exist_ok=True)
     repo_dir = cache_root / case_id
     marker = repo_dir / ".ready.json"
