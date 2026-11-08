@@ -9,6 +9,7 @@ Provides 4 repeatable diff configurations:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import random
 import subprocess
@@ -18,6 +19,15 @@ target_drift = "record"
 """
 
 
+_WORKLOAD_ENV = os.environ.copy()
+_WORKLOAD_ENV.update({
+    "GIT_AUTHOR_NAME": "VerifyCI Benchmark",
+    "GIT_AUTHOR_EMAIL": "benchmark@verifyci.local",
+    "GIT_COMMITTER_NAME": "VerifyCI Benchmark",
+    "GIT_COMMITTER_EMAIL": "benchmark@verifyci.local",
+})
+
+
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
@@ -25,6 +35,7 @@ def _git(repo: Path, *args: str) -> str:
         text=True,
         encoding="utf-8",
         check=False,
+        env=_WORKLOAD_ENV,
     )
     if result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} failed in {repo}: {result.stderr or result.stdout}")
@@ -34,9 +45,8 @@ def _git(repo: Path, *args: str) -> str:
 def _init_repo(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
     _git(root, "init", "-q")
-    _git(root, "config", "user.name", "VerifyCI Benchmark")
-    _git(root, "config", "user.email", "benchmark@verifyci.local")
-    _git(root, "config", "core.autocrlf", "false")
+    with open(root / ".git" / "config", "a", encoding="utf-8") as f:
+        f.write("\n[core]\n\tautocrlf = false\n\tsafecrlf = false\n")
     policy_dir = root / ".verifyci"
     policy_dir.mkdir(parents=True, exist_ok=True)
     (policy_dir / "policy.toml").write_text(POLICY_CONTENT, encoding="utf-8", newline="\n")

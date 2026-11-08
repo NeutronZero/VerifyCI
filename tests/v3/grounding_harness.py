@@ -20,11 +20,16 @@ def build_case_repo(
 ) -> Tuple[GitRepo, str, str, str]:
     """Build a reproducible Git repository with base, merge-base, head, and policy."""
     target_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q", "-b", "main", str(target_dir)], check=True)
-    subprocess.run(["git", "-C", str(target_dir), "config", "core.autocrlf", "false"], check=True)
-    subprocess.run(["git", "-C", str(target_dir), "config", "core.safecrlf", "false"], check=True)
-    subprocess.run(["git", "-C", str(target_dir), "config", "user.name", "VerifyCI Tester"], check=True)
-    subprocess.run(["git", "-C", str(target_dir), "config", "user.email", "test@verifyci.dev"], check=True)
+    env = os.environ.copy()
+    env.update({
+        "GIT_AUTHOR_NAME": "VerifyCI Tester",
+        "GIT_AUTHOR_EMAIL": "test@verifyci.dev",
+        "GIT_COMMITTER_NAME": "VerifyCI Tester",
+        "GIT_COMMITTER_EMAIL": "test@verifyci.dev",
+    })
+    subprocess.run(["git", "init", "-q", "-b", "main", str(target_dir)], check=True, env=env)
+    with open(target_dir / ".git" / "config", "a", encoding="utf-8") as f:
+        f.write("[core]\n\tautocrlf = false\n\tsafecrlf = false\n")
 
     # 1. Authoritative base policy
     pol_file = case_dir / "policy.toml"
@@ -43,15 +48,10 @@ def build_case_repo(
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(f, dest)
 
-    subprocess.run(["git", "-C", str(target_dir), "add", "-A"], check=True)
-    subprocess.run(["git", "-C", str(target_dir), "commit", "-q", "-m", "base"], check=True)
-    base_commit = subprocess.check_output(
-        ["git", "-C", str(target_dir), "rev-parse", "HEAD"], text=True
-    ).strip()
+    subprocess.run(["git", "-C", str(target_dir), "add", "-A"], check=True, env=env)
+    subprocess.run(["git", "-C", str(target_dir), "commit", "-q", "-m", "base", "--date", "2026-01-01T00:00:00"], check=True, env=env)
+    base_commit = (target_dir / ".git" / "refs" / "heads" / "main").read_text(encoding="utf-8").strip()
     merge_base = base_commit
-
-    # Ensure timestamp resolution difference between commits
-    time.sleep(0.05)
 
     # 3. Head tree
     # Clear previous working tree (except .git and .verifyci)
@@ -73,11 +73,9 @@ def build_case_repo(
                 shutil.copy2(f, dest)
                 os.utime(dest, (future_time, future_time))
 
-    subprocess.run(["git", "-C", str(target_dir), "add", "-A"], check=True)
-    subprocess.run(["git", "-C", str(target_dir), "commit", "-q", "-m", "head"], check=True)
-    head_commit = subprocess.check_output(
-        ["git", "-C", str(target_dir), "rev-parse", "HEAD"], text=True
-    ).strip()
+    subprocess.run(["git", "-C", str(target_dir), "add", "-A"], check=True, env=env)
+    subprocess.run(["git", "-C", str(target_dir), "commit", "-q", "-m", "head", "--date", "2026-01-01T00:00:10"], check=True, env=env)
+    head_commit = (target_dir / ".git" / "refs" / "heads" / "main").read_text(encoding="utf-8").strip()
 
     repo = GitRepo(target_dir)
 

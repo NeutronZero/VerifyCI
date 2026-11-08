@@ -16,6 +16,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import hashlib
+import os
+import tempfile
 import shutil
 import subprocess
 
@@ -43,70 +46,90 @@ def load_deletion_cases() -> list[dict]:
     return cases
 
 
+_BUILT_DELETION_REPOS: dict[str, tuple[GitRepo, str, str, str]] = {}
+
+
 def _build_case_repo(case: dict, target_dir: Path) -> tuple[GitRepo, str, str, str]:
-    repo_dir = target_dir / case["case_id"]
-    if repo_dir.exists():
-        shutil.rmtree(repo_dir)
-    repo_dir.mkdir(parents=True)
+    case_id = case["case_id"]
+    if case_id in _BUILT_DELETION_REPOS:
+        return _BUILT_DELETION_REPOS[case_id]
 
-    subprocess.run(
-        ["git", "init", "-q", "-b", "main", str(repo_dir)],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(repo_dir), "config", "user.name", "TestRunner"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(repo_dir), "config", "user.email", "test@verifyci.dev"],
-        check=True,
-        capture_output=True,
-    )
+    corpus_hash = hashlib.sha256(CASES_FILE.read_bytes()).hexdigest()[:12]
+    cache_root = Path(tempfile.gettempdir()) / f"vc_deletion_{corpus_hash}"
+    cache_root.mkdir(parents=True, exist_ok=True)
+    repo_dir = cache_root / case_id
+    marker = repo_dir / ".ready.json"
 
-    for rel_path, content in case["base_files"].items():
-        file_path = repo_dir / rel_path
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(content, encoding="utf-8", newline="")
+    if not marker.exists():
+        if repo_dir.exists():
+            shutil.rmtree(repo_dir, ignore_errors=True)
+        repo_dir.mkdir(parents=True, exist_ok=True)
 
-    subprocess.run(
-        ["git", "-C", str(repo_dir), "add", "-A"], check=True, capture_output=True
-    )
-    subprocess.run(
-        ["git", "-C", str(repo_dir), "commit", "-q", "-m", "base"],
-        check=True,
-        capture_output=True,
-    )
-    base_commit = subprocess.check_output(
-        ["git", "-C", str(repo_dir), "rev-parse", "HEAD"], text=True
-    ).strip()
+        env = os.environ.copy()
+        env.update({
+            "GIT_AUTHOR_NAME": "TestRunner",
+            "GIT_AUTHOR_EMAIL": "test@verifyci.dev",
+            "GIT_COMMITTER_NAME": "TestRunner",
+            "GIT_COMMITTER_EMAIL": "test@verifyci.dev",
+        })
 
-    for item in repo_dir.iterdir():
-        if item.name != ".git":
-            if item.is_dir():
-                shutil.rmtree(item)
-            else:
-                item.unlink()
+        subprocess.run(
+            ["git", "init", "-q", "-b", "main", str(repo_dir)],
+            check=True,
+            capture_output=True,
+            env=env,
+        )
+        with open(repo_dir / ".git" / "config", "a", encoding="utf-8") as f:
+            f.write("""
+[core]
+	autocrlf = false
+	safecrlf = false
+""")
 
-    for rel_path, content in case["head_files"].items():
-        file_path = repo_dir / rel_path
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(content, encoding="utf-8", newline="")
+        for rel_path, content in case["base_files"].items():
+            file_path = repo_dir / rel_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8", newline="")
 
-    subprocess.run(
-        ["git", "-C", str(repo_dir), "add", "-A"], check=True, capture_output=True
-    )
-    subprocess.run(
-        ["git", "-C", str(repo_dir), "commit", "-q", "-m", "head", "--allow-empty"],
-        check=True,
-        capture_output=True,
-    )
-    head_commit = subprocess.check_output(
-        ["git", "-C", str(repo_dir), "rev-parse", "HEAD"], text=True
-    ).strip()
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "add", "-A"], check=True, capture_output=True, env=env
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "commit", "-q", "-m", "base", "--date", "2026-01-01T00:00:00"],
+            check=True,
+            capture_output=True,
+            env=env,
+        )
+        base_commit = (repo_dir / ".git" / "refs" / "heads" / "main").read_text(encoding="utf-8").strip()
 
-    return GitRepo(repo_dir), base_commit, base_commit, head_commit
+        for item in repo_dir.iterdir():
+            if item.name != ".git":
+                if item.is_dir():
+                    shutil.rmtree(item)
+                else:
+                    item.unlink()
+
+        for rel_path, content in case["head_files"].items():
+            file_path = repo_dir / rel_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8", newline="")
+
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "add", "-A"], check=True, capture_output=True, env=env
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "commit", "-q", "-m", "head", "--allow-empty", "--date", "2026-01-01T00:00:10"],
+            check=True,
+            capture_output=True,
+            env=env,
+        )
+        head_commit = (repo_dir / ".git" / "refs" / "heads" / "main").read_text(encoding="utf-8").strip()
+        marker.write_text(json.dumps({"base": base_commit, "head": head_commit}), encoding="utf-8")
+
+    data = json.loads(marker.read_text(encoding="utf-8"))
+    res = (GitRepo(repo_dir), data["base"], data["base"], data["head"])
+    _BUILT_DELETION_REPOS[case_id] = res
+    return res
 
 
 def _execute_case(case: dict, tmp_path: Path) -> CheckResult:

@@ -17,9 +17,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
+import time
 
 import pytest
 
@@ -36,12 +39,67 @@ from verifyci.contracts.model import (
 )
 from verifyci.contracts.reason_codes import ALL_CODES, validate_finding_triple
 from verifyci.gate.policy import parse_policy_bytes
-from verifyci.scm.git import GitError
+from verifyci.scm.git import GitError, GitRepo
 
 
 CORPUS_ROOT = Path("corpora/grounding")
 CASES_FILE = CORPUS_ROOT / "cases.jsonl"
 SUMS_FILE = CORPUS_ROOT / "SHA256SUMS"
+
+_BUILT_GROUNDING_REPOS: dict[str, tuple[GitRepo, str, str, str, Path]] = {}
+_GROUNDING_TD: tempfile.TemporaryDirectory | None = None
+
+
+def _get_grounding_repo(case_id: str, *, corrupt_int: bool = False) -> tuple[GitRepo, str, str, str, Path]:
+    key = f"{case_id}_{corrupt_int}"
+    if key in _BUILT_GROUNDING_REPOS:
+        return _BUILT_GROUNDING_REPOS[key]
+
+    corpus_hash = hashlib.sha256(SUMS_FILE.read_bytes()).hexdigest()[:12]
+    cache_root = Path(tempfile.gettempdir()) / f"vc_grounding_{corpus_hash}"
+    cache_root.mkdir(parents=True, exist_ok=True)
+    target_dir = cache_root / key
+    marker = target_dir / ".ready.json"
+
+    if not marker.exists():
+        lock_file = cache_root / f"{key}.lock"
+        acquired = False
+        start = time.time()
+        while time.time() - start < 120:
+            try:
+                fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
+                acquired = True
+                break
+            except FileExistsError:
+                if marker.exists():
+                    break
+                time.sleep(0.05)
+
+        if not marker.exists():
+            try:
+                case_dir = CORPUS_ROOT / "fixtures" / case_id
+                if target_dir.exists():
+                    shutil.rmtree(target_dir, ignore_errors=True)
+                repo, base_c, mb, head_c = build_case_repo(case_dir, target_dir, corrupt_int=corrupt_int)
+                marker_data = json.dumps({"base": base_c, "head": head_c})
+                marker.write_text(marker_data, encoding="utf-8")
+            finally:
+                if acquired and lock_file.exists():
+                    try:
+                        lock_file.unlink()
+                    except OSError:
+                        pass
+        elif acquired and lock_file.exists():
+            try:
+                lock_file.unlink()
+            except OSError:
+                pass
+
+    data = json.loads(marker.read_text(encoding="utf-8"))
+    res = (GitRepo(target_dir), data["base"], data["base"], data["head"], target_dir)
+    _BUILT_GROUNDING_REPOS[key] = res
+    return res
 
 
 def load_cases() -> list[dict]:
@@ -353,38 +411,35 @@ def test_git_blob_identity_accuracy():
 @pytest.mark.invariant
 def test_reproducible_git_harness_and_diffs():
     """Build a real Git repository for every fixture and verify diff entries and hunks."""
-    with tempfile.TemporaryDirectory() as td:
-        for case in load_cases():
-            case_id = case["case_id"]
-            case_dir = CORPUS_ROOT / "fixtures" / case_id
-            target_dir = Path(td) / case_id
-            is_int = (case_id == "GRD-INT-001")
+    for case in load_cases():
+        case_id = case["case_id"]
+        is_int = (case_id == "GRD-INT-001")
 
-            repo, base_c, mb, head_c = build_case_repo(case_dir, target_dir, corrupt_int=is_int)
-            assert repo is not None
-            assert len(base_c) == 40
-            assert len(head_c) == 40
-            assert mb == base_c
+        repo, base_c, mb, head_c, _ = _get_grounding_repo(case_id, corrupt_int=is_int)
+        assert repo is not None
+        assert len(base_c) == 40
+        assert len(head_c) == 40
+        assert mb == base_c
 
-            if is_int:
-                # GRD-INT-001 must produce Git integrity fault on tampered object
-                with pytest.raises(GitError) as exc_info:
-                    repo.diff_entries(base_c, head_c)
-                assert exc_info.value.code in ("missing_git_object", "provenance_integrity_error")
-            else:
-                entries, _ = repo.diff_entries(base_c, head_c)
-                expected_hunks = case["expected"].get("hunks", [])
-                actual_hunks = []
-                for e in entries:
-                    for h in e.hunks:
-                        actual_hunks.append((h.old_start, h.old_count, h.new_start, h.new_count))
-                expected_hunk_tuples = [
-                    (h["old_start"], h["old_count"], h["new_start"], h["new_count"])
-                    for h in expected_hunks
-                ]
-                assert actual_hunks == expected_hunk_tuples, (
-                    f"{case_id}: hunk mismatch: actual {actual_hunks} != expected {expected_hunk_tuples}"
-                )
+        if is_int:
+            # GRD-INT-001 must produce Git integrity fault on tampered object
+            with pytest.raises(GitError) as exc_info:
+                repo.diff_entries(base_c, head_c)
+            assert exc_info.value.code in ("missing_git_object", "provenance_integrity_error")
+        else:
+            entries, _ = repo.diff_entries(base_c, head_c)
+            expected_hunks = case["expected"].get("hunks", [])
+            actual_hunks = []
+            for e in entries:
+                for h in e.hunks:
+                    actual_hunks.append((h.old_start, h.old_count, h.new_start, h.new_count))
+            expected_hunk_tuples = [
+                (h["old_start"], h["old_count"], h["new_start"], h["new_count"])
+                for h in expected_hunks
+            ]
+            assert actual_hunks == expected_hunk_tuples, (
+                f"{case_id}: hunk mismatch: actual {actual_hunks} != expected {expected_hunk_tuples}"
+            )
 
 
 @pytest.mark.invariant
@@ -522,274 +577,273 @@ def test_grounded_mapper_empirical_benchmark():
     discrepancies: list[str] = []
     per_class_results: dict[str, dict[str, int]] = {}
 
-    with tempfile.TemporaryDirectory() as td:
-        for case in cases:
-            case_id = case["case_id"]
-            kind = case["kind"]
-            case_dir = CORPUS_ROOT / "fixtures" / case_id
-            is_int = (case_id == "GRD-INT-001")
-            expected = case["expected"]
+    for case in cases:
+        case_id = case["case_id"]
+        case_dir = CORPUS_ROOT / "fixtures" / case_id
+        kind = case["kind"]
+        is_int = (case_id == "GRD-INT-001")
+        expected = case["expected"]
 
-            stats = per_class_results.setdefault(kind, {"total": 0, "passed": 0})
-            stats["total"] += 1
+        stats = per_class_results.setdefault(kind, {"total": 0, "passed": 0})
+        stats["total"] += 1
 
-            repo, base_c, mb, head_c = build_case_repo(case_dir, Path(td) / case_id, corrupt_int=is_int)
+        repo, base_c, mb, head_c, repo_dir = _get_grounding_repo(case_id, corrupt_int=is_int)
 
-            if is_int:
-                # Production pipeline execution through run_gate (§9.2, §15)
-                req = GateRequest(
-                    repo=Path(td) / case_id,
-                    base=base_c,
-                    head=head_c,
-                    as_of_date="2026-10-22",
-                )
-                bundle = run_gate(req)
-                check_results = {r["check_id"]: r for r in bundle.payload["check_results"]}
-                grounding_res = check_results["grounding"]
-
-                actual_outcome = grounding_res["outcome"]
-                actual_coverage = grounding_res["coverage"]
-                actual_reasons = tuple(sorted(grounding_res["reason_codes"]))
-                actual_hunks = ()
-                actual_entities = ()
-
-                # Production pipeline integrity validation
-                int_has_diag = any(
-                    integrity_expected_hash in str(d.get("detail", ""))
-                    for d in grounding_res["diagnostics"]
-                )
-                integrity_ok = (
-                    actual_outcome == Outcome.ERROR.value
-                    and actual_coverage == Coverage.UNKNOWN.value
-                    and len(grounding_res["findings"]) == 0
-                    and int_has_diag
-                )
-                if not integrity_ok:
-                    discrepancies.append(
-                        f"{case_id}: integrity pipeline check failed (outcome={actual_outcome}, "
-                        f"coverage={actual_coverage}, findings={len(grounding_res['findings'])}, "
-                        f"diag_match={int_has_diag})"
-                    )
-            else:
-                entries, rename_limit_exceeded = repo.diff_entries(base_c, head_c)
-                policy_file = case_dir / "policy.toml"
-                policy = parse_policy_bytes(policy_file.read_bytes()) if policy_file.exists() else parse_policy_bytes(b"[deny_changes]\n")
-
-                scope = build_changed_scope(entries, rename_limit_exceeded=rename_limit_exceeded)
-                context = CheckContext(
-                    git=repo,
-                    policy=policy,
-                    entries=tuple(entries),
-                    scope=scope,
-                    as_of_date="2026-10-22",
-                    object_format="sha1",
-                    target_base_commit=base_c,
-                    merge_base_commit=mb,
-                    head_commit=head_c,
-                    toolchain_fingerprint="sha256:frozen",
-                    rename_limit_exceeded=rename_limit_exceeded,
-                )
-                res = grounding.run(context)
-                actual_outcome = res.outcome.value
-                actual_coverage = res.coverage.value
-                actual_reasons = tuple(sorted(res.reason_codes))
-                actual_hunks = tuple(dict(h) for h in scope.mapped_hunks)
-                actual_entities = tuple(dict(e) for e in scope.mapped_entities)
-
-            # 1. Outcomes
-            exp_outcome = expected["outcome"]
-            if actual_outcome == exp_outcome:
-                outcome_matches += 1
-            if actual_outcome == Outcome.FAIL.value and exp_outcome != Outcome.FAIL.value:
-                false_fails += 1
-
-            # 2. Coverage
-            if actual_coverage == expected["coverage"]:
-                coverage_matches += 1
-
-            # 3. Reason codes
-            exp_reasons = tuple(sorted(expected.get("reason_codes", [])))
-            if actual_reasons == exp_reasons:
-                reason_matches += 1
-
-            # 4. Hunk confusion matrix paired by immutable coordinate tuple (file, old_start, old_count, new_start, new_count)
-            hunks_match = False
-            if not is_int:
-                exp_hunks = tuple(expected.get("hunks", []))
-                hunks_match = (actual_hunks == exp_hunks)
-                if hunks_match:
-                    exact_hunk_matches += 1
-                else:
-                    discrepancies.append(f"{case_id}: hunk mismatch: {actual_hunks} != {exp_hunks}")
-
-                def hunk_coord(h: dict) -> tuple[str, int, int, int, int]:
-                    return (h["file"], h["old_start"], h["old_count"], h["new_start"], h["new_count"])
-
-                exp_hunks_by_coord = {hunk_coord(h): h.get("mapped_entity") for h in exp_hunks}
-                act_hunks_by_coord = {hunk_coord(h): h.get("mapped_entity") for h in actual_hunks}
-                all_hunk_coords = set(exp_hunks_by_coord.keys()) | set(act_hunks_by_coord.keys())
-
-                for coord in all_hunk_coords:
-                    in_exp = coord in exp_hunks_by_coord
-                    in_act = coord in act_hunks_by_coord
-                    if in_exp and in_act:
-                        e_target = exp_hunks_by_coord[coord]
-                        a_target = act_hunks_by_coord[coord]
-                        if e_target is not None:
-                            if a_target == e_target:
-                                tp_hunks += 1
-                            elif a_target is None:
-                                fn_hunks += 1
-                            else:
-                                # Misclassified entity label: FP for wrong label, FN for missed expected label
-                                fp_hunks += 1
-                                fn_hunks += 1
-                        else:
-                            if a_target is None:
-                                tn_hunks += 1
-                            else:
-                                fp_hunks += 1
-                    elif in_exp and not in_act:
-                        # Expected hunk omitted in actual output
-                        fn_hunks += 1
-                    else:
-                        # Spurious hunk generated in actual output
-                        fp_hunks += 1
-
-                # 5. Entity confusion matrix (computed independently over declared candidate universe)
-                exp_ents = expected.get("entities", [])
-                exp_ents_dict = {e["qname"]: e["change"] for e in exp_ents}
-                act_ents_dict = {e["qname"]: e["change"] for e in actual_entities}
-
-                ents_match = (json.dumps(actual_entities, sort_keys=True) == json.dumps(exp_ents, sort_keys=True))
-                if ents_match:
-                    exact_entity_matches += 1
-                else:
-                    discrepancies.append(f"{case_id}: entities mismatch: {actual_entities} != {exp_ents}")
-
-                # Track entity instances across base and head
-                case_base_inst = sum(len(f.entities) for f in scope.base_facts.values())
-                case_head_inst = sum(len(f.entities) for f in scope.head_facts.values())
-                total_base_instances += case_base_inst
-                total_head_instances += case_head_inst
-
-                # Candidate universe: unique qualified names across touched files
-                case_qnames = {
-                    e.qname
-                    for f in list(scope.base_facts.values()) + list(scope.head_facts.values())
-                    for e in f.entities
-                } | set(exp_ents_dict.keys()) | set(act_ents_dict.keys())
-                total_per_case_candidate_qnames += len(case_qnames)
-
-                # Global tracking across the corpus
-                global_candidate_qnames.update(case_qnames)
-                global_changed_qnames.update(exp_ents_dict.keys())
-                global_act_changed_qnames.update(act_ents_dict.keys())
-
-                for q in case_qnames:
-                    in_exp = q in exp_ents_dict
-                    in_act = q in act_ents_dict
-                    if in_exp and in_act:
-                        if act_ents_dict[q] == exp_ents_dict[q]:
-                            tp_ents += 1
-                        else:
-                            # Misclassified change type: FP for wrong label, FN for expected label
-                            fp_ents += 1
-                            fn_ents += 1
-                    elif in_exp and not in_act:
-                        fn_ents += 1
-                    elif not in_exp and in_act:
-                        fp_ents += 1
-                    else:
-                        tn_ents += 1
-
-                # 6. Canonical findings comparison accounting for permitted derived fields
-                exp_findings = expected.get("findings", [])
-                findings_ok = True
-                if len(res.findings) != len(exp_findings):
-                    findings_ok = False
-                    discrepancies.append(
-                        f"{case_id}: findings count mismatch {len(res.findings)} != {len(exp_findings)}"
-                    )
-                else:
-                    for act_f, exp_f in zip(res.findings, exp_findings):
-                        act_dict = act_f.to_dict()
-
-                        # Core finding attributes
-                        for attr in (
-                            "defect_id",
-                            "defect_semantics_version",
-                            "disposition",
-                            "message",
-                            "reason_code",
-                            "tier",
-                            "witness_level",
-                        ):
-                            if act_dict.get(attr) != exp_f.get(attr):
-                                findings_ok = False
-                                discrepancies.append(
-                                    f"{case_id}: attribute {attr} mismatch: {act_dict.get(attr)!r} != {exp_f.get(attr)!r}"
-                                )
-
-                        # Evidence structure and payload
-                        if act_f.evidence.kind.value != exp_f["evidence"]["kind"]:
-                            findings_ok = False
-                            discrepancies.append(f"{case_id}: evidence.kind mismatch")
-
-                        exp_payload = exp_f["evidence"]["payload"]
-                        act_payload = dict(act_f.evidence.payload)
-                        for pk, pv in exp_payload.items():
-                            if act_payload.get(pk) != pv:
-                                findings_ok = False
-                                discrepancies.append(
-                                    f"{case_id}: payload[{pk}] mismatch: {act_payload.get(pk)!r} != {pv!r}"
-                                )
-                        permitted_extra_payload = {"rule_ids"}
-                        extra_payload = set(act_payload.keys()) - set(exp_payload.keys())
-                        if not (extra_payload <= permitted_extra_payload):
-                            findings_ok = False
-                            discrepancies.append(f"{case_id}: unexpected extra payload keys: {extra_payload}")
-                        if "rule_ids" in act_payload and act_payload["rule_ids"] != exp_payload.get("matched_rule_ids"):
-                            findings_ok = False
-                            discrepancies.append(f"{case_id}: rule_ids mismatch")
-
-                        # Exact subject dictionary
-                        exp_subj = exp_f["subject"]
-                        for sk, sv in exp_subj.items():
-                            if act_f.subject.get(sk) != sv:
-                                findings_ok = False
-                                discrepancies.append(
-                                    f"{case_id}: subject[{sk}] mismatch: {act_f.subject.get(sk)!r} != {sv!r}"
-                                )
-                        permitted_extra_subj = {"check_id", "base_span", "head_span"}
-                        extra_subj = set(act_f.subject.keys()) - set(exp_subj.keys())
-                        if not (extra_subj <= permitted_extra_subj):
-                            findings_ok = False
-                            discrepancies.append(f"{case_id}: unexpected extra subject keys: {extra_subj}")
-
-                        # Contract-derived fields present on live model finding
-                        if not act_f.fingerprint.startswith("sha256:"):
-                            findings_ok = False
-                            discrepancies.append(f"{case_id}: missing stable fingerprint")
-                        if not (isinstance(act_f.premises, dict) and "rule_ids" in act_f.premises):
-                            findings_ok = False
-                            discrepancies.append(f"{case_id}: missing premises")
-                        if act_f.remediation is None:
-                            findings_ok = False
-                            discrepancies.append(f"{case_id}: missing remediation")
-
-                if findings_ok:
-                    findings_matches += 1
-
-            case_all_matched = (
-                actual_outcome == exp_outcome
-                and actual_coverage == expected["coverage"]
-                and actual_reasons == exp_reasons
-                and (is_int or (hunks_match and ents_match and findings_ok))
-                and (not is_int or integrity_ok)
+        if is_int:
+            # Production pipeline execution through run_gate (§9.2, §15)
+            req = GateRequest(
+                repo=repo_dir,
+                base=base_c,
+                head=head_c,
+                as_of_date="2026-10-22",
             )
-            if case_all_matched:
-                stats["passed"] += 1
+            bundle = run_gate(req)
+            check_results = {r["check_id"]: r for r in bundle.payload["check_results"]}
+            grounding_res = check_results["grounding"]
+
+            actual_outcome = grounding_res["outcome"]
+            actual_coverage = grounding_res["coverage"]
+            actual_reasons = tuple(sorted(grounding_res["reason_codes"]))
+            actual_hunks = ()
+            actual_entities = ()
+
+            # Production pipeline integrity validation
+            int_has_diag = any(
+                integrity_expected_hash in str(d.get("detail", ""))
+                for d in grounding_res["diagnostics"]
+            )
+            integrity_ok = (
+                actual_outcome == Outcome.ERROR.value
+                and actual_coverage == Coverage.UNKNOWN.value
+                and len(grounding_res["findings"]) == 0
+                and int_has_diag
+            )
+            if not integrity_ok:
+                discrepancies.append(
+                    f"{case_id}: integrity pipeline check failed (outcome={actual_outcome}, "
+                    f"coverage={actual_coverage}, findings={len(grounding_res['findings'])}, "
+                    f"diag_match={int_has_diag})"
+                )
+        else:
+            entries, rename_limit_exceeded = repo.diff_entries(base_c, head_c)
+            policy_file = case_dir / "policy.toml"
+            policy = parse_policy_bytes(policy_file.read_bytes()) if policy_file.exists() else parse_policy_bytes(b"[deny_changes]\n")
+
+            scope = build_changed_scope(entries, rename_limit_exceeded=rename_limit_exceeded)
+            context = CheckContext(
+                git=repo,
+                policy=policy,
+                entries=tuple(entries),
+                scope=scope,
+                as_of_date="2026-10-22",
+                object_format="sha1",
+                target_base_commit=base_c,
+                merge_base_commit=mb,
+                head_commit=head_c,
+                toolchain_fingerprint="sha256:frozen",
+                rename_limit_exceeded=rename_limit_exceeded,
+            )
+            res = grounding.run(context)
+            actual_outcome = res.outcome.value
+            actual_coverage = res.coverage.value
+            actual_reasons = tuple(sorted(res.reason_codes))
+            actual_hunks = tuple(dict(h) for h in scope.mapped_hunks)
+            actual_entities = tuple(dict(e) for e in scope.mapped_entities)
+
+        # 1. Outcomes
+        exp_outcome = expected["outcome"]
+        if actual_outcome == exp_outcome:
+            outcome_matches += 1
+        if actual_outcome == Outcome.FAIL.value and exp_outcome != Outcome.FAIL.value:
+            false_fails += 1
+
+        # 2. Coverage
+        if actual_coverage == expected["coverage"]:
+            coverage_matches += 1
+
+        # 3. Reason codes
+        exp_reasons = tuple(sorted(expected.get("reason_codes", [])))
+        if actual_reasons == exp_reasons:
+            reason_matches += 1
+
+        # 4. Hunk confusion matrix paired by immutable coordinate tuple (file, old_start, old_count, new_start, new_count)
+        hunks_match = False
+        if not is_int:
+            exp_hunks = tuple(expected.get("hunks", []))
+            hunks_match = (actual_hunks == exp_hunks)
+            if hunks_match:
+                exact_hunk_matches += 1
+            else:
+                discrepancies.append(f"{case_id}: hunk mismatch: {actual_hunks} != {exp_hunks}")
+
+            def hunk_coord(h: dict) -> tuple[str, int, int, int, int]:
+                return (h["file"], h["old_start"], h["old_count"], h["new_start"], h["new_count"])
+
+            exp_hunks_by_coord = {hunk_coord(h): h.get("mapped_entity") for h in exp_hunks}
+            act_hunks_by_coord = {hunk_coord(h): h.get("mapped_entity") for h in actual_hunks}
+            all_hunk_coords = set(exp_hunks_by_coord.keys()) | set(act_hunks_by_coord.keys())
+
+            for coord in all_hunk_coords:
+                in_exp = coord in exp_hunks_by_coord
+                in_act = coord in act_hunks_by_coord
+                if in_exp and in_act:
+                    e_target = exp_hunks_by_coord[coord]
+                    a_target = act_hunks_by_coord[coord]
+                    if e_target is not None:
+                        if a_target == e_target:
+                            tp_hunks += 1
+                        elif a_target is None:
+                            fn_hunks += 1
+                        else:
+                            # Misclassified entity label: FP for wrong label, FN for missed expected label
+                            fp_hunks += 1
+                            fn_hunks += 1
+                    else:
+                        if a_target is None:
+                            tn_hunks += 1
+                        else:
+                            fp_hunks += 1
+                elif in_exp and not in_act:
+                    # Expected hunk omitted in actual output
+                    fn_hunks += 1
+                else:
+                    # Spurious hunk generated in actual output
+                    fp_hunks += 1
+
+            # 5. Entity confusion matrix (computed independently over declared candidate universe)
+            exp_ents = expected.get("entities", [])
+            exp_ents_dict = {e["qname"]: e["change"] for e in exp_ents}
+            act_ents_dict = {e["qname"]: e["change"] for e in actual_entities}
+
+            ents_match = (json.dumps(actual_entities, sort_keys=True) == json.dumps(exp_ents, sort_keys=True))
+            if ents_match:
+                exact_entity_matches += 1
+            else:
+                discrepancies.append(f"{case_id}: entities mismatch: {actual_entities} != {exp_ents}")
+
+            # Track entity instances across base and head
+            case_base_inst = sum(len(f.entities) for f in scope.base_facts.values())
+            case_head_inst = sum(len(f.entities) for f in scope.head_facts.values())
+            total_base_instances += case_base_inst
+            total_head_instances += case_head_inst
+
+            # Candidate universe: unique qualified names across touched files
+            case_qnames = {
+                e.qname
+                for f in list(scope.base_facts.values()) + list(scope.head_facts.values())
+                for e in f.entities
+            } | set(exp_ents_dict.keys()) | set(act_ents_dict.keys())
+            total_per_case_candidate_qnames += len(case_qnames)
+
+            # Global tracking across the corpus
+            global_candidate_qnames.update(case_qnames)
+            global_changed_qnames.update(exp_ents_dict.keys())
+            global_act_changed_qnames.update(act_ents_dict.keys())
+
+            for q in case_qnames:
+                in_exp = q in exp_ents_dict
+                in_act = q in act_ents_dict
+                if in_exp and in_act:
+                    if act_ents_dict[q] == exp_ents_dict[q]:
+                        tp_ents += 1
+                    else:
+                        # Misclassified change type: FP for wrong label, FN for expected label
+                        fp_ents += 1
+                        fn_ents += 1
+                elif in_exp and not in_act:
+                    fn_ents += 1
+                elif not in_exp and in_act:
+                    fp_ents += 1
+                else:
+                    tn_ents += 1
+
+            # 6. Canonical findings comparison accounting for permitted derived fields
+            exp_findings = expected.get("findings", [])
+            findings_ok = True
+            if len(res.findings) != len(exp_findings):
+                findings_ok = False
+                discrepancies.append(
+                    f"{case_id}: findings count mismatch {len(res.findings)} != {len(exp_findings)}"
+                )
+            else:
+                for act_f, exp_f in zip(res.findings, exp_findings):
+                    act_dict = act_f.to_dict()
+
+                    # Core finding attributes
+                    for attr in (
+                        "defect_id",
+                        "defect_semantics_version",
+                        "disposition",
+                        "message",
+                        "reason_code",
+                        "tier",
+                        "witness_level",
+                    ):
+                        if act_dict.get(attr) != exp_f.get(attr):
+                            findings_ok = False
+                            discrepancies.append(
+                                f"{case_id}: attribute {attr} mismatch: {act_dict.get(attr)!r} != {exp_f.get(attr)!r}"
+                            )
+
+                    # Evidence structure and payload
+                    if act_f.evidence.kind.value != exp_f["evidence"]["kind"]:
+                        findings_ok = False
+                        discrepancies.append(f"{case_id}: evidence.kind mismatch")
+
+                    exp_payload = exp_f["evidence"]["payload"]
+                    act_payload = dict(act_f.evidence.payload)
+                    for pk, pv in exp_payload.items():
+                        if act_payload.get(pk) != pv:
+                            findings_ok = False
+                            discrepancies.append(
+                                f"{case_id}: payload[{pk}] mismatch: {act_payload.get(pk)!r} != {pv!r}"
+                            )
+                    permitted_extra_payload = {"rule_ids"}
+                    extra_payload = set(act_payload.keys()) - set(exp_payload.keys())
+                    if not (extra_payload <= permitted_extra_payload):
+                        findings_ok = False
+                        discrepancies.append(f"{case_id}: unexpected extra payload keys: {extra_payload}")
+                    if "rule_ids" in act_payload and act_payload["rule_ids"] != exp_payload.get("matched_rule_ids"):
+                        findings_ok = False
+                        discrepancies.append(f"{case_id}: rule_ids mismatch")
+
+                    # Exact subject dictionary
+                    exp_subj = exp_f["subject"]
+                    for sk, sv in exp_subj.items():
+                        if act_f.subject.get(sk) != sv:
+                            findings_ok = False
+                            discrepancies.append(
+                                f"{case_id}: subject[{sk}] mismatch: {act_f.subject.get(sk)!r} != {sv!r}"
+                            )
+                    permitted_extra_subj = {"check_id", "base_span", "head_span"}
+                    extra_subj = set(act_f.subject.keys()) - set(exp_subj.keys())
+                    if not (extra_subj <= permitted_extra_subj):
+                        findings_ok = False
+                        discrepancies.append(f"{case_id}: unexpected extra subject keys: {extra_subj}")
+
+                    # Contract-derived fields present on live model finding
+                    if not act_f.fingerprint.startswith("sha256:"):
+                        findings_ok = False
+                        discrepancies.append(f"{case_id}: missing stable fingerprint")
+                    if not (isinstance(act_f.premises, dict) and "rule_ids" in act_f.premises):
+                        findings_ok = False
+                        discrepancies.append(f"{case_id}: missing premises")
+                    if act_f.remediation is None:
+                        findings_ok = False
+                        discrepancies.append(f"{case_id}: missing remediation")
+
+            if findings_ok:
+                findings_matches += 1
+
+        case_all_matched = (
+            actual_outcome == exp_outcome
+            and actual_coverage == expected["coverage"]
+            and actual_reasons == exp_reasons
+            and (is_int or (hunks_match and ents_match and findings_ok))
+            and (not is_int or integrity_ok)
+        )
+        if case_all_matched:
+            stats["passed"] += 1
 
     hunk_precision = 1.0 if (tp_hunks + fp_hunks == 0) else tp_hunks / (tp_hunks + fp_hunks)
     hunk_recall = 1.0 if (tp_hunks + fn_hunks == 0) else tp_hunks / (tp_hunks + fn_hunks)

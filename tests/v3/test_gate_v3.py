@@ -8,6 +8,7 @@ reads, patch parsing, and evidence assembly.
 from __future__ import annotations
 
 import json
+import os
 from hashlib import sha256
 from pathlib import Path
 import subprocess
@@ -48,6 +49,15 @@ CODEOOWNERS_FULL = (
 )
 
 
+_GIT_ENV = os.environ.copy()
+_GIT_ENV.update({
+    "GIT_AUTHOR_NAME": "VerifyCI Test",
+    "GIT_AUTHOR_EMAIL": "test@example.com",
+    "GIT_COMMITTER_NAME": "VerifyCI Test",
+    "GIT_COMMITTER_EMAIL": "test@example.com",
+})
+
+
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
@@ -55,19 +65,32 @@ def _git(repo: Path, *args: str) -> str:
         text=True,
         encoding="utf-8",
         check=False,
+        env=_GIT_ENV,
     )
     if result.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} failed: {result.stderr or result.stdout}")
     return result.stdout.strip()
 
 
+def _get_head_sha(repo: Path) -> str:
+    head_file = repo / ".git" / "HEAD"
+    if head_file.exists():
+        content = head_file.read_text(encoding="utf-8").strip()
+        if content.startswith("ref: "):
+            ref_path = repo / ".git" / Path(content[5:])
+            if ref_path.exists():
+                return ref_path.read_text(encoding="utf-8").strip()
+        elif len(content) == 40:
+            return content
+    return _git(repo, "rev-parse", "HEAD")
+
+
 def _repo(tmp_path: Path, files: dict[str, str | None], policy: str = POLICY) -> tuple[Path, str]:
     root = tmp_path / "repo"
     root.mkdir(parents=True)
     _git(root, "init", "-q")
-    _git(root, "config", "user.name", "VerifyCI Test")
-    _git(root, "config", "user.email", "test@example.com")
-    _git(root, "config", "core.autocrlf", "false")
+    with open(root / ".git" / "config", "a", encoding="utf-8") as f:
+        f.write('\n[core]\n\tautocrlf = false\n\tsafecrlf = false\n')
     (root / ".verifyci").mkdir()
     (root / ".verifyci" / "policy.toml").write_text(policy, encoding="utf-8", newline="\n")
     for path, content in files.items():
@@ -78,7 +101,7 @@ def _repo(tmp_path: Path, files: dict[str, str | None], policy: str = POLICY) ->
         target.write_text(content, encoding="utf-8", newline="\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "base")
-    return root, _git(root, "rev-parse", "HEAD")
+    return root, _get_head_sha(root)
 
 
 def _commit(root: Path, files: dict[str, str | None], message: str = "head") -> str:
@@ -91,7 +114,7 @@ def _commit(root: Path, files: dict[str, str | None], message: str = "head") -> 
             target.write_text(content, encoding="utf-8", newline="\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", message)
-    return _git(root, "rev-parse", "HEAD")
+    return _get_head_sha(root)
 
 
 def _gate(
