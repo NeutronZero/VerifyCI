@@ -1,0 +1,69 @@
+{
+  "protocol": "verifyci-3.1.11-perf-reproducibility-v1",
+  "version": "1.0.0",
+  "description": "Reproducible latency and resource benchmark for VerifyCI v3 gate, scope, and parser pipelines",
+  "workloads": [
+    {
+      "id": "empty_diff",
+      "description": "Clean target base without file changes",
+      "expected_changed_files": 0
+    },
+    {
+      "id": "small_diff",
+      "description": "Single-file localized modification",
+      "expected_changed_files": 1
+    },
+    {
+      "id": "typical_diff",
+      "description": "Multi-file diff across 4 modules with cross-references",
+      "expected_changed_files": 4
+    },
+    {
+      "id": "large_diff",
+      "description": "Large diff exceeding 50 changed files",
+      "expected_changed_files": 52
+    }
+  ],
+  "budget_targets_ms": {
+    "empty_diff": {
+      "cold_p95": 1000.0,
+      "warm_p95": 400.0
+    },
+    "small_diff": {
+      "cold_p95": 1500.0,
+      "warm_p95": 600.0
+    },
+    "typical_diff": {
+      "cold_p95": 2500.0,
+      "warm_p95": 1000.0
+    },
+    "large_diff": {
+      "cold_p95": 15000.0,
+      "warm_p95": 6000.0
+    }
+  },
+  "subphases": [
+    "git_subprocess",
+    "git_blob_read",
+    "scope_construction",
+    "ast_parsing",
+    "entity_extraction",
+    "check_execution"
+  ],
+  "sample_counts": {
+    "cold_rounds": 3,
+    "warm_rounds": 5
+  },
+  "sample_dimensions": {
+    "timing_iterations": "Micro observations within a single execution (e.g. repeated parser iterations or query tests)",
+    "execution_runs": "Independent end-to-end gate CLI process executions (cold rounds K=3, warm rounds K=5)",
+    "percentile_pool": "Sample pool from which percentiles are evaluated"
+  },
+  "statistical_sufficiency": {
+    "policy_type": "engineering_sufficiency_policy",
+    "description": "Sample thresholds define conservative engineering sufficiency criteria to avoid premature gate certification on small sample sets; they are not mathematical guarantees.",
+    "min_central_tendency_samples": 30,
+    "min_p95_samples": 200,
+    "min_p99_samples": 1000
+  }
+}
