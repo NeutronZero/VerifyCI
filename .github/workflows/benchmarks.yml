@@ -35,19 +35,17 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --frozen --extra dev
-      - name: Run v2 Capability Smoke & Corpus Adjudication
+      - name: Run v3 Benchmark Integrity & Performance Protocol
         run: |
-          uv run --no-sync python -m verifyci_v2.interface.cli adjudicate --corpus
-      - name: Execute Canonical Evidence Adjudication (CAP-009 through CAP-013)
-        run: uv run --no-sync python scripts/adjudicate_cap.py
-      - name: Execute Performance Evidence Adjudication
-        run: uv run --no-sync python scripts/adjudicate_performance_evidence.py
-      - name: Run v2 Test Suite
-        run: uv run --no-sync python -m pytest tests/v2/ -v
+          uv run --no-sync python -m pytest tests/v3/test_benchmark_integrity.py tests/v3/test_performance_protocol.py -v
+      - name: Run v3 Capability Benchmarks
+        run: |
+          uv run --no-sync python -m pytest tests/v3/test_contract_benchmark.py tests/v3/test_deletion_benchmark.py tests/v3/test_security_benchmark.py tests/v3/test_semantic_benchmark.py -v
       - name: Upload Benchmark Results
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: benchmark-results-${{ matrix.os }}
           path: |
-            benchmark-results-${{ matrix.os }}.json
-            evidence/cap-adjudication-bundle.json
+            benchmarks/performance/results.json
+          if-no-files-found: ignore
