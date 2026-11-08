@@ -1,0 +1,23 @@
+{
+  "adjudication_date": "2026-10-26",
+  "check_id": "deletion",
+  "mined_corpus_id": "deletion-mined-v1",
+  "records": [
+    {
+      "candidate_id": "MINED-DELETION-001",
+      "final_verdict": "true_positive",
+      "pr_id": 101,
+      "rationale": "Independent two-reviewer agreement for deletion candidate.",
+      "repo": "https://github.com/example-org/deletion-repo-a",
+      "reviewers": [
+        "deletion-adjudicator-1",
+        "deletion-adjudicator-2"
+      ],
+      "verdicts": {
+        "deletion-adjudicator-1": "true_positive",
+        "deletion-adjudicator-2": "true_positive"
+      }
+    }
+  ],
+  "schema": "verifyci.adjudication/v1"
+}

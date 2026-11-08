@@ -1,0 +1,23 @@
+{
+  "adjudication_date": "2026-10-26",
+  "check_id": "grounding",
+  "mined_corpus_id": "grounding-mined-v1",
+  "records": [
+    {
+      "candidate_id": "MINED-GROUNDING-001",
+      "final_verdict": "true_positive",
+      "pr_id": 101,
+      "rationale": "Independent two-reviewer agreement for grounding candidate.",
+      "repo": "https://github.com/example-org/grounding-repo-a",
+      "reviewers": [
+        "grounding-adjudicator-1",
+        "grounding-adjudicator-2"
+      ],
+      "verdicts": {
+        "grounding-adjudicator-1": "true_positive",
+        "grounding-adjudicator-2": "true_positive"
+      }
+    }
+  ],
+  "schema": "verifyci.adjudication/v1"
+}

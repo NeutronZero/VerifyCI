@@ -5,4 +5,5 @@
 *.md text eol=lf
 *SHA256 text eol=lf
 benchmarks/beir/embedding_cache_*.json filter=lfs diff=lfs merge=lfs -text
+corpora/** -text
 

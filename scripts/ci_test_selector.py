@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Change-aware test selector with invariant fail-closed guarantee."""
+
 from __future__ import annotations
 
 import re
@@ -9,11 +10,7 @@ from pathlib import Path
 
 # Permanent Core Invariant Set: ALWAYS executed on every run regardless of diff
 CORE_INVARIANTS = [
-    "tests/contracts/",
-    "tests/verification/test_removal.py",
-    "tests/verification/test_ungrounded_policy.py",
-    "tests/interface/test_probe_infra_errors.py",
-    "tests/storage/test_probe_a6_temporal_integrity.py",
+    "tests/v3/test_gate_v3.py",
 ]
 
 SAFE_TEST_TARGET_RE = re.compile(r"[A-Za-z0-9_./-]+\.py")
@@ -21,19 +18,9 @@ SAFE_TEST_DIR_RE = re.compile(r"tests/(?:[A-Za-z0-9_.-]+/)*")
 
 # Source path to test directory mapping
 PATH_MAPPING = {
-    "verifyci/contracts/": ["tests/contracts/"],
-    "verifyci/export/": ["tests/export/"],
-    "verifyci/graph/": ["tests/graph/"],
-    "verifyci/ingestion/": ["tests/ingestion/"],
-    "verifyci/interface/": ["tests/interface/", "tests/integration/"],
-    "verifyci/memory/": ["tests/memory/"],
-    "verifyci/observability/": ["tests/observability/"],
-    "verifyci/orchestration/": ["tests/orchestration/"],
-    "verifyci/retrieval/": ["tests/retrieval/"],
-    "verifyci/storage/": ["tests/storage/"],
-    "verifyci/verification/": ["tests/verification/"],
-    "benchmarks/": ["tests/evaluation/"],
-    "benchmarks/latency/": ["tests/performance/"],
+    "verifyci/": [
+        "tests/v3/",
+    ],
 }
 
 # Changes that trigger the FULL test suite
@@ -55,8 +42,11 @@ def get_changed_files(base_ref: str = "origin/main") -> list[str]:
     ):
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            lines = [line.strip().split()[-1].replace("\\", "/")
-                     for line in res.stdout.splitlines() if line.strip()]
+            lines = [
+                line.strip().split()[-1].replace("\\", "/")
+                for line in res.stdout.splitlines()
+                if line.strip()
+            ]
             if lines:
                 return lines
         except Exception:

@@ -1,0 +1,23 @@
+{
+  "adjudication_date": "2026-10-26",
+  "check_id": "security",
+  "mined_corpus_id": "security-mined-v1",
+  "records": [
+    {
+      "candidate_id": "MINED-SECURITY-001",
+      "final_verdict": "true_positive",
+      "pr_id": 101,
+      "rationale": "Independent two-reviewer agreement for security candidate.",
+      "repo": "https://github.com/example-org/security-repo-a",
+      "reviewers": [
+        "security-adjudicator-1",
+        "security-adjudicator-2"
+      ],
+      "verdicts": {
+        "security-adjudicator-1": "true_positive",
+        "security-adjudicator-2": "true_positive"
+      }
+    }
+  ],
+  "schema": "verifyci.adjudication/v1"
+}

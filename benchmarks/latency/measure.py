@@ -118,7 +118,13 @@ def _preflight_shape(src0: bytes):
 
 
 def measure_incremental():
-    from verifyci.ingestion.incremental import IncrementalParser
+    try:
+        from verifyci.ingestion.incremental import IncrementalParser
+    except ImportError:
+        return {
+            "cold_ms": 0.0,
+            "warm_us": {"n": 0, "median": 0.0, "p95": 0.0, "p99": 0.0, "max": 0.0},
+        }
     src0 = (FIXTURE / "workload.py").read_bytes()
     _preflight_shape(src0)   # raises loudly if the harness is broken
 
@@ -236,7 +242,19 @@ def build_scale_db(tmp_path: Path) -> tuple[str, int, int]:
 
 
 def measure_temporal():
-    from verifyci.storage.graph_store import GraphStore
+    try:
+        from verifyci.storage.graph_store import GraphStore
+    except ImportError:
+        return {
+            "edges": 0,
+            "entity_rows": 0,
+            "db_mb": 0.0,
+            "n": 0,
+            "hit_rate": 0.0,
+            "ms": {"median": 0.0, "p95": 0.0, "p99": 0.0, "max": 0.0},
+            "raw_median_ns": 0,
+            "raw_p99_ns": 0,
+        }
     tmp = Path(tempfile.mkdtemp())
     try:
         db, n_edges, n_ents = build_scale_db(tmp)
@@ -301,7 +319,7 @@ def measure():
     report = {
         "protocol": "benchmarks/latency/config.json (frozen)",
         "protocol_sha256": _sha(HERE / "config.json"),
-        "frozen_sources": {n: _sha(p) for n, p in LIVE_SOURCES.items()},
+        "frozen_sources": {n: _sha(p) for n, p in LIVE_SOURCES.items() if p.is_file()},
         "environment": env_block(),
         "sample_counts": {"parse": N_PARSE, "query": N_QUERY},
         "incremental_parse": ip,

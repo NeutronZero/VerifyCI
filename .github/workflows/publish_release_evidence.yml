@@ -1,0 +1,107 @@
+name: Publish Release Evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        required: true
+        type: string
+        description: "Candidate commit SHA"
+      signing_run_id:
+        required: true
+        type: string
+        description: "GitHub Actions run ID of the release_signing run"
+      evidence_branch:
+        required: false
+        type: string
+        default: ""
+        description: "Branch to publish evidence commit (defaults to refs/heads/evidence/<candidate_sha>)"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish-evidence:
+    name: publish-evidence
+    runs-on: ubuntu-latest
+    if: >-
+      github.repository == 'NeutronZero/VerifyCI' &&
+      github.ref == 'refs/heads/release-authority'
+    steps:
+      - name: Validate Candidate SHA
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          case "$CANDIDATE_SHA" in
+            (*[!0-9a-f]*|"") echo "invalid candidate SHA: $CANDIDATE_SHA" >&2; exit 1 ;;
+          esac
+          test "${#CANDIDATE_SHA}" -eq 40
+
+      - name: Checkout Trusted Authority
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/heads/release-authority
+          fetch-depth: 0
+
+      - name: Download Signed Evidence Bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SIGNING_RUN_ID: ${{ inputs.signing_run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/release
+          gh run download "$SIGNING_RUN_ID" -n evidence-bundle --dir evidence/release
+
+      - name: Cryptographic Pre-Publish Verification
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import hashlib
+          from pathlib import Path
+          from cryptography.hazmat.primitives.asymmetric import ed25519
+
+          def canonical_json_bytes(obj) -> bytes:
+              return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+
+          evidence_path = Path("evidence/release/release_validation.json")
+          if not evidence_path.is_file():
+              raise SystemExit("release_validation.json not found")
+          data = json.loads(evidence_path.read_text(encoding="utf-8"))
+          assert data.get("schema") in ("verifyci.release_validation/v1", "verifyci.release_validation/v3")
+          assert data.get("status") == "VALIDATED"
+          att = data["attestation"]
+          pub = ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(att["public_key"]))
+          sig = bytes.fromhex(att["signature"])
+
+          payload_for_digest = {k: v for k, v in data.items() if k != "attestation"}
+          recomputed_digest = "sha256:" + hashlib.sha256(canonical_json_bytes(payload_for_digest)).hexdigest()
+          if att.get("digest") != recomputed_digest:
+              raise ValueError(f"Claimed digest {att.get('digest')} != recomputed digest {recomputed_digest}")
+
+          digest_bytes = recomputed_digest.encode("utf-8")
+          try:
+              pub.verify(sig, digest_bytes)
+          except Exception:
+              DOMAIN_SEPARATOR = b"VERIFYCI-RELEASE-EVIDENCE\x00"
+              pub.verify(sig, DOMAIN_SEPARATOR + digest_bytes)
+          print("Cryptographic check passed before publishing.")
+          PY
+
+      - name: Publish Evidence Commit
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CUSTOM_BRANCH: ${{ inputs.evidence_branch }}
+        run: |
+          set -euo pipefail
+          BRANCH="${CUSTOM_BRANCH:-evidence/${CANDIDATE_SHA}}"
+          git config user.name "VerifyCI Release Authority"
+          git config user.email "release-authority@verifyci.local"
+          git checkout -B "$BRANCH" "$CANDIDATE_SHA"
+          git add evidence/release/release_validation.json \
+                  evidence/release/measurements.json \
+                  evidence/release/measurement_attestation.json
+          git commit -m "chore(release): record authenticated release evidence for ${CANDIDATE_SHA:0:8}"
+          git push origin "$BRANCH"

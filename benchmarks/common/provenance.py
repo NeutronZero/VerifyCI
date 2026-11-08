@@ -1,4 +1,5 @@
 """Common git provenance extraction and dirty-tree validation across CAP harnesses."""
+
 from __future__ import annotations
 
 import fnmatch
@@ -38,13 +39,12 @@ ALLOWED_EXACT_RESULTS = {
 def is_path_exempt(path_str: str, allowed_exact: set[str] | None = None) -> bool:
     allowed = allowed_exact if allowed_exact is not None else ALLOWED_EXACT_RESULTS
     norm = path_str.strip().replace("\\", "/")
-    return (
-        norm in allowed
-        or fnmatch.fnmatchcase(norm, "benchmark-results-*.json")
-    )
+    return norm in allowed or fnmatch.fnmatchcase(norm, "benchmark-results-*.json")
 
 
-def get_git_provenance(repo_root: Path | None = None, allowed_exact: set[str] | None = None) -> tuple[str, bool]:
+def get_git_provenance(
+    repo_root: Path | None = None, allowed_exact: set[str] | None = None
+) -> tuple[str, bool]:
     root = repo_root or Path(__file__).resolve().parent.parent.parent
 
     try:
@@ -62,7 +62,9 @@ def get_git_provenance(repo_root: Path | None = None, allowed_exact: set[str] | 
             ["git", "status", "--porcelain", "-z"], cwd=root
         )
     except Exception as exc:
-        raise RuntimeError(f"Failed to obtain git status for provenance: {exc}") from exc
+        raise RuntimeError(
+            f"Failed to obtain git status for provenance: {exc}"
+        ) from exc
 
     dirty = False
     tokens = raw_z.split(b"\0")
@@ -81,7 +83,10 @@ def get_git_provenance(repo_root: Path | None = None, allowed_exact: set[str] | 
             if i + 1 < len(tokens):
                 i += 1
                 p2 = tokens[i].decode("utf-8", errors="replace")
-                if not (is_path_exempt(p1, allowed_exact) and is_path_exempt(p2, allowed_exact)):
+                if not (
+                    is_path_exempt(p1, allowed_exact)
+                    and is_path_exempt(p2, allowed_exact)
+                ):
                     dirty = True
                     break
             else:

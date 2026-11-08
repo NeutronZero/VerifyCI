@@ -1,0 +1,32 @@
+name: Release Measurement Dispatcher
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        required: true
+        type: string
+        description: "Full 40-character candidate commit SHA to measure"
+      worker_image:
+        required: true
+        type: string
+        description: "Immutable OCI worker image reference (e.g. ghcr.io/neutronzero/verifyci-worker@sha256:...)"
+
+permissions:
+  contents: read
+  packages: read
+  attestations: read
+  id-token: write
+  actions: read
+  checks: read
+
+jobs:
+  dispatch-measurements:
+    name: dispatch-measurements
+    if: >-
+      github.repository == 'NeutronZero/VerifyCI' &&
+      github.ref == 'refs/heads/release-authority'
+    uses: ./.github/workflows/release_measurements.yml
+    with:
+      candidate_sha: ${{ inputs.candidate_sha }}
+      worker_image: ${{ inputs.worker_image }}

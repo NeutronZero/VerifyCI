@@ -1,0 +1,3 @@
+[deny_changes.protect_assets]
+paths = ["*.png"]
+reason = "Binary asset modifications require asset team sign-off."

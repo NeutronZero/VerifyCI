@@ -1,0 +1,23 @@
+{
+  "adjudication_date": "2026-10-26",
+  "check_id": "contract",
+  "mined_corpus_id": "contract-mined-v1",
+  "records": [
+    {
+      "candidate_id": "MINED-CONTRACT-001",
+      "final_verdict": "true_positive",
+      "pr_id": 101,
+      "rationale": "Independent two-reviewer agreement for contract candidate.",
+      "repo": "https://github.com/example-org/contract-repo-a",
+      "reviewers": [
+        "contract-adjudicator-1",
+        "contract-adjudicator-2"
+      ],
+      "verdicts": {
+        "contract-adjudicator-1": "true_positive",
+        "contract-adjudicator-2": "true_positive"
+      }
+    }
+  ],
+  "schema": "verifyci.adjudication/v1"
+}

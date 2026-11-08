@@ -1,0 +1,31 @@
+name: Worker Image Build Caller
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        type: string
+        required: false
+        default: "latest"
+        description: "Tag for the published worker image"
+  push:
+    branches:
+      - release-authority
+    paths:
+      - "docker/worker/**"
+      - ".github/workflows/build_worker_image.yml"
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+jobs:
+  call-worker-builder:
+    name: call-worker-builder
+    if: github.repository == 'NeutronZero/VerifyCI' && github.ref == 'refs/heads/release-authority'
+    uses: ./.github/workflows/build_worker_image.yml
+    with:
+      image_tag: ${{ inputs.image_tag || 'latest' }}
+    secrets: inherit

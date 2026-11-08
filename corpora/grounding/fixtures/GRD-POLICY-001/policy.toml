@@ -1,0 +1,3 @@
+[deny_changes.rotate_key_rule]
+symbols = ["sample:rotate_key"]
+reason = "Key rotation implementation requires a separate approved change."

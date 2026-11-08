@@ -1,0 +1,7 @@
+[deny_changes.a_rule]
+paths = ["sample.txt"]
+reason = "First rule prohibiting sample.txt edits."
+
+[deny_changes.z_rule]
+paths = ["sample.txt"]
+reason = "Second rule prohibiting sample.txt edits."
