@@ -776,6 +776,28 @@ def _taint_excluded(policy, path: str) -> bool:
     return False
 
 
+def _taint_budget_exhausted(context: CheckContext, detail: str) -> CheckResult:
+    """Fail-closed taint sub-result for an exhausted deterministic budget."""
+    return _sub_result(
+        context,
+        suffix="taint",
+        outcome=Outcome.INCONCLUSIVE,
+        coverage=Coverage.PARTIAL,
+        evaluated_scope={},
+        scope_enumeration={"complete": False},
+        candidate_discovery={"complete": False},
+        applicability_evidence={"configured": True},
+        reason_codes=("budget_exhausted",),
+        coverage_gaps=(
+            CoverageGap(
+                reason_code="budget_exhausted",
+                subject={"check_id": "security.taint"},
+            ),
+        ),
+        diagnostics=(({"code": "budget_exhausted", "detail": detail}),),
+    )
+
+
 def _taint_sub(
     context: CheckContext,
     lines_cache: dict[int, list[str]] | None = None,
@@ -791,6 +813,16 @@ def _taint_sub(
             candidate_discovery={"complete": True},
             applicability_evidence={"configured": False},
         )
+    budget = context.budget
+    # This model resolves a source and a sink observed on the same changed line:
+    # exactly one propagation hop.  A depth budget below that hop count cannot
+    # fund the analysis, so it fails closed instead of being silently ignored.
+    required_depth = 1
+    if budget.max_taint_depth < required_depth:
+        return _taint_budget_exhausted(
+            context,
+            f"max_taint_depth limit exceeded (required {required_depth} > {budget.max_taint_depth})",
+        )
     changed = _changed_head_lines(context)
     findings = []
     gaps = unsupported_scope_gaps(
@@ -800,6 +832,7 @@ def _taint_sub(
     )
     relevant = 0
     unresolved = 0
+    iterations = 0
     for entry in context.entries:
         if context.deadline is not None and time.monotonic() > context.deadline:
             raise TimeoutError("cold_deadline_seconds exceeded")
@@ -819,6 +852,12 @@ def _taint_sub(
             if not has_source and not has_sink:
                 continue
             relevant += 1
+            iterations += 1
+            if iterations > budget.max_taint_iterations:
+                return _taint_budget_exhausted(
+                    context,
+                    f"max_taint_iterations limit exceeded ({iterations} > {budget.max_taint_iterations})",
+                )
             if has_source and has_sink:
                 _source_match = _TAINT_SOURCE_RE.search(line)
                 _sink_match = _TAINT_SINK_RE.search(line)
@@ -872,7 +911,7 @@ def _taint_sub(
         suffix="taint",
         outcome=outcome,
         coverage=coverage,
-        evaluated_scope={"relevant_lines": relevant},
+        evaluated_scope={"relevant_lines": relevant, "modeled_hop_depth": required_depth},
         scope_enumeration={"complete": not gaps, "relevant_lines": relevant},
         candidate_discovery={"complete": not gaps, "relevant_lines": relevant, "unresolved": unresolved},
         applicability_evidence={"configured": True, "relevant_lines": relevant},

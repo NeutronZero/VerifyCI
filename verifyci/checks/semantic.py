@@ -21,7 +21,14 @@ import time
 from typing import Any, Mapping, cast
 import z3
 
-from verifyci.checks.base import CheckContext, budget_exhausted_result, gap, make_finding, make_result
+from verifyci.checks.base import (
+    CheckContext,
+    budget_exhausted_result,
+    entity_budget_exceeded,
+    gap,
+    make_finding,
+    make_result,
+)
 from verifyci.runtime.budget import WorkBudget
 from verifyci.contracts.model import (
     CheckResult,
@@ -1179,6 +1186,13 @@ def _analyze_typescript_guard(
 def run(context: CheckContext) -> CheckResult:
     if context.deadline is not None and time.monotonic() > context.deadline:
         return budget_exhausted_result(context, "semantic", "cold_deadline_seconds exceeded")
+    entities_over_budget, enumerated_entities = entity_budget_exceeded(context)
+    if entities_over_budget:
+        return budget_exhausted_result(
+            context,
+            "semantic",
+            f"max_entities limit exceeded ({enumerated_entities} > {context.budget.max_entities})",
+        )
     # --- Check A: Strict Unsupported Language Check on Code Scope ---
     code_entries = []
     for entry in context.entries:

@@ -11,6 +11,7 @@ from typing import Any
 from verifyci.checks.base import (
     CheckContext,
     budget_exhausted_result,
+    entity_budget_exceeded,
     gap,
     make_finding,
     make_result,
@@ -376,6 +377,13 @@ def _finding_call(
 def run(context: CheckContext) -> CheckResult:
     if context.deadline is not None and time.monotonic() > context.deadline:
         return budget_exhausted_result(context, "contract", "cold_deadline_seconds exceeded")
+    entities_over_budget, enumerated_entities = entity_budget_exceeded(context)
+    if entities_over_budget:
+        return budget_exhausted_result(
+            context,
+            "contract",
+            f"max_entities limit exceeded ({enumerated_entities} > {context.budget.max_entities})",
+        )
     base_entities: dict[str, Entity] = {}
     head_entities: dict[str, Entity] = {}
     for facts in context.scope.base_facts.values():

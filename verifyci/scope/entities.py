@@ -108,11 +108,28 @@ def git_blob_id(data: bytes) -> str:
 
 _PY_LANG_OBJECT: Any = None
 _PY_LANG_INITIALIZED: bool = False
-_PY_LOCAL = threading.local()
 _LANG_LOCK = threading.Lock()
 
 
+def _make_parser(lang_obj: Any) -> Any:
+    """Build a fresh tree-sitter parser for one parse.
+
+    Parsers are never cached or shared: a `Parser` may only be used by the
+    thread that owns it, and the gate parses entries on a worker pool.  Parsed
+    trees and `Language` objects are immutable, so those are shared freely.
+    """
+    from tree_sitter import Parser
+
+    try:
+        return Parser(lang_obj)
+    except TypeError:
+        parser = Parser()
+        parser.set_language(lang_obj)
+        return parser
+
+
 def _py_language() -> Any:
+    """Return the cached Python `Language` object, or None when unavailable."""
     global _PY_LANG_OBJECT, _PY_LANG_INITIALIZED
     if not _PY_LANG_INITIALIZED:
         with _LANG_LOCK:
@@ -128,15 +145,9 @@ def _py_language() -> Any:
                     _PY_LANG_OBJECT = None
                 finally:
                     _PY_LANG_INITIALIZED = True
-    if _PY_LANG_OBJECT is None:
-        return None
-    parser = getattr(_PY_LOCAL, "parser", None)
-    if parser is None:
-        from tree_sitter import Parser
+    return _PY_LANG_OBJECT
 
-        parser = Parser(_PY_LANG_OBJECT)
-        _PY_LOCAL.parser = parser
-    return parser
+
 def _pos_to_byte(data: bytes, lineno: int, col: int) -> int:
     # Backwards-compatible helper; callers with repeated invocations should
     # prefer the precomputed prefix table built in _python_entities.
@@ -372,6 +383,93 @@ def _decorator_names(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
     return tuple(out)
 
 
+def _python_entities_via_tree_sitter(
+    ts_parser: Any,
+    path: str,
+    module: str,
+    exports: frozenset[str] | set[str] | None,
+    blob_id: str,
+    tree: ast.Module,
+    source_bytes: bytes,
+) -> tuple[Entity, ...]:
+    """Extract Python entity spans from a tree-sitter parse.
+
+    Runs on the calling thread with a parser owned by that thread; see
+    `_make_parser`.
+    """
+    ts_tree = ts_parser.parse(source_bytes)
+    ast_nodes: dict[str, Any] = {}
+
+    def map_ast(node: ast.AST, parent_qual: str) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            qname = f"{parent_qual}.{node.name}" if parent_qual else node.name
+            ast_nodes[qname] = node
+            for child in ast.iter_child_nodes(node):
+                map_ast(child, qname)
+            return
+        for child in ast.iter_child_nodes(node):
+            map_ast(child, parent_qual)
+
+    map_ast(tree, "")
+    entities: list[Entity] = []
+
+    def walk_ts(node: Any, parent_qual: str) -> None:
+        name = ""
+        kind = ""
+        if node.type in ("function_definition", "class_definition"):
+            name_node = next((c for c in node.children if c.type == "identifier"), None)
+            if name_node:
+                name = name_node.text.decode("utf-8")
+                kind = "class" if node.type == "class_definition" else "function"
+        if name and kind:
+            qname = f"{parent_qual}.{name}" if parent_qual else name
+            span_node = node.parent if (node.parent and node.parent.type == "decorated_definition") else node
+            ast_node = ast_nodes.get(qname)
+            params = _function_params(ast_node) if ast_node and isinstance(ast_node, (ast.FunctionDef, ast.AsyncFunctionDef)) else ()
+            is_async = any(c.type == "async" for c in node.children) or bool(ast_node and isinstance(ast_node, ast.AsyncFunctionDef))
+            top_level = "." not in qname
+            is_export = bool(
+                (top_level and not name.startswith("_"))
+                or name in exports
+                or (top_level and name in exports)
+            )
+            body = ast.dump(ast_node, annotate_fields=False, include_attributes=False) if ast_node else ""
+            signature = {
+                "params": [p.to_dict() for p in params],
+                "returns": _annotation(ast_node.returns) if ast_node and not isinstance(ast_node, ast.ClassDef) else "",
+                "async": is_async,
+                "decorators": list(_decorator_names(ast_node)) if ast_node else [],
+            }
+            entities.append(
+                Entity(
+                    file_path=path,
+                    qname=qualify(module, qname),
+                    kind=kind,
+                    start_line=span_node.start_point.row + 1,
+                    end_line=span_node.end_point.row + 1,
+                    start_col=span_node.start_point.column,
+                    end_col=span_node.end_point.column,
+                    start_byte=span_node.start_byte,
+                    end_byte=span_node.end_byte,
+                    blob_id=blob_id,
+                    body_digest=_digest(body),
+                    is_export=is_export,
+                    is_async=is_async,
+                    signature_digest=_digest(repr(signature)),
+                    parameters=tuple((p.name, p.kind, p.has_default) for p in params),
+                    returns=_annotation(ast_node.returns) if ast_node and not isinstance(ast_node, ast.ClassDef) else "",
+                )
+            )
+            for child in node.children:
+                walk_ts(child, qname)
+            return
+        for child in node.children:
+            walk_ts(child, parent_qual)
+
+    walk_ts(ts_tree.root_node, "")
+    return tuple(entities)
+
+
 def _python_entities(
     path: str,
     source: str,
@@ -389,80 +487,12 @@ def _python_entities(
     if exports is None:
         exports = _collect_all(tree)
 
-    ts_parser = _py_language()
-    if ts_parser is not None:
+    ts_lang = _py_language()
+    if ts_lang is not None:
         try:
-            ts_tree = ts_parser.parse(source_bytes)
-            ast_nodes: dict[str, Any] = {}
-
-            def map_ast(node: ast.AST, parent_qual: str) -> None:
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    qname = f"{parent_qual}.{node.name}" if parent_qual else node.name
-                    ast_nodes[qname] = node
-                    for child in ast.iter_child_nodes(node):
-                        map_ast(child, qname)
-                    return
-                for child in ast.iter_child_nodes(node):
-                    map_ast(child, parent_qual)
-
-            map_ast(tree, "")
-            entities: list[Entity] = []
-
-            def walk_ts(node: Any, parent_qual: str) -> None:
-                name = ""
-                kind = ""
-                if node.type in ("function_definition", "class_definition"):
-                    name_node = next((c for c in node.children if c.type == "identifier"), None)
-                    if name_node:
-                        name = name_node.text.decode("utf-8")
-                        kind = "class" if node.type == "class_definition" else "function"
-                if name and kind:
-                    qname = f"{parent_qual}.{name}" if parent_qual else name
-                    span_node = node.parent if (node.parent and node.parent.type == "decorated_definition") else node
-                    ast_node = ast_nodes.get(qname)
-                    params = _function_params(ast_node) if ast_node and isinstance(ast_node, (ast.FunctionDef, ast.AsyncFunctionDef)) else ()
-                    is_async = any(c.type == "async" for c in node.children) or bool(ast_node and isinstance(ast_node, ast.AsyncFunctionDef))
-                    top_level = "." not in qname
-                    is_export = bool(
-                        (top_level and not name.startswith("_"))
-                        or name in exports
-                        or (top_level and name in exports)
-                    )
-                    body = ast.dump(ast_node, annotate_fields=False, include_attributes=False) if ast_node else ""
-                    signature = {
-                        "params": [p.to_dict() for p in params],
-                        "returns": _annotation(ast_node.returns) if ast_node and not isinstance(ast_node, ast.ClassDef) else "",
-                        "async": is_async,
-                        "decorators": list(_decorator_names(ast_node)) if ast_node else [],
-                    }
-                    entities.append(
-                        Entity(
-                            file_path=path,
-                            qname=qualify(module, qname),
-                            kind=kind,
-                            start_line=span_node.start_point.row + 1,
-                            end_line=span_node.end_point.row + 1,
-                            start_col=span_node.start_point.column,
-                            end_col=span_node.end_point.column,
-                            start_byte=span_node.start_byte,
-                            end_byte=span_node.end_byte,
-                            blob_id=blob_id,
-                            body_digest=_digest(body),
-                            is_export=is_export,
-                            is_async=is_async,
-                            signature_digest=_digest(repr(signature)),
-                            parameters=tuple((p.name, p.kind, p.has_default) for p in params),
-                            returns=_annotation(ast_node.returns) if ast_node and not isinstance(ast_node, ast.ClassDef) else "",
-                        )
-                    )
-                    for child in node.children:
-                        walk_ts(child, qname)
-                    return
-                for child in node.children:
-                    walk_ts(child, parent_qual)
-
-            walk_ts(ts_tree.root_node, "")
-            return tuple(entities)
+            return _python_entities_via_tree_sitter(
+                _make_parser(ts_lang), path, module, exports, blob_id, tree, source_bytes
+            )
         except Exception:
             pass
 
@@ -551,6 +581,27 @@ def _python_entities(
     return tuple(entities)
 
 
+def _python_shape(tree: ast.AST) -> tuple[int, int]:
+    """Return (node count, maximum nesting depth) in one iterative pass.
+
+    Depth is the number of `ast.iter_child_nodes` edges from the module node
+    down to the deepest node (the module itself is depth 1).  The traversal is
+    explicit rather than recursive so a pathological input cannot exhaust the
+    interpreter stack before the depth budget is checked.
+    """
+    node_count = 0
+    max_depth = 0
+    stack: list[tuple[ast.AST, int]] = [(tree, 1)]
+    while stack:
+        node, depth = stack.pop()
+        node_count += 1
+        if depth > max_depth:
+            max_depth = depth
+        for child in ast.iter_child_nodes(node):
+            stack.append((child, depth + 1))
+    return node_count, max_depth
+
+
 def analyze_python(
     path: str,
     source: str,
@@ -575,13 +626,20 @@ def analyze_python(
             supported=False,
             parse_error=f"line {exc.lineno}: {exc.msg}",
         )
-    node_count = sum(1 for _ in ast.walk(tree))
+    node_count, max_depth = _python_shape(tree)
     if node_count > budget.max_ast_nodes:
         return SourceFacts(
             path=path,
             language="python",
             supported=False,
             parse_error=f"parse_resource_limit: AST node count {node_count} exceeds max_ast_nodes {budget.max_ast_nodes}",
+        )
+    if max_depth > budget.max_ast_depth:
+        return SourceFacts(
+            path=path,
+            language="python",
+            supported=False,
+            parse_error=f"parse_resource_limit: AST depth {max_depth} exceeds max_ast_depth {budget.max_ast_depth}",
         )
     visitor = _CallVisitor()
     visitor.visit(tree)
@@ -608,10 +666,10 @@ def analyze_python(
 # ---------------------------------------------------------------------------
 
 _TS_LANG_OBJECTS: dict[str, Any] = {}
-_TS_LOCAL = threading.local()
 
 
 def _ts_language(language: str) -> Any:
+    """Return the cached TS/JS `Language` object for `language`, or None."""
     if language not in _TS_LANG_OBJECTS:
         with _LANG_LOCK:
             if language not in _TS_LANG_OBJECTS:
@@ -643,21 +701,7 @@ def _ts_language(language: str) -> Any:
                 except Exception:
                     _TS_LANG_OBJECTS[language] = None
 
-    lang_obj = _TS_LANG_OBJECTS.get(language)
-    if lang_obj is None:
-        return None
-
-    parsers = getattr(_TS_LOCAL, "parsers", None)
-    if parsers is None:
-        parsers = {}
-        _TS_LOCAL.parsers = parsers
-    parser = parsers.get(language)
-    if parser is None:
-        from tree_sitter import Parser
-
-        parser = Parser(lang_obj)
-        parsers[language] = parser
-    return parser
+    return _TS_LANG_OBJECTS.get(language)
 
 
 def _node_text(node: Any) -> str:
@@ -705,12 +749,12 @@ def _ts_entities(
     suffix = path.rsplit(".", 1)[-1].lower()
     language = "tsx" if suffix == "tsx" else ("typescript" if suffix in ("ts", "mts", "cts") else "javascript")
     if tree is None:
-        parser = _ts_language(language)
-        if parser is None:
+        lang_obj = _ts_language(language)
+        if lang_obj is None:
             return None
         source_bytes = source.encode("utf-8")
         try:
-            tree = parser.parse(source_bytes)
+            tree = _make_parser(lang_obj).parse(source_bytes)
         except Exception:
             return None
     else:
@@ -786,16 +830,18 @@ def analyze_typescript(
     blob_hash: str = "",
     budget: WorkBudget = DEFAULT_BUDGET,
 ) -> SourceFacts:
+    """Analyze a TS/JS file with a parser owned by the calling thread."""
     suffix = path.rsplit(".", 1)[-1].lower()
     language = "tsx" if suffix == "tsx" else ("typescript" if suffix in ("ts", "mts", "cts") else "javascript")
-    parser = _ts_language(language)
-    if parser is None:
+    lang_obj = _ts_language(language)
+    if lang_obj is None:
         return SourceFacts(
             path=path,
             language=language,
             supported=False,
             parse_error="tree-sitter TypeScript/JavaScript grammar unavailable",
         )
+    parser = _make_parser(lang_obj)
     source_bytes = source.encode("utf-8")
     if len(source_bytes) > budget.max_file_bytes:
         return SourceFacts(
@@ -814,17 +860,28 @@ def analyze_typescript(
             parse_error=f"line 1: {exc}",
         )
     node_count = 0
-    stack = [tree.root_node]
+    max_depth = 0
+    stack: list[tuple[Any, int]] = [(tree.root_node, 1)]
     while stack:
-        cur = stack.pop()
+        cur, depth = stack.pop()
         node_count += 1
-        stack.extend(cur.children)
+        if depth > max_depth:
+            max_depth = depth
+        for child in cur.children:
+            stack.append((child, depth + 1))
     if node_count > budget.max_ast_nodes:
         return SourceFacts(
             path=path,
             language=language,
             supported=False,
             parse_error=f"parse_resource_limit: AST node count {node_count} exceeds max_ast_nodes {budget.max_ast_nodes}",
+        )
+    if max_depth > budget.max_ast_depth:
+        return SourceFacts(
+            path=path,
+            language=language,
+            supported=False,
+            parse_error=f"parse_resource_limit: AST depth {max_depth} exceeds max_ast_depth {budget.max_ast_depth}",
         )
     entities = _ts_entities(path, source, blob_hash=blob_hash, tree=tree)
     if entities is None:

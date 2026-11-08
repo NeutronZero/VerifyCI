@@ -130,6 +130,19 @@ def make_finding(
     )
 
 
+def entity_budget_exceeded(context: CheckContext) -> tuple[bool, int]:
+    """Return ``(exceeded, enumerated)`` for this check's relevant scope.
+
+    ``WorkBudget.max_entities`` is a per-check bound on how many entities a
+    check may enumerate across both revisions of the changed scope.  Exceeding
+    it is never a pass: callers must return ``budget_exhausted_result`` so the
+    check reports ``INCONCLUSIVE`` with a ``budget_exhausted`` gap.
+    """
+    scope = context.scope
+    enumerated = len(scope.base_entities.union(scope.head_entities))
+    return enumerated > context.budget.max_entities, enumerated
+
+
 def unsupported_scope_gaps(
     context: CheckContext,
     check_id: str,
@@ -282,6 +295,7 @@ def budget_exhausted_result(
 __all__ = [
     "CheckContext",
     "budget_exhausted_result",
+    "entity_budget_exceeded",
     "error_result",
     "gap",
     "make_finding",

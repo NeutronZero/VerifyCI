@@ -27,6 +27,7 @@ class GitError(RuntimeError):
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _LFS_POINTER = b"version https://git-lfs.github.com/spec/v1"
 _MAX_BLOB_BYTES = 64 * 1024 * 1024
+_BATCH_TIMEOUT_SECONDS = 120
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +43,6 @@ class GitRepo:
         self._empty_config = os.devnull
         self._blob_cache: dict[str, bytes] = {}
         self._tree_cache: dict[str, dict[str, tuple[str, str, str, str]]] = {}
-        self._batch_proc: subprocess.Popen[bytes] | None = None
         self._object_format_cached: str | None = None
         env = os.environ.copy()
         env.update(
@@ -62,19 +62,14 @@ class GitRepo:
         self.env = env
 
     def close(self) -> None:
-        if self._batch_proc is not None:
-            proc = self._batch_proc
-            self._batch_proc = None
-            try:
-                if proc.stdin:
-                    proc.stdin.close()
-                proc.terminate()
-                proc.wait(timeout=1)
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
+        """Release adapter state.
+
+        Every Git invocation this adapter makes is one-shot and fully drained
+        before it returns (``subprocess.run`` with a bounded timeout), so no
+        child process outlives a call and there is no long-lived pipe to shut
+        down here.  The method is kept so callers can use ``with`` uniformly.
+        """
+        return None
 
     def __del__(self) -> None:
         self.close()
@@ -84,42 +79,6 @@ class GitRepo:
 
     def __exit__(self, *args: object) -> None:
         self.close()
-
-    def _get_batch_reader(self) -> subprocess.Popen[bytes]:
-        if self._batch_proc is not None and self._batch_proc.poll() is None:
-            return self._batch_proc
-        command = [
-            "git",
-            "-C",
-            str(self.repo),
-            "--no-pager",
-            "-c",
-            "core.quotepath=false",
-            "-c",
-            "core.autocrlf=false",
-            "-c",
-            "core.safecrlf=false",
-            "-c",
-            "core.hooksPath=",
-            "-c",
-            "core.fsmonitor=false",
-            "-c",
-            f"core.attributesFile={self._empty_config}",
-            "cat-file",
-            "--batch",
-        ]
-        try:
-            self._batch_proc = subprocess.Popen(
-                command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=-1,
-                env=self.env,
-            )
-        except FileNotFoundError as exc:
-            raise GitError("internal_fault", "git executable was not found") from exc
-        return self._batch_proc
 
     # ------------------------------------------------------------------
     # Plumbing
@@ -243,21 +202,28 @@ class GitRepo:
             "cat-file",
             "--batch",
         ]
+        # One request/response per call: the process is fully drained and then
+        # reaped, so concurrent readers can never interleave reads on a shared
+        # pipe.  The timeout bounds a hung or blocked git process and kills it.
         try:
-            with subprocess.Popen(
+            proc = subprocess.run(
                 command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=-1,
+                input=input_data,
+                capture_output=True,
+                check=False,
                 env=self.env,
-            ) as proc:
-                stdout, stderr = proc.communicate(input_data)
-                returncode = proc.returncode
+                timeout=_BATCH_TIMEOUT_SECONDS,
+            )
         except FileNotFoundError as exc:
             raise GitError("internal_fault", "git executable was not found") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise GitError(
+                "internal_fault",
+                f"git cat-file --batch timed out after {_BATCH_TIMEOUT_SECONDS}s",
+            ) from exc
         except Exception as exc:
             raise GitError("internal_fault", f"cat-file --batch failed: {exc}") from exc
+        stdout, stderr, returncode = proc.stdout, proc.stderr, proc.returncode
 
         if returncode != 0 and not stdout:
             text = stderr.decode("utf-8", "replace").strip()

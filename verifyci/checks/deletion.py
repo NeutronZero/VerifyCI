@@ -10,6 +10,7 @@ from typing import Any, Mapping
 from verifyci.checks.base import (
     CheckContext,
     budget_exhausted_result,
+    entity_budget_exceeded,
     gap,
     make_finding,
     make_result,
@@ -188,6 +189,13 @@ def _dynamic_references(
 def run(context: CheckContext) -> CheckResult:
     if context.deadline is not None and time.monotonic() > context.deadline:
         return budget_exhausted_result(context, "deletion", "cold_deadline_seconds exceeded")
+    entities_over_budget, enumerated_entities = entity_budget_exceeded(context)
+    if entities_over_budget:
+        return budget_exhausted_result(
+            context,
+            "deletion",
+            f"max_entities limit exceeded ({enumerated_entities} > {context.budget.max_entities})",
+        )
     excluded_patterns = []
     for key in ("generated", "vendored"):
         excluded_patterns.extend(context.policy.path_classes.get(key, ()))
