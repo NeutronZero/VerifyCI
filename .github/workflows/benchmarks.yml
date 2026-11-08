@@ -41,7 +41,7 @@ jobs:
         run: echo "VERIFYCI_TEST_CACHE_DIR=${{ runner.temp }}/verifyci_cache" >> $GITHUB_ENV
         shell: bash
       - name: Cache Benchmark Corpora Repositories
-        uses: actions/cache@1bd1e32413824ab0f38a58424e396fe4a85c51fd # v4.2.0
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ runner.temp }}/verifyci_cache
           key: benchmark-repos-${{ runner.os }}-${{ hashFiles('corpora/**') }}
