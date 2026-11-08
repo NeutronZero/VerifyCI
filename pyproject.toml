@@ -22,20 +22,10 @@ requires-python = ">=3.12"
 dependencies = [
     "tree-sitter>=0.25,<0.26",
     "tree-sitter-python>=0.25",
-    "tree-sitter-c>=0.24",
-    "tree-sitter-cpp>=0.23",
     "tree-sitter-typescript>=0.23",
     "tree-sitter-javascript>=0.23",
     "z3-solver>=4.13.0",
-    "duckdb>=1.0.0",
     "cryptography>=42.0.0",
-    "wasmtime>=49.0.0",
-    "msgspec>=0.22.0",
-    "securesystemslib>=1.5.0",
-    "blake3>=0.4.1",
-    "xxhash>=3.4.1",
-    "egglog>=0.4.0",
-    "llguidance>=0.7.0",
 ]
 
 [project.optional-dependencies]
