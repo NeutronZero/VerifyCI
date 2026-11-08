@@ -20,6 +20,7 @@ from pathlib import Path
 import hashlib
 import os
 import tempfile
+import time
 import shutil
 import subprocess
 
@@ -62,70 +63,97 @@ def _build_case_repo(case: dict, target_dir: Path) -> tuple[GitRepo, str, str, s
     marker = repo_dir / ".ready.json"
 
     if not marker.exists():
-        if repo_dir.exists():
-            shutil.rmtree(repo_dir, ignore_errors=True)
-        repo_dir.mkdir(parents=True, exist_ok=True)
+        lock_file = cache_root / f"{case_id}.lock"
+        acquired = False
+        start = time.time()
+        while time.time() - start < 120:
+            try:
+                fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
+                acquired = True
+                break
+            except FileExistsError:
+                if marker.exists():
+                    break
+                time.sleep(0.05)
 
-        env = os.environ.copy()
-        env.update({
-            "GIT_AUTHOR_NAME": "TestRunner",
-            "GIT_AUTHOR_EMAIL": "test@verifyci.dev",
-            "GIT_COMMITTER_NAME": "TestRunner",
-            "GIT_COMMITTER_EMAIL": "test@verifyci.dev",
-        })
+        if not marker.exists():
+            try:
+                if repo_dir.exists():
+                    shutil.rmtree(repo_dir, ignore_errors=True)
+                repo_dir.mkdir(parents=True, exist_ok=True)
 
-        subprocess.run(
-            ["git", "init", "-q", "-b", "main", str(repo_dir)],
-            check=True,
-            capture_output=True,
-            env=env,
-        )
-        with open(repo_dir / ".git" / "config", "a", encoding="utf-8") as f:
-            f.write("""
-[core]
-	autocrlf = false
-	safecrlf = false
-""")
+                env = os.environ.copy()
+                env.update({
+                    "GIT_AUTHOR_NAME": "TestRunner",
+                    "GIT_AUTHOR_EMAIL": "test@verifyci.dev",
+                    "GIT_COMMITTER_NAME": "TestRunner",
+                    "GIT_COMMITTER_EMAIL": "test@verifyci.dev",
+                })
 
-        for rel_path, content in case["base_files"].items():
-            file_path = repo_dir / rel_path
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_text(content, encoding="utf-8", newline="")
+                subprocess.run(
+                    ["git", "init", "-q", "-b", "main", str(repo_dir)],
+                    check=True,
+                    capture_output=True,
+                    env=env,
+                )
+                with open(repo_dir / ".git" / "config", "a", encoding="utf-8") as f:
+                    f.write("""
+        [core]
+        	autocrlf = false
+        	safecrlf = false
+        """)
 
-        subprocess.run(
-            ["git", "-C", str(repo_dir), "add", "-A"], check=True, capture_output=True, env=env
-        )
-        subprocess.run(
-            ["git", "-C", str(repo_dir), "commit", "-q", "-m", "base", "--date", "2026-01-01T00:00:00"],
-            check=True,
-            capture_output=True,
-            env=env,
-        )
-        base_commit = (repo_dir / ".git" / "refs" / "heads" / "main").read_text(encoding="utf-8").strip()
+                for rel_path, content in case["base_files"].items():
+                    file_path = repo_dir / rel_path
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(content, encoding="utf-8", newline="")
 
-        for item in repo_dir.iterdir():
-            if item.name != ".git":
-                if item.is_dir():
-                    shutil.rmtree(item)
-                else:
-                    item.unlink()
+                subprocess.run(
+                    ["git", "-C", str(repo_dir), "add", "-A"], check=True, capture_output=True, env=env
+                )
+                subprocess.run(
+                    ["git", "-C", str(repo_dir), "commit", "-q", "-m", "base", "--date", "2026-01-01T00:00:00"],
+                    check=True,
+                    capture_output=True,
+                    env=env,
+                )
+                base_commit = (repo_dir / ".git" / "refs" / "heads" / "main").read_text(encoding="utf-8").strip()
 
-        for rel_path, content in case["head_files"].items():
-            file_path = repo_dir / rel_path
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_text(content, encoding="utf-8", newline="")
+                for item in repo_dir.iterdir():
+                    if item.name != ".git":
+                        if item.is_dir():
+                            shutil.rmtree(item)
+                        else:
+                            item.unlink()
 
-        subprocess.run(
-            ["git", "-C", str(repo_dir), "add", "-A"], check=True, capture_output=True, env=env
-        )
-        subprocess.run(
-            ["git", "-C", str(repo_dir), "commit", "-q", "-m", "head", "--allow-empty", "--date", "2026-01-01T00:00:10"],
-            check=True,
-            capture_output=True,
-            env=env,
-        )
-        head_commit = (repo_dir / ".git" / "refs" / "heads" / "main").read_text(encoding="utf-8").strip()
-        marker.write_text(json.dumps({"base": base_commit, "head": head_commit}), encoding="utf-8")
+                for rel_path, content in case["head_files"].items():
+                    file_path = repo_dir / rel_path
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(content, encoding="utf-8", newline="")
+
+                subprocess.run(
+                    ["git", "-C", str(repo_dir), "add", "-A"], check=True, capture_output=True, env=env
+                )
+                subprocess.run(
+                    ["git", "-C", str(repo_dir), "commit", "-q", "-m", "head", "--allow-empty", "--date", "2026-01-01T00:00:10"],
+                    check=True,
+                    capture_output=True,
+                    env=env,
+                )
+                head_commit = (repo_dir / ".git" / "refs" / "heads" / "main").read_text(encoding="utf-8").strip()
+                marker.write_text(json.dumps({"base": base_commit, "head": head_commit}), encoding="utf-8")
+            finally:
+                if acquired and lock_file.exists():
+                    try:
+                        lock_file.unlink()
+                    except OSError:
+                        pass
+        elif acquired and lock_file.exists():
+            try:
+                lock_file.unlink()
+            except OSError:
+                pass
 
     data = json.loads(marker.read_text(encoding="utf-8"))
     res = (GitRepo(repo_dir), data["base"], data["base"], data["head"])
