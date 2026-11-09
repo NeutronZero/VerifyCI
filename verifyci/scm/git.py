@@ -29,6 +29,26 @@ _LFS_POINTER = b"version https://git-lfs.github.com/spec/v1"
 _MAX_BLOB_BYTES = 64 * 1024 * 1024
 _BATCH_TIMEOUT_SECONDS = 120
 
+_SCRUB_EXACT = frozenset(
+    {
+        "VERIFYCI_RELEASE_SIGNING_KEY",
+        "VERIFYCI_RELEASE_VALIDATION_PATH",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "GIT_ASKPASS",
+        "SSH_AUTH_SOCK",
+    }
+)
+_SCRUB_PATTERNS = (
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "CREDENTIAL",
+    "SIGNING_KEY",
+    "PRIVATE_KEY",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class GitResult:
@@ -45,6 +65,14 @@ class GitRepo:
         self._tree_cache: dict[str, dict[str, tuple[str, str, str, str]]] = {}
         self._object_format_cached: str | None = None
         env = os.environ.copy()
+        for k in list(env.keys()):
+            k_upper = k.upper()
+            if (
+                k in _SCRUB_EXACT
+                or k_upper.endswith(("_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_PASSWD", "_CREDENTIAL"))
+                or any(part in k_upper for part in _SCRUB_PATTERNS)
+            ):
+                env.pop(k, None)
         env.update(
             {
                 "GIT_NO_REPLACE_OBJECTS": "1",
@@ -127,8 +155,8 @@ class GitRepo:
             return GitError("shallow_history", text or "shallow history")
         if "ambiguous" in lower and "merge" in lower:
             return GitError("ambiguous_merge_base", text or "ambiguous merge base")
-        if "not a git repository" in lower:
-            return GitError("internal_fault", text or "not a git repository")
+        if "not a git repository" in lower or "cannot change to" in lower:
+            return GitError("invalid_repository", text or "not a git repository")
         if "unable to read" in lower or "corrupt" in lower:
             return GitError("provenance_integrity_error", text or "provenance integrity error")
         if "bad object" in lower or "not a valid object" in lower or "unknown revision" in lower:
@@ -473,10 +501,10 @@ def _parse_patch_hunks(data: bytes) -> dict[str, tuple[Hunk, ...]]:
             old_path = new_path = current_key = ""
             continue
         if line.startswith("--- "):
-            old_path = _patch_path(line[4:])
+            old_path = _patch_path(line[4:], prefix="a/")
             continue
         if line.startswith("+++ "):
-            new_path = _patch_path(line[4:])
+            new_path = _patch_path(line[4:], prefix="b/")
             current_key = new_path or old_path
             out.setdefault(current_key, [])
             continue
@@ -498,12 +526,19 @@ def _parse_patch_hunks(data: bytes) -> dict[str, tuple[Hunk, ...]]:
     return {k: tuple(v) for k, v in out.items()}
 
 
-def _patch_path(value: str) -> str:
+def _patch_path(value: str, prefix: str | Sequence[str] | None = None) -> str:
     value = value.strip().split("\t", 1)[0]
     if value == "/dev/null":
         return ""
-    if value.startswith(("a/", "b/")):
-        value = value[2:]
+    if prefix:
+        if isinstance(prefix, str):
+            if value.startswith(prefix):
+                value = value[len(prefix):]
+        else:
+            for p in prefix:
+                if value.startswith(p):
+                    value = value[len(p):]
+                    break
     return normalize_repo_path(value)
 
 

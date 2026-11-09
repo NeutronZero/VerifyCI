@@ -29,29 +29,48 @@ FULL_RUN_TRIGGERS = [
     ".github/",
     ".gitattributes",
     "scripts/",
+    "uv.lock",
+    "corpora/",
+    "verifyci_release_trust/",
 ]
 
 
 def get_changed_files(base_ref: str = "origin/main") -> list[str]:
     """Retrieve list of files changed against base reference using git."""
-    for cmd in (
-        ["git", "diff", "--name-only", f"{base_ref}...HEAD"],
-        ["git", "diff", "--name-only", f"{base_ref}"],
-        ["git", "diff", "--name-only", "HEAD~1"],
-        ["git", "status", "--porcelain"],
-    ):
-        try:
-            res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            lines = [
-                line.strip().split()[-1].replace("\\", "/")
-                for line in res.stdout.splitlines()
-                if line.strip()
-            ]
-            if lines:
+    if base_ref:
+        for cmd in (
+            ["git", "diff", "--name-only", f"{base_ref}...HEAD"],
+            ["git", "diff", "--name-only", f"{base_ref}"],
+        ):
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                lines = [
+                    line.strip().replace("\\", "/")
+                    for line in res.stdout.splitlines()
+                    if line.strip()
+                ]
                 return lines
-        except Exception:
-            continue
-    return []
+            except Exception:
+                continue
+        return []
+
+    # If no base_ref is specified, check uncommitted working tree changes
+    try:
+        res = subprocess.run(
+            ["git", "status", "--porcelain"], capture_output=True, text=True, check=True
+        )
+        lines = []
+        for line in res.stdout.splitlines():
+            if not line.strip() or len(line) < 3:
+                continue
+            entry = line[3:].strip().replace("\\", "/")
+            if " -> " in entry:
+                entry = entry.split(" -> ")[-1].strip()
+            if entry:
+                lines.append(entry)
+        return lines
+    except Exception:
+        return []
 
 
 def select_tests(changed_files: list[str]) -> list[str]:

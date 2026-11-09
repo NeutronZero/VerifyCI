@@ -23,6 +23,7 @@ class NameError(ValueError):
 
 def normalize_repo_path(path: str) -> str:
     p = str(path).replace("\\", "/").strip()
+    p = re.sub(r"/+", "/", p)
     while p.startswith("./"):
         p = p[2:]
     return p
@@ -34,7 +35,11 @@ def is_safe_repo_path(path: str) -> bool:
     if re.match(r"^[A-Za-z]:", path):
         return False
     parts = path.split("/")
-    return all(part not in ("", ".", "..") for part in parts)
+    return all(
+        part not in ("", ".", "..", "~")
+        and part.rstrip(". ") == part
+        for part in parts
+    )
 
 
 def validate_glob_pattern(pattern: str, *, allow_leading_slash: bool = False) -> str:
