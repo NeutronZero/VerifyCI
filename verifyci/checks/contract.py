@@ -17,6 +17,7 @@ from verifyci.checks.base import (
     make_result,
     unsupported_scope_gaps,
 )
+from verifyci.contracts.manifest import CODE_EXTENSIONS
 from verifyci.contracts.model import CheckResult, Coverage, Entity, EvidenceKind, Outcome
 from verifyci.contracts.names import symbol_matches_any
 from verifyci.scope.entities import CallSite, SourceFacts
@@ -93,6 +94,7 @@ class _Sig:
     has_kwarg: bool
     keyword_names: frozenset[str]
     required_kwonly: frozenset[str]
+    is_ts: bool = False
 
 
 def _sig(entity: Entity) -> _Sig:
@@ -103,6 +105,7 @@ def _sig(entity: Entity) -> _Sig:
     has_kwarg = any(p[1] == "kwarg" for p in params)
     keyword_names = frozenset(p[0] for p in params if p[1] in ("positional", "kwonly"))
     required_kwonly = frozenset(p[0] for p in params if p[1] == "kwonly" and not p[2])
+    is_ts = not entity.file_path.endswith((".py", ".pyi"))
     return _Sig(
         params=params,
         positional=positional,
@@ -111,6 +114,7 @@ def _sig(entity: Entity) -> _Sig:
         has_kwarg=has_kwarg,
         keyword_names=keyword_names,
         required_kwonly=required_kwonly,
+        is_ts=is_ts,
     )
 
 
@@ -292,13 +296,14 @@ def _call_problem(call: CallSite, sig: _Sig) -> str:
         return "too_many_positional_arguments"
     if sig.has_kwarg:
         return ""
-    for keyword in call.keywords:
-        if keyword not in sig.keyword_names:
-            return f"unknown_keyword:{keyword}"
-    if sig.required_kwonly:
-        missing = sig.required_kwonly - set(call.keywords)
-        if missing:
-            return f"missing_required_keyword:{sorted(missing)[0]}"
+    if not sig.is_ts:
+        for keyword in call.keywords:
+            if keyword not in sig.keyword_names:
+                return f"unknown_keyword:{keyword}"
+        if sig.required_kwonly:
+            missing = sig.required_kwonly - set(call.keywords)
+            if missing:
+                return f"missing_required_keyword:{sorted(missing)[0]}"
     return ""
 
 
@@ -637,17 +642,12 @@ def run(context: CheckContext) -> CheckResult:
 
     # Unsupported code languages make the contract scope incomplete.  Text,
     # docs, config, and other non-code files are out of scope.
-    code_suffixes = {
-        "py", "pyi", "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts",
-        "go", "rs", "java", "kt", "kts", "c", "cc", "cpp", "h", "hpp", "cs",
-        "rb", "php", "swift", "scala",
-    }
     for entry in context.entries:
         path = entry.head_path or entry.base_path
         if not path:
             continue
         suffix = path.rsplit(".", 1)[-1].lower()
-        if suffix not in code_suffixes:
+        if suffix not in CODE_EXTENSIONS:
             continue
         facts = context.scope.head_facts.get(path) or context.scope.base_facts.get(path)
         if facts is not None and not facts.supported:

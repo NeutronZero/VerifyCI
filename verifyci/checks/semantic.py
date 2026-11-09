@@ -39,16 +39,11 @@ from verifyci.contracts.model import (
     Outcome,
     WitnessLevel,
 )
+from verifyci.contracts.manifest import CODE_EXTENSIONS
 from verifyci.contracts.names import path_matches_any
 
 _SUPPORTED_EXTENSIONS = (".py", ".pyi", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts")
-_CODE_SUFFIXES = frozenset(
-    {
-        "py", "pyi", "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts",
-        "go", "rs", "java", "kt", "kts", "c", "cc", "cpp", "h", "hpp", "cs",
-        "rb", "php", "swift", "scala",
-    }
-)
+_CODE_SUFFIXES = CODE_EXTENSIONS
 _STANDARD_TRANSPARENT_DECORATORS = frozenset(
     {"property", "staticmethod", "classmethod", "abstractmethod"}
 )

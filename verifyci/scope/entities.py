@@ -907,6 +907,7 @@ def analyze_typescript(
                     if arg.type in (",", "(", ")"):
                         continue
                     if arg.type == "object":
+                        positional += 1
                         for pair in arg.children:
                             if pair.type == "pair" and pair.children:
                                 keywords.append(_node_text(pair.children[0]).strip().strip("\"'"))
@@ -1264,7 +1265,8 @@ def find_matching_entity_detailed(
 
 def find_matching_entity(entities: Sequence[Entity], start_line: int, count: int) -> Entity | None:
     """Find the unique entity that contains or uniquely maps to the line range."""
-    match, _ = find_matching_entity_detailed(entities, start_line, count)
+    effective_count = 1 if count == 0 and start_line > 0 else count
+    match, _ = find_matching_entity_detailed(entities, start_line, effective_count)
     return match
 
 
@@ -1464,6 +1466,7 @@ def build_changed_scope(
         b_ents = bf.entities if bf else ()
         h_ents = hf.entities if hf else ()
         b_by_qname = {e.qname: e for e in b_ents}
+        h_by_qname = {e.qname: e for e in h_ents}
 
         b_tree: ast.Module | None = None
         h_tree: ast.Module | None = None
@@ -1548,19 +1551,36 @@ def build_changed_scope(
                     }
                 )
             elif m_base is not None and m_head is None:
-                qname = m_base.qname
-                changed.add(qname)
-                entity_changes[qname] = {"change": "removed", "base_e": m_base, "head_e": None}
-                mapped_hunks.append(
-                    {
-                        "file": path,
-                        "old_start": hunk.old_start,
-                        "old_count": hunk.old_count,
-                        "new_start": hunk.new_start,
-                        "new_count": hunk.new_count,
-                        "mapped_entity": qname,
-                    }
-                )
+                head_e = h_by_qname.get(m_base.qname) if hunk.new_count == 0 else None
+
+                if head_e is not None:
+                    qname = head_e.qname
+                    changed.add(qname)
+                    entity_changes[qname] = {"change": "modified", "base_e": m_base, "head_e": head_e}
+                    mapped_hunks.append(
+                        {
+                            "file": path,
+                            "old_start": hunk.old_start,
+                            "old_count": hunk.old_count,
+                            "new_start": hunk.new_start,
+                            "new_count": hunk.new_count,
+                            "mapped_entity": qname,
+                        }
+                    )
+                else:
+                    qname = m_base.qname
+                    changed.add(qname)
+                    entity_changes[qname] = {"change": "removed", "base_e": m_base, "head_e": None}
+                    mapped_hunks.append(
+                        {
+                            "file": path,
+                            "old_start": hunk.old_start,
+                            "old_count": hunk.old_count,
+                            "new_start": hunk.new_start,
+                            "new_count": hunk.new_count,
+                            "mapped_entity": qname,
+                        }
+                    )
             elif m_base is None and m_head is None:
                 if (
                     sfx == "py"

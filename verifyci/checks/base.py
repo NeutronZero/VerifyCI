@@ -32,7 +32,7 @@ from verifyci.scm.git import GitRepo
 
 @dataclass(frozen=True, slots=True)
 class CheckContext:
-    git: GitRepo
+    git: GitRepo | None
     policy: Policy
     entries: tuple[DiffEntry, ...]
     scope: ChangedScope

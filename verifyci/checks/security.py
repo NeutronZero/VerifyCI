@@ -37,7 +37,12 @@ _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("SLACK_TOKEN", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,120}\b")),
     ("SLACK_WEBHOOK", re.compile(r"https://hooks\.slack\.com/services/T[0-9A-Za-z_]{8,14}/B[0-9A-Za-z_]{8,14}/[0-9A-Za-z_]{20,36}")),
     ("STRIPE_KEY", re.compile(r"\b[rs]k_live_[0-9a-zA-Z]{16,99}\b")),
-    ("OPENAI_KEY", re.compile(r"\bsk-(?:proj-|live-)?[A-Za-z0-9_-]{12,120}\b")),
+    (
+        "OPENAI_KEY",
+        re.compile(
+            r"\bsk-(?!(?:learn|learning|sklearn)\b)(?:proj-|svcacct-|admin-|live-)?[A-Za-z0-9_-]{20,128}\b"
+        ),
+    ),
     ("GOOGLE_KEY", re.compile(r"\bAIza[0-9A-Za-z_-]{30,50}\b")),
     ("PRIVATE_KEY", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("JWT_TOKEN", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")),
@@ -48,8 +53,13 @@ _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
 )
-_SECRET_VAR_NAMES = re.compile(r"(?i)(?:secret|password|passwd|api_key|token|auth_key|private_key|deploy_key)")
+_SECRET_VAR_NAMES = re.compile(
+    r"(?i)(?:\b|_)(?:secret|password|passwd|api_key|token|auth_key|private_key|deploy_key)(?:\b|_)"
+)
 _PLACEHOLDER_PREFIXES = ("your_", "replace_", "example", "changeme", "enter_", "mock_", "dummy_")
+_PLACEHOLDER_INFIX_RE = re.compile(
+    r"(?i)\b(?:your|replace|example|changeme|enter|mock|dummy)\b"
+)
 _PLACEHOLDER_EXACT = {
     "placeholder", "example", "changeme", "your_key_here", "mysecretpassword",
     "dummy", "test", "fake", "null", "none", "<secret>", "your-api-key",
@@ -126,7 +136,9 @@ def _is_placeholder(value: str, extra: Sequence[str] = ()) -> bool:
         return True
     if clean in {item.strip().lower() for item in extra}:
         return True
-    return any(clean.startswith(prefix) or prefix in clean for prefix in _PLACEHOLDER_PREFIXES)
+    if any(clean.startswith(prefix) for prefix in _PLACEHOLDER_PREFIXES):
+        return True
+    return bool(_PLACEHOLDER_INFIX_RE.search(clean))
 
 
 def _valid_secret(kind: str, token: str) -> tuple[bool, str]:
@@ -141,6 +153,8 @@ def _valid_secret(kind: str, token: str) -> tuple[bool, str]:
     if kind == "STRIPE_KEY":
         return token.startswith(("sk_live_", "rk_live_")), "stripe_live_key_format"
     if kind == "OPENAI_KEY":
+        if any(lib in token.lower() for lib in ("sklearn", "sk-learn", "scikit-learn")):
+            return False, "package_name_not_secret"
         return token.startswith("sk-") and len(token) >= 20, "openai_key_format"
     if kind == "GOOGLE_KEY":
         return token.startswith("AIza") and len(token) >= 35, "google_api_key_format"

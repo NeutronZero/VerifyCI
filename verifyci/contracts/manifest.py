@@ -26,6 +26,14 @@ MANIFEST_SCHEMA = "verifyci.manifest/v3.1"
 # a development build as a release-validated gate.
 RELEASE_VALIDATED = False
 
+CODE_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        "py", "pyi", "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts",
+        "go", "rs", "java", "kt", "kts", "c", "cc", "cpp", "cxx", "h", "hpp",
+        "cs", "rb", "php", "swift", "scala", "lua", "ex", "exs", "erl", "hrl",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class CheckSpec:
@@ -367,6 +375,7 @@ def validate_manifest() -> list[str]:
 __all__ = [
     "CHECK_ORDER",
     "CHECK_SPECS",
+    "CODE_EXTENSIONS",
     "CheckSpec",
     "MANIFEST_SCHEMA",
     "RELEASE_VALIDATED",
