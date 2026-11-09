@@ -1019,3 +1019,51 @@ def test_evidence_record_excludes_raw_oidc_jwt():
     assert payload["oidc_binding"]["jti"] == "jwt-uuid-canonical"
     assert "jwt_sha256" in payload["oidc_binding"]
 
+
+
+def test_worker_ipc_accepts_canonical_coverage_and_not_applicable() -> None:
+    from verifyci_release_trust.ipc import parse_strict_ipc_payload
+
+    not_applicable = {
+        "outcome": "NOT_APPLICABLE",
+        "coverage": "COMPLETE",
+        "reason_codes": [],
+        "findings": [],
+    }
+    parsed = parse_strict_ipc_payload(json.dumps(not_applicable).encode("utf-8"), 4)
+    assert parsed.error is None
+    assert parsed.outcome == "NOT_APPLICABLE"
+    assert parsed.data is not None
+
+    passing = {
+        "outcome": "PASS",
+        "coverage": "COMPLETE",
+        "reason_codes": [],
+        "findings": [],
+    }
+    parsed_pass = parse_strict_ipc_payload(json.dumps(passing).encode("utf-8"), 0)
+    assert parsed_pass.error is None
+    assert parsed_pass.data is not None
+
+    # Legacy worker spellings remain readable.
+    legacy = {
+        "outcome": "PASS",
+        "coverage": "FULL",
+        "reason_codes": [],
+        "findings": [],
+    }
+    assert parse_strict_ipc_payload(json.dumps(legacy).encode("utf-8"), 0).error is None
+
+
+def test_worker_ipc_rejects_exit_code_outcome_mismatch() -> None:
+    from verifyci_release_trust.ipc import parse_strict_ipc_payload
+
+    payload = {
+        "outcome": "NOT_APPLICABLE",
+        "coverage": "COMPLETE",
+        "reason_codes": [],
+        "findings": [],
+    }
+    parsed = parse_strict_ipc_payload(json.dumps(payload).encode("utf-8"), 3)
+    assert parsed.error is not None
+    assert parsed.outcome == "INCONCLUSIVE"

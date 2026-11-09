@@ -97,13 +97,17 @@ def main():
             sys.stdout.write(json.dumps(payload, sort_keys=True) + "\n")
             sys.stdout.flush()
 
-            # Exit code mapping: 0=PASS, 1=FAIL, 2=INCONCLUSIVE, 3=ERROR
+            # Exit code mapping: 0=PASS, 1=FAIL, 2=INCONCLUSIVE, 3=ERROR,
+            # 4=NOT_APPLICABLE.  The IPC validator accepts the canonical
+            # Coverage enum (COMPLETE/PARTIAL/UNKNOWN) emitted above.
             if res.outcome.value == "PASS":
                 return 0
             if res.outcome.value == "FAIL":
                 return 1
             if res.outcome.value == "INCONCLUSIVE":
                 return 2
+            if res.outcome.value == "NOT_APPLICABLE":
+                return 4
             return 3
 
         except Exception as exc:

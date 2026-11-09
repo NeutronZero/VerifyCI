@@ -22,7 +22,16 @@ EXIT_CODE_MAP = {
     1: "FAIL",
     2: "INCONCLUSIVE",
     3: "ERROR",
+    # Worker-only mapping for a case where the check is not applicable to the
+    # scenario (the CLI's exit code 4 means REVIEW; that value never crosses
+    # this boundary).
+    4: "NOT_APPLICABLE",
 }
+
+# The canonical Coverage enum is COMPLETE/PARTIAL/UNKNOWN; FULL/NONE are legacy
+# worker spellings retained for fixture compatibility.
+VALID_COVERAGE = frozenset({"COMPLETE", "PARTIAL", "UNKNOWN", "FULL", "NONE"})
+VALID_OUTCOMES = frozenset({"PASS", "FAIL", "INCONCLUSIVE", "ERROR", "NOT_APPLICABLE"})
 
 
 class IPCParseResult(NamedTuple):
@@ -100,11 +109,11 @@ def validate_check_result_schema(obj: Any) -> tuple[bool, str | None]:
         return False, f"unexpected fields in worker response: {extra}"
 
     outcome = obj.get("outcome")
-    if outcome not in ("PASS", "FAIL", "INCONCLUSIVE", "ERROR"):
+    if outcome not in VALID_OUTCOMES:
         return False, f"invalid outcome value: {outcome!r}"
 
     coverage = obj.get("coverage")
-    if coverage not in ("FULL", "PARTIAL", "NONE", "UNKNOWN"):
+    if coverage not in VALID_COVERAGE:
         return False, f"invalid coverage value: {coverage!r}"
 
     reason_codes = obj.get("reason_codes")
@@ -180,5 +189,7 @@ def parse_strict_ipc_payload(raw_bytes: bytes, exit_code: int) -> IPCParseResult
         return IPCParseResult(None, "INCONCLUSIVE", f"exit code 2 inconsistent with outcome {claimed_outcome!r}")
     if exit_code == 3 and claimed_outcome != "ERROR":
         return IPCParseResult(None, "INCONCLUSIVE", f"exit code 3 inconsistent with outcome {claimed_outcome!r}")
+    if exit_code == 4 and claimed_outcome != "NOT_APPLICABLE":
+        return IPCParseResult(None, "INCONCLUSIVE", f"exit code 4 inconsistent with outcome {claimed_outcome!r}")
 
     return IPCParseResult(data, claimed_outcome, None)
