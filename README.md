@@ -1,4 +1,4 @@
-# VerifyCI
+# VerifyCI Blueprint
 
 **Deterministic, local-first pre-merge verification gate for AI-authored pull requests and diffs.**
 
@@ -6,6 +6,8 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](pyproject.toml)
 [![Architecture: Local-First](https://img.shields.io/badge/architecture-local--first-green.svg)](docs/architecture.md)
 [![Output: SARIF_v2.1.0](https://img.shields.io/badge/output-SARIF_v2.1.0-orange.svg)](docs/architecture.md)
+
+## System Overview
 
 VerifyCI is a local-first, deterministic pre-merge verification gate designed to halt semantic regressions, ungrounded edits, security violations, and contract breakage in AI-generated code modifications before tests or human review.
 
@@ -53,6 +55,41 @@ VerifyCI enforces a strict exit ladder:
 | `INCONCLUSIVE` | `2` | Coverage incomplete, unmodelled syntax encountered, or analysis budget exhausted. |
 | `ERROR` | `3` | Internal failure, corrupt/missing Git object, or invalid policy schema. |
 | `REVIEW` | `4` | Policy or gate-integrity files modified; requires designated codeowner review. |
+
+---
+
+## Subdirectories & System Boundaries
+
+- **[verifyci](./verifyci/README.md)**: Core verification engine containing CLI entry points, language frontends (Python/TS), index and caching layers, analysis pipelines, check suites (`grounding`, `deletion`, `contract`, `security`, `semantic`), and gate verdict aggregator.
+- **[benchmarks](./benchmarks/README.md)**: Reproducible latency profiling and end-to-end gate performance benchmarking suites across synthetic and multi-file diff workloads.
+- **[docker](./docker/README.md)**: Containerization assets and isolated launcher harness for sandboxed candidate worker execution.
+- **[scripts](./scripts/README.md)**: Operational release tooling, change-aware CI test selector, canonical RFC 8785 evidence bundle packaging, and standalone Ed25519 signing scripts.
+- **[verifyci_release_trust](./verifyci_release_trust/README.md)**: Hardened § 15.10 release trust supervisor, OCI image provenance verification, metamorphic benchmark evaluator, RFC 8785 canonical serialization, and Ed25519 attestation signing.
+- **[verifyci_trusted_harness](./verifyci_trusted_harness/README.md)**: Trusted Pytest plugin infrastructure for configuring and isolating candidate container execution during testing.
+
+---
+
+## Global Invariants
+
+- **Offline Determinism**: Verification algorithms and checks operate 100% offline with zero external network access, LLM calls, or cloud database dependencies.
+- **Target-Base Policy Authority**: Gate configuration policies and CODEOWNERS rules are loaded strictly from the target-base Git commit to prevent malicious PRs from relaxing their own evaluation criteria.
+- **Fail-Closed Gate Ladders**: Incomplete test coverage, unmapped AST syntax, parser errors, or exhausted analysis budgets yield `INCONCLUSIVE` or `FAIL`, never `PASS`. Non-MEASURED benchmark states or sample insufficiency cannot establish passing release gates.
+- **RFC 8785 Canonical Cryptographic Proofs**: All hashes, attestations, signatures, and evidence bundles strictly follow RFC 8785 canonical JSON formatting with UTF-16 code unit sorted keys and Ed25519 signing.
+- **Hostile-Boundary Isolation**: Untrusted candidate code, candidate Docker containers, and test replay witnesses execute strictly in unprivileged sandboxes with dropped capabilities, read-only root filesystems, and scrubbed environment credentials (`VERIFYCI_RELEASE_SIGNING_KEY`).
+
+---
+
+## Global Side Effects
+
+- **Git Database Inspection**: Reads Git tree objects, commit metadata, and diff hunks directly using read-only Git plumbing subprocesses (`git rev-parse`, `git ls-tree`, `git cat-file`).
+- **Filesystem Output Generation**: Generates deterministic SARIF v2.1.0 reports (`verifyci-results.sarif`), HMAC-authenticated CAS caches in `.verifyci/`, and cryptographic evidence bundles in `evidence/`.
+- **Subprocess & Container Lifecycle**: Spawns isolated Python/Node.js worker child processes and manages ephemeral Docker containers (`docker create`, `docker start`, `docker kill`, `docker rm`) during candidate verification.
+
+---
+
+## System Verification
+
+- Run: `pytest`
 
 ---
 
