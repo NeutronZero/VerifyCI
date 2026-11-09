@@ -46,7 +46,7 @@ def _apply_waiver_result(
     applied_keys: set[tuple[str, str]],
     review_reasons: set[str],
     diagnostics: list[dict[str, Any]],
-    diagnostic_keys: set[tuple[str, str]],
+    diagnostic_keys: set[tuple[Any, ...]],
 ) -> CheckResult:
     if result.tier != Tier.BLOCKING:
         return result
@@ -57,6 +57,9 @@ def _apply_waiver_result(
             new_findings.append(finding)
             continue
         key = (waiver.record_id, waiver.fingerprint)
+        path = finding.subject.get("path") if isinstance(finding.subject, Mapping) else None
+        line = finding.subject.get("line") if isinstance(finding.subject, Mapping) else None
+        diag_key = (waiver.record_id, waiver.fingerprint, path, line)
         if waiver.active(as_of_date):
             new_findings.append(finding.with_disposition(Disposition.WAIVED))
             if key not in applied_keys:
@@ -74,18 +77,21 @@ def _apply_waiver_result(
         else:
             new_findings.append(finding)
             review_reasons.add("waiver_review")
-            if key not in diagnostic_keys:
-                diagnostic_keys.add(key)
-                diagnostics.append(
-                    {
-                        "code": "stale_waiver_present",
-                        "check": result.check_id,
-                        "waiver_id": waiver.record_id,
-                        "created": waiver.created,
-                        "expires": waiver.expires,
-                        "fingerprint": waiver.fingerprint,
-                    }
-                )
+            if diag_key not in diagnostic_keys:
+                diagnostic_keys.add(diag_key)
+                diag_item = {
+                    "code": "stale_waiver_present",
+                    "check": result.check_id,
+                    "waiver_id": waiver.record_id,
+                    "created": waiver.created,
+                    "expires": waiver.expires,
+                    "fingerprint": waiver.fingerprint,
+                }
+                if path is not None:
+                    diag_item["path"] = path
+                if line is not None:
+                    diag_item["line"] = line
+                diagnostics.append(diag_item)
     sub_results = tuple(
         _apply_waiver_result(
             sub,
@@ -112,7 +118,7 @@ def apply_waivers(
     applied_keys: set[tuple[str, str]] = set()
     review_reasons: set[str] = set()
     diagnostics: list[dict[str, Any]] = []
-    diagnostic_keys: set[tuple[str, str]] = set()
+    diagnostic_keys: set[tuple[Any, ...]] = set()
     out = tuple(
         _apply_waiver_result(
             result,
@@ -315,6 +321,7 @@ def aggregate(
     target_drift: bool = False,
     target_drift_mode: str = "record",
     extra_faults: Iterable[str] = (),
+    inconclusive_reasons: Iterable[str] = (),
 ) -> VerdictResult:
     """Apply the specified precedence: ERROR > FAIL > INCONCLUSIVE > REVIEW > PASS.
 
@@ -323,6 +330,7 @@ def aggregate(
     """
     review = set(review_reasons)
     fault_codes = set(extra_faults)
+    inconclusive_set = set(inconclusive_reasons)
     blocking = [r for r in results if r.tier == Tier.BLOCKING]
 
     invalid = False
@@ -338,7 +346,8 @@ def aggregate(
     open_findings: list[Finding] = []
     all_blocking_findings: list[Finding] = []
     gap_codes: set[str] = set()
-    incomplete = False
+    incomplete = bool(inconclusive_set)
+    gap_codes.update(inconclusive_set)
     for result in blocking:
         all_blocking_findings.extend(result.findings)
         for finding in result.findings:

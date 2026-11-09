@@ -112,6 +112,10 @@ REVIEWS: dict[str, ReasonCode] = {
         "coverage_acceptance_review", ReasonClass.REVIEW,
         "Remove or validly renew the inactive coverage acceptance through a separate policy-clearing PR.",
     ),
+    "candidate_build_unvalidated": ReasonCode(
+        "candidate_build_unvalidated", ReasonClass.REVIEW,
+        "Run on a validated release build or sign candidate measurements.",
+    ),
 }
 
 

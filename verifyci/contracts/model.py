@@ -570,11 +570,27 @@ class EvidenceBundle:
 
     @property
     def verdict(self) -> Verdict:
-        return Verdict(str(self.payload["verdict"]["status"]))
+        if not isinstance(self.payload, Mapping):
+            return Verdict.ERROR
+        verdict_obj = self.payload.get("verdict")
+        if not isinstance(verdict_obj, Mapping) or "status" not in verdict_obj:
+            return Verdict.ERROR
+        try:
+            return Verdict(str(verdict_obj["status"]))
+        except ValueError:
+            return Verdict.ERROR
 
     @property
     def exit_code(self) -> int:
-        return int(self.payload["verdict"]["exit_code"])
+        if not isinstance(self.payload, Mapping):
+            return VERDICT_EXIT_CODES[Verdict.ERROR]
+        verdict_obj = self.payload.get("verdict")
+        if not isinstance(verdict_obj, Mapping) or "exit_code" not in verdict_obj:
+            return VERDICT_EXIT_CODES.get(self.verdict, 3)
+        try:
+            return int(verdict_obj["exit_code"])
+        except (ValueError, TypeError):
+            return VERDICT_EXIT_CODES.get(self.verdict, 3)
 
 
 @functools.lru_cache(maxsize=2048)

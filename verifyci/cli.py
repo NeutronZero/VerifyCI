@@ -37,6 +37,12 @@ def _parser() -> argparse.ArgumentParser:
     gate.add_argument("--cache-read-only", action="store_true", help="never write cache entries")
     gate.add_argument("--jobs", type=int, default=1)
     gate.add_argument("--review-mode", choices=("fail", "codeowners"), default="fail")
+    gate.add_argument(
+        "--candidate-build",
+        action="store_true",
+        default=False,
+        help="treat missing release evidence as candidate inconclusive rather than fatal error",
+    )
     return parser
 
 
@@ -112,8 +118,6 @@ def _text_summary(bundle) -> str:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if args.command != "gate":
-        return 2
     if args.jobs < 1:
         sys.stderr.write("jobs must be >= 1\n")
         return 2
@@ -161,6 +165,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         merge_base=args.merge_base,
         as_of_date=args.as_of,
         review_mode=args.review_mode,
+        candidate_build=args.candidate_build,
         cache_mode=cache_mode,
         allow_local_cache=args.allow_local_cache,
         cache_dir=args.cache_dir,

@@ -81,6 +81,7 @@ class GateRequest:
     merge_base: str | None = None
     as_of_date: str | None = None
     review_mode: str = "fail"
+    candidate_build: bool = False
     generated_at: str | None = None
     cache_mode: str = "none"
     allow_local_cache: bool = False
@@ -851,15 +852,23 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
         # repository under review: a target tree that happens to contain signed
         # evidence must not be able to clear this fault for a different build.
         is_release_validated, val_diag = verify_release_validation_evidence()
+        is_candidate_unvalidated = request.candidate_build and not is_release_validated
+        if is_candidate_unvalidated:
+            review_reasons.add("candidate_build_unvalidated")
+
+        release_faults = set()
+        if not is_release_validated and not request.candidate_build:
+            release_faults.add("check_not_validated")
+
+        inconclusive_reasons = {"candidate_build_unvalidated"} if is_candidate_unvalidated else set()
+
         verdict = aggregate(
             results,
             review_reasons=review_reasons,
             target_drift=target_drift,
             target_drift_mode=str(policy.gate.get("target_drift", "record")),
-            extra_faults=(
-                extra_faults
-                | ({"check_not_validated"} if not is_release_validated else set())
-            ),
+            extra_faults=extra_faults | release_faults,
+            inconclusive_reasons=inconclusive_reasons,
         )
 
         # Policy remediation boundary: a valid proposed policy can supersede an
@@ -893,10 +902,8 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
                     review_reasons=review_reasons,
                     target_drift=target_drift,
                     target_drift_mode=str(policy.gate.get("target_drift", "record")),
-                    extra_faults=(
-                        extra_faults
-                        | ({"check_not_validated"} if not is_release_validated else set())
-                    ),
+                    extra_faults=extra_faults | release_faults,
+                    inconclusive_reasons=inconclusive_reasons,
                 )
 
         review_cleared = bool(
@@ -915,15 +922,26 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
                     all_findings.append(finding.to_dict())
         diagnostics = list(waiver_diagnostics) + list(acceptance_diagnostics)
         if not is_release_validated:
-            diagnostics.append(
-                {
-                    "code": "check_not_validated",
-                    "detail": (
-                        val_diag
-                        or "release-validation artifacts are absent; this internal build cannot emit a normal gate verdict"
-                    ),
-                }
-            )
+            if request.candidate_build:
+                diagnostics.append(
+                    {
+                        "code": "candidate_build_unvalidated",
+                        "detail": (
+                            val_diag
+                            or "release-validation artifacts are absent; running in candidate-build mode"
+                        ),
+                    }
+                )
+            else:
+                diagnostics.append(
+                    {
+                        "code": "check_not_validated",
+                        "detail": (
+                            val_diag
+                            or "release-validation artifacts are absent; this internal build cannot emit a normal gate verdict"
+                        ),
+                    }
+                )
         if extra_faults:
             diagnostics.append(
                 {

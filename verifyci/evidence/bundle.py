@@ -34,6 +34,18 @@ def toolchain_fingerprint(*, git_version: str = "", object_format: str = "") -> 
     return "sha256:" + sha256(canonical_json_bytes(identity)).hexdigest()
 
 
+def _dedup_mappings(items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[bytes] = set()
+    out: list[dict[str, Any]] = []
+    for item in items:
+        d = dict(item)
+        canonical = canonical_json_bytes(d)
+        if canonical not in seen:
+            seen.add(canonical)
+            out.append(d)
+    return out
+
+
 def build_payload(
     *,
     inputs: Mapping[str, Any],
@@ -55,6 +67,17 @@ def build_payload(
     manifest["hash"] = manifest_hash()
     if manifest_extra:
         manifest.update(dict(manifest_extra))
+
+    clean_findings = _dedup_mappings(findings)
+    clean_waivers = _dedup_mappings(waivers)
+    clean_accepted_gaps = _dedup_mappings(accepted_gaps)
+    clean_diagnostics = _dedup_mappings(diagnostics)
+    clean_assumptions = _dedup_mappings(assumptions)
+    clean_excluded_scope = _dedup_mappings(excluded_scope)
+
+    clean_policy = dict(policy) if policy else (dict(inputs.get("policy", {})) if isinstance(inputs.get("policy"), Mapping) else {})
+    clean_inputs = dict(inputs)
+
     return {
         "schema": BUNDLE_SCHEMA,
         "tool": {
@@ -62,18 +85,18 @@ def build_payload(
             "version": TOOL_VERSION,
             "toolchain_fingerprint": toolchain,
         },
-        "inputs": dict(inputs),
-        "policy": dict(policy),
+        "inputs": clean_inputs,
+        "policy": clean_policy,
         "manifest": manifest,
         "scope": dict(scope),
         "gate_integrity": dict(gate_integrity),
         "check_results": [r.to_dict() for r in check_results],
-        "findings": [dict(f) for f in findings],
-        "waivers": [dict(w) for w in waivers],
-        "accepted_gaps": [dict(g) for g in accepted_gaps],
-        "diagnostics": [dict(d) for d in diagnostics],
-        "assumptions": [dict(a) for a in assumptions],
-        "excluded_scope": [dict(e) for e in excluded_scope],
+        "findings": clean_findings,
+        "waivers": clean_waivers,
+        "accepted_gaps": clean_accepted_gaps,
+        "diagnostics": clean_diagnostics,
+        "assumptions": clean_assumptions,
+        "excluded_scope": clean_excluded_scope,
         "verdict": verdict.to_dict(),
     }
 
@@ -117,6 +140,7 @@ def build_bundle(
 __all__ = [
     "BUNDLE_SCHEMA",
     "ENVELOPE_SCHEMA",
+    "EvidenceBundle",
     "build_bundle",
     "build_envelope",
     "build_payload",
