@@ -404,3 +404,30 @@ def test_secret_to_aliased_sink_detected(tmp_path: Path):
     assert len(sink_findings) >= 1
     assert sink_findings[0].subject.get("symbol") == "token"
     assert raw_secret not in json.dumps(sink_findings[0].evidence.payload)
+
+
+@pytest.mark.invariant
+def test_empty_assignment_line_does_not_crash(tmp_path: Path):
+    """A line like ``=foo`` has no assignment target and must not raise."""
+    base = {"config.ini": "key=value\n"}
+    head = {"config.ini": "key=value\n=foo\n"}
+    res = _build_and_run("empty_assignment", base, head, "", tmp_path)
+    assert res.outcome != Outcome.ERROR
+    assert res.coverage in (Coverage.COMPLETE, Coverage.PARTIAL)
+
+
+@pytest.mark.invariant
+def test_subprocess_call_reported_once(tmp_path: Path):
+    """The AST pass and the regex fallback must not double-report one call."""
+    base = {"app.py": "def run():\n    return 1\n"}
+    head = {
+        "app.py": (
+            "import subprocess\n"
+            "def run():\n"
+            "    return subprocess.run(['ls'], capture_output=True)\n"
+        )
+    }
+    res = _build_and_run("dangerous_once", base, head, "", tmp_path)
+    dangerous = [f for f in res.findings if f.defect_id == "SEC-DANGEROUS-CALL"]
+    assert len(dangerous) == 1
+    assert dangerous[0].subject["line"] == 3

@@ -183,3 +183,23 @@ def test_taint_runs_when_budgets_fund_the_model():
     )
     result = security._taint_sub(ctx)
     assert "budget_exhausted" not in result.reason_codes
+
+
+def test_default_entity_budget_admits_repository_scale_enumeration() -> None:
+    """The default is a resource ceiling, not a cap on a normal repository.
+
+    A working-tree scan of a few thousand entities is routine; the previous
+    1,000-entity default made every real repository INCONCLUSIVE.
+    """
+    from types import SimpleNamespace
+
+    from verifyci.runtime.budget import DEFAULT_BUDGET
+
+    scope = SimpleNamespace(
+        base_entities=frozenset(f"mod:entity_{i}" for i in range(5_000)),
+        head_entities=frozenset(),
+    )
+    exceeded, enumerated = entity_budget_exceeded(
+        SimpleNamespace(scope=scope, budget=DEFAULT_BUDGET)
+    )
+    assert (exceeded, enumerated) == (False, 5_000)

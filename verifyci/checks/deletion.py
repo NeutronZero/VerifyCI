@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import posixpath
 import re
 import time
 from typing import Any, Mapping
@@ -42,10 +43,54 @@ def _module_name(path: str) -> str:
     return mod
 
 
+_MODULE_SUFFIXES = (
+    ".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs", ".py",
+)
+
+
+def _normalized_module_path(path: str) -> str:
+    """Return the path form used to match relative TS/JS import specifiers."""
+    p = (path or "").replace("\\", "/")
+    for suffix in _MODULE_SUFFIXES:
+        if p.endswith(suffix):
+            p = p[: -len(suffix)]
+            break
+    if p.endswith("/index"):
+        p = p[: -len("/index")]
+    elif p.endswith("/__init__"):
+        p = p[: -len("/__init__")]
+    return p
+
+
+def _module_candidates(imp_module: str, importing_path: str, level: int = 0) -> set[str]:
+    """Return every module identity an import specifier could name.
+
+    Python imports resolve to dotted modules; TypeScript/JavaScript imports use
+    repository-relative specifiers that must be normalised the same way the
+    entity's file path is, or cross-file references are never discovered.
+    """
+    spec = (imp_module or "").strip()
+    candidates: set[str] = set()
+    resolved = _resolve_module(spec, importing_path, level)
+    if resolved:
+        candidates.add(resolved)
+    if spec.startswith((".", "/")):
+        base = posixpath.dirname((importing_path or "").replace("\\", "/"))
+        joined = posixpath.normpath(posixpath.join(base, spec))
+        candidates.add(_normalized_module_path(joined))
+    elif spec:
+        candidates.add(_normalized_module_path(spec))
+    return candidates
+
+
 def _resolve_module(imp_module: str, importing_path: str, level: int = 0) -> str | None:
     imp_module = (imp_module or "").strip()
-    # Legacy/relative-dot form.
+    # Legacy/relative-dot form.  Relative specifiers in TypeScript/JavaScript
+    # are repository paths, not Python package levels; ``_module_candidates``
+    # normalises those separately.
     if imp_module.startswith("."):
+        if not importing_path.endswith(".py"):
+            return None
         dots = len(imp_module) - len(imp_module.lstrip("."))
         level = level or dots
         imp_module = imp_module.lstrip(".")
@@ -78,8 +123,11 @@ def _head_references(
     entity_module = _module_name(entity.file_path)
     references: list[dict[str, Any]] = []
 
+    entity_modules = {entity_module, _normalized_module_path(entity.file_path)}
     if importers_by_symbol is not None:
-        candidate_paths = set(importers_by_symbol.get((entity_module, simple), ()))
+        candidate_paths: set[str] = set()
+        for module_key in entity_modules:
+            candidate_paths.update(importers_by_symbol.get((module_key, simple), ()))
         candidate_paths.add(entity.file_path)
         path_items = [
             (p, context.scope.head_facts[p])
@@ -95,7 +143,7 @@ def _head_references(
         for imp in facts.imports:
             if simple not in imp.names:
                 continue
-            if _resolve_module(imp.module or "", path, getattr(imp, "level", 0)) == entity_module:
+            if _module_candidates(imp.module or "", path, getattr(imp, "level", 0)) & entity_modules:
                 imports_symbol = True
                 break
         if not same_module and not imports_symbol:
@@ -138,7 +186,9 @@ def _dynamic_references(
     out: list[dict[str, Any]] = []
 
     if importers_by_symbol is not None:
-        candidate_paths = set(importers_by_symbol.get((entity_module, simple), ()))
+        candidate_paths = set()
+        for module_key in {entity_module, _normalized_module_path(entity.file_path)}:
+            candidate_paths.update(importers_by_symbol.get((module_key, simple), ()))
         candidate_paths.add(entity.file_path)
         path_items = [
             (p, context.scope.head_facts[p])
@@ -152,8 +202,10 @@ def _dynamic_references(
         # Only attribute a dynamic lookup to this entity when the file is the
         # same module or imports the symbol from this entity's module.
         same_module = path == entity.file_path
+        entity_modules = {entity_module, _normalized_module_path(entity.file_path)}
         imports_symbol = any(
-            simple in imp.names and _resolve_module(imp.module or "", path, getattr(imp, "level", 0)) == entity_module
+            simple in imp.names
+            and _module_candidates(imp.module or "", path, getattr(imp, "level", 0)) & entity_modules
             for imp in facts.imports
         )
         if not same_module and not imports_symbol:
@@ -225,10 +277,10 @@ def run(context: CheckContext) -> CheckResult:
             for imp in hf.imports:
                 init_imported_symbols.update(imp.names)
         for imp in hf.imports:
-            resolved = _resolve_module(imp.module or "", p, getattr(imp, "level", 0))
-            if resolved:
+            resolved = _module_candidates(imp.module or "", p, getattr(imp, "level", 0))
+            for module_key in resolved:
                 for name in imp.names:
-                    importers_by_symbol[(resolved, name)].append(p)
+                    importers_by_symbol[(module_key, name)].append(p)
 
     dynamic_lines_cache: dict[str, list[str]] = {}
     for entity in removed:
@@ -360,6 +412,11 @@ def run(context: CheckContext) -> CheckResult:
         if context.deadline is not None and time.monotonic() > context.deadline:
             return budget_exhausted_result(context, "deletion", "cold_deadline_seconds exceeded")
         if path.endswith("__init__.py"):
+            continue
+        # TypeScript/JavaScript specifiers are repository paths, not module
+        # identities, and packages imported from outside the tree are not gaps.
+        # Cross-file TS references are covered by reachable-symbol analysis.
+        if not path.endswith(".py"):
             continue
         for imp in facts.imports:
             for name in imp.names:

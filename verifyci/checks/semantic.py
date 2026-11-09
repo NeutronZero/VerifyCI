@@ -15,6 +15,8 @@ from collections import defaultdict
 import copy
 import dataclasses
 import json
+import os
+import re
 import subprocess
 import sys
 import time
@@ -426,22 +428,6 @@ def collect_target_sites(
 # ---------------------------------------------------------------------------
 
 
-class ExecutionTrace:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, tuple[Any, ...]]] = []
-        self.return_val: Any = None
-        self.raised: str | None = None
-
-    def record_call(self, name: str, *args: Any) -> None:
-        self.calls.append((name, args))
-
-    def record_return(self, val: Any) -> None:
-        self.return_val = val
-
-    def record_raise(self, exc: BaseException) -> None:
-        self.raised = exc.__class__.__name__
-
-
 @dataclasses.dataclass(frozen=True)
 class ReplayResult:
     confirmed: bool
@@ -687,6 +673,15 @@ if __name__ == "__main__":
 """
 
 
+class ExecutionTrace:
+    """Observation returned from the isolated replay subprocess."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.return_val: Any = None
+        self.raised: str | None = None
+
+
 def execute_function_isolated(
     src: str, fn_name: str, args_dict: dict[str, Any], timeout: float = 2.0
 ) -> ExecutionTrace:
@@ -712,6 +707,7 @@ def execute_function_isolated(
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=_replay_env(),
         )
     except subprocess.TimeoutExpired:
         raise TimeoutError(f"replay process timed out after {timeout}s (execution timeout exceeded)")
@@ -737,9 +733,34 @@ def execute_function_isolated(
     return trace
 
 
+_JS_CALLABLE_RE = re.compile(r"^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$")
+
+# Minimal environment for candidate replay processes: enough for the runtime to
+# start on every supported OS, with CI tokens and signing keys excluded.
+_REPLAY_ENV_ALLOWLIST = (
+    "PATH",
+    "HOME",
+    "TEMP",
+    "TMP",
+    "LANG",
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+)
+
+
+def _replay_env() -> dict[str, str]:
+    env = {key: os.environ[key] for key in _REPLAY_ENV_ALLOWLIST if key in os.environ}
+    env["NODE_OPTIONS"] = ""
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
 def execute_ts_function_isolated(
     b_src: str, h_src: str, fn_name: str, target: str, model_values: dict[str, Any], timeout: float = 5.0
-) -> tuple[bool, str]:
+) -> tuple[bool, str, dict[str, Any], dict[str, Any]]:
     """Execute base and head TypeScript functions in an isolated Node.js subprocess.
 
     Provides lexical block scoping and an execution timeout boundary.
@@ -751,9 +772,16 @@ def execute_ts_function_isolated(
     if not node_bin:
         raise RuntimeError("Node.js runtime not found for TypeScript replay")
 
+    # ``fn_name``/``target`` are interpolated into a JavaScript program.  They
+    # are derived from source text, so accept only identifier/dotted-name shapes
+    # instead of executing arbitrary code in the replay subprocess.
+    if not _JS_CALLABLE_RE.match(fn_name or "") or not _JS_CALLABLE_RE.match(target or ""):
+        raise RuntimeError("TypeScript replay target is not a plain identifier")
+
     clean_b = b_src.replace("export ", "")
     clean_h = h_src.replace("export ", "")
-    arg_obj = json.dumps(model_values)
+    # ensure_ascii keeps JSON literal output valid JavaScript even for U+2028/9.
+    arg_obj = json.dumps(model_values, ensure_ascii=True)
 
     ts_script = f"""
     let b_calls = [];
@@ -780,6 +808,8 @@ def execute_ts_function_isolated(
             capture_output=True,
             text=True,
             timeout=timeout,
+            # Do not inherit CI tokens or signing keys into candidate code.
+            env=_replay_env(),
         )
     except subprocess.TimeoutExpired:
         raise TimeoutError(f"TypeScript replay timed out after {timeout}s")
@@ -788,11 +818,18 @@ def execute_ts_function_isolated(
         raise RuntimeError(f"TypeScript replay exited with code {proc.returncode}: {proc.stderr.strip()}")
 
     res = json.loads(proc.stdout)
-    b_called = any(name == target for name, _ in res.get("b_calls", []))
-    h_called = any(name == target for name, _ in res.get("h_calls", []))
+    b_calls = res.get("b_calls", [])
+    h_calls = res.get("h_calls", [])
+    b_called = any(name == target for name, _ in b_calls)
+    h_called = any(name == target for name, _ in h_calls)
     confirmed = h_called and not b_called
     obs = f"TypeScript replay: head called {target} ({h_called}), base called {target} ({b_called})"
-    return confirmed, obs
+    return (
+        confirmed,
+        obs,
+        {"target": target, "calls": b_calls},
+        {"target": target, "calls": h_calls},
+    )
 
 
 def replay_witness(
@@ -819,7 +856,7 @@ def replay_witness(
 
     if language == "typescript" or (source_identity and source_identity.endswith(".ts")):
         try:
-            confirmed, obs = execute_ts_function_isolated(
+            confirmed, obs, base_obs, head_obs = execute_ts_function_isolated(
                 base_src, head_src, fn_name, target, model_values, timeout=max(timeout, 5.0)
             )
             return ReplayResult(
@@ -827,8 +864,8 @@ def replay_witness(
                 reason=obs,
                 input_model=model_values,
                 source_identity=ident,
-                base_observation={"target": target, "calls": [] if not confirmed else []},
-                head_observation={"target": target, "calls": [[target, []]] if confirmed else []},
+                base_observation=base_obs,
+                head_observation=head_obs,
             )
         except Exception as exc:
             return ReplayResult(
@@ -1021,14 +1058,13 @@ def _find_function_node(
     tree: ast.AST,
     fn_name: str,
     funcs_by_name: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
-) -> ast.FunctionDef | None:
-    """Find FunctionDef AST node matching name."""
+) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    """Find a sync or async function AST node matching name."""
     if funcs_by_name is not None:
-        found = funcs_by_name.get(fn_name)
-        return cast(ast.FunctionDef, found) if isinstance(found, ast.FunctionDef) else None
+        return funcs_by_name.get(fn_name)
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == fn_name:
-            return cast(ast.FunctionDef, node)
+            return node
     return None
 
 
@@ -1194,7 +1230,13 @@ def run(context: CheckContext) -> CheckResult:
             f"max_entities limit exceeded ({enumerated_entities} > {context.budget.max_entities})",
         )
     # --- Check A: Strict Unsupported Language Check on Code Scope ---
+    # A changed file outside the frontends is a scoped, acceptable exclusion.
+    # It must be recorded as a gap (and may be accepted by policy) instead of
+    # aborting the check for the whole diff: one Go file in a PR must not erase
+    # semantic results for every Python file in the same PR.
     code_entries = []
+    unsupported_gaps: list[Any] = []
+    unsupported_languages: set[str] = set()
     for entry in context.entries:
         path = entry.head_path or entry.base_path
         if not path:
@@ -1207,24 +1249,32 @@ def run(context: CheckContext) -> CheckResult:
             continue
         if ext not in _SUPPORTED_EXTENSIONS:
             lang = suffix or "unknown"
-            return make_result(
-                context=context,
-                check_id="semantic",
-                outcome=Outcome.INCONCLUSIVE,
-                coverage=Coverage.UNKNOWN,
-                evaluated_scope={"path": path, "language": lang},
-                scope_enumeration={"complete": False, "language": lang},
-                candidate_discovery={"complete": False},
-                applicability_evidence={"language_supported": False},
-                reason_codes=("unsupported_language",),
-                coverage_gaps=[
-                    gap(
-                        "unsupported_language",
-                        {"path": path, "language": lang, "reason_code": "unsupported_language"},
-                    )
-                ],
+            unsupported_languages.add(lang)
+            unsupported_gaps.append(
+                gap(
+                    "unsupported_language",
+                    {"path": path, "language": lang, "reason_code": "unsupported_language"},
+                )
             )
+            continue
         code_entries.append(entry)
+
+    if unsupported_gaps and not code_entries:
+        return make_result(
+            context=context,
+            check_id="semantic",
+            outcome=Outcome.INCONCLUSIVE,
+            coverage=Coverage.UNKNOWN,
+            evaluated_scope={
+                "paths": sorted({str(g.subject.get("path")) for g in unsupported_gaps}),
+                "languages": sorted(unsupported_languages),
+            },
+            scope_enumeration={"complete": False, "languages": sorted(unsupported_languages)},
+            candidate_discovery={"complete": False},
+            applicability_evidence={"language_supported": False},
+            reason_codes=("unsupported_language",),
+            coverage_gaps=unsupported_gaps,
+        )
 
     if not code_entries:
         return make_result(
@@ -1518,8 +1568,18 @@ def run(context: CheckContext) -> CheckResult:
             h_tree = ast.parse(entry.head_source)
         mod_name = path.replace(".py", "").replace("\\", "/")
 
-        b_funcs = {f.name: f for f in ast.walk(b_tree) if isinstance(f, ast.FunctionDef)}
-        h_funcs = {f.name: f for f in ast.walk(h_tree) if isinstance(f, ast.FunctionDef)}
+        # Async functions carry the same guard/effect structure; excluding them
+        # silently dropped every async candidate from semantic analysis.
+        b_funcs = {
+            f.name: f
+            for f in ast.walk(b_tree)
+            if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        h_funcs = {
+            f.name: f
+            for f in ast.walk(h_tree)
+            if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
         h_enclosing_map = _build_enclosing_function_map(h_tree)
 
         # --- Candidate Category 1: Return Tuple Binding Swaps ---
@@ -1530,13 +1590,26 @@ def run(context: CheckContext) -> CheckResult:
             n for n in ast.walk(h_tree) if isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple)
         ]
         if b_returns and h_returns:
-            b_elts = [ast.dump(e, include_attributes=False) for e in b_returns[0].value.elts]  # ty: ignore[unresolved-attribute]
-            h_elts = [ast.dump(e, include_attributes=False) for e in h_returns[0].value.elts]  # ty: ignore[unresolved-attribute]
-            if len(b_elts) >= 2 and b_elts != h_elts and sorted(b_elts) == sorted(h_elts):
-                fn_name = _find_enclosing_function(h_tree, h_returns[0], h_enclosing_map)
+            # Pair returns from the *same* function.  Comparing the first tuple
+            # return in each file could compare two unrelated functions and
+            # invent a binding swap that no function exhibits.
+            b_ret = b_returns[0]
+            b_fn_name = _find_enclosing_function(b_tree, b_ret, None)
+            h_ret = next(
+                (
+                    r
+                    for r in h_returns
+                    if _find_enclosing_function(h_tree, r, h_enclosing_map) == b_fn_name
+                ),
+                None,
+            )
+            b_elts = [ast.dump(e, include_attributes=False) for e in b_ret.value.elts]  # ty: ignore[unresolved-attribute]
+            h_elts = [ast.dump(e, include_attributes=False) for e in (h_ret.value.elts if h_ret is not None else ())]  # ty: ignore[unresolved-attribute]
+            if h_ret is not None and len(b_elts) >= 2 and b_elts != h_elts and sorted(b_elts) == sorted(h_elts):
+                fn_name = b_fn_name
                 ctx_sym = SymbolicContext()
-                b_names = [_node_to_var_name(e) for e in b_returns[0].value.elts]  # ty: ignore[unresolved-attribute]
-                h_names = [_node_to_var_name(e) for e in h_returns[0].value.elts]  # ty: ignore[unresolved-attribute]
+                b_names = [_node_to_var_name(e) for e in b_ret.value.elts]  # ty: ignore[unresolved-attribute]
+                h_names = [_node_to_var_name(e) for e in h_ret.value.elts]  # ty: ignore[unresolved-attribute]
                 b_vars = [ctx_sym.get_var(n, "string") for n in b_names]
                 h_vars = [ctx_sym.get_var(n, "string") for n in h_names]
                 solver = z3.Solver()
@@ -1551,7 +1624,7 @@ def run(context: CheckContext) -> CheckResult:
                         check_id="semantic",
                         outcome=Outcome.INCONCLUSIVE,
                         coverage=Coverage.PARTIAL,
-                        evaluated_scope={"path": path, "symbol": f"{mod_name}:{fn_name}", "line": h_returns[0].lineno},
+                        evaluated_scope={"path": path, "symbol": f"{mod_name}:{fn_name}", "line": h_ret.lineno},
                         scope_enumeration={"complete": True},
                         candidate_discovery={"complete": True},
                         applicability_evidence={"solver_status": "unknown", "reason": solver.reason_unknown()},
@@ -1561,7 +1634,7 @@ def run(context: CheckContext) -> CheckResult:
                                 "solver_unknown",
                                 {
                                     "path": path,
-                                    "line": h_returns[0].lineno,
+                                    "line": h_ret.lineno,
                                     "symbol": f"{mod_name}:{fn_name}",
                                     "reason": solver.reason_unknown(),
                                     "reason_code": "solver_unknown",
@@ -1592,7 +1665,7 @@ def run(context: CheckContext) -> CheckResult:
                             check_id="semantic",
                             outcome=Outcome.INCONCLUSIVE,
                             coverage=Coverage.PARTIAL,
-                            evaluated_scope={"path": path, "symbol": f"{mod_name}:{fn_name}", "line": h_returns[0].lineno},
+                            evaluated_scope={"path": path, "symbol": f"{mod_name}:{fn_name}", "line": h_ret.lineno},
                             scope_enumeration={"complete": True},
                             candidate_discovery={"complete": True},
                             applicability_evidence={"replay_divergence_unconfirmed": True, "detail": replay_res.reason},
@@ -1602,7 +1675,7 @@ def run(context: CheckContext) -> CheckResult:
                                     "semantic_alignment_unresolved",
                                     {
                                         "path": path,
-                                        "line": h_returns[0].lineno,
+                                        "line": h_ret.lineno,
                                         "detail": f"solver SAT but concrete replay could not confirm divergence: {replay_res.reason}",
                                         "reason_code": "semantic_alignment_unresolved",
                                     },
@@ -1616,7 +1689,7 @@ def run(context: CheckContext) -> CheckResult:
                         subject={
                             "path": path,
                             "symbol": f"{mod_name}:{fn_name}",
-                            "line": h_returns[0].lineno,
+                            "line": h_ret.lineno,
                         },
                         premises={
                             "return_swap": True,
@@ -2258,7 +2331,11 @@ def run(context: CheckContext) -> CheckResult:
                             msg = f"nested guard {cond_text} removed for effect {eff} in {symbol}"
                         else:
                             is_weakened = True
-                            line_witness = h_first_test.lineno if h_first_test else 2
+                            line_witness = (
+                                h_first_test.lineno
+                                if h_first_test
+                                else h_eff_sites[0].line
+                            )
                             msg = f"guard boundary relaxed for effect {eff} in {symbol}"
 
                         if is_weakened:
@@ -2298,17 +2375,41 @@ def run(context: CheckContext) -> CheckResult:
                             continue
 
     # --- Result Assembly ---
+    evaluated_paths = [e.head_path or e.base_path for e in code_entries]
+    unsupported_codes = ("unsupported_language",) if unsupported_gaps else ()
     if findings:
         return make_result(
             context=context,
             check_id="semantic",
             outcome=Outcome.FAIL,
-            coverage=Coverage.COMPLETE,
-            evaluated_scope={"paths": [e.head_path or e.base_path for e in code_entries]},
-            scope_enumeration={"complete": True},
+            coverage=Coverage.COMPLETE if not unsupported_gaps else Coverage.PARTIAL,
+            evaluated_scope={"paths": evaluated_paths},
+            scope_enumeration={
+                "complete": not unsupported_gaps,
+                "analyzed_languages": ["python", "typescript"],
+            },
             candidate_discovery={"complete": True, "candidates": len(findings)},
             applicability_evidence={"configured": True},
+            reason_codes=unsupported_codes,
+            coverage_gaps=unsupported_gaps,
             findings=findings,
+        )
+    elif unsupported_gaps:
+        return make_result(
+            context=context,
+            check_id="semantic",
+            outcome=Outcome.INCONCLUSIVE,
+            coverage=Coverage.PARTIAL,
+            evaluated_scope={"paths": evaluated_paths},
+            scope_enumeration={
+                "complete": False,
+                "languages": sorted(unsupported_languages),
+                "analyzed_languages": ["python", "typescript"],
+            },
+            candidate_discovery={"complete": True, "candidates": 0},
+            applicability_evidence={"configured": True, "language_supported": False},
+            reason_codes=unsupported_codes,
+            coverage_gaps=unsupported_gaps,
         )
     else:
         return make_result(
@@ -2316,7 +2417,7 @@ def run(context: CheckContext) -> CheckResult:
             check_id="semantic",
             outcome=Outcome.PASS,
             coverage=Coverage.COMPLETE,
-            evaluated_scope={"paths": [e.head_path or e.base_path for e in code_entries]},
+            evaluated_scope={"paths": evaluated_paths},
             scope_enumeration={"complete": True},
             candidate_discovery={"complete": True, "candidates": 0},
             applicability_evidence={"configured": True},

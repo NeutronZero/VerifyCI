@@ -91,6 +91,22 @@ def _redact(token: str) -> str:
     return f"{token[:4]}…{token[-2:]} (len={len(token)})"
 
 
+def _assignment_var_name(line: str) -> str:
+    """Return the identifier assigned by ``line``, or ``""`` when there is none.
+
+    A changed text line may start with the assignment operator (for example
+    ``=foo`` in an INI/.env file).  Splitting the left-hand side then yields an
+    empty token list; the scanner must treat that as "no assignment" instead of
+    raising ``IndexError`` and turning the whole security check into a fault.
+    """
+    key = line.partition("=")[0].strip()
+    tokens = key.split()
+    if not tokens:
+        return ""
+    name = tokens[-1]
+    return name if name.isidentifier() else ""
+
+
 @lru_cache(maxsize=4096)
 def _entropy(value: str) -> float:
     if not value:
@@ -388,9 +404,8 @@ def _secret_sub(
                         )
                     stripped_line = line.strip()
                     if "=" in stripped_line and not stripped_line.startswith("#"):
-                        lhs, _, _ = stripped_line.partition("=")
-                        var_name = lhs.strip().split()[-1]
-                        if var_name.isidentifier():
+                        var_name = _assignment_var_name(stripped_line)
+                        if var_name:
                             assigned_secrets[var_name] = (line_number, kind, redacted)
                     break
             # Generic high-entropy assignment in changed text.
@@ -398,7 +413,7 @@ def _secret_sub(
             if not known_secret_found and "=" in stripped and not stripped.startswith("#"):
                 key, _, value = stripped.partition("=")
                 value = value.strip().strip("'\"")
-                var_name = key.strip().split()[-1]
+                var_name = _assignment_var_name(stripped)
                 if (
                     _SECRET_VAR_NAMES.search(key)
                     and len(value) >= 16
@@ -435,7 +450,7 @@ def _secret_sub(
                                 remediation="Remove the credential, rotate it, and use a secret manager.",
                             )
                         )
-                        if var_name.isidentifier():
+                        if var_name:
                             assigned_secrets[var_name] = (line_number, "HIGH_ENTROPY_ASSIGNMENT", redacted)
 
         # Inspect whole head file (both changed and unchanged lines) for sinks consuming assigned secrets
@@ -648,7 +663,10 @@ def _dangerous_sub(
                         or canonical == "os.system"
                         or canonical.startswith("subprocess.")
                     ):
-                        matched_rule = (resolved.split(".")[0] if "." in resolved else canonical.split(".")[0], resolved)
+                        # Use the same family key as the line-level regex table so a
+                        # single call cannot be reported twice (AST pass + regex pass).
+                        family = "os.system" if canonical == "os.system" or resolved == "os.system" else "subprocess"
+                        matched_rule = (family, resolved)
                     elif resolved in ("pickle.loads", "yaml.load") or canonical in ("pickle.loads", "yaml.load"):
                         matched_rule = (canonical, canonical)
                     else:
@@ -671,8 +689,10 @@ def _dangerous_sub(
                     if matched_rule:
                         rule_id, symbol = matched_rule
                         key = (path, start_line, symbol)
+                        family_key = (path, start_line, rule_id)
                         if key not in seen_call_keys:
                             seen_call_keys.add(key)
+                            seen_call_keys.add(family_key)
                             findings.append(
                                 make_finding(
                                     context=context,
@@ -715,8 +735,10 @@ def _dangerous_sub(
                     matched.append((rule_id, symbol))
             for rule_id, symbol in matched:
                 key = (path, line_number, symbol)
-                if key not in seen_call_keys:
+                family_key = (path, line_number, rule_id)
+                if key not in seen_call_keys and family_key not in seen_call_keys:
                     seen_call_keys.add(key)
+                    seen_call_keys.add(family_key)
                     findings.append(
                         make_finding(
                             context=context,

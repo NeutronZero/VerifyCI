@@ -10,7 +10,12 @@ from typing import Any
 
 @dataclass(frozen=True)
 class WorkBudget:
-    max_entities: int = 1000
+    # Upper bound on the entities a check may enumerate across both revisions of
+    # the repository.  Checks treat an overrun as ``budget_exhausted``
+    # (INCONCLUSIVE), never as a pass.  A working-tree-wide scan of a
+    # mid-sized repository routinely exceeds a few thousand entities, so the
+    # default is a genuine resource ceiling rather than a changed-scope cap.
+    max_entities: int = 20_000
     max_references: int = 10000
     max_symbolic_paths: int = 64
     max_taint_depth: int = 16

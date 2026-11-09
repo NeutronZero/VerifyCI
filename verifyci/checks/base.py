@@ -261,6 +261,46 @@ def gap(reason_code: str, subject: Mapping[str, Any]) -> CoverageGap:
     return CoverageGap(reason_code=reason_code, subject=dict(subject))
 
 
+def inconclusive_gap_result(
+    *,
+    context: CheckContext,
+    check_id: str,
+    reason_code: str,
+    detail: str,
+) -> CheckResult:
+    """Return INCONCLUSIVE for an environmental limit that is not a gate fault.
+
+    Parse/resource limits (oversized blobs, revision-graph limits) mean the
+    check could not finish; they do not mean the tool malfunctioned.  Reporting
+    them as gaps keeps the fail-closed verdict (INCONCLUSIVE) without claiming
+    an internal fault the operator should page on.
+    """
+    spec = CHECK_SPECS[check_id]
+    return CheckResult(
+        check_id=check_id,
+        check_version=spec.check_version,
+        tier=spec.tier,
+        maturity=spec.maturity,
+        outcome=Outcome.INCONCLUSIVE,
+        coverage=Coverage.PARTIAL,
+        evaluated_scope={},
+        scope_enumeration={"complete": False, "reason_code": reason_code},
+        candidate_discovery={"complete": False, "reason_code": reason_code},
+        applicability_evidence={},
+        method=spec.method,
+        method_version=spec.method_version,
+        reason_codes=(reason_code,),
+        coverage_gaps=(
+            CoverageGap(
+                reason_code=reason_code,
+                subject={"check_id": check_id, "detail": detail},
+            ),
+        ),
+        diagnostics=(({"code": reason_code, "detail": detail}),),
+        toolchain_fingerprint=context.toolchain_fingerprint,
+    )
+
+
 def budget_exhausted_result(
     context: CheckContext,
     check_id: str,
@@ -298,6 +338,7 @@ __all__ = [
     "entity_budget_exceeded",
     "error_result",
     "gap",
+    "inconclusive_gap_result",
     "make_finding",
     "make_result",
 ]

@@ -951,7 +951,10 @@ def analyze_typescript(
                 imports.append(
                     ImportFact(
                         module=mod,
-                        names=(),
+                        # ``names`` feeds cross-file reference discovery; leaving it
+                        # empty made every TypeScript import opaque, so a deleted
+                        # export with a live importer produced no reference evidence.
+                        names=tuple(names),
                         line=node.start_point.row + 1,
                         level=0,
                         aliases=tuple(aliases),
@@ -1389,15 +1392,23 @@ def build_changed_scope(
         bf = base_facts.get(entry.base_path)
         hf = head_facts.get(entry.head_path)
 
-        # Check for parse errors
+        # Check for parse errors.  A file outside the frontends is reported as
+        # "parse_error: unsupported language frontend"; that is an acceptable
+        # scope exclusion, not a parser failure, so it must be classified as
+        # ``unsupported_language`` below.
         parse_err = (bf and bf.parse_error) or (hf and hf.parse_error)
-        if parse_err:
+        if parse_err and not str(parse_err).startswith("unsupported language"):
+            reason_code = (
+                "parse_resource_limit"
+                if str(parse_err).startswith("parse_resource_limit")
+                else "parse_error"
+            )
             for hunk in entry.hunks:
                 unmapped.append(
                     {
                         "path": path,
                         "hunk": hunk.to_dict(),
-                        "reason_code": "parse_error",
+                        "reason_code": reason_code,
                     }
                 )
                 mapped_hunks.append(
