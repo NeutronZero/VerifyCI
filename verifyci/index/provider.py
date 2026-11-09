@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
+import threading
 from typing import Any
 from verifyci.index.cache import CacheStore
 from verifyci.evidence.canonical import canonical_json_bytes
@@ -17,6 +18,7 @@ class CacheIntegrityMismatch(RuntimeError):
 class FactProvider:
     def __init__(self, cache_store: CacheStore | None = None) -> None:
         self.cache_store = cache_store
+        self._lock = threading.Lock()
         self.stats = {"hits": 0, "misses": 0, "writes": 0, "sampled_recomputations": 0}
 
     def get_or_compute(
@@ -31,22 +33,27 @@ class FactProvider:
         disagreement is a fatal integrity error; the caller must disable the cache.
         """
         if self.cache_store is None or self.cache_store.mode == "none":
-            self.stats["misses"] += 1
+            with self._lock:
+                self.stats["misses"] += 1
             return compute()
 
         value, hit = self.cache_store.get(object_type, components)
         if not hit:
-            self.stats["misses"] += 1
             value = compute()
-            if self.cache_store.put(object_type, components, value):
-                self.stats["writes"] += 1
+            written = self.cache_store.put(object_type, components, value)
+            with self._lock:
+                self.stats["misses"] += 1
+                if written:
+                    self.stats["writes"] += 1
             return value
 
-        self.stats["hits"] += 1
+        with self._lock:
+            self.stats["hits"] += 1
         if not self.cache_store.sample_selected(object_type, components):
             return value
 
-        self.stats["sampled_recomputations"] += 1
+        with self._lock:
+            self.stats["sampled_recomputations"] += 1
         recomputed = compute()
         if canonical_json_bytes(value) != canonical_json_bytes(recomputed):
             key = self.cache_store.entry_key(object_type, components)
@@ -79,7 +86,8 @@ class FactProvider:
         }
 
     def cache_stats(self) -> dict[str, int]:
-        return dict(self.stats)
+        with self._lock:
+            return dict(self.stats)
 
     def cache_disabled(self) -> None:
         if self.cache_store is not None:

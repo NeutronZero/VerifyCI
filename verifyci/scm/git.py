@@ -6,10 +6,12 @@ All blob bytes come from commit-pinned Git objects through this module.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 import os
 import re
 import subprocess
+import threading
 from pathlib import Path
 from typing import Sequence
 
@@ -28,6 +30,7 @@ _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _LFS_POINTER = b"version https://git-lfs.github.com/spec/v1"
 _MAX_BLOB_BYTES = 64 * 1024 * 1024
 _BATCH_TIMEOUT_SECONDS = 120
+_MAX_CACHE_SIZE = 5000
 
 _SCRUB_EXACT = frozenset(
     {
@@ -58,11 +61,13 @@ class GitResult:
 
 
 class GitRepo:
-    def __init__(self, repo: str | Path) -> None:
+    def __init__(self, repo: str | Path, max_cache_size: int = _MAX_CACHE_SIZE) -> None:
         self.repo = Path(repo).resolve()
         self._empty_config = os.devnull
-        self._blob_cache: dict[str, bytes] = {}
-        self._tree_cache: dict[str, dict[str, tuple[str, str, str, str]]] = {}
+        self._max_cache_size = max_cache_size
+        self._cache_lock = threading.Lock()
+        self._blob_cache: OrderedDict[str, bytes] = OrderedDict()
+        self._tree_cache: OrderedDict[str, dict[str, tuple[str, str, str, str]]] = OrderedDict()
         self._object_format_cached: str | None = None
         env = os.environ.copy()
         for k in list(env.keys()):
@@ -202,9 +207,19 @@ class GitRepo:
         return result.returncode == 0
 
     def read_blobs(self, object_ids: Sequence[str]) -> dict[str, bytes]:
-        needed = [oid for oid in object_ids if oid and oid not in self._blob_cache]
+        needed: list[str] = []
+        result: dict[str, bytes] = {}
+        with self._cache_lock:
+            for oid in object_ids:
+                if not oid:
+                    continue
+                if oid in self._blob_cache:
+                    self._blob_cache.move_to_end(oid)
+                    result[oid] = self._blob_cache[oid]
+                elif oid not in needed:
+                    needed.append(oid)
         if not needed:
-            return {oid: self._blob_cache[oid] for oid in object_ids if oid in self._blob_cache}
+            return result
         for oid in needed:
             if oid.startswith("-") or "\n" in oid or "\r" in oid:
                 raise GitError("missing_git_object", f"invalid blob id {oid!r}")
@@ -261,53 +276,84 @@ class GitRepo:
         total_len = len(stdout)
         for oid in needed:
             if idx >= total_len:
-                break
+                text = stderr.decode("utf-8", "replace").strip()
+                raise GitError(
+                    "internal_fault",
+                    text or f"unexpected EOF from git cat-file --batch: missing response for {oid}",
+                )
             nl = stdout.find(b"\n", idx)
             if nl == -1:
-                break
+                text = stderr.decode("utf-8", "replace").strip()
+                raise GitError(
+                    "internal_fault",
+                    text or f"unexpected EOF reading cat-file --batch header for {oid}",
+                )
             header = stdout[idx:nl].decode("ascii", "replace").strip()
             idx = nl + 1
             if header.endswith("missing") or "bad object" in header.lower() or "not a valid object" in header.lower():
                 continue
             parts = header.split(" ")
             if len(parts) < 3:
-                continue
+                raise GitError("internal_fault", f"invalid header from cat-file --batch: {header!r}")
             obj_sha, obj_type, size_str = parts[0], parts[1], parts[2]
             try:
                 size = int(size_str)
             except ValueError:
                 raise GitError("internal_fault", f"invalid size in cat-file --batch header: {header!r}")
+            if idx + size > total_len:
+                raise GitError(
+                    "internal_fault",
+                    f"truncated blob data from git cat-file --batch for {oid}: expected {size} bytes, got {total_len - idx}",
+                )
             if obj_type != "blob":
-                idx += size + 1
+                idx += size
+                if idx < total_len and stdout[idx : idx + 1] == b"\n":
+                    idx += 1
                 continue
             if size > _MAX_BLOB_BYTES:
                 raise GitError("parse_resource_limit", f"blob {oid} exceeds the size budget")
             data = stdout[idx : idx + size]
-            idx += size + 1
-            self._blob_cache[oid] = data
-            if obj_sha and obj_sha != oid:
-                self._blob_cache[obj_sha] = data
-        return {oid: self._blob_cache[oid] for oid in object_ids if oid in self._blob_cache}
+            idx += size
+            if idx < total_len and stdout[idx : idx + 1] == b"\n":
+                idx += 1
+            with self._cache_lock:
+                self._blob_cache[oid] = data
+                self._blob_cache.move_to_end(oid)
+                if obj_sha and obj_sha != oid:
+                    self._blob_cache[obj_sha] = data
+                    self._blob_cache.move_to_end(obj_sha)
+                while len(self._blob_cache) > self._max_cache_size:
+                    self._blob_cache.popitem(last=False)
+        with self._cache_lock:
+            for oid in object_ids:
+                if oid in self._blob_cache:
+                    self._blob_cache.move_to_end(oid)
+                    result[oid] = self._blob_cache[oid]
+        return result
 
     def read_blob(self, object_id: str) -> bytes:
         if not object_id or object_id.startswith("-") or "\n" in object_id or "\r" in object_id:
             raise GitError("missing_git_object", f"invalid blob id {object_id!r}")
-        cached = self._blob_cache.get(object_id)
-        if cached is not None:
-            return cached
+        with self._cache_lock:
+            if object_id in self._blob_cache:
+                self._blob_cache.move_to_end(object_id)
+                return self._blob_cache[object_id]
         self.read_blobs([object_id])
-        cached = self._blob_cache.get(object_id)
-        if cached is None:
-            raise GitError("missing_git_object", f"blob {object_id!r} not found")
-        return cached
+        with self._cache_lock:
+            if object_id in self._blob_cache:
+                self._blob_cache.move_to_end(object_id)
+                return self._blob_cache[object_id]
+        raise GitError("missing_git_object", f"blob {object_id!r} not found")
 
     def path_exists_at(self, rev: str, path: str) -> bool:
         path = normalize_repo_path(path)
         if not is_safe_repo_path(path):
             return False
-        cached_tree = self._tree_cache.get(rev)
-        if cached_tree is not None:
-            return path in cached_tree
+        with self._cache_lock:
+            cached_tree = self._tree_cache.get(rev)
+            if cached_tree is not None:
+                self._tree_cache.move_to_end(rev)
+                return path in cached_tree
         return self.read_path_at(rev, path) is not None
 
     def read_path_at(self, rev: str, path: str) -> bytes | None:
@@ -315,17 +361,26 @@ class GitRepo:
         if not is_safe_repo_path(path):
             return None
 
-        cached_tree = self._tree_cache.get(rev)
-        if cached_tree is not None:
-            record = cached_tree.get(path)
-            if record is None:
-                return None
-            mode, obj_type, obj_id, _ = record
-            if mode == "160000" or obj_type == "commit":
-                return None
-            if obj_type == "blob":
-                return self.read_blob(obj_id)
-            return None
+        with self._cache_lock:
+            cached_tree = self._tree_cache.get(rev)
+            if cached_tree is not None:
+                self._tree_cache.move_to_end(rev)
+                record = cached_tree.get(path)
+                if record is None:
+                    return None
+                mode, obj_type, obj_id, _ = record
+                if mode == "160000" or obj_type == "commit":
+                    return None
+                if obj_type == "blob":
+                    blob_id = obj_id
+                else:
+                    return None
+            else:
+                record = None
+                blob_id = None
+
+        if record is not None and blob_id is not None:
+            return self.read_blob(blob_id)
 
         try:
             return self.read_blob(f"{rev}:{path}")
@@ -353,7 +408,11 @@ class GitRepo:
                 continue
             records.append((mode, obj_type, obj_id, p.decode("utf-8", "replace")))
         if not path:
-            self._tree_cache[rev] = {record[3]: record for record in records}
+            with self._cache_lock:
+                self._tree_cache[rev] = {record[3]: record for record in records}
+                self._tree_cache.move_to_end(rev)
+                while len(self._tree_cache) > self._max_cache_size:
+                    self._tree_cache.popitem(last=False)
         return records
 
     # ------------------------------------------------------------------

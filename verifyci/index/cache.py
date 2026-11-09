@@ -7,6 +7,9 @@ import hmac
 import json
 import os
 from pathlib import Path
+import tempfile
+import threading
+import time
 from typing import Any
 
 from verifyci.evidence.canonical import canonical_json_bytes
@@ -124,15 +127,18 @@ class CacheStore:
         self.key = key
         self.key_id = key_id
         self.read_only = read_only
+        self._lock = threading.Lock()
         self._created_shards: set[str] = set()
+        self._shards = self._created_shards
         if self.mode != "none":
             if not self.read_only:
                 self.cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     def _ensure_shard(self, shard: str) -> None:
-        if shard not in self._created_shards:
-            (self.cache_dir / shard).mkdir(parents=True, exist_ok=True)
-            self._created_shards.add(shard)
+        with self._lock:
+            if shard not in self._created_shards:
+                (self.cache_dir / shard).mkdir(parents=True, exist_ok=True)
+                self._created_shards.add(shard)
 
     def _path_for_key(self, key_hex: str) -> Path:
         shard = key_hex[:2]
@@ -249,16 +255,36 @@ class CacheStore:
             )
             record["key_id"] = self.key_id
 
-        temp_path = path.with_suffix(".tmp")
+        temp_path: Path | None = None
         try:
-            descriptor = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as f:
+            temp_file = tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=path.parent,
+                delete=False,
+                prefix=f".{k_hex}.",
+                suffix=".tmp",
+            )
+            temp_path = Path(temp_file.name)
+            with temp_file as f:
                 json.dump(record, f, sort_keys=True, separators=(",", ":"))
-            os.replace(temp_path, path)
+            max_attempts = 15
+            for attempt in range(max_attempts):
+                try:
+                    os.replace(temp_path, path)
+                    break
+                except OSError:
+                    if attempt == max_attempts - 1:
+                        raise
+                    time.sleep(0.005 * (1.5 ** min(attempt, 6)))
             return True
         except Exception:
-            if temp_path.exists():
-                temp_path.unlink()
+            if temp_path is not None:
+                try:
+                    if temp_path.exists():
+                        temp_path.unlink()
+                except OSError:
+                    pass
             return False
 
 
