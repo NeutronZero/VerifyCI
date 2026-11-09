@@ -2,6 +2,56 @@
 
 ## [Unreleased]
 
+### v3.1 gate remediation
+
+- **Security check crash**: an assignment line with no target (``=foo`` in a
+  config file) no longer raises `IndexError` and turns the gate into
+  `ERROR/internal_fault`.
+- **Duplicate dangerous-call findings**: the AST pass and the regex fallback now
+  share a rule-family key, so `subprocess.run(...)` is reported once.
+- **Entity budget**: the default `WorkBudget.max_entities` was 1,000 and made any
+  real repository `budget_exhausted` / INCONCLUSIVE; it is now a 20,000-entity
+  resource ceiling.
+- **Gap taxonomy**: files outside the supported frontends are reported as the
+  acceptable `unsupported_language` gap, not `parse_error`; oversized inputs and
+  revision-graph limits are `INCONCLUSIVE` with the real gap code instead of
+  `ERROR/internal_fault`.
+- **Polyglot diffs**: one unsupported-language file no longer discards semantic
+  analysis for every supported file in the same diff; the unsupported file is a
+  scoped gap.
+- **Coverage acceptance**: accepting every remaining scope-exclusion gap
+  (`unsupported_language`, `frontend_capability_missing`) now lifts a check to
+  `COMPLETE` and records `accepted_exclusions`; analytical gaps
+  (`solver_unknown`, `dynamic_target_unresolved`, `parse_error`, budget) remain
+  INCONCLUSIVE even when accepted.
+- **Policy authority in fatal bundles**: an unparseable target policy is named
+  (source + blob hash) instead of silently reporting the builtin bootstrap
+  policy as authoritative; release-validation evidence for a scanned repository
+  can no longer clear `check_not_validated`.
+- **Semantic coverage**: async functions participate in guard/effect analysis,
+  tuple-return candidates are paired within the same function, and fabricated
+  witness lines are gone. TypeScript replay validates identifiers, runs with a
+  minimal environment, and records real base/head observations.
+- **TypeScript references**: imports carry their names/aliases and relative
+  specifiers resolve to repository paths, so live cross-file references to a
+  removed export are found.
+- **Trusted-worker IPC**: accepts canonical `COMPLETE`/`PARTIAL`/`UNKNOWN`
+  coverage and `NOT_APPLICABLE` with exit code `4`; the worker image lock now
+  pins `z3-solver` (required at import) and drops unused v1 packages.
+- **SARIF**: correct `informationUri`, source lines derived from subject/evidence
+  spans (not just top-level `line`), `partialFingerprints`, URI encoding, and the
+  manifest tool version instead of a hardcoded string.
+- **GitHub Action**: a non-zero gate exit is captured before the step fails, and
+  status is read from `payload.verdict.status` / `runs[0].properties.verdict`.
+- **CLI**: authenticated cache mode without a valid `VERIFYCI_CACHE_KEY` warns on
+  stderr instead of downgrading silently.
+- **Docs**: quickstart, verdicts, stability, security scope, CI integration, and
+  the walkthrough now describe the v3 `vc gate` surface; added
+  `docs/architecture.md`; removed the broken pre-commit hook.
+- **Tests**: regression coverage for each item above; the
+  `requires_release_evidence` integration test skips when the checked-in signed
+  evidence is absent or stale instead of failing for the wrong reason.
+
 ### Fixed
 - **BOM Byte Corruption**: Stripped unexpected UTF-8 Byte Order Marks (BOM) from 8 test probe suites (`tests/integration/test_probe_*.py`, `tests/orchestration/test_probe_sched.py`, `tests/storage/test_probe_*.py`), eliminating panic crashes during Ruff formatting.
 - **Loop Variable Closure Binding (`B023`)**: Resolved late binding in loop closures across `verifyci/verification/deletion.py`, `verifyci/verification/witness.py`, `verifyci/ingestion/dependency.py`, and `benchmarks/retrieval/measure.py`.

@@ -59,7 +59,7 @@ uv run --no-sync python -m pytest -q
 
 To run a specific test module:
 ```bash
-uv run --no-sync python -m pytest tests/export/test_sarif_export.py -v
+uv run --no-sync python -m pytest tests/v3/test_gate_v3.py -v -n 0
 ```
 
 ### Packaging Validation
@@ -72,19 +72,15 @@ uv build
 
 ## Running Benchmarks & Empirical Evaluations
 
-VerifyCI includes empirical evaluation suites in `tests/evaluation/` and `tests/performance/`:
+Empirical suites live in `tests/v3/` (corpus and benchmark tests) and measure
+against the frozen corpora in `corpora/` and `benchmarks/`:
 
 ```bash
-pytest tests/evaluation/ tests/performance/ -q
+python -m pytest tests/v3 -q -n 0
 ```
 
-To re-run with all frozen re-measure guards active:
-```bash
-VERIFYCI_PATCH_RERUN=1 \
-VERIFYCI_BLAST_RERUN=1 \
-VERIFYCI_LATENCY_RERUN=1 \
-pytest tests/evaluation/ -q
-```
+`benchmarks/latency/` targets the retired v1 ingestion API and is kept only as
+frozen historical evidence; it is not runnable against v3.1.
 
 ---
 
@@ -93,14 +89,15 @@ pytest tests/evaluation/ -q
 When working on VerifyCI, keep these fundamental principles in mind:
 
 ### 1. Frozen Benchmark Corpora Are Immutable
-- **Never edit frozen corpora**: Do not alter `benchmarks/patch_corpus/`, `benchmarks/blast_corpus/`, `benchmarks/beir/`, or other historical fixture directories.
+- **Never edit frozen corpora**: Do not alter `corpora/` or `benchmarks/` fixture, oracle, or baseline files.
 - **Never retune thresholds retroactively**: Benchmark thresholds are declared before measurement. If a new approach is being evaluated, create a new directory (e.g. `benchmarks/patch_real/cap009/`).
 - **Never relabel an oracle** to make a failing test pass.
 
 ### 2. Preserve Honest Verdict Semantics
-- Never collapse `PASS`, `FAIL`, `HUMAN_REVIEW`, `INCONCLUSIVE`, `INFRA_ERROR`, or `TIMEOUT`.
+- Never collapse `PASS`, `FAIL`, `INCONCLUSIVE`, `ERROR`, or `REVIEW`.
 - An inability to ground is `INCONCLUSIVE`, never a `PASS`.
-- An infrastructure problem (missing/locked database) is `INFRA_ERROR` (exit 3), never a verification verdict.
+- An execution or Git-object problem is `ERROR` (exit 3), never a verification verdict.
+- Coverage acceptances and waivers are reviewed policy records; never special-case a corpus, label, or repository to force a pass.
 
 ### 3. Local-First & Zero Hosted Dependencies
 - VerifyCI must remain fully functional on an offline developer workstation or local CI runner without external API keys, cloud subscriptions, or SaaS infrastructure.

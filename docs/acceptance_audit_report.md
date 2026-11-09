@@ -120,8 +120,9 @@ The table below reflects the live execution of the frozen benchmark suite on HEA
 
 ## 5. Formal Policy Authorization Framework (Policy v2)
 
-The proposed **Evidence-Based Dual-Metric Policy** has been formalized in specification document:
-[acceptance_policy_v2_spec.md](file:///C:/Users/satya/.gemini/antigravity/brain/7f97fdcc-535e-4425-8f0e-fb62a0b92a92/acceptance_policy_v2_spec.md).
+The proposed **Evidence-Based Dual-Metric Policy** is summarized below. (The
+original specification draft lived outside the repository and is not published;
+the requirements it defined are reproduced here.)
 
 ### The Three Independent Requirements:
 

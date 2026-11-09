@@ -1,15 +1,21 @@
-# CI/CD Pipeline Integrations
+# CI/CD Integration
 
-VerifyCI is local-first, zero-SaaS, and runs natively in any standard containerized or VM CI runner.
+VerifyCI is local-first: any runner with Python 3.12+, Git, and the target
+branch's history can run the gate. Nothing is uploaded unless you upload the
+SARIF report yourself.
+
+The gate consumes a **commit range**, not a patch file: it reads Git objects for
+the base, merge base, and head, and treats the target-base policy as
+authoritative.
 
 ---
 
 ## 1. GitHub Actions
 
-Use the official composite action located in the repository root (`action.yml`):
+The composite action in the repository root wraps `vc gate`:
 
 ```yaml
-name: Verify Pull Request Diff
+name: VerifyCI Gate
 
 on:
   pull_request:
@@ -17,7 +23,8 @@ on:
 
 permissions:
   contents: read
-  security-events: write # Required if uploading SARIF to GitHub Code Scanning
+  security-events: write
+  pull-requests: read
 
 jobs:
   verify:
@@ -25,90 +32,107 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Required for git diff base calculation
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+          fetch-depth: 0
 
       - name: VerifyCI Gate
+        id: verifyci
         uses: NeutronZero/VerifyCI@main
         with:
-          format: "sarif"
-          output-file: "verifyci-results.sarif"
-          fail-on-inconclusive: "true"
+          format: sarif
+          output-file: verifyci-results.sarif
+          review-mode: codeowners
 
-      - name: Upload SARIF to GitHub Code Scanning
+      - name: Upload SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: "verifyci-results.sarif"
+          sarif_file: verifyci-results.sarif
 ```
+
+The action records `status` and `exit-code` even when the gate exits non-zero,
+then fails the step. `status` is read from `payload.verdict.status` (JSON) or
+`runs[0].properties.verdict` (SARIF), with the exit code as fallback.
+
+Do **not** pass a cache key on `pull_request_target` or for fork PRs; the action
+forces `cache-mode: none` there. For authenticated caching, pass
+`cache-key: ${{ secrets.VERIFYCI_CACHE_KEY }}` (64 lowercase hex characters) from
+a trusted workflow only.
+
+An unvalidated build emits `ERROR` with `check_not_validated`; only a release
+build with valid signed evidence can return `PASS`.
 
 ---
 
-## 2. GitLab CI (`.gitlab-ci.yml`)
+## 2. GitLab CI
 
 ```yaml
-stages:
-  - verify
-
-verifyci-diff:
+verifyci-gate:
   stage: verify
   image: python:3.12-slim
   before_script:
     - apt-get update && apt-get install -y git
-    - pip install uv && uv pip install --system verifyci
+    - pip install verifyci
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
   script:
-    # Initialize and index repository graph
-    - verifyci init .
-    - verifyci ingest .
-    # Compute diff against target branch and evaluate
-    - git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_NAME --depth=1 || true
-    - git diff origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME HEAD > pr.diff
-    - verifyci verify-diff --diff-file pr.diff --format json --output verifyci-report.json
+    - >
+      vc gate --repo . 
+      --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+      --head "$CI_COMMIT_SHA"
+      --format sarif --output verifyci.sarif
+      --review-mode fail
   artifacts:
     when: always
-    reports:
-      codequality: verifyci-report.json
-    paths:
-      - verifyci-report.json
-  only:
-    - merge_requests
+    paths: [verifyci.sarif]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 ```
 
 ---
 
-## 3. Bitbucket Pipelines (`bitbucket-pipelines.yml`)
+## 3. Bitbucket Pipelines
 
 ```yaml
 pipelines:
   pull-requests:
     '**':
       - step:
-          name: VerifyCI Deterministic Gate
+          name: VerifyCI Gate
           image: python:3.12
           script:
             - pip install verifyci
-            - verifyci init .
-            - verifyci ingest .
-            - git fetch origin $BITBUCKET_PR_DESTINATION_BRANCH --depth=1 || true
-            - git diff origin/$BITBUCKET_PR_DESTINATION_BRANCH HEAD > pr.diff
-            - verifyci verify-diff --diff-file pr.diff --format json --output report.json
+            - git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH"
+            - >
+              vc gate --repo .
+              --base "origin/$BITBUCKET_PR_DESTINATION_BRANCH"
+              --head "$BITBUCKET_COMMIT"
+              --format sarif --output verifyci.sarif
           artifacts:
-            - report.json
+            - verifyci.sarif
 ```
 
 ---
 
-## 4. Pre-commit Hook (`.pre-commit-config.yaml`)
+## 4. Generic runner
 
-Verify staged diffs before creating commits locally:
-
-```yaml
-repos:
-  - repo: https://github.com/NeutronZero/VerifyCI
-    rev: v0.1.0
-    hooks:
-      - id: verifyci-staged
+```bash
+git fetch origin main
+vc gate --repo . --base origin/main --head HEAD --format json --output evidence.json
+case $? in
+  0) echo "PASS" ;;
+  1) echo "FAIL" ;;
+  2) echo "INCONCLUSIVE (coverage gap)" ;;
+  3) echo "ERROR (no verdict established)" ;;
+  4) echo "REVIEW required" ;;
+esac
 ```
+
+Persist `evidence.json` alongside the job: the payload hash is the reproducible
+identity of the run.
+
+---
+
+## 5. Pre-commit
+
+There is no pre-commit hook: a commit range gate needs a base revision and a
+policy from the target branch, which a per-file pre-commit hook does not have.
+Run `vc gate --base HEAD~1 --head HEAD` in a local `pre-push` hook or CI instead.

@@ -1,86 +1,107 @@
 # VerifyCI API & Contract Stability
 
-This document outlines the API stability tiers, contract guarantees, and deprecation policies for VerifyCI.
+This document defines the stability tiers, contract guarantees, and frozen-artifact
+policy for VerifyCI **v3.1.10**.
 
 ---
 
-## Stability Tiers
+## Stability tiers
 
-VerifyCI components are classified into three stability tiers: **Stable / Public**, **Experimental**, and **Internal**.
-
-| Tier | Guarantee | Breaking Change Policy |
+| Tier | Guarantee | Breaking-change policy |
 |---|---|---|
-| **Stable / Public** | Backwards-compatible within a major release | Requires deprecation notice across at least one minor release; breaking changes only in major releases (SemVer 2.0.0). |
-| **Experimental** | Subject to measurement and refinement; default-off | May change or be removed across minor releases; documented in CHANGELOG.md. |
-| **Internal** | Implementation details; no external compatibility guarantee | May change at any time without notice. |
+| **Stable / public** | Backwards compatible within a major release | Deprecation notice in a minor release; removal only in a major release (SemVer 2.0.0) |
+| **Experimental** | Subject to measurement and refinement; opt-in | May change in any minor release; recorded in CHANGELOG.md |
+| **Internal** | No external compatibility guarantee | May change at any time |
 
 ---
 
-## 1. Stable / Public Surface
+## 1. Stable / public surface
 
-The following interfaces and contracts form VerifyCI's authoritative public API:
+### CLI
 
-### CLI Commands and Exit Semantics
-- Primary CLI entry point: `verifyci` (and the `aci` compatibility alias).
-- Commands: `init`, `ingest`, `verify-diff`, `stats`, `query`, `deps`, `run`, `verify-chain`, `serve`.
-- **Exit Code Ladder**:
-  - `0`: `PASS` (Verification succeeded; evidence and traces established).
-  - `1`: `FAIL` (Verification failed; blocking check or invariant tripped).
-  - `2`: `HUMAN_REVIEW` / `INCONCLUSIVE` (Uncertainty or inability to ground; escalated to human).
-  - `3`: `INFRA_ERROR` / `TIMEOUT` (Infrastructure failure or task deadline exceeded; not a verdict).
-- Output Formats:
-  - Default text output.
-  - `--format json`: Stable machine-readable Certificate and Report representation.
-  - `--format sarif`: OASIS SARIF v2.1.0 standard representation.
+- Entry point: `vc` (`python -m verifyci.cli`).
+- Supported command: **`vc gate`**. The v1/v2 commands (`init`, `ingest`,
+  `verify-diff`, `stats`, `query`, `deps`, `run`, `verify-chain`, `serve`) are
+  retired; invoking them fails argument parsing.
 
-### Frozen Contracts (`verifyci/contracts/`)
-The schemas in `verifyci/contracts/` define the boundary between ingestion, storage, verification, and external tools:
-- **`entity.Entity`**, **`entity.EntityType`**
-- **`edge.Edge`**, **`edge.EdgeType`**
-- **`event.Event`**, **`event.AttestationMetadata`**
-- **`revision.Revision`**
-- **`evidence.SourceChunk`**, **`evidence.ProvenanceEntry`**, **`evidence.EvidencePack`**
-- **`verification_ir.Certificate`**, **`verification_ir.Premise`**, **`verification_ir.FileEvidence`**, **`verification_ir.ExecutionTrace`**, **`verification_ir.Conclusion`**
-- **`verification_ir.CheckResult`**, **`verification_ir.VerificationReport`**, **`verification_ir.VerificationDecision`**, **`verification_ir.VerificationPolicy`**
-- **`jsonio.to_json`**, **`jsonio.to_json_dict`**
+```text
+vc gate --repo PATH --base REV [--head REV] [--merge-base REV]
+        [--format text|json|sarif] [--output PATH] [--as-of YYYY-MM-DD]
+        [--cache-mode none|local|authenticated] [--cache-dir PATH]
+        [--allow-local-cache] [--cache-read-only] [--jobs N]
+        [--review-mode fail|codeowners]
+```
 
-*Breaking changes to frozen contracts require a formal contract amendment and a major version bump.*
+- Exit codes: `0` PASS · `1` FAIL · `2` INCONCLUSIVE · `3` ERROR · `4` REVIEW.
+- `--format json` emits the evidence envelope `{"payload": …, "envelope": …}`;
+  the verdict is `payload.verdict`.
+- `--format sarif` emits SARIF 2.1.0; the verdict is also mirrored at
+  `runs[0].properties.verdict`.
+- Policy authority: `.verifyci/policy.toml` on the **target base** revision.
 
-### GitHub Action Integration (`action.yml`)
-- Inputs: `path`, `db`, `base-ref`, `head-ref`, `format`, `output-file`, `fail-on-inconclusive`.
-- Outputs: `status`, `rationale`, `exit-code`, `report-file`.
+### Frozen contracts (`verifyci/contracts/`)
 
----
+- `model.CheckResult`, `model.Finding`, `model.CoverageGap`, `model.VerdictResult`,
+  `model.EvidenceBundle`, `model.Policy`
+- `manifest` (check registry, tool version, manifest hash)
+- `reason_codes` (closed catalog; reason classes `FAULT`/`REVIEW`/`GAP`/`FINDING`/`DIAGNOSTIC`)
+- `release_validation` (independent §15.10 evidence verification)
+- Evidence envelope and payload schemas (`verifyci.evidence/v3.1`,
+  `verifyci.envelope/v3.1`)
 
-## 2. Experimental Surface
+### GitHub Action (`action.yml`)
 
-Features marked experimental are active research or opt-in capabilities undergoing evaluation:
+- Inputs: `path`, `base-ref`, `head-ref`, `format`, `output-file`, `as-of`,
+  `review-mode`, `cache-mode`, `cache-dir`, `cache-key`, `cache-key-id`.
+- Outputs: `status`, `exit-code`, `report-file`.
+- A non-zero gate exit is recorded in `status`/`exit-code` before the step
+  fails; `FAIL`/`INCONCLUSIVE` are never lost to shell error handling.
 
-- **Overlap Reranker** (`retrieval/reranker.py`): Opt-in via `verifyci query --rerank`. Default is off (measured net-negative on held-out benchmarks).
-- **Ollama Local Embeddings** (`retrieval/dense.py`): Configured via `VERIFYCI_EMBEDDINGS=ollama[:model]`. Defaults to offline hash embeddings with zero server dependencies.
-- **FastMCP HTTP Transport**: `verifyci serve --transport http`. Stdio transport is stable; HTTP binding is experimental.
+### Trusted-worker IPC (`verifyci_release_trust/ipc.py`)
 
----
-
-## 3. Internal Implementation
-
-The following modules are internal and not subject to compatibility guarantees:
-
-- `verifyci/graph/builder.py`, `diagnostics.py`, and AST traversal internal ordering.
-- Tree-sitter grammar parse-tree node extraction details in `ingestion/parser.py`.
-- Transient types (`BDDSpec`, `NFR`, `Diff`, `CodeGraph`, `ExecutionContext`).
-- Low-level SQLite schema tables and index definitions.
+- Outcomes: `PASS`, `FAIL`, `INCONCLUSIVE`, `ERROR`, `NOT_APPLICABLE`.
+- Coverage: canonical `COMPLETE`/`PARTIAL`/`UNKNOWN`; legacy `FULL`/`NONE`
+  spellings remain accepted.
+- Exit-code mapping: `0` PASS, `1` FAIL, `2` INCONCLUSIVE, `3` ERROR,
+  `4` NOT_APPLICABLE (worker boundary).
 
 ---
 
-## Frozen Evidence & Benchmark Immutability
+## 2. Experimental surface
 
-VerifyCI adheres to a strict scientific standard regarding empirical evidence:
+- Alternative frontends beyond Python/TypeScript/JavaScript coverage: files are
+  reported as `unsupported_language` gaps and may be accepted, but no semantic
+  analysis is claimed.
+- Cross-file TypeScript reference resolution (import-based) is implemented for
+  relative and repository-path specifiers; package-manager aliases are not
+  resolved and remain `unresolved_import` gaps.
+- Node-based TypeScript witness replay requires a local `node` binary; when it
+  is absent the result is `semantic_alignment_unresolved`, never PASS.
 
-1. **Frozen Benchmark Corpora Are Immutable**:
-   - Corpora in `benchmarks/patch_corpus/`, `benchmarks/blast_corpus/`, `benchmarks/beir/`, `benchmarks/temporal_corpus/`, and `benchmarks/concurrency_corpus/` are frozen and pinned by SHA-256 hashes.
-   - Ground-truth labels and oracles must never be modified retroactively to make an implementation appear passing.
-2. **New Evidence Requires New Identifiers**:
-   - Any new benchmark, ablation study, or capability measurement must receive a new directory and unique identifier (e.g., `cap009`).
-3. **No Retroactive Retuning**:
-   - Acceptance thresholds and gate definitions are declared before measurement runs, never tuned after seeing benchmark results.
+---
+
+## 3. Internal implementation
+
+- `verifyci/scope/entities.py` parse-tree extraction details and cache keying.
+- `verifyci/runtime/sandbox.py` (test-side container helper; not part of the gate path).
+- `verifyci/analysis/`, `verifyci/frontend/`, `verifyci/index/facts.py`,
+  `verifyci/index/symbol_index.py` (unused placeholders; no gate dependency).
+- `verifyci/evidence/canonical.py` JSON canonicalisation internals.
+
+---
+
+## Frozen evidence & benchmarks
+
+1. **Baseline artifacts are immutable.** The `v1.0-evidence-baseline` tag and
+   everything under `corpora/` and `benchmarks/` are frozen and SHA-256 pinned.
+   Frozen labels, snapshots, workloads, and oracles are never rewritten to make
+   an implementation pass.
+2. **New evidence needs new identifiers.** Any new benchmark, ablation, or
+   measurement gets a new directory/identifier; remediation and benchmark work
+   lands in separate commits.
+3. **No retroactive retuning.** Acceptance thresholds and gate definitions are
+   declared before a measurement run.
+4. **Retired harnesses stay retired.** `benchmarks/latency/` targets the removed
+   v1 ingestion API and cannot run against v3.1; it is retained only as frozen
+   historical evidence. New latency measurements belong in
+   `benchmarks/performance/`.

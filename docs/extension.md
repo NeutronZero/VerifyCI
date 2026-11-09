@@ -1,169 +1,113 @@
-# Extending VerifyCI: Adding Verification Checkers
+# Adding a verification check
 
-This guide explains how to write, register, test, and benchmark a new deterministic verification checker in VerifyCI.
-
----
-
-## 1. Checker Interface & Result Model
-
-All verification checks in VerifyCI yield an immutable `CheckResult` contract object defined in `verifyci/contracts/verification_ir.py`:
-
-```python
-from dataclasses import dataclass
-from typing import Optional
-from verifyci.contracts.verification_ir import Certificate
-
-@dataclass(frozen=True)
-class CheckResult:
-    check_id: str
-    passed: bool
-    score: float
-    evidence: list[str]
-    explanation: str
-    blocking: bool = True
-    certificate: Optional[Certificate] = None
-    deterministic: bool = True
-    established: bool = True
-```
-
-### Key Semantics:
-- **`check_id`**: A unique string identifying the check (e.g., `"no_unsafe_deserialization"`).
-- **`passed`**: `True` if no violation was found; `False` if a violation occurred.
-- **`blocking`**: If `True`, a failure causes `PolicyEvaluator` to reject the diff with a `FAIL` verdict (exit code 1). If `False`, the failure is routed to `HUMAN_REVIEW` (exit code 2).
-- **`established`**: **Critical safety invariant**. Indicates whether the check had relevant code entities/edges to evaluate. If `established=False` (e.g. check evaluated 0 relevant edges or ungroundable content), the policy routes to `INCONCLUSIVE` rather than counting as a false pass or unfair rejection.
-- **`deterministic`**: Must be `True` for all algorithmic and rule-based checks. Set `False` for LLM opinions (which VerifyCI policy strictly ignores).
-- **`evidence`**: Formatted location strings citing the exact files and lines (e.g., `["src/parser.py:42:pickle.loads"]`).
+Checks are deterministic modules registered in the frozen manifest. Adding one
+is a contract change: it needs a check spec, evidence kinds, a corpus, and a
+promotion record before it can block.
 
 ---
 
-## 2. Implementing a Checker
+## 1. Contract
 
-Create a dedicated module in `verifyci/verification/` (e.g., `verifyci/verification/deserialization.py`):
+A check is a function `run(context: CheckContext) -> CheckResult` in
+`verifyci/checks/<name>.py`. `CheckResult` (in `verifyci/contracts/model.py`)
+carries:
 
-```python
-import re
-from verifyci.contracts.verification_ir import CheckResult
-from verifyci.verification.diffmap import iter_added_lines_with_lineno
+| Field | Meaning |
+|---|---|
+| `check_id`, `check_version` | Identity and version of the check. |
+| `tier`, `maturity` | `blocking`/`advisory`, `shadow`/promoted maturity. |
+| `outcome` | `PASS`, `FAIL`, `NOT_APPLICABLE`, `INCONCLUSIVE`, `ERROR`. |
+| `coverage` | `COMPLETE`, `PARTIAL`, `UNKNOWN`. |
+| `evaluated_scope`, `scope_enumeration`, `candidate_discovery`, `applicability_evidence` | What was examined and how completely. |
+| `coverage_gaps` | `CoverageGap(reason_code, subject)` from the closed catalog. |
+| `findings` | Blocking findings built with `make_finding(...)`. |
 
-_FORBIDDEN_CALLS = re.compile(r"\b(pickle\.loads|yaml\.unsafe_load|marshal\.loads)\b")
+Use the helpers in `verifyci/checks/base.py`:
 
-def unsafe_deserialization_check(diff: str) -> CheckResult:
-    """Detect unsafe deserialization functions introduced in added diff lines."""
-    if not diff or not diff.strip():
-        return CheckResult(
-            check_id="unsafe_deserialization",
-            passed=True,
-            score=1.0,
-            evidence=[],
-            explanation="empty diff, nothing to evaluate",
-            blocking=True,
-            established=True,
-        )
+- `make_result(...)` for normal results;
+- `make_finding(...)` for defects (validates defect id/evidence-kind pairing,
+  computes the stable fingerprint, and binds premises to commits/blobs/policy);
+- `gap(code, subject)` for gaps;
+- `budget_exhausted_result(...)` when a deadline or budget is hit;
+- `inconclusive_gap_result(...)` for environmental limits that are not faults.
 
-    violations = []
-    for file_path, lineno, line_content in iter_added_lines_with_lineno(diff):
-        match = _FORBIDDEN_CALLS.search(line_content)
-        if match:
-            loc = f"{file_path}:{lineno or '?'}:{match.group(1)}"
-            violations.append(loc)
-
-    if violations:
-        return CheckResult(
-            check_id="unsafe_deserialization",
-            passed=False,
-            score=0.0,
-            evidence=violations,
-            explanation=f"unsafe deserialization detected in {violations[0]}",
-            blocking=True,
-            established=True,
-        )
-
-    return CheckResult(
-        check_id="unsafe_deserialization",
-        passed=True,
-        score=1.0,
-        evidence=[],
-        explanation="no unsafe deserialization calls introduced",
-        blocking=True,
-        established=True,
-    )
-```
+`ERROR` is reserved for faults. Never return `ERROR` for an unmodelled construct;
+return `INCONCLUSIVE` with a gap.
 
 ---
 
-## 3. Registering the Checker
+## 2. Register the check
 
-### Option A: Diff Verification Pipeline
-Add the check to `run_verify` in `verifyci/interface/commands/verify.py`:
+1. Add a `CheckSpec` in `verifyci/contracts/manifest.py`:
 
 ```python
-from verifyci.verification.deserialization import unsafe_deserialization_check
-
-# In run_verify():
-checks.append(unsafe_deserialization_check(diff))
+_MY_CHECK = CheckSpec(
+    check_id="mycheck",
+    check_version=1,
+    tier=Tier.BLOCKING,
+    maturity=Maturity.SHADOW,          # blocking requires a promotion record
+    method="mycheck",
+    method_version=1,
+    supported_languages=("python",),
+    supported_syntax=("python_3_12",),
+    defect_ids=("MY-DEFECT-ID",),
+    reason_codes=("my_reason",),
+    evidence_kinds=("reference",),
+    corpus_id="mycorpus-v1",
+    corpus_hash="sha256:…",
+    promotion_record_hash="",
+)
 ```
 
-### Option B: Invariant Query Dispatcher
-If the checker should be configurable via `.verifyci/invariants.yaml`, register its query prefix in `verifyci/verification/intent_align.py` (`_check_invariant`):
+2. Register the defect id → reason code in
+   `verifyci/contracts/reason_codes.py` (`DEFECT_REASON_CODES`) and the allowed
+   evidence kinds in `EVIDENCE_KINDS_BY_DEFECT`; add the reason code to the
+   findings/gaps catalog.
+3. Add `CHECK_SPECS`/`CHECK_ORDER` entries and map the runner in
+   `verifyci/gate/orchestrator.py::_CHECK_RUNNERS`.
+4. Add the check id to any policy validation lists (`_CHECK_IDS` in
+   `verifyci/gate/policy.py`).
 
-```python
-if query.startswith("forbid_deserialization:"):
-    # Dispatch query
+`validate_manifest()` enforces the invariants: every check in `CHECK_ORDER` has
+a spec, a blocking check cannot be shadow, and a non-shadow check needs a
+promotion record hash.
+
+---
+
+## 3. Evidence requirements
+
+- Findings must cite source-level evidence (`EvidenceKind`) and include premises
+  that already bind base/merge-base/head, the authoritative policy hash,
+  check version, and toolchain.
+- A finding without a validated witness is not a FAIL: use a gap.
+- `subject` should carry `path`, `symbol`, and `line` (or `head_span`) so SARIF
+  can point at the right location and fingerprints stay stable.
+
+---
+
+## 4. Tests and corpora
+
+A new check needs:
+
+1. A frozen corpus with expected outcomes, coverage, gaps, and findings
+   (`corpora/<check>/cases.jsonl` + fixtures + `SHA256SUMS`). Oracles are frozen
+   before measurement and never rewritten to match an implementation.
+2. An empirical benchmark test (precision/recall thresholds are part of the
+   check spec).
+3. Adversarial tests for bypasses and fail-closed behaviour.
+4. `docs/` describing the new defect id and reason codes.
+
+Run the gate test suite and the new corpus before opening a PR:
+
+```bash
+python -m pytest tests/v3 -q -n 0
+python -m ruff check . --select E,F,B023
 ```
 
 ---
 
-## 4. PolicyEvaluator Integration
+## 5. Promotion
 
-`PolicyEvaluator` (`verifyci/verification/policy.py`) evaluates the compiled `VerificationReport`:
-1. If any blocking check fails and is `established=True` -> Verdict: `FAIL` (exit 1).
-2. If any blocking check is `established=False` (inability) -> Verdict: `INCONCLUSIVE` (exit 2).
-3. If non-blocking checks fail -> Verdict: `HUMAN_REVIEW` (exit 2).
-4. If all checks pass and are established -> Verdict: `PASS` (exit 0).
-
-Never bypass or weaken the `PolicyEvaluator` invariants.
-
----
-
-## 5. Adding Automated Tests
-
-Create tests in `tests/verification/` following the Arrange-Act-Assert (AAA) pattern:
-
-```python
-from verifyci.verification.deserialization import unsafe_deserialization_check
-
-def test_unsafe_deserialization_detects_pickle():
-    diff = (
-        "diff --git a/app.py b/app.py\n"
-        "--- a/app.py\n"
-        "+++ b/app.py\n"
-        "@@ -1,0 +1,1 @@\n"
-        "+data = pickle.loads(raw_input)\n"
-    )
-    result = unsafe_deserialization_check(diff)
-    assert result.passed is False
-    assert result.blocking is True
-    assert "pickle.loads" in result.evidence[0]
-
-def test_unsafe_deserialization_passes_clean_diff():
-    diff = (
-        "diff --git a/app.py b/app.py\n"
-        "--- a/app.py\n"
-        "+++ b/app.py\n"
-        "@@ -1,0 +1,1 @@\n"
-        "+data = json.loads(raw_input)\n"
-    )
-    result = unsafe_deserialization_check(diff)
-    assert result.passed is True
-```
-
----
-
-## 6. Frozen Benchmark Protection Rules
-
-VerifyCI relies on frozen empirical benchmarks (`benchmarks/`). When adding or updating checkers:
-
-- **Do NOT alter frozen corpora**: Never edit files in `benchmarks/patch_corpus/`, `benchmarks/blast_corpus/`, or `benchmarks/temporal_corpus/`.
-- **Do NOT retune thresholds retroactively**: Historical benchmarks record baseline evidence and must remain immutable.
-- **New evaluations get new directories**: If you are benchmarking a new capability, create a new subfolder (e.g. `benchmarks/patch_real/cap009/`).
-- **Clean-room oracles**: Benchmark evaluation harnesses must derive expected labels independently of the production checker code under test.
+A shadow check becomes blocking only with an independent promotion record under
+`evidence/release/` (see [release-evidence.md](release-evidence.md)). Promotion
+is a separate commit; it is never inferred from a green CI run.

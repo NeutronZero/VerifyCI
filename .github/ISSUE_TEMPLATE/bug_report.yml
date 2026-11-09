@@ -12,14 +12,14 @@ body:
     attributes:
       label: Summary
       description: Concise description of the unexpected behavior.
-      placeholder: E.g., verify-diff returns INCONCLUSIVE on valid deletion with anchor...
+      placeholder: E.g., vc gate returns INCONCLUSIVE on a diff that only touches a supported Python file...
     validations:
       required: true
   - type: textarea
     id: reproduction_diff
     attributes:
       label: Minimal Reproducible Diff
-      description: Unified git diff that reproduces the behavior.
+      description: Minimal commit range (base..head) or unified diff that reproduces the behavior, plus the .verifyci/policy.toml in force.
       render: diff
     validations:
       required: true
@@ -27,7 +27,7 @@ body:
     id: command_output
     attributes:
       label: Command & Exit Code / Output
-      description: The exact command executed and its output (`--format json` preferred).
+      description: The exact `vc gate` command and its exit code, with `--format json` output (evidence bundle) preferred.
       render: shell
     validations:
       required: true
@@ -39,7 +39,8 @@ body:
         - "Observed FAIL, Expected PASS"
         - "Observed PASS, Expected FAIL"
         - "Observed INCONCLUSIVE, Expected PASS"
-        - "Observed INFRA_ERROR (Exit 3)"
+        - "Observed ERROR (Exit 3)"
+        - "Observed REVIEW (Exit 4)"
         - "Linter or Build failure"
     validations:
       required: true
@@ -48,6 +49,6 @@ body:
     attributes:
       label: Environment
       description: Python version, OS, VerifyCI version / commit SHA.
-      placeholder: Python 3.12, Ubuntu 22.04, verifyci v0.1.0
+      placeholder: Python 3.12, Ubuntu 22.04, VerifyCI 3.1.10, git 2.45
     validations:
       required: true
