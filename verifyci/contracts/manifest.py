@@ -19,7 +19,7 @@ from verifyci.index.cache import (
 )
 
 
-TOOL_VERSION = "3.1.10"
+from verifyci import __version__ as TOOL_VERSION  # single source of truth
 MANIFEST_SCHEMA = "verifyci.manifest/v3.1"
 # The implementation is an M0 candidate.  Release validation artifacts are
 # produced separately; this flag deliberately prevents the CLI from presenting

@@ -3,8 +3,38 @@
 from __future__ import annotations
 
 from typing import Any, Mapping
+from urllib.parse import quote
 
+from verifyci.contracts.manifest import TOOL_VERSION
 from verifyci.contracts.model import EvidenceBundle
+
+
+_LINE_KEYS = ("line", "start_line")
+
+
+def _line_from(value: Any) -> int | None:
+    if isinstance(value, Mapping):
+        for key in _LINE_KEYS:
+            candidate = value.get(key)
+            if isinstance(candidate, int) and candidate > 0:
+                return candidate
+    return None
+
+
+def _finding_line(finding: Mapping[str, Any], ev_payload: Mapping[str, Any]) -> int:
+    """Locate the finding's source line across the shapes each check emits."""
+    subject = finding.get("subject") or {}
+    candidates: list[Any] = [subject.get("head_span"), subject, ev_payload]
+    for key in ("span", "reference", "call", "source", "sink", "removed", "identity"):
+        nested = ev_payload.get(key)
+        candidates.append(nested)
+        if isinstance(nested, Mapping):
+            candidates.append(nested.get("span"))
+    for candidate in candidates:
+        line = _line_from(candidate)
+        if line is not None:
+            return line
+    return 1
 
 
 def _rule_map(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -42,28 +72,36 @@ def bundle_to_sarif(bundle: EvidenceBundle) -> dict[str, Any]:
     for finding in payload.get("findings", []):
         subject = finding.get("subject", {})
         path = str(subject.get("path") or "")
-        line = 1
         evidence = finding.get("evidence", {})
-        ev_payload = evidence.get("payload", {}) if isinstance(evidence, Mapping) else {}
-        if isinstance(ev_payload, Mapping):
-            line = int(ev_payload.get("line") or ev_payload.get("start_line") or 1)
+        ev_payload: Mapping[str, Any] = (
+            evidence.get("payload", {}) if isinstance(evidence, Mapping) else {}
+        )
+        if not isinstance(ev_payload, Mapping):
+            ev_payload = {}
+        line = _finding_line(finding, ev_payload)
+        fingerprint = finding.get("fingerprint")
         result: dict[str, Any] = {
             "ruleId": finding.get("defect_id"),
             "level": _level(finding, status),
             "message": {"text": finding.get("message", "")},
             "properties": {
                 "reason_code": finding.get("reason_code"),
-                "fingerprint": finding.get("fingerprint"),
+                "fingerprint": fingerprint,
                 "disposition": finding.get("disposition"),
                 "evidence_kind": evidence.get("kind") if isinstance(evidence, Mapping) else None,
                 "premises": finding.get("premises", {}),
             },
         }
+        if fingerprint:
+            result["partialFingerprints"] = {"verifyciFingerprint/v1": str(fingerprint)}
         if path:
             result["locations"] = [
                 {
                     "physicalLocation": {
-                        "artifactLocation": {"uri": path, "uriBaseId": "%SRCROOT%"},
+                        "artifactLocation": {
+                            "uri": quote(path, safe="/"),
+                            "uriBaseId": "%SRCROOT%",
+                        },
                         "region": {"startLine": max(line, 1)},
                     }
                 }
@@ -93,8 +131,8 @@ def bundle_to_sarif(bundle: EvidenceBundle) -> dict[str, Any]:
         "tool": {
             "driver": {
                 "name": "verifyci",
-                "version": str(payload.get("tool", {}).get("version", "3.1.10")),
-                "informationUri": "https://github.com/verifyci/verifyci",
+                "version": str(payload.get("tool", {}).get("version", TOOL_VERSION)),
+                "informationUri": "https://github.com/NeutronZero/VerifyCI",
                 "rules": _rule_map(payload),
             }
         },

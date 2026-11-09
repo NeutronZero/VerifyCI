@@ -7,7 +7,7 @@ from hashlib import sha256
 import platform
 from typing import Any, Mapping, Sequence
 
-from verifyci.contracts.manifest import manifest_hash, manifest_payload
+from verifyci.contracts.manifest import TOOL_VERSION, manifest_hash, manifest_payload
 from verifyci.contracts.model import CheckResult, EvidenceBundle, VerdictResult
 from verifyci.evidence.canonical import canonical_json_bytes, payload_hash
 
@@ -59,7 +59,7 @@ def build_payload(
         "schema": BUNDLE_SCHEMA,
         "tool": {
             "name": "verifyci",
-            "version": "3.1.10",
+            "version": TOOL_VERSION,
             "toolchain_fingerprint": toolchain,
         },
         "inputs": dict(inputs),
