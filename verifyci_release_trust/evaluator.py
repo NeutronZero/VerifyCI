@@ -181,7 +181,9 @@ def generate_held_out_scenarios(
     """
     seed_bytes = bytes.fromhex(seed_hex)
     commitment = "sha256:" + hashlib.sha256(seed_bytes).hexdigest()
-    epoch = seed_bytes[:8].hex()
+    epoch = hmac.new(
+        b"VERIFYCI-HELDOUT-EPOCH-COMMITMENT", seed_bytes, hashlib.sha256
+    ).hexdigest()[:16]
 
     rng = random.Random(seed_bytes)
     scenarios: list[dict[str, Any]] = []

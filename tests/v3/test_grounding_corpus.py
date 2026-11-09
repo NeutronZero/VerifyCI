@@ -798,7 +798,7 @@ def test_grounded_mapper_empirical_benchmark():
                             discrepancies.append(
                                 f"{case_id}: payload[{pk}] mismatch: {act_payload.get(pk)!r} != {pv!r}"
                             )
-                    permitted_extra_payload = {"rule_ids"}
+                    permitted_extra_payload = {"rule_ids", "content_sha256"}
                     extra_payload = set(act_payload.keys()) - set(exp_payload.keys())
                     if not (extra_payload <= permitted_extra_payload):
                         findings_ok = False

@@ -897,7 +897,8 @@ def _taint_sub(
             if has_source and has_sink:
                 _source_match = _TAINT_SOURCE_RE.search(line)
                 _sink_match = _TAINT_SINK_RE.search(line)
-                assert _source_match is not None and _sink_match is not None
+                if _source_match is None or _sink_match is None:
+                    continue
                 _source_text = _source_match.group(0)
                 _sink_text = _sink_match.group(0)
                 findings.append(

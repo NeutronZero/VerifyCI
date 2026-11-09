@@ -271,13 +271,15 @@ def run_supervisor_measurement_pipeline(
 
     completed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-    has_fatal_errors = any(
-        "failed" in e or "mismatch" in e or "violated" in e or "blocking" in e or "unredacted" in e
-        for e in errors
+    has_errors = bool(errors)
+    execution_verified = (
+        not has_errors
+        and bool(held_out_seed)
+        and held_out_metrics.get("cases_evaluated", 0) == len(held_out_cases)
     )
-    if not errors and held_out_seed and held_out_metrics.get("cases_evaluated") == len(held_out_cases):
+    if execution_verified:
         overall_verdict = "PASS"
-    elif has_fatal_errors:
+    elif has_errors:
         overall_verdict = "FAIL"
     else:
         overall_verdict = "INCONCLUSIVE"

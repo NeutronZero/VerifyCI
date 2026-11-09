@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import ast
 from collections import defaultdict
-import copy
 import dataclasses
+import hashlib
 import json
 import os
 import re
@@ -1020,6 +1020,29 @@ def _strip_docstrings(tree: ast.AST) -> None:
                 node.body = node.body[1:]
 
 
+def _ast_body_digest(tree: ast.AST) -> str:
+    """Compute structural AST digest excluding docstrings without full AST deepcopy."""
+    restorations: list[tuple[ast.AST, list[ast.stmt]]] = []
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module)
+        ):
+            if (
+                node.body
+                and isinstance(node.body[0], ast.Expr)
+                and isinstance(node.body[0].value, ast.Constant)
+                and isinstance(node.body[0].value.value, str)
+            ):
+                restorations.append((node, node.body))
+                node.body = node.body[1:]
+    try:
+        dump = ast.dump(tree, annotate_fields=False, include_attributes=False)
+        return hashlib.sha256(dump.encode("utf-8")).hexdigest()
+    finally:
+        for node, orig_body in reversed(restorations):
+            node.body = orig_body
+
+
 def _build_enclosing_function_map(tree: ast.AST) -> dict[int, str]:
     """Map each AST node id to its outermost enclosing function name."""
     mapping: dict[int, str] = {}
@@ -1400,14 +1423,10 @@ def run(context: CheckContext) -> CheckResult:
         path = entry.head_path or entry.base_path
         if path.endswith((".py", ".pyi")):
             b_orig = parsed_trees.get((id(entry), "base"))
-            b_tree = copy.deepcopy(b_orig) if b_orig is not None else ast.parse(entry.base_source)
+            b_tree = b_orig if b_orig is not None else ast.parse(entry.base_source)
             h_orig = parsed_trees.get((id(entry), "head"))
-            h_tree = copy.deepcopy(h_orig) if h_orig is not None else ast.parse(entry.head_source)
-            _strip_docstrings(b_tree)
-            _strip_docstrings(h_tree)
-            if ast.dump(b_tree, include_attributes=False) != ast.dump(
-                h_tree, include_attributes=False
-            ):
+            h_tree = h_orig if h_orig is not None else ast.parse(entry.head_source)
+            if _ast_body_digest(b_tree) != _ast_body_digest(h_tree):
                 has_body_change = True
         elif path.endswith((".ts", ".tsx", ".js", ".jsx")):
             if entry.base_source.strip() != entry.head_source.strip():

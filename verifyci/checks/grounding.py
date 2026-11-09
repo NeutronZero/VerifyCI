@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import time
 from typing import Any
 
@@ -68,6 +69,25 @@ def run(context: CheckContext) -> CheckResult:
             "base_blob": entry.base_blob if entry else None,
             "head_blob": entry.head_blob if entry else None,
         }
+        if is_binary:
+            content = b""
+            if entry is not None:
+                if hasattr(entry, "content"):
+                    raw_c = getattr(entry, "content")
+                    content = raw_c if isinstance(raw_c, bytes) else str(raw_c).encode("utf-8")
+                elif context.git is not None:
+                    blob_id = entry.head_blob or entry.base_blob
+                    if blob_id:
+                        try:
+                            content = context.git.read_blob(blob_id)
+                        except Exception:
+                            content = b""
+                if not content:
+                    if entry.head_source:
+                        content = entry.head_source.encode("utf-8")
+                    elif entry.base_source:
+                        content = entry.base_source.encode("utf-8")
+            payload["content_sha256"] = hashlib.sha256(content).hexdigest()
         message = (
             f"Changed binary path {path} matches active deny_changes rule {primary_rule_id}"
             if is_binary
