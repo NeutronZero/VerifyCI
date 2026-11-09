@@ -16,6 +16,7 @@ import sys
 import time
 import urllib.request
 
+from verifyci import __version__ as TOOL_VERSION
 from verifyci_release_trust.evidence import (
     canonical_jcs_digest,
     compute_file_sha256,
@@ -147,7 +148,7 @@ def main():
     attestation_record = {
         "schema": "verifyci.measurement_attestation/v3",
         "issuer": "verifyci.measurement_pipeline",
-        "tool_version": "3.1.10",
+        "tool_version": TOOL_VERSION,
         "created_at": created_iso,
         "candidate_sha": cand_sha,
         "caller_workflow_sha": caller_sha,

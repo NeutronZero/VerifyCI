@@ -371,9 +371,8 @@ def aggregate(
         status = Verdict.PASS
 
     if status == Verdict.ERROR:
-        # Preserve validated findings; they remain in the bundle and set the
-        # boolean because the run cannot establish a clean pass.
-        blocking_present = bool(all_blocking_findings)
+        # Preserve open findings; waived findings do not set blocking_present.
+        blocking_present = bool(open_findings)
     elif status == Verdict.FAIL:
         blocking_present = True
     else:

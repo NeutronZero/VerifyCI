@@ -43,6 +43,18 @@ import urllib.error
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _read_tool_version() -> str:
+    init_path = ROOT / "verifyci" / "__init__.py"
+    if init_path.is_file():
+        for line in init_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("__version__"):
+                return line.split("=")[1].strip().strip('"\'')
+    return "3.1.10"
+
+
+TOOL_VERSION = _read_tool_version()
+
+
 def isolate_execution_environment(repo_root: Path) -> None:
     """Enforce strict process isolation by purging all repository-controlled paths from sys.path."""
     resolved_root = repo_root.resolve()
@@ -105,7 +117,7 @@ ATTESTATION_SCHEMA = "verifyci.measurement_attestation/v1"
 MEASUREMENTS_SCHEMA = "verifyci.release_measurements/v1"
 SUPPORTED_ATTESTATION_SCHEMAS = ("verifyci.measurement_attestation/v1", "verifyci.measurement_attestation/v3")
 SUPPORTED_MEASUREMENTS_SCHEMAS = ("verifyci.release_measurements/v1", "verifyci.measurements/v3")
-TOOL_VERSION = "3.1.10"
+# TOOL_VERSION is synchronized from verifyci.__version__ above
 RELEASE_AUTHORITY_KEY_ID = "verifyci-release-authority-ed25519-v1"
 RELEASE_AUTHORITY_PUBLIC_KEY_HEX = (
     "7926b9524e2ec893f7834b9081228da255f058709fa158d77a75d7d21a3715f7"
@@ -150,6 +162,9 @@ _CRITICAL_IMPLEMENTATION_FILES = (
     Path(".github/workflows/ci.yml"),
     Path(".github/workflows/release_measurements.yml"),
     Path(".github/workflows/release_signing.yml"),
+    Path("docker/worker/Dockerfile"),
+    Path("docker/worker/launch_candidate.py"),
+    Path("docker/worker/requirements.lock"),
     Path("pyproject.toml"),
     Path("uv.lock"),
     Path("verifyci/checks/security.py"),
@@ -157,12 +172,22 @@ _CRITICAL_IMPLEMENTATION_FILES = (
     Path("verifyci/checks/contract.py"),
     Path("verifyci/checks/deletion.py"),
     Path("verifyci/checks/grounding.py"),
-    Path("verifyci/gate/orchestrator.py"),
-    Path("verifyci/gate/policy.py"),
-    Path("verifyci/gate/integrity.py"),
     Path("verifyci/contracts/manifest.py"),
     Path("verifyci/contracts/promotion.py"),
     Path("verifyci/contracts/release_validation.py"),
+    Path("verifyci/evidence/__init__.py"),
+    Path("verifyci/evidence/bundle.py"),
+    Path("verifyci/evidence/canonical.py"),
+    Path("verifyci/evidence/sarif.py"),
+    Path("verifyci/gate/integrity.py"),
+    Path("verifyci/gate/orchestrator.py"),
+    Path("verifyci/gate/policy.py"),
+    Path("verifyci/index/__init__.py"),
+    Path("verifyci/index/cache.py"),
+    Path("verifyci/index/facts.py"),
+    Path("verifyci/index/provider.py"),
+    Path("verifyci/index/symbol_index.py"),
+    Path("verifyci/scope/entities.py"),
     Path("verifyci/cli.py"),
     Path("scripts/validate_release.py"),
     Path("scripts/standalone_signer.py"),
@@ -170,10 +195,13 @@ _CRITICAL_IMPLEMENTATION_FILES = (
     Path("tests/v3/test_security_benchmark.py"),
     Path("tests/v3/test_security_corpus.py"),
     Path("tests/v3/test_security_regressions.py"),
+    Path("corpora/contract/CORPUS_SPEC.md"),
+    Path("corpora/deletion/CORPUS_SPEC.md"),
     Path("corpora/security/cases.jsonl"),
     Path("corpora/security/CORPUS_SPEC.md"),
     Path("corpora/security/SHA256SUMS"),
     Path("corpora/security/ORACLE_REVIEW.md"),
+    Path("corpora/semantic/CORPUS_SPEC.md"),
 )
 
 # -----------------------------------------------------------------------------

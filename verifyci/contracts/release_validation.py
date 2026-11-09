@@ -47,6 +47,9 @@ _CRITICAL_IMPLEMENTATION_FILES = (
     Path(".github/workflows/ci.yml"),
     Path(".github/workflows/release_measurements.yml"),
     Path(".github/workflows/release_signing.yml"),
+    Path("docker/worker/Dockerfile"),
+    Path("docker/worker/launch_candidate.py"),
+    Path("docker/worker/requirements.lock"),
     Path("pyproject.toml"),
     Path("uv.lock"),
     Path("verifyci/checks/security.py"),
@@ -54,12 +57,22 @@ _CRITICAL_IMPLEMENTATION_FILES = (
     Path("verifyci/checks/contract.py"),
     Path("verifyci/checks/deletion.py"),
     Path("verifyci/checks/grounding.py"),
-    Path("verifyci/gate/orchestrator.py"),
-    Path("verifyci/gate/policy.py"),
-    Path("verifyci/gate/integrity.py"),
     Path("verifyci/contracts/manifest.py"),
     Path("verifyci/contracts/promotion.py"),
     Path("verifyci/contracts/release_validation.py"),
+    Path("verifyci/evidence/__init__.py"),
+    Path("verifyci/evidence/bundle.py"),
+    Path("verifyci/evidence/canonical.py"),
+    Path("verifyci/evidence/sarif.py"),
+    Path("verifyci/gate/integrity.py"),
+    Path("verifyci/gate/orchestrator.py"),
+    Path("verifyci/gate/policy.py"),
+    Path("verifyci/index/__init__.py"),
+    Path("verifyci/index/cache.py"),
+    Path("verifyci/index/facts.py"),
+    Path("verifyci/index/provider.py"),
+    Path("verifyci/index/symbol_index.py"),
+    Path("verifyci/scope/entities.py"),
     Path("verifyci/cli.py"),
     Path("scripts/validate_release.py"),
     Path("scripts/standalone_signer.py"),
@@ -67,16 +80,35 @@ _CRITICAL_IMPLEMENTATION_FILES = (
     Path("tests/v3/test_security_benchmark.py"),
     Path("tests/v3/test_security_corpus.py"),
     Path("tests/v3/test_security_regressions.py"),
+    Path("corpora/contract/CORPUS_SPEC.md"),
+    Path("corpora/deletion/CORPUS_SPEC.md"),
     Path("corpora/security/cases.jsonl"),
     Path("corpora/security/CORPUS_SPEC.md"),
     Path("corpora/security/SHA256SUMS"),
     Path("corpora/security/ORACLE_REVIEW.md"),
+    Path("corpora/semantic/CORPUS_SPEC.md"),
 )
 
 
 def get_verifyci_root() -> Path:
     """Return the root path of the VerifyCI repository / installation."""
-    return Path(__file__).resolve().parents[2]
+    candidate = Path(__file__).resolve().parents[2]
+    if (candidate / VALIDATION_REL_PATH).is_file() or (candidate / ".git").exists():
+        return candidate
+
+    for env_var in ("VERIFYCI_ROOT", "VERIFYCI_REPO_ROOT"):
+        val = os.environ.get(env_var)
+        if val:
+            env_path = Path(val).resolve()
+            if env_path.exists():
+                return env_path
+
+    # Fallback to package-relative resource (installed wheel layout)
+    pkg_root = Path(__file__).resolve().parents[1]
+    if (pkg_root / VALIDATION_REL_PATH).is_file() or (pkg_root / "release_validation.json").is_file():
+        return pkg_root
+
+    return candidate
 
 
 def get_commit_sha(repo_root: Path) -> str | None:
@@ -176,8 +208,9 @@ def verify_release_validation_evidence(
     repo_root: Path | None = None,
     *,
     expected_commit: str | None = None,
-    authority_public_key_hex: str | None = None,
+    _authority_public_key_hex: str | None = None,
     require_ci: bool = False,
+    **kwargs: Any,
 ) -> tuple[bool, str | None]:
     """Verify that trusted, non-stale release-validation evidence exists.
 
@@ -185,6 +218,11 @@ def verify_release_validation_evidence(
         (True, None) if validation is authoritative, verified, and unstale.
         (False, reason_detail) otherwise.
     """
+    if "authority_public_key_hex" in kwargs:
+        raise TypeError("authority_public_key_hex cannot be overridden in production; use trusted authority key")
+    if _authority_public_key_hex is not None:
+        if "pytest" not in sys.modules and os.environ.get("VERIFYCI_TESTING") != "1":
+            return False, "unauthorized authority key override: testing key override is prohibited in production runs"
     root = repo_root or get_verifyci_root()
     val_file = root / VALIDATION_REL_PATH
     if not val_file.is_file():
@@ -238,7 +276,7 @@ def verify_release_validation_evidence(
     if attestation.get("key_id") != RELEASE_AUTHORITY_KEY_ID:
         return False, f"unrecognized attestation key ID: {attestation.get('key_id')}"
 
-    expected_pub_hex = authority_public_key_hex or RELEASE_AUTHORITY_PUBLIC_KEY_HEX
+    expected_pub_hex = _authority_public_key_hex or RELEASE_AUTHORITY_PUBLIC_KEY_HEX
     if attestation.get("public_key") != expected_pub_hex:
         return False, f"untrusted release attestation public key: {attestation.get('public_key')}"
 

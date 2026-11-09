@@ -48,6 +48,10 @@ FAULTS: dict[str, ReasonCode] = {
         "path_traversal", ReasonClass.FAULT,
         "Remove paths escaping the repository from policy.",
     ),
+    "invalid_repository": ReasonCode(
+        "invalid_repository", ReasonClass.FAULT,
+        "Supply a valid path to an initialized Git repository.",
+    ),
     "invalid_cache_location": ReasonCode(
         "invalid_cache_location", ReasonClass.FAULT,
         "Choose a cache directory outside the working tree.",

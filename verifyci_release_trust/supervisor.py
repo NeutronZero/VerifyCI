@@ -15,6 +15,7 @@ import tempfile
 import time
 from typing import Any
 
+from verifyci import __version__ as TOOL_VERSION
 from verifyci_release_trust.evaluator import (
     aggregate_benchmark_metrics,
     generate_held_out_scenarios,
@@ -283,7 +284,7 @@ def run_supervisor_measurement_pipeline(
 
     measurements_record = {
         "schema": "verifyci.measurements/v3",
-        "tool_version": "3.1.10",
+        "tool_version": TOOL_VERSION,
         "verdict": overall_verdict,
         "candidate_sha": manifest.commit_sha,
         "candidate_tree_sha": manifest.tree_sha,

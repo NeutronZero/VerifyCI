@@ -23,6 +23,7 @@ from verifyci.runtime.scheduler import run_deterministic_batch
 from verifyci.contracts.manifest import (
     CHECK_ORDER,
     CHECK_SPECS,
+    CODE_EXTENSIONS,
     manifest_hash,
     release_summary,
     validate_manifest,
@@ -107,7 +108,7 @@ def _scope_empty() -> ChangedScope:
 
 def _context(
     *,
-    git: GitRepo,
+    git: GitRepo | None,
     policy: Policy,
     entries: Sequence[DiffEntry],
     scope: ChangedScope,
@@ -217,7 +218,7 @@ def _fatal_bundle(
 ) -> EvidenceBundle:
     effective_policy = policy or builtin_bootstrap_policy()
     context = _context(
-        git=git or GitRepo(request.repo),
+        git=git,
         policy=effective_policy,
         entries=entries,
         scope=_scope_empty(),
@@ -491,11 +492,7 @@ def _build_payload(**kwargs: Any) -> dict[str, Any]:
     return build_payload(**kwargs)
 
 
-_CODE_SUFFIXES = {
-    "py", "pyi", "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts",
-    "go", "rs", "java", "kt", "kts", "c", "cc", "cpp", "cxx", "h", "hpp",
-    "cs", "rb", "php", "swift", "scala", "lua", "ex", "exs", "erl", "hrl",
-}
+_CODE_SUFFIXES = CODE_EXTENSIONS
 
 
 def _augment_scope_with_repository(
@@ -663,7 +660,7 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             started=started,
             as_of_date=as_of,
         )
-    git = GitRepo(request.repo)
+    git: GitRepo | None = None
     toolchain = ""
     object_format = ""
     target_base = merge_base = head = ""
@@ -677,6 +674,27 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
     codeowners = CodeownersCoverage(proven=False, reasons=("not_evaluated",))
     target_drift = False
     try:
+        try:
+            repo_path = Path(request.repo)
+            if not repo_path.is_dir():
+                raise GitError(
+                    "invalid_repository",
+                    f"repository path does not exist or is not a directory: {request.repo!r}",
+                )
+            git = GitRepo(repo_path)
+            git_dir_check = git.run(["rev-parse", "--git-dir"])
+            if git_dir_check.returncode != 0:
+                classified = git._classify(git_dir_check)
+                if classified.code == "invalid_repository":
+                    raise classified
+                raise GitError("invalid_repository", classified.detail or f"not a git repository: {request.repo!r}")
+        except GitError:
+            raise
+        except Exception as exc:
+            raise GitError(
+                "invalid_repository",
+                f"failed to initialize git repository {request.repo!r}: {exc}",
+            ) from exc
         git_version_result = git.run(["version"])
         git_version = git_version_result.stdout.decode("utf-8", "replace").strip() if git_version_result.returncode == 0 else ""
         object_format = git.object_format()
