@@ -185,8 +185,8 @@ def _apply_acceptance_result(
     gaps = tuple(new_gaps)
     coverage = result.coverage
     outcome = result.outcome
-    scope_complete = bool(result.scope_enumeration.get("complete", False))
-    candidates_complete = bool(result.candidate_discovery.get("complete", False))
+    scope_enumeration = dict(result.scope_enumeration)
+    candidate_discovery = dict(result.candidate_discovery)
     sub_results = tuple(
         _apply_acceptance_result(
             sub,
@@ -206,6 +206,40 @@ def _apply_acceptance_result(
         else True
     )
     has_unaccepted = any(not g.accepted for g in gaps)
+    # Only scope-exclusion gaps may recompute completeness.  Analytical gaps
+    # (dynamic targets, solver unknowns, parse failures) leave the check partly
+    # unenumerated even when a reviewer accepts the residual risk.
+    _SCOPE_EXCLUSION_GAPS = frozenset({"unsupported_language", "frontend_capability_missing"})
+    if (
+        gaps
+        and not has_unaccepted
+        and {g.reason_code for g in gaps} <= _SCOPE_EXCLUSION_GAPS
+    ):
+        # Every gap in this check is covered by an active, reviewed acceptance.
+        # That is a scope exclusion, not an unfinished analysis: the remaining
+        # scope was enumerated completely.  Completeness must therefore be
+        # recomputed from the accepted exclusions (which stay in the bundle),
+        # otherwise an acceptance can never affect the verdict.
+        exclusions = [
+            {
+                "reason_code": g.reason_code,
+                "subject": dict(g.subject),
+                "acceptance_id": g.acceptance_id,
+            }
+            for g in gaps
+        ]
+        scope_enumeration = {
+            **scope_enumeration,
+            "complete": True,
+            "accepted_exclusions": exclusions,
+        }
+        candidate_discovery = {
+            **candidate_discovery,
+            "complete": True,
+            "accepted_exclusions": exclusions,
+        }
+    scope_complete = bool(scope_enumeration.get("complete", False))
+    candidates_complete = bool(candidate_discovery.get("complete", False))
     if (
         not has_unaccepted
         and scope_complete
@@ -229,6 +263,8 @@ def _apply_acceptance_result(
         coverage_gaps=gaps,
         coverage=coverage,
         outcome=outcome,
+        scope_enumeration=scope_enumeration,
+        candidate_discovery=candidate_discovery,
         sub_results=sub_results,
     )
 

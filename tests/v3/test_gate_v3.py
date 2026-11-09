@@ -220,6 +220,14 @@ def test_clean_gate_stays_error_until_release_validation(tmp_path, monkeypatch):
 
 @pytest.mark.requires_release_evidence
 def test_clean_gate_passes_when_release_validated(tmp_path):
+    # The marker is a precondition, not a promise: a development build with
+    # absent or stale signed evidence cannot produce a PASS verdict at all, and
+    # regenerating that evidence needs the release signing key.
+    from verifyci.contracts.release_validation import verify_release_validation_evidence
+
+    validated, reason = verify_release_validation_evidence()
+    if not validated:
+        pytest.skip(f"signed release-validation evidence is not valid for this build: {reason}")
     root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
     head = _commit(
         root,
@@ -1332,3 +1340,133 @@ def test_coverage_invariants_and_fail_closed_validation() -> None:
 
 
 
+
+
+def test_unsupported_language_change_is_reported_as_scoped_gap(tmp_path, monkeypatch) -> None:
+    _allow_release_validation(monkeypatch)
+    root, base = _repo(tmp_path, {"app.py": "def add(a, b):\n    return a + b\n"})
+    head = _commit(
+        root,
+        {"app.py": "def add(a, b):\n    return a + b\n", "tool.rs": "fn main() {}\n"},
+    )
+    bundle = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
+    results = _assert_check_results(bundle)
+    for check_id in ("grounding", "deletion", "contract", "semantic"):
+        codes = {g["reason_code"] for g in results[check_id]["coverage_gaps"]}
+        assert "parse_error" not in codes, (check_id, codes)
+    assert any(
+        "unsupported_language" in {g["reason_code"] for g in results[check_id]["coverage_gaps"]}
+        for check_id in ("grounding", "deletion", "contract", "semantic")
+    )
+
+
+def test_accepted_unsupported_language_lifts_scope_completeness() -> None:
+    from verifyci.contracts.model import (
+        AcceptanceRecord,
+        CheckResult,
+        Coverage,
+        CoverageGap,
+        Maturity,
+        Outcome,
+        Tier,
+    )
+    from verifyci.gate.policy import Policy
+    from verifyci.gate.verdict import apply_acceptances
+
+    gap_item = CoverageGap(
+        reason_code="unsupported_language",
+        subject={"path": "tool.rs", "language": "rust"},
+    )
+    acceptance = AcceptanceRecord(
+        record_id="acc-rs",
+        check="semantic",
+        reason_code="unsupported_language",
+        paths=("tool.rs",),
+        symbols=(),
+        reason="rust frontend is out of scope for the accepted diff",
+        approved_by="@security",
+        created="2026-10-01",
+        expires="2026-12-31",
+    )
+    policy = Policy(
+        raw={},
+        source="repo",
+        blob_hash="h1",
+        effective_hash="e1",
+        acceptances={"acc-rs": acceptance},
+    )
+    result = CheckResult(
+        check_id="semantic",
+        check_version=1,
+        tier=Tier.BLOCKING,
+        maturity=Maturity.PROVISIONAL,
+        outcome=Outcome.INCONCLUSIVE,
+        coverage=Coverage.UNKNOWN,
+        evaluated_scope={},
+        scope_enumeration={"complete": False, "languages": ["rust"]},
+        candidate_discovery={"complete": False},
+        applicability_evidence={},
+        method="semantic",
+        method_version=1,
+        coverage_gaps=(gap_item,),
+    )
+    evaluated, accepted, _, _ = apply_acceptances(
+        [result], policy, as_of_date="2026-10-21"
+    )
+    res = evaluated[0]
+    assert res.coverage_gaps[0].accepted is True
+    assert res.outcome == Outcome.PASS
+    assert res.coverage == Coverage.COMPLETE
+    assert res.scope_enumeration["complete"] is True
+    assert res.scope_enumeration["accepted_exclusions"][0]["reason_code"] == "unsupported_language"
+    assert accepted and accepted[0]["disposition"] == "ACCEPTED"
+
+
+def test_resource_limit_failure_is_inconclusive_not_internal_fault() -> None:
+    from verifyci.gate.orchestrator import _fatal_bundle
+
+    bundle = _fatal_bundle(
+        request=GateRequest(repo=Path("."), base="HEAD", head="HEAD"),
+        git=None,
+        code="parse_resource_limit",
+        detail="changed blob exceeds max_file_bytes",
+    )
+    verdict = bundle.payload["verdict"]
+    assert verdict["status"] == "INCONCLUSIVE"
+    assert "parse_resource_limit" in verdict["reason_codes"]
+    assert "internal_fault" not in verdict["reason_codes"]
+
+
+def test_sarif_locations_fingerprints_and_uri(tmp_path, monkeypatch) -> None:
+    _allow_release_validation(monkeypatch)
+    root, base = _repo(tmp_path, {"app.py": "def run():\n    return 1\n"})
+    head = _commit(
+        root,
+        {"app.py": "import subprocess\ndef run():\n    return subprocess.run(['ls'])\n"},
+    )
+    bundle = _gate(root, base, head, generated_at="2026-10-21T00:00:00Z")
+    sarif = bundle_to_sarif(bundle)
+    driver = sarif["runs"][0]["tool"]["driver"]
+    assert driver["informationUri"] == "https://github.com/NeutronZero/VerifyCI"
+    assert driver["version"] == __import__("verifyci").__version__
+    finding = sarif["runs"][0]["results"][0]
+    assert finding["locations"][0]["physicalLocation"]["region"]["startLine"] == 3
+    fingerprint = finding["properties"]["fingerprint"]
+    assert finding["partialFingerprints"]["verifyciFingerprint/v1"] == fingerprint
+
+
+def test_typescript_import_facts_feed_reference_resolution() -> None:
+    from verifyci.checks.deletion import _module_candidates
+    from verifyci.scope.entities import analyze_source
+
+    facts = analyze_source(
+        "src/use.ts",
+        "import { helper as h } from './lib/util';\n"
+        "export function run() { return h(); }\n",
+    )
+    assert facts.supported is True
+    imported = facts.imports[0]
+    assert imported.module == "./lib/util"
+    assert "helper" in imported.names
+    assert ("helper", "h") in imported.aliases
+    assert "src/lib/util" in _module_candidates("./lib/util", "src/use.ts")

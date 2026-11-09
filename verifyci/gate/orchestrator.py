@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from verifyci.checks import contract, deletion, grounding, security, semantic
-from verifyci.checks.base import CheckContext, budget_exhausted_result, error_result
+from verifyci.checks.base import (
+    CheckContext,
+    budget_exhausted_result,
+    error_result,
+    inconclusive_gap_result,
+)
 from verifyci.runtime.budget import DEFAULT_BUDGET, WorkBudget
 from verifyci.runtime.scheduler import run_deterministic_batch
 from verifyci.contracts.manifest import (
@@ -33,7 +38,7 @@ from verifyci.contracts.model import (
     Verdict,
 )
 from verifyci.contracts.names import normalize_repo_path
-from verifyci.contracts.reason_codes import is_fault_code
+from verifyci.contracts.reason_codes import GAPS, is_fault_code
 from verifyci.evidence.bundle import build_bundle, toolchain_fingerprint
 from verifyci.evidence.canonical import canonical_json_bytes
 from verifyci.gate.integrity import (
@@ -181,8 +186,11 @@ def _assumptions(*, codeowners: CodeownersCoverage, policy: Policy) -> list[dict
     if policy.protected_guards or policy.protected_errors:
         assumptions.append(
             {
-                "id": "semantic_shadow_only",
-                "detail": "semantic analysis is advisory in v3.1.10 and emits no solver-backed finding",
+                "id": "semantic_replay_limitations",
+                "detail": (
+                    "solver-backed semantic findings are blocking; witness replay cannot "
+                    "import modules, so traces that require imports remain unconfirmed"
+                ),
             }
         )
     return assumptions
@@ -224,10 +232,18 @@ def _fatal_bundle(
         integrity_paths=integrity_paths,
         target_drift=target_drift,
     )
-    results = [
-        error_result(context=context, check_id=check_id, detail=detail, reason_code=code, diagnostic_code=code)
-        for check_id in CHECK_ORDER
-    ]
+    if is_fault_code(code) or code not in GAPS:
+        results = [
+            error_result(context=context, check_id=check_id, detail=detail, reason_code=code, diagnostic_code=code)
+            for check_id in CHECK_ORDER
+        ]
+    else:
+        # Environmental limits (oversized blobs, rename/revision limits) are not
+        # internal faults: report INCONCLUSIVE with the real gap code.
+        results = [
+            inconclusive_gap_result(context=context, check_id=check_id, reason_code=code, detail=detail)
+            for check_id in CHECK_ORDER
+        ]
     verdict = aggregate(
         results,
         review_reasons=review_reasons,
@@ -813,11 +829,10 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
         )
         review_reasons.update(acceptance_reviews)
 
+        # Release validation is a property of the tool build, never of the
+        # repository under review: a target tree that happens to contain signed
+        # evidence must not be able to clear this fault for a different build.
         is_release_validated, val_diag = verify_release_validation_evidence()
-        if not is_release_validated and request.repo:
-            repo_path = Path(request.repo)
-            if (repo_path / "evidence" / "release" / "release_validation.json").is_file():
-                is_release_validated, val_diag = verify_release_validation_evidence(repo_path)
         verdict = aggregate(
             results,
             review_reasons=review_reasons,
@@ -959,6 +974,16 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             target_drift=target_drift,
         )
     except PolicyError as exc:
+        reporting_policy = policy
+        if reporting_policy is None and exc.source:
+            # The authoritative blob existed but failed to parse; name it so the
+            # bundle does not claim the builtin bootstrap policy was in force.
+            reporting_policy = Policy(
+                raw={},
+                blob_hash=exc.blob_hash,
+                source=exc.source,
+                effective_hash=exc.blob_hash or "",
+            )
         return _fatal_bundle(
             request=request,
             git=git,
@@ -972,7 +997,7 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
                 if policy_changed(entries)
                 else review_reasons
             ),
-            policy=policy,
+            policy=reporting_policy,
             entries=entries,
             target_base=target_base,
             merge_base=merge_base,

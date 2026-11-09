@@ -145,12 +145,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     cache_key: bytes | None = None
     if cache_mode == "authenticated":
         raw_key = os.environ.pop("VERIFYCI_CACHE_KEY", "")
-        if len(raw_key) == 64:
-            try:
-                parsed_key = bytes.fromhex(raw_key)
-                cache_key = parsed_key if len(parsed_key) == 32 else None
-            except ValueError:
-                cache_key = None
+        if len(raw_key) == 64 and all(c in "0123456789abcdef" for c in raw_key):
+            cache_key = bytes.fromhex(raw_key)
+        # Never downgrade to an unauthenticated cache silently: a trusted CI job
+        # that forgot the secret must notice that its cache is not authoritative.
+        if cache_key is None:
+            sys.stderr.write(
+                "warning: --cache-mode authenticated requires VERIFYCI_CACHE_KEY as "
+                "64 lowercase hex characters; continuing without an authenticated cache\n"
+            )
     request = GateRequest(
         repo=repo,
         base=args.base,

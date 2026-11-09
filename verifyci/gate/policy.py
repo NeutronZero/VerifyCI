@@ -54,10 +54,22 @@ _TOP_LEVEL = {
 
 
 class PolicyError(ValueError):
-    def __init__(self, code: str, detail: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        source: str | None = None,
+        blob_hash: str | None = None,
+    ) -> None:
         super().__init__(detail)
         self.code = code
         self.detail = detail
+        # Filled in by parse_policy_bytes so a fatal-policy bundle can still
+        # name the authoritative blob instead of silently substituting the
+        # builtin bootstrap policy.
+        self.source = source
+        self.blob_hash = blob_hash
 
 
 @dataclass(frozen=True, slots=True)
@@ -423,21 +435,24 @@ def _build_policy(data: Mapping[str, Any], *, blob_hash: str | None, source: str
 
 
 def parse_policy_bytes(data: bytes, *, source: str = "target_blob", blob_hash: str | None = None) -> Policy:
+    digest = "sha256:" + (blob_hash or sha256(data).hexdigest()).removeprefix("sha256:")
     try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise PolicyError("invalid_policy", "policy is not valid UTF-8") from exc
-    try:
-        parsed = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as exc:
-        raise PolicyError("invalid_policy", f"invalid TOML: {exc}") from exc
-    if not isinstance(parsed, dict):
-        raise PolicyError("invalid_policy", "policy root must be a table")
-    _validate_policy_object(parsed)
-    hash_value = None
-    if blob_hash:
-        hash_value = "sha256:" + blob_hash.removeprefix("sha256:")
-    return _build_policy(parsed, blob_hash=hash_value, source=source)
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise PolicyError("invalid_policy", "policy is not valid UTF-8") from exc
+        try:
+            parsed = tomllib.loads(text)
+        except tomllib.TOMLDecodeError as exc:
+            raise PolicyError("invalid_policy", f"invalid TOML: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise PolicyError("invalid_policy", "policy root must be a table")
+        _validate_policy_object(parsed)
+    except PolicyError as exc:
+        exc.source = exc.source or source
+        exc.blob_hash = exc.blob_hash or digest
+        raise
+    return _build_policy(parsed, blob_hash=digest if blob_hash else None, source=source)
 
 
 def load_policy_at(git: GitRepo, rev: str) -> Policy | None:
