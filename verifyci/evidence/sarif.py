@@ -70,7 +70,6 @@ def bundle_to_sarif(bundle: EvidenceBundle) -> dict[str, Any]:
     status = str(payload.get("verdict", {}).get("status", "ERROR"))
     notifications = []
     results: list[dict[str, Any]] = []
-    defaulted_lines = 0
     for finding in payload.get("findings", []):
         subject = finding.get("subject", {})
         path = str(subject.get("path") or "")

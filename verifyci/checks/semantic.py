@@ -1217,7 +1217,7 @@ def _analyze_typescript_guard(
                 break
 
         if op_text and op_text not in ("==", "==="):
-            return None
+            return ("unsupported_operator", op_text)
 
         z3_var = z3.String(var_name)
         phi_base = (z3_var == val_str)
@@ -1506,6 +1506,19 @@ def run(context: CheckContext) -> CheckResult:
                                 ],
                             )
                         if analysis is not None:
+                            if isinstance(analysis, tuple) and len(analysis) == 2 and analysis[0] == "unsupported_operator":
+                                gaps.append(
+                                    gap(
+                                        "semantic_alignment_unresolved",
+                                        {
+                                            "check_id": "semantic",
+                                            "path": path,
+                                            "line": b_call_line,
+                                            "detail": f"unsupported_ts_guard_operator:{analysis[1]}",
+                                        },
+                                    )
+                                )
+                                continue
                             b_fn_name, h_fn_name, phi_base, phi_head, model_values, line_num, guard_desc = analysis
                             fn_name = h_fn_name or b_fn_name
                             symbol = f"{mod_name}:{fn_name}"
@@ -1577,17 +1590,7 @@ def run(context: CheckContext) -> CheckResult:
                             )
                             findings.append(finding)
                         else:
-                            gaps.append(
-                                gap(
-                                    "semantic_alignment_unresolved",
-                                    {
-                                        "check_id": "semantic",
-                                        "path": path,
-                                        "line": b_call_line,
-                                        "detail": "ts_guard_unsupported_operator",
-                                    },
-                                )
-                            )
+                            pass
 
     # 2. Python files
     path_counter: list[int] = [0]

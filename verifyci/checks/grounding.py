@@ -34,8 +34,10 @@ def run(context: CheckContext) -> CheckResult:
 
     exceeded, enumerated = entity_budget_exceeded(context)
     if exceeded:
+        budget = getattr(context, "budget", None)
+        max_entities = getattr(budget, "max_entities", 0) if budget is not None else 0
         return budget_exhausted_result(
-            context, "grounding", f"max_entities limit exceeded ({enumerated} > {context.budget.max_entities})"
+            context, "grounding", f"max_entities limit exceeded ({enumerated} > {max_entities})"
         )
     rules = context.policy.deny_changes
     changed_paths = sorted(

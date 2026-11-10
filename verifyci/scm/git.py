@@ -192,7 +192,6 @@ class GitRepo:
             raise GitError("invalid_revision", f"unsafe revision {base!r}/{head!r}")
         if explicit:
             mb = self.resolve_commit(explicit)
-            mb = self.resolve_commit(explicit)
             if not self.is_ancestor(mb, base) or not self.is_ancestor(mb, head):
                 raise GitError("ambiguous_merge_base", "explicit merge base is not a common ancestor")
             return mb
