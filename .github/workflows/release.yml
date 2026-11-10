@@ -60,10 +60,27 @@ jobs:
   create-release:
     needs: build
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate Release Tag
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+        run: |
+          set -euo pipefail
+          python scripts/verifyci_workflow_guards.py --tag "$TAG_NAME"
+          # residual risk: workflow_dispatch path validates tag charset only;
+          # push-tags path additionally requires a signed evidence commit below.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            case "${{ github.ref }}" in refs/tags/*) ;; *) echo "not a tag push" >&2; exit 1 ;; esac
+          fi
+      - name: Require Signed Release Evidence (tag pushes only)
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          python scripts/verifyci_workflow_guards.py --require-evidence-commit . --commit "${{ github.sha }}"
       - name: Download distribution packages
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
         with:

@@ -15,6 +15,25 @@ CORE_INVARIANTS = [
 
 SAFE_TEST_TARGET_RE = re.compile(r"[A-Za-z0-9_./-]+\.py")
 SAFE_TEST_DIR_RE = re.compile(r"tests/(?:[A-Za-z0-9_.-]+/)*")
+SAFE_BASE_REF_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+
+
+def validate_base_ref(base_ref: str) -> str:
+    """Reject base refs that could inject git options or shell metacharacters.
+
+    Applied before `git diff`: a leading dash enables option injection
+    (e.g. --upload-pack=...), and whitespace/metacharacters would smuggle
+    shell syntax into any caller that interpolates the ref.
+    """
+    if not base_ref:
+        raise ValueError("unsafe git base ref: must be non-empty")
+    if len(base_ref) > 256:
+        raise ValueError(f"unsafe git base ref: too long ({len(base_ref)} chars)")
+    if base_ref.startswith("-"):
+        raise ValueError(f"unsafe git base ref: leading dash not allowed: {base_ref[:80]!r}")
+    if not SAFE_BASE_REF_RE.fullmatch(base_ref):
+        raise ValueError(f"unsafe git base ref: {base_ref[:80]!r}")
+    return base_ref
 
 # Source path to test directory mapping
 PATH_MAPPING = {
@@ -38,6 +57,7 @@ FULL_RUN_TRIGGERS = [
 def get_changed_files(base_ref: str = "origin/main") -> list[str]:
     """Retrieve list of files changed against base reference using git."""
     if base_ref:
+        validate_base_ref(base_ref)
         for cmd in (
             ["git", "diff", "--name-only", f"{base_ref}...HEAD"],
             ["git", "diff", "--name-only", f"{base_ref}"],
@@ -120,9 +140,14 @@ def validate_test_targets(targets: list[str]) -> list[str]:
 
 def main():
     base = sys.argv[1] if len(sys.argv) > 1 else "origin/main"
-    files = get_changed_files(base)
-    targets = select_tests(files)
-    validate_test_targets(targets)
+    try:
+        files = get_changed_files(base)
+        targets = select_tests(files)
+        validate_test_targets(targets)
+    except ValueError as exc:
+        # Fail closed and quietly: hostile input must not reach git/pytest.
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(1)
     # One target per line is deliberate: the CI caller transports these through
     # a file and passes them to pytest as an argument array, never GITHUB_OUTPUT.
     print("\n".join(targets))

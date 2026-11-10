@@ -69,6 +69,19 @@ jobs:
           cd trusted-authority
           uv sync --frozen --extra dev
 
+      - name: Validate Worker Image Input
+        run: |
+          set -euo pipefail
+          python trusted-authority/scripts/verifyci_workflow_guards.py --worker-image "${{ inputs.worker_image }}"
+
+      - name: Validate Authority Public Key Config
+        env:
+          RELEASE_AUTHORITY_PUBLIC_KEY_HEX: ${{ vars.RELEASE_AUTHORITY_PUBLIC_KEY_HEX }}
+        run: |
+          set -euo pipefail
+          python trusted-authority/scripts/verifyci_workflow_guards.py --verify-pubkey \
+            "$RELEASE_AUTHORITY_PUBLIC_KEY_HEX" "$RELEASE_AUTHORITY_PUBLIC_KEY_HEX"
+
       - name: Verify Worker Image Provenance
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
