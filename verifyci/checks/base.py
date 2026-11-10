@@ -146,7 +146,16 @@ def entity_budget_exceeded(context: CheckContext) -> tuple[bool, int]:
     check reports ``INCONCLUSIVE`` with a ``budget_exhausted`` gap.
     """
     scope = context.scope
-    enumerated = len(scope.base_entities.union(scope.head_entities))
+    base_raw = getattr(scope, "base_entities", None)
+    head_raw = getattr(scope, "head_entities", None)
+    if base_raw is None or head_raw is None:
+        return False, 0
+    try:
+        base_set = set(base_raw)
+        head_set = set(head_raw)
+    except TypeError:
+        return False, 0
+    enumerated = len(base_set.union(head_set))
     return enumerated > context.budget.max_entities, enumerated
 
 
