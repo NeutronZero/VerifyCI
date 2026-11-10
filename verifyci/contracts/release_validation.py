@@ -26,6 +26,44 @@ from verifyci.contracts.manifest import (
 )
 from verifyci.evidence.canonical import canonical_json_bytes
 
+_SCRUB_EXACT = {
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "CREDENTIAL",
+    "SIGNING_KEY",
+    "PRIVATE_KEY",
+}
+
+
+def _scrubbed_git_env() -> dict[str, str]:
+    env = os.environ.copy()
+    for key in list(env.keys()):
+        upper = key.upper()
+        if (
+            key in _SCRUB_EXACT
+            or upper.endswith(("_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_PASSWD", "_CREDENTIAL"))
+            or any(part in upper for part in ("TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "SIGNING_KEY", "PRIVATE_KEY"))
+        ):
+            env.pop(key, None)
+    env.update(
+        {
+            "GIT_NO_REPLACE_OBJECTS": "1",
+            "GIT_NO_LAZY_FETCH": "1",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_ATTR_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_PAGER": "cat",
+            "LC_ALL": "C",
+        }
+    )
+    return env
+
+
 VALIDATION_SCHEMA = "verifyci.release_validation/v1"
 SUPPORTED_VALIDATION_SCHEMAS = ("verifyci.release_validation/v1", "verifyci.release_validation/v3")
 VALIDATION_REL_PATH = Path("evidence") / "release" / "release_validation.json"
@@ -64,14 +102,21 @@ _CRITICAL_IMPLEMENTATION_FILES = (
     Path("verifyci/evidence/bundle.py"),
     Path("verifyci/evidence/canonical.py"),
     Path("verifyci/evidence/sarif.py"),
+    Path("verifyci/checks/base.py"),
+    Path("verifyci/contracts/model.py"),
+    Path("verifyci/contracts/names.py"),
     Path("verifyci/gate/integrity.py"),
     Path("verifyci/gate/orchestrator.py"),
     Path("verifyci/gate/policy.py"),
+    Path("verifyci/gate/verdict.py"),
     Path("verifyci/index/__init__.py"),
     Path("verifyci/index/cache.py"),
     Path("verifyci/index/facts.py"),
     Path("verifyci/index/provider.py"),
     Path("verifyci/index/symbol_index.py"),
+    Path("verifyci/runtime/budget.py"),
+    Path("verifyci/runtime/scheduler.py"),
+    Path("verifyci/scm/git.py"),
     Path("verifyci/scope/entities.py"),
     Path("verifyci/cli.py"),
     Path("scripts/validate_release.py"),
@@ -120,6 +165,7 @@ def get_commit_sha(repo_root: Path) -> str | None:
             capture_output=True,
             text=True,
             check=False,
+            env=_scrubbed_git_env(),
         )
         if proc.returncode == 0:
             commit = proc.stdout.strip()
@@ -132,6 +178,8 @@ def get_commit_sha(repo_root: Path) -> str | None:
 
 def get_parent_commit(repo_root: Path, commit_sha: str) -> str | None:
     """Resolve parent commit SHA."""
+    if not (isinstance(commit_sha, str) and len(commit_sha) == 40 and all(c in "0123456789abcdef" for c in commit_sha.lower())):
+        return None
     try:
         proc = subprocess.run(
             ["git", "rev-parse", f"{commit_sha}^"],
@@ -139,6 +187,7 @@ def get_parent_commit(repo_root: Path, commit_sha: str) -> str | None:
             capture_output=True,
             text=True,
             check=False,
+            env=_scrubbed_git_env(),
         )
         if proc.returncode == 0:
             parent = proc.stdout.strip()
@@ -151,6 +200,15 @@ def get_parent_commit(repo_root: Path, commit_sha: str) -> str | None:
 
 def get_changed_files_between(repo_root: Path, base_commit: str, head_commit: str) -> list[str]:
     """Return list of relative file paths changed between base_commit and head_commit."""
+    if not (
+        isinstance(base_commit, str)
+        and isinstance(head_commit, str)
+        and len(base_commit) == 40
+        and len(head_commit) == 40
+        and all(c in "0123456789abcdef" for c in base_commit.lower())
+        and all(c in "0123456789abcdef" for c in head_commit.lower())
+    ):
+        return []
     try:
         proc = subprocess.run(
             ["git", "diff", "--name-only", base_commit, head_commit],
@@ -158,6 +216,7 @@ def get_changed_files_between(repo_root: Path, base_commit: str, head_commit: st
             capture_output=True,
             text=True,
             check=False,
+            env=_scrubbed_git_env(),
         )
         if proc.returncode == 0:
             return [line.strip().replace("\\", "/") for line in proc.stdout.splitlines() if line.strip()]

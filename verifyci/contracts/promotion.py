@@ -44,6 +44,9 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _read_json(path: Path) -> tuple[bytes, dict[str, Any]]:
+    size = path.stat().st_size
+    if size > MAX_ARTIFACT_BYTES:
+        raise ValueError(f"artifact exceeds {MAX_ARTIFACT_BYTES} bytes: {path}")
     raw = path.read_bytes()
     if len(raw) > MAX_ARTIFACT_BYTES:
         raise ValueError(f"artifact exceeds {MAX_ARTIFACT_BYTES} bytes: {path}")
@@ -222,6 +225,8 @@ def validate_promotion_chain(spec: Any, repo_root: str | Path | None = None) -> 
                 seen_roles.add(role)
             try:
                 input_path = _inside_root(root, item_path)
+                if input_path.stat().st_size > MAX_ARTIFACT_BYTES:
+                    raise ValueError(f"input exceeds {MAX_ARTIFACT_BYTES} bytes: {item_path}")
                 if _sha256(input_path.read_bytes()) != item["sha256"]:
                     errors.append(f"{spec.check_id}: release input hash mismatch: {item_path}")
             except (OSError, ValueError) as exc:

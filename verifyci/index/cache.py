@@ -168,9 +168,16 @@ class CacheStore:
             return None, False
 
         try:
+            size = path.stat().st_size
+        except OSError:
+            return None, False
+        if size > 8 * 1024 * 1024:
+            raise ValueError(f"cache entry exceeds 8388608 bytes: {path}")
+
+        try:
             with open(path, "r", encoding="utf-8") as f:
                 record = json.load(f)
-        except Exception:
+        except (OSError, ValueError, json.JSONDecodeError):
             return None, False
         if not isinstance(record, dict):
             return None, False

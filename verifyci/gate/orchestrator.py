@@ -617,6 +617,20 @@ def _augment_scope_with_repository(
     )
 
 
+def _safe_detail(exc: BaseException) -> str:
+    """Scrub a caught exception into a safe diagnostic detail string."""
+    import re as _re
+
+    message = str(exc)
+    # Replace absolute filesystem paths with a placeholder.
+    message = _re.sub(r"[A-Za-z]:\\[^\s\"']+", "<path>", message)
+    message = _re.sub(r"(?<![\w])/[^\s\"']{8,}", "<path>", message)
+    # Strip control characters.
+    message = "".join(ch for ch in message if ch.isprintable() or ch in " \t")
+    detail = f"{type(exc).__name__}: {message}".strip()
+    return detail[:200]
+
+
 def _run_checks(
     context: CheckContext, deadline: float | None = None, jobs: int = 1
 ) -> list[CheckResult]:
@@ -630,7 +644,7 @@ def _run_checks(
             return error_result(
                 context=context,
                 check_id=check_id,
-                detail=f"{type(exc).__name__}: {exc}",
+                detail=_safe_detail(exc),
                 reason_code="internal_fault",
                 diagnostic_code="internal_fault",
             )
@@ -921,6 +935,15 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
                     seen.add(key)
                     all_findings.append(finding.to_dict())
         diagnostics = list(waiver_diagnostics) + list(acceptance_diagnostics)
+        parse_warnings = getattr(git, "parse_warnings", None) or []
+        if parse_warnings:
+            diagnostics = diagnostics + [
+                {
+                    "code": "diff_parse_warning",
+                    "count": len(parse_warnings),
+                    "kinds": sorted({w.get("kind", "unknown") for w in parse_warnings}),
+                }
+            ]
         if not is_release_validated:
             if request.candidate_build:
                 diagnostics.append(
@@ -996,6 +1019,25 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             git=git,
             code="cache_integrity_mismatch",
             detail=f"sampled cache entry disagreed with Git-derived recomputation: {exc.entry_key}",
+            toolchain=toolchain,
+            object_format=object_format,
+            as_of_date=as_of,
+            review_reasons=review_reasons,
+            policy=policy,
+            entries=entries,
+            target_base=target_base,
+            merge_base=merge_base,
+            head=head,
+            started=started,
+            integrity_paths=integrity_paths,
+            target_drift=target_drift,
+        )
+    except ValueError as exc:
+        return _fatal_bundle(
+            request=request,
+            git=git,
+            code="cache_key_invalid",
+            detail=f"cache key validation failed: {type(exc).__name__}",
             toolchain=toolchain,
             object_format=object_format,
             as_of_date=as_of,

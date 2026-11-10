@@ -21,8 +21,8 @@ def _line_from(value: Any) -> int | None:
     return None
 
 
-def _finding_line(finding: Mapping[str, Any], ev_payload: Mapping[str, Any]) -> int:
-    """Locate the finding's source line across the shapes each check emits."""
+def _finding_line(finding: Mapping[str, Any], ev_payload: Mapping[str, Any]) -> tuple[int, bool]:
+    """Locate the finding's source line; return (line, defaulted)."""
     subject = finding.get("subject") or {}
     candidates: list[Any] = [subject.get("head_span"), subject, ev_payload]
     for key in ("span", "reference", "call", "source", "sink", "removed", "identity"):
@@ -33,8 +33,8 @@ def _finding_line(finding: Mapping[str, Any], ev_payload: Mapping[str, Any]) -> 
     for candidate in candidates:
         line = _line_from(candidate)
         if line is not None:
-            return line
-    return 1
+            return line, False
+    return 1, True
 
 
 def _rule_map(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -68,7 +68,9 @@ def _level(finding: Mapping[str, Any], status: str) -> str:
 def bundle_to_sarif(bundle: EvidenceBundle) -> dict[str, Any]:
     payload = bundle.payload
     status = str(payload.get("verdict", {}).get("status", "ERROR"))
+    notifications = []
     results: list[dict[str, Any]] = []
+    defaulted_lines = 0
     for finding in payload.get("findings", []):
         subject = finding.get("subject", {})
         path = str(subject.get("path") or "")
@@ -78,7 +80,16 @@ def bundle_to_sarif(bundle: EvidenceBundle) -> dict[str, Any]:
         )
         if not isinstance(ev_payload, Mapping):
             ev_payload = {}
-        line = _finding_line(finding, ev_payload)
+        line, defaulted = _finding_line(finding, ev_payload)
+        if defaulted:
+            defaulted_lines += 1
+            notifications.append(
+                {
+                    "level": "note",
+                    "message": {"text": f"finding line defaulted to 1 for {finding.get('defect_id')}"},
+                    "descriptor": {"id": "line_defaulted"},
+                }
+            )
         fingerprint = finding.get("fingerprint")
         result: dict[str, Any] = {
             "ruleId": finding.get("defect_id"),
@@ -108,7 +119,6 @@ def bundle_to_sarif(bundle: EvidenceBundle) -> dict[str, Any]:
             ]
         results.append(result)
 
-    notifications = []
     for diagnostic in payload.get("diagnostics", []):
         notifications.append(
             {
@@ -147,6 +157,7 @@ def bundle_to_sarif(bundle: EvidenceBundle) -> dict[str, Any]:
         "properties": {
             "verdict": status,
             "payload_hash": bundle.envelope.get("payload_hash"),
+            "payload_hash_verified": bundle.verify_payload_hash(),
             "reason_codes": payload.get("verdict", {}).get("reason_codes", []),
         },
     }
