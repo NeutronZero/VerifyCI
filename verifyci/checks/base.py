@@ -24,6 +24,7 @@ from verifyci.contracts.reason_codes import (
     DEFECT_REASON_CODES,
     EVIDENCE_KINDS_BY_DEFECT,
     GAPS,
+    is_fault_code,
 )
 from verifyci.runtime.budget import DEFAULT_BUDGET, WorkBudget
 from verifyci.scope.entities import ChangedScope
@@ -114,6 +115,12 @@ def make_finding(
         "check_version": CHECK_SPECS[check_id].check_version,
         "toolchain_fingerprint": context.toolchain_fingerprint,
     }
+    rejected = sorted(dict(premises).keys() & required_premises.keys())
+    if rejected:
+        raise ValueError(
+            f"caller premises must not override required provenance keys: "
+            f"{', '.join(rejected)}"
+        )
     return Finding(
         tier=CHECK_SPECS[check_id].tier,
         defect_id=defect_id,
@@ -166,7 +173,23 @@ def unsupported_scope_gaps(
     gaps: list[Any] = []
     for path in paths:
         facts = context.scope.head_facts.get(path) or context.scope.base_facts.get(path)
-        if facts is None or facts.supported:
+        if facts is None:
+            # A changed path with no facts on either revision is complete
+            # unknown, not "covered": record an explicit gap so the check
+            # stays fail-closed instead of silently passing.
+            gaps.append(
+                gap(
+                    "unsupported_language",
+                    {
+                        "check_id": check_id,
+                        "path": path,
+                        "language": None,
+                        "parse_error": "facts_missing",
+                    },
+                )
+            )
+            continue
+        if facts.supported:
             continue
         if facts.parse_error.startswith("parse_resource_limit"):
             reason = "parse_resource_limit"
@@ -236,6 +259,8 @@ def error_result(
     reason_code: str = "not_executed",
     diagnostic_code: str = "internal_fault",
 ) -> CheckResult:
+    if not is_fault_code(reason_code):
+        raise ValueError(f"unknown fault reason code {reason_code!r}")
     return make_result(
         context=context,
         check_id=check_id,
@@ -275,6 +300,8 @@ def inconclusive_gap_result(
     them as gaps keeps the fail-closed verdict (INCONCLUSIVE) without claiming
     an internal fault the operator should page on.
     """
+    if reason_code not in GAPS:
+        raise ValueError(f"unknown coverage gap reason code {reason_code!r}")
     spec = CHECK_SPECS[check_id]
     return CheckResult(
         check_id=check_id,

@@ -19,7 +19,7 @@ from verifyci.contracts.model import (
     VerdictResult,
     VERDICT_EXIT_CODES,
 )
-from verifyci.contracts.reason_codes import FAULTS, is_fault_code
+from verifyci.contracts.reason_codes import FAULTS, is_acceptable_gap, is_fault_code
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +151,10 @@ def _apply_acceptance_result(
     new_gaps: list[CoverageGap] = []
     for item in result.coverage_gaps:
         acceptance = policy.acceptance_for_gap(result.check_id, item)
-        if acceptance is None:
+        # Defense-in-depth: acceptances may only ever apply to gap codes the
+        # registry marks acceptable. Policy loading validates this too, but
+        # direct-constructed results must never re-open this door.
+        if acceptance is None or not is_acceptable_gap(item.reason_code):
             new_gaps.append(item)
             continue
         key = (

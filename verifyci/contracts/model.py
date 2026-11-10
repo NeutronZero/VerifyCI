@@ -9,12 +9,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import functools
+import hmac
 import re
 from typing import Any, Mapping
 
 from verifyci.contracts.reason_codes import (
     DEFECT_REASON_CODES,
     EVIDENCE_KINDS_BY_DEFECT,
+    FAULTS,
+    GAPS,
     ReasonClass,
     is_acceptable_gap,
 )
@@ -351,9 +354,18 @@ class CheckResult:
         if self.outcome == Outcome.ERROR and not (self.diagnostics or self.reason_codes):
             errors.append("ERROR requires a diagnostic or reason code")
         finding_codes = set(DEFECT_REASON_CODES.values())
+        valid_result_codes = set(FAULTS) | set(GAPS)
         for code in self.reason_codes:
             if code in finding_codes:
                 errors.append(f"check reason_codes contains finding code {code}")
+            elif code not in valid_result_codes:
+                errors.append(f"check reason_codes contains unregistered code {code}")
+        for i, gap_item in enumerate(self.coverage_gaps):
+            if gap_item.reason_code not in GAPS:
+                errors.append(
+                    f"coverage_gaps[{i}] contains unregistered gap code "
+                    f"{gap_item.reason_code!r}"
+                )
         for finding in self.findings:
             if DEFECT_REASON_CODES.get(finding.defect_id) != finding.reason_code:
                 errors.append(f"invalid finding reason code {finding.reason_code}")
@@ -514,10 +526,12 @@ class Policy:
                 continue
             if waiver.fingerprint != finding.fingerprint:
                 continue
-            # Fingerprints already bind the check ID; this guard catches a
-            # malformed or manually assembled finding that carries one.
+            # Check identity is required in both directions: a finding whose
+            # subject omits check_id can never bind this waiver, no matter how
+            # identical its fingerprint is. Hand-built findings are the reason
+            # this guard exists at all.
             check_id = finding.subject.get("check_id")
-            if check_id is not None and waiver.check != check_id:
+            if check_id is None or waiver.check != check_id:
                 continue
             return waiver
         return None
@@ -527,9 +541,13 @@ class Policy:
     ) -> AcceptanceRecord | None:
         path = str(gap.subject.get("path") or "")
         symbol = str(gap.subject.get("symbol") or "")
-        subject_check = str(gap.subject.get("check_id") or "")
+        # Single check rule: the acceptances list may tag the check that
+        # emitted the gap (subject carry) or rely on the caller's check id.
+        # The two must never be mixed into an OR, or one check's acceptance
+        # would silently cover another check's gap.
+        required = str(gap.subject.get("check_id") or "") or check_id
         for acceptance in self.acceptances.values():
-            if acceptance.check not in (check_id, subject_check):
+            if acceptance.check != required:
                 continue
             if acceptance.reason_code != gap.reason_code:
                 continue
@@ -567,6 +585,24 @@ class EvidenceBundle:
 
     def to_dict(self) -> dict[str, Any]:
         return {"payload": dict(self.payload), "envelope": dict(self.envelope)}
+
+    def verify_payload_hash(self) -> bool:
+        """Recompute the canonical payload digest and compare it to the envelope.
+
+        The envelope's ``payload_hash`` (see evidence.bundle) binds the payload
+        bytes; verifying it catches post-emission tampering.  ``evidence.canonical``
+        is imported lazily to avoid an import cycle during module bootstrap.
+        """
+        from verifyci.evidence.canonical import payload_hash
+
+        recorded = self.envelope.get("payload_hash") if isinstance(self.envelope, Mapping) else None
+        if not isinstance(recorded, str) or not recorded:
+            return False
+        try:
+            computed = payload_hash(self.payload)
+        except (TypeError, ValueError):
+            return False
+        return hmac.compare_digest(recorded, computed)
 
     @property
     def verdict(self) -> Verdict:
