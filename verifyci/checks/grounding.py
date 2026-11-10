@@ -30,6 +30,13 @@ def _fact_for_path(context: CheckContext, path: str):
 def run(context: CheckContext) -> CheckResult:
     if context.deadline is not None and time.monotonic() > context.deadline:
         return budget_exhausted_result(context, "grounding", "cold_deadline_seconds exceeded")
+    from verifyci.checks.base import entity_budget_exceeded
+
+    exceeded, enumerated = entity_budget_exceeded(context)
+    if exceeded:
+        return budget_exhausted_result(
+            context, "grounding", f"max_entities limit exceeded ({enumerated} > {context.budget.max_entities})"
+        )
     rules = context.policy.deny_changes
     changed_paths = sorted(
         {p for entry in context.entries for p in entry.changed_paths}

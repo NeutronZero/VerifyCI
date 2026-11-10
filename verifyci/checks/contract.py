@@ -280,9 +280,9 @@ def _match_callee_to_entity(
                     return "NO_MATCH"
 
         rec_mod = _normalize_mod(receiver)
-        if rec_mod == target_mod:
-            return "MATCH"
-
+        # Textual module-name equality alone is not import evidence: a local
+        # variable/parameter named like the target module would otherwise
+        # falsely match. Fail closed (AMBIGUOUS) when no import resolved.
         return "AMBIGUOUS"
 
 
@@ -449,6 +449,18 @@ def run(context: CheckContext) -> CheckResult:
                     problems.append("kwargs_removed")
                 if old_sig.keyword_names - new_sig.keyword_names:
                     problems.append("keyword_parameters_removed")
+                if old_sig.params != new_sig.params and not async_changed and not problems and sorted(old_sig.params) == sorted(new_sig.params):
+                    gaps.append(
+                        gap(
+                            "dynamic_target_unresolved",
+                            {
+                                "check_id": "contract",
+                                "symbol": qname,
+                                "path": head.file_path,
+                                "detail": "parameter_order_changed",
+                            },
+                        )
+                    )
                 matched_callers = []
                 target_mod = _normalize_mod(head.file_path)
                 target_symbol = head.qname.split(":", 1)[-1]

@@ -1120,8 +1120,14 @@ def _has_null_check(fn: ast.AST) -> tuple[bool, str]:
             for op, comp in zip(n.ops, n.comparators):
                 if isinstance(op, (ast.IsNot, ast.Is)) and isinstance(comp, ast.Constant) and comp.value is None:
                     var_name = _node_to_var_name(n.left)
-                    if var_name:
+                    if var_name and var_name != "None":
                         return True, var_name
+                # Also handle inverted form `x is None` where the variable is on the right.
+                if isinstance(op, (ast.IsNot, ast.Is)) and isinstance(n.left, ast.Constant) and n.left.value is None:
+                    for c in n.comparators:
+                        var_name = _node_to_var_name(c)
+                        if var_name and var_name != "None":
+                            return True, var_name
     return False, ""
 
 
@@ -1191,6 +1197,7 @@ def _analyze_typescript_guard(
     if b_guard_node and not h_guard_node:
         var_name = "role"
         val_str = "admin"
+        op_text = ""
         for child in b_guard_node.children:
             if child.type == "binary_expression":
                 left_text = ""
@@ -1201,11 +1208,16 @@ def _analyze_typescript_guard(
                             left_text = sub.text.decode("utf-8")
                     elif sub.type in ("string", "string_fragment", "number"):
                         right_text = sub.text.decode("utf-8").strip("\"'")
+                    elif sub.type in ("==", "===", "!=", "!==", ">=", "<=", ">", "<"):
+                        op_text = sub.text.decode("utf-8")
                 if left_text:
                     var_name = left_text.split(".")[-1]
                 if right_text:
                     val_str = right_text
                 break
+
+        if op_text and op_text not in ("==", "==="):
+            return None
 
         z3_var = z3.String(var_name)
         phi_base = (z3_var == val_str)
@@ -1564,6 +1576,18 @@ def run(context: CheckContext) -> CheckResult:
                                 witness_level=WitnessLevel.IR,
                             )
                             findings.append(finding)
+                        else:
+                            gaps.append(
+                                gap(
+                                    "semantic_alignment_unresolved",
+                                    {
+                                        "check_id": "semantic",
+                                        "path": path,
+                                        "line": b_call_line,
+                                        "detail": "ts_guard_unsupported_operator",
+                                    },
+                                )
+                            )
 
     # 2. Python files
     path_counter: list[int] = [0]
@@ -1584,16 +1608,14 @@ def run(context: CheckContext) -> CheckResult:
 
         # Async functions carry the same guard/effect structure; excluding them
         # silently dropped every async candidate from semantic analysis.
-        b_funcs = {
-            f.name: f
-            for f in ast.walk(b_tree)
-            if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
-        h_funcs = {
-            f.name: f
-            for f in ast.walk(h_tree)
-            if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
+        b_funcs: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {}
+        for _f in ast.walk(b_tree):
+            if isinstance(_f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                b_funcs.setdefault(_f.name, []).append(_f)
+        h_funcs: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {}
+        for _f in ast.walk(h_tree):
+            if isinstance(_f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                h_funcs.setdefault(_f.name, []).append(_f)
         h_enclosing_map = _build_enclosing_function_map(h_tree)
 
         # --- Candidate Category 1: Return Tuple Binding Swaps ---
@@ -1659,7 +1681,8 @@ def run(context: CheckContext) -> CheckResult:
                 if solver_res == z3.sat:
                     z3_model = solver.model()
                     model = _extract_model_dict(z3_model)
-                    fn_node = h_funcs.get(fn_name)
+                    fn_node_list = h_funcs.get(fn_name) or []
+                    fn_node = fn_node_list[0] if fn_node_list else None
                     if fn_node:
                         for arg in fn_node.args.args:
                             if arg.arg not in model and not any(k.startswith(f"{arg.arg}.") for k in model):
@@ -1753,8 +1776,8 @@ def run(context: CheckContext) -> CheckResult:
                         # Callee definition compensation check
                         compensated = False
                         if callee_name in b_funcs and callee_name in h_funcs:
-                            bf = b_funcs[callee_name]
-                            hf = h_funcs[callee_name]
+                            bf = b_funcs[callee_name][0]
+                            hf = h_funcs[callee_name][0]
                             bf_params = [a.arg for a in bf.args.args]
                             hf_params = [a.arg for a in hf.args.args]
                             if bf_params != hf_params and sorted(bf_params) == sorted(hf_params):
@@ -1800,7 +1823,8 @@ def run(context: CheckContext) -> CheckResult:
                             if solver_res == z3.sat:
                                 z3_model = solver.model()
                                 model = _extract_model_dict(z3_model)
-                                fn_node = h_funcs.get(caller_fn)
+                                fn_node_list = h_funcs.get(caller_fn) or []
+                                fn_node = fn_node_list[0] if fn_node_list else None
                                 if fn_node:
                                     for arg in fn_node.args.args:
                                         if arg.arg not in model and not any(k.startswith(f"{arg.arg}.") for k in model):
@@ -1906,15 +1930,22 @@ def run(context: CheckContext) -> CheckResult:
             if paths and not path_matches_any(paths, path):
                 continue
             for exc in rule.get("raises", ()):
-                for b_name, b_fn in b_funcs.items():
-                    if context.deadline is not None and time.monotonic() > context.deadline:
-                        return budget_exhausted_result(context, "semantic", "cold_deadline_seconds exceeded")
-                    h_fn = h_funcs.get(b_name)
-                    if not h_fn:
-                        continue
+                used_h_cat3: set[int] = set()
+                for b_name, b_fn_list in b_funcs.items():
+                    for b_fn in b_fn_list:
+                        if context.deadline is not None and time.monotonic() > context.deadline:
+                            return budget_exhausted_result(context, "semantic", "cold_deadline_seconds exceeded")
+                        h_fn = None
+                        for cand in h_funcs.get(b_name, ()):
+                            if id(cand) not in used_h_cat3:
+                                h_fn = cand
+                                used_h_cat3.add(id(cand))
+                                break
+                        if not h_fn:
+                            continue
 
                     try:
-                        b_sites, h_sites = _get_target_sites(b_fn, h_fn, b_name)
+                        b_sites, h_sites = _get_target_sites(b_fn, h_fn, f"{b_name}:{b_fn.lineno}")
                     except BudgetExhaustedError as exc_budget:
                         return budget_exhausted_result(context, "semantic", str(exc_budget))
                     except (UnsupportedExpressionError, UnsupportedControlFlowError) as exc_unsupp:
@@ -2065,15 +2096,22 @@ def run(context: CheckContext) -> CheckResult:
             if paths and not path_matches_any(paths, path):
                 continue
             for eff in rule.get("effects", ()):
-                for b_name, b_fn in b_funcs.items():
-                    if context.deadline is not None and time.monotonic() > context.deadline:
-                        return budget_exhausted_result(context, "semantic", "cold_deadline_seconds exceeded")
-                    h_fn = h_funcs.get(b_name)
-                    if not h_fn:
-                        continue
+                used_h_cat4: set[int] = set()
+                for b_name, b_fn_list in b_funcs.items():
+                    for b_fn in b_fn_list:
+                        if context.deadline is not None and time.monotonic() > context.deadline:
+                            return budget_exhausted_result(context, "semantic", "cold_deadline_seconds exceeded")
+                        h_fn = None
+                        for cand in h_funcs.get(b_name, ()):
+                            if id(cand) not in used_h_cat4:
+                                h_fn = cand
+                                used_h_cat4.add(id(cand))
+                                break
+                        if not h_fn:
+                            continue
 
                     try:
-                        b_sites, h_sites = _get_target_sites(b_fn, h_fn, b_name)
+                        b_sites, h_sites = _get_target_sites(b_fn, h_fn, f"{b_name}:{b_fn.lineno}")
                     except BudgetExhaustedError as exc_budget:
                         return budget_exhausted_result(context, "semantic", str(exc_budget))
                     except (UnsupportedExpressionError, UnsupportedControlFlowError) as exc_unsupp:

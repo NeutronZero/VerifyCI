@@ -36,7 +36,7 @@ def test_patch_path_preserves_genuine_directories():
         b"@@ -1,3 +1,4 @@\n"
         b" context\n"
     )
-    hunks = _parse_patch_hunks(patch_bytes)
+    hunks, _warnings = _parse_patch_hunks(patch_bytes)
     assert "a/real_dir/file.py" in hunks
     assert len(hunks["a/real_dir/file.py"]) == 1
     assert hunks["a/real_dir/file.py"][0].new_start == 1
