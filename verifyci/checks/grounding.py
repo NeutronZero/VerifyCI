@@ -23,10 +23,6 @@ from verifyci.contracts.model import (
 from verifyci.contracts.names import path_matches_any, symbol_matches_any
 
 
-def _fact_for_path(context: CheckContext, path: str):
-    return context.scope.head_facts.get(path) or context.scope.base_facts.get(path)
-
-
 def run(context: CheckContext) -> CheckResult:
     if context.deadline is not None and time.monotonic() > context.deadline:
         return budget_exhausted_result(context, "grounding", "cold_deadline_seconds exceeded")

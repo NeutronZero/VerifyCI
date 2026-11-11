@@ -89,10 +89,6 @@ class FactProvider:
         with self._lock:
             return dict(self.stats)
 
-    def cache_disabled(self) -> None:
-        if self.cache_store is not None:
-            self.cache_store.mode = "none"
-
     def get_entity_spans(self, path: str, blob_hash: str) -> list[dict[str, Any]] | None:
         if self.cache_store:
             components = self.tier1_components(

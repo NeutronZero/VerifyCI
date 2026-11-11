@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 import json
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -20,21 +20,6 @@ from verifyci.contracts.model import (
     VERDICT_EXIT_CODES,
 )
 from verifyci.contracts.reason_codes import FAULTS, is_fault_code
-
-
-@dataclass(frozen=True, slots=True)
-class Aggregation:
-    results: tuple[CheckResult, ...]
-    verdict: VerdictResult
-    applied_waivers: tuple[Mapping[str, Any], ...]
-    accepted_gaps: tuple[Mapping[str, Any], ...]
-    diagnostics: tuple[Mapping[str, Any], ...]
-    review_reasons: tuple[str, ...]
-    blocking_findings: tuple[Finding, ...]
-
-
-def _finding_key(finding: Finding) -> str:
-    return finding.fingerprint or f"{finding.defect_id}:{finding.reason_code}:{dict(finding.subject)}"
 
 
 def _apply_waiver_result(
@@ -402,4 +387,4 @@ def aggregate(
     )
 
 
-__all__ = ["Aggregation", "aggregate", "apply_acceptances", "apply_waivers"]
+__all__ = ["aggregate", "apply_acceptances", "apply_waivers"]

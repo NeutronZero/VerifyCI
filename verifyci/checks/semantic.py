@@ -20,7 +20,7 @@ import re
 import subprocess
 import sys
 import time
-from typing import Any, Mapping, cast
+from typing import Any, cast
 import z3
 
 from verifyci.checks.base import (
@@ -61,33 +61,6 @@ def _local_identity_decorator_names(tree: ast.AST) -> frozenset[str]:
                     if isinstance(ret_val, ast.Name) and ret_val.id == param_name:
                         out.add(node.name)
     return frozenset(out)
-
-_SAFE_BUILTINS: dict[str, Any] = {
-    "abs": abs,
-    "all": all,
-    "any": any,
-    "bool": bool,
-    "dict": dict,
-    "int": int,
-    "len": len,
-    "list": list,
-    "max": max,
-    "min": min,
-    "range": range,
-    "set": set,
-    "str": str,
-    "tuple": tuple,
-    "Exception": Exception,
-    "ValueError": ValueError,
-    "TypeError": TypeError,
-    "PermissionError": PermissionError,
-    "KeyError": KeyError,
-    "AttributeError": AttributeError,
-    "RuntimeError": RuntimeError,
-    "True": True,
-    "False": False,
-    "None": None,
-}
 
 
 # ---------------------------------------------------------------------------
@@ -1006,19 +979,6 @@ def replay_witness(
 # 5. AST Normalization & Body Comparison
 # ---------------------------------------------------------------------------
 
-def _strip_docstrings(tree: ast.AST) -> None:
-    for node in ast.walk(tree):
-        if isinstance(
-            node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module)
-        ):
-            if (
-                node.body
-                and isinstance(node.body[0], ast.Expr)
-                and isinstance(node.body[0].value, ast.Constant)
-                and isinstance(node.body[0].value.value, str)
-            ):
-                node.body = node.body[1:]
-
 
 def _ast_body_digest(tree: ast.AST) -> str:
     """Compute structural AST digest excluding docstrings without full AST deepcopy."""
@@ -1070,20 +1030,6 @@ def _find_enclosing_function(
     if enclosing_map is not None:
         return enclosing_map.get(id(target_node), "")
     return _build_enclosing_function_map(tree).get(id(target_node), "")
-
-
-def _find_function_node(
-    tree: ast.AST,
-    fn_name: str,
-    funcs_by_name: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
-) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
-    """Find a sync or async function AST node matching name."""
-    if funcs_by_name is not None:
-        return funcs_by_name.get(fn_name)
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == fn_name:
-            return node
-    return None
 
 
 def _node_to_var_name(node: ast.AST) -> str:

@@ -10,7 +10,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import subprocess
 from typing import Any, NamedTuple
 import urllib.request
 
@@ -165,67 +164,6 @@ def parse_and_verify_oidc_token(
         workflow_sha=caller_wf_sha,
         workflow_ref=claims.get("workflow_ref", ""),
     ), []
-
-
-def verify_image_attestation_cli(
-    image_uri: str,
-    expected_image_digest: str,
-    expected_builder_workflow_sha: str,
-    expected_source_commit: str,
-) -> tuple[bool, str | None]:
-    """Execute gh attestation verify on OCI image and parse structured JSON result."""
-    cmd = [
-        "gh", "attestation", "verify",
-        image_uri,
-        "--owner", "NeutronZero",
-        "--format", "json",
-    ]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if proc.returncode != 0:
-            return False, f"gh attestation verify failed (exit {proc.returncode}): {proc.stderr.strip()}"
-        records = json.loads(proc.stdout)
-        if not isinstance(records, list) or not records:
-            return False, "empty attestation record list"
-
-        matched = False
-        clean_digest = expected_image_digest.removeprefix("sha256:").lower()
-        for rec in records:
-            stmt = rec.get("verificationResult", {}).get("statement", {})
-            pred = stmt.get("predicate", {})
-            subjects = stmt.get("subject", [])
-            has_sub = any(
-                str(s.get("digest", {}).get("sha256", "")).lower() == clean_digest for s in subjects
-            )
-            if not has_sub:
-                continue
-
-            wf_sha = (
-                pred.get("buildDefinition", {})
-                .get("internalParameters", {})
-                .get("workflow", {})
-                .get("sha", "")
-                .lower()
-            )
-            if wf_sha != expected_builder_workflow_sha.lower():
-                continue
-
-            deps = pred.get("buildDefinition", {}).get("resolvedDependencies", [])
-            src_dep = next((d for d in deps if d.get("uri", "").endswith("/VerifyCI")), None)
-            if not src_dep:
-                continue
-            git_commit = str(src_dep.get("digest", {}).get("gitCommit", "")).lower()
-            if git_commit != expected_source_commit.lower():
-                continue
-
-            matched = True
-            break
-
-        if not matched:
-            return False, "no attestation record matched image digest, builder SHA, and Commit A"
-        return True, None
-    except Exception as exc:
-        return False, f"image attestation verification exception: {exc}"
 
 
 def verify_attestation_timing_window(

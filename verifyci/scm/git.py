@@ -345,17 +345,6 @@ class GitRepo:
                 return self._blob_cache[object_id]
         raise GitError("missing_git_object", f"blob {object_id!r} not found")
 
-    def path_exists_at(self, rev: str, path: str) -> bool:
-        path = normalize_repo_path(path)
-        if not is_safe_repo_path(path):
-            return False
-        with self._cache_lock:
-            cached_tree = self._tree_cache.get(rev)
-            if cached_tree is not None:
-                self._tree_cache.move_to_end(rev)
-                return path in cached_tree
-        return self.read_path_at(rev, path) is not None
-
     def read_path_at(self, rev: str, path: str) -> bytes | None:
         path = normalize_repo_path(path)
         if not is_safe_repo_path(path):

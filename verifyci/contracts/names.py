@@ -65,24 +65,6 @@ def validate_glob_pattern(pattern: str, *, allow_leading_slash: bool = False) ->
     return p
 
 
-def normalize_module_name(path: str, source_roots: Sequence[str] = ()) -> str:
-    p = normalize_repo_path(path)
-    for root in sorted(source_roots, key=len, reverse=True):
-        r = root.strip("/")
-        if r in ("", "."):
-            continue
-        if p == r or p.startswith(r + "/"):
-            p = p[len(r):].lstrip("/")
-            break
-    if p.endswith(".py"):
-        p = p[:-3]
-    if p.endswith("/__init__"):
-        p = p[: -len("/__init__")]
-    elif p == "__init__":
-        p = ""
-    return p.replace("/", ".")
-
-
 def qualify(module: str, qualname: str) -> str:
     return f"{module}:{qualname}" if module else qualname
 
@@ -290,7 +272,6 @@ def symbol_matches_any(patterns: Sequence[str], value: str) -> bool:
 __all__ = [
     "NameError",
     "glob_union_is_universal",
-    "normalize_module_name",
     "normalize_repo_path",
     "parse_qualified_name",
     "path_matches_any",

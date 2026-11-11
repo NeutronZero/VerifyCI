@@ -44,9 +44,6 @@ class CheckContext:
     toolchain_fingerprint: str
     source_roots: tuple[str, ...] = ()
     rename_limit_exceeded: bool = False
-    gate_integrity_paths: tuple[str, ...] = ()
-    target_drift: bool = False
-    release_validated: bool = False
     budget: WorkBudget = DEFAULT_BUDGET
     deadline: float | None = None
     _entries_by_path: dict[str, DiffEntry] | None = field(

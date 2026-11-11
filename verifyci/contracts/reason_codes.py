@@ -229,21 +229,8 @@ def is_acceptable_gap(code: str) -> bool:
     return GAPS.get(code, ReasonCode(code, ReasonClass.GAP)).acceptable
 
 
-def is_finding_code(code: str) -> bool:
-    return code in FINDINGS
-
-
 def is_fault_code(code: str) -> bool:
     return code in FAULTS
-
-
-def is_review_code(code: str) -> bool:
-    return code in REVIEWS
-
-
-def reason_class(code: str) -> ReasonClass | None:
-    entry = ALL_CODES.get(code)
-    return entry.reason_class if entry else None
 
 
 def validate_finding_triple(defect_id: str, code: str, evidence_kind: str) -> bool:
@@ -266,8 +253,5 @@ __all__ = [
     "ReasonCode",
     "is_acceptable_gap",
     "is_fault_code",
-    "is_finding_code",
-    "is_review_code",
-    "reason_class",
     "validate_finding_triple",
 ]

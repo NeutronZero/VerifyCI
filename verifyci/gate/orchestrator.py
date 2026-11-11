@@ -121,8 +121,6 @@ def _context(
     toolchain: str,
     source_roots: Sequence[str],
     rename_limit_exceeded: bool,
-    integrity_paths: Sequence[str],
-    target_drift: bool,
     budget: WorkBudget = DEFAULT_BUDGET,
     deadline: float | None = None,
 ) -> CheckContext:
@@ -139,9 +137,6 @@ def _context(
         toolchain_fingerprint=toolchain,
         source_roots=tuple(source_roots),
         rename_limit_exceeded=rename_limit_exceeded,
-        gate_integrity_paths=tuple(integrity_paths),
-        target_drift=target_drift,
-        release_validated=False,
         budget=budget,
         deadline=deadline,
     )
@@ -231,8 +226,6 @@ def _fatal_bundle(
         toolchain=toolchain,
         source_roots=(),
         rename_limit_exceeded=False,
-        integrity_paths=integrity_paths,
-        target_drift=target_drift,
     )
     if is_fault_code(code) or code not in GAPS:
         results = [
@@ -396,7 +389,6 @@ def _payload(
             }
         )
     return _payload_build(
-        request=request,
         context=context,
         results=results,
         verdict=verdict,
@@ -421,7 +413,6 @@ def _payload(
 
 def _payload_build(
     *,
-    request: GateRequest,
     context: CheckContext,
     results: Sequence[CheckResult],
     verdict,
@@ -832,8 +823,6 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             toolchain=toolchain,
             source_roots=source_roots,
             rename_limit_exceeded=rename_limit_exceeded,
-            integrity_paths=integrity_paths,
-            target_drift=target_drift,
             budget=request.budget,
             deadline=deadline,
         )

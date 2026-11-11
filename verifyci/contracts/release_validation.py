@@ -179,31 +179,6 @@ def compute_implementation_fingerprint(repo_root: Path) -> str:
     return "sha256:" + hasher.hexdigest()
 
 
-def compute_attestation_signature(digest: str, private_key_hex: str | None = None) -> str:
-    """Compute Ed25519 signature over canonical attestation digest using protected private key.
-
-    The private key must be provided via the private_key_hex argument or the
-    VERIFYCI_RELEASE_SIGNING_KEY environment variable. If no private key is available,
-    it fails closed.
-    """
-    key_hex = private_key_hex or os.environ.get("VERIFYCI_RELEASE_SIGNING_KEY")
-    if not key_hex:
-        raise RuntimeError(
-            "Release attestation signing authority unavailable: no private key provided "
-            "and VERIFYCI_RELEASE_SIGNING_KEY is unset."
-        )
-    key_hex = key_hex.strip()
-    try:
-        from cryptography.hazmat.primitives.asymmetric import ed25519
-
-        priv_bytes = bytes.fromhex(key_hex)
-        priv = ed25519.Ed25519PrivateKey.from_private_bytes(priv_bytes)
-        sig = priv.sign(digest.encode("utf-8"))
-        return sig.hex()
-    except Exception as exc:
-        raise RuntimeError(f"Failed to generate Ed25519 attestation signature: {exc}") from exc
-
-
 def verify_release_validation_evidence(
     repo_root: Path | None = None,
     *,
@@ -485,75 +460,12 @@ def verify_release_validation_evidence(
     return True, None
 
 
-def generate_release_validation_record(
-    repo_root: Path,
-    commit_sha: str,
-    measurements: dict[str, Any],
-    signing_key_hex: str | None = None,
-) -> dict[str, Any]:
-    """Generate, sign with Ed25519, and atomically write authoritative release-validation evidence."""
-    payload_body = {
-        "schema": VALIDATION_SCHEMA,
-        "tool_version": TOOL_VERSION,
-        "status": "VALIDATED",
-        "stage": "final",
-        "commit_sha": commit_sha.lower(),
-        "manifest_hash": manifest_hash(),
-        "toolchain_fingerprint": CHECK_SPECS["security"].toolchain_fingerprint,
-        "toolchain_identity": {
-            "python_version": platform.python_version(),
-            "platform": platform.system(),
-            "arch": platform.machine(),
-        },
-        "corpora_hashes": {
-            check_id: spec.corpus_hash
-            for check_id, spec in CHECK_SPECS.items()
-            if spec.corpus_hash
-        },
-        "implementation_fingerprint": compute_implementation_fingerprint(repo_root),
-        "checks_validated": list(CHECK_ORDER),
-        "measurements": measurements,
-    }
-
-    # Compute canonical RFC 8785 digest and Ed25519 signature
-    canonical_bytes = canonical_json_bytes(payload_body)
-    digest = "sha256:" + hashlib.sha256(canonical_bytes).hexdigest()
-    signature = compute_attestation_signature(digest, private_key_hex=signing_key_hex)
-
-    record = dict(payload_body)
-    record["attestation"] = {
-        "issuer": "verifyci.release_pipeline",
-        "algorithm": "ed25519",
-        "key_id": RELEASE_AUTHORITY_KEY_ID,
-        "public_key": RELEASE_AUTHORITY_PUBLIC_KEY_HEX,
-        "digest": digest,
-        "signature": signature,
-    }
-
-    val_file = repo_root / VALIDATION_REL_PATH
-    val_file.parent.mkdir(parents=True, exist_ok=True)
-
-    # Atomic write via temporary file
-    temp_file = val_file.with_name(f"{val_file.name}.tmp.{os.getpid()}")
-    try:
-        temp_file.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        os.replace(temp_file, val_file)
-    except Exception:
-        if temp_file.is_file():
-            temp_file.unlink(missing_ok=True)
-        raise
-
-    return record
-
-
 __all__ = [
     "RELEASE_AUTHORITY_KEY_ID",
     "RELEASE_AUTHORITY_PUBLIC_KEY_HEX",
     "VALIDATION_REL_PATH",
     "VALIDATION_SCHEMA",
-    "compute_attestation_signature",
     "compute_implementation_fingerprint",
-    "generate_release_validation_record",
     "get_changed_files_between",
     "get_commit_sha",
     "get_parent_commit",

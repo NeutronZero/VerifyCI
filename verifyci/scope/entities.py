@@ -15,7 +15,7 @@ import re
 import threading
 from typing import Any, Callable, Mapping, Sequence
 
-from verifyci.contracts.model import DiffEntry, Entity, Hunk
+from verifyci.contracts.model import DiffEntry, Entity
 from verifyci.contracts.names import normalize_repo_path, qualify
 from verifyci.runtime.budget import DEFAULT_BUDGET, WorkBudget
 
@@ -74,19 +74,9 @@ class SourceFacts:
     parse_error: str = ""
     has_dynamic_dispatch: bool = False
     has_unknown_decorator: bool = False
-    _entity_by_qname: dict[str, Entity] | None = field(
-        default=None, init=False, repr=False, compare=False, hash=False
-    )
     _names: set[str] | None = field(
         default=None, init=False, repr=False, compare=False, hash=False
     )
-
-    def entity_by_qname(self) -> dict[str, Entity]:
-        idx = self._entity_by_qname
-        if idx is None:
-            idx = {e.qname: e for e in self.entities}
-            object.__setattr__(self, "_entity_by_qname", idx)
-        return idx
 
     def names(self) -> set[str]:
         nms = self._names
@@ -148,23 +138,6 @@ def _py_language() -> Any:
     return _PY_LANG_OBJECT
 
 
-def _pos_to_byte(data: bytes, lineno: int, col: int) -> int:
-    # Backwards-compatible helper; callers with repeated invocations should
-    # prefer the precomputed prefix table built in _python_entities.
-    if lineno <= 1:
-        return col
-    idx = 0
-    count = 1
-    target = lineno - 1
-    while count <= target:
-        nxt = data.find(b"\n", idx)
-        if nxt == -1:
-            return len(data) + col
-        idx = nxt + 1
-        count += 1
-    return idx + col
-
-
 def _annotation(node: ast.AST | None) -> str:
     if node is None:
         return ""
@@ -172,16 +145,6 @@ def _annotation(node: ast.AST | None) -> str:
         return ast.unparse(node)
     except Exception:
         return ""
-
-
-def _param_kind(arg: ast.arg, index: int, args: ast.arguments) -> str:
-    if arg in args.posonlyargs:
-        return "posonly"
-    if arg in args.args:
-        return "positional"
-    if arg in args.kwonlyargs:
-        return "kwonly"
-    return "positional"
 
 
 def _function_params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[Param, ...]:
@@ -474,7 +437,6 @@ def _python_entities(
     path: str,
     source: str,
     tree: ast.Module,
-    source_roots: Sequence[str],
     exports: frozenset[str] | set[str] | None = None,
     blob_hash: str = "",
 ) -> tuple[Entity, ...]:
@@ -645,7 +607,7 @@ def analyze_python(
     visitor.visit(tree)
     exports_set = frozenset(_collect_all(tree))
     entities = _python_entities(
-        path, source, tree, source_roots, exports=exports_set, blob_hash=blob_hash
+        path, source, tree, exports=exports_set, blob_hash=blob_hash
     )
     return SourceFacts(
         path=path,
@@ -1173,16 +1135,6 @@ def _is_safe_range_tree(tree: ast.Module, start_line: int, end_line: int) -> boo
     return True
 
 
-def _is_safe_range(source: str, start_line: int, end_line: int) -> bool:
-    if not source:
-        return True
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return False
-    return _is_safe_range_tree(tree, start_line, end_line)
-
-
 def is_safe_module_construct(
     base_source: str,
     old_start: int,
@@ -1685,16 +1637,6 @@ def build_changed_scope(
     )
 
 
-def _overlapping(facts: SourceFacts | None, start: int, end: int) -> list[str]:
-    if facts is None:
-        return []
-    return [e.qname for e in facts.entities if e.overlaps(start, end)]
-
-
-def changed_hunks(entry: DiffEntry) -> tuple[Hunk, ...]:
-    return entry.hunks
-
-
 __all__ = [
     "CallSite",
     "ChangedScope",
@@ -1705,7 +1647,6 @@ __all__ = [
     "analyze_source",
     "analyze_typescript",
     "build_changed_scope",
-    "changed_hunks",
     "extract_entities",
     "find_matching_entity",
     "git_blob_id",

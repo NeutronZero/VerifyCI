@@ -135,15 +135,6 @@ def _path_globs(value: Any, field: str, record_id: str) -> tuple[str, ...]:
     return tuple(out)
 
 
-def _qualified(value: Any, field: str, record_id: str) -> str:
-    text = _nonempty_str(value, field, record_id)
-    try:
-        parse_qualified_name(text)
-    except ValueError as exc:
-        raise PolicyError("invalid_policy", f"{record_id}: {field}: {exc}") from exc
-    return text
-
-
 def _qualified_list(value: Any, field: str, record_id: str) -> tuple[str, ...]:
     items = _string_list(value, field, record_id)
     for item in items:

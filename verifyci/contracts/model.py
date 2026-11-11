@@ -89,9 +89,6 @@ class Hunk:
     new_start: int
     new_count: int
 
-    def old_end(self) -> int:
-        return self.old_start + max(self.old_count, 1) - 1
-
     def new_end(self) -> int:
         return self.new_start + max(self.new_count, 1) - 1
 
@@ -139,23 +136,8 @@ class DiffEntry:
         return self.base_blob is None and self.head_blob is not None
 
     @property
-    def is_deleted(self) -> bool:
-        return self.base_blob is not None and self.head_blob is None
-
-    @property
     def is_renamed(self) -> bool:
         return bool(self.base_path and self.head_path and self.base_path != self.head_path)
-
-    def to_input_dict(self) -> dict[str, Any]:
-        return {
-            "status": self.status,
-            "base_path": self.base_path or None,
-            "head_path": self.head_path or None,
-            "base_blob": self.base_blob,
-            "head_blob": self.head_blob,
-            "base_mode": self.base_mode,
-            "head_mode": self.head_mode,
-        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,9 +158,6 @@ class Entity:
     signature_digest: str = ""
     parameters: tuple[tuple[str, str, bool], ...] = ()
     returns: str = ""
-
-    def overlaps(self, start: int, end: int) -> bool:
-        return self.start_line <= end and start <= self.end_line
 
     @property
     def span(self) -> dict[str, int]:
@@ -426,9 +405,6 @@ class WaiverRecord:
     def expired(self, as_of_date: str) -> bool:
         return as_of_date > self.expires
 
-    def not_yet_effective(self, as_of_date: str) -> bool:
-        return as_of_date < self.created
-
     def normalized(self) -> dict[str, Any]:
         return {
             "check": self.check,
@@ -463,9 +439,6 @@ class AcceptanceRecord:
 
     def expired(self, as_of_date: str) -> bool:
         return as_of_date > self.expires
-
-    def not_yet_effective(self, as_of_date: str) -> bool:
-        return as_of_date < self.created
 
     def normalized(self) -> dict[str, Any]:
         return {

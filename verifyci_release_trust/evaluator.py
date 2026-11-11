@@ -10,7 +10,7 @@ import hmac
 import json
 from pathlib import Path
 import random
-from typing import Any, NamedTuple
+from typing import Any
 
 AUTHORITATIVE_SECURITY_CORPUS_HASH = (
     "sha256:8d45f911c72bfda761c21da754b235d7a58768864a1d0087d70d745eeb97b880"
@@ -22,12 +22,6 @@ REQUIRED_DEFECT_FAMILIES = (
     "SEC-DANGEROUS-CALL",
     "SEC-TAINT-TO-SINK",
 )
-
-
-class BenchmarkEvaluationResult(NamedTuple):
-    metrics: dict[str, Any]
-    verdict: str  # PASS, FAIL, INCONCLUSIVE, ERROR
-    errors: list[str]
 
 
 def load_authoritative_public_cases(trusted_root: Path) -> list[dict[str, Any]]:

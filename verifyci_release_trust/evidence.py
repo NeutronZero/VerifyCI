@@ -61,54 +61,6 @@ def compute_file_sha256(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def compute_trusted_measurement_fingerprint(
-    harness_sha: str,
-    measurement_workflow_sha: str,
-    caller_workflow_sha: str,
-    public_corpus_digest: str,
-    private_suite_epoch: str,
-    worker_image_digest: str,
-    dockerfile_sha: str,
-    lockfile_sha: str,
-    supervisor_sha: str,
-) -> str:
-    """Compute composite trusted measurement fingerprint binding all measurement authority inputs."""
-    hasher = hashlib.sha256()
-    hasher.update(b"VERIFYCI-MEASUREMENT-AUTHORITY-V1\n")
-    for val in (
-        harness_sha.lower(),
-        measurement_workflow_sha.lower(),
-        caller_workflow_sha.lower(),
-        public_corpus_digest.lower(),
-        private_suite_epoch.lower(),
-        worker_image_digest.lower(),
-        dockerfile_sha.lower(),
-        lockfile_sha.lower(),
-        supervisor_sha.lower(),
-    ):
-        hasher.update(val.encode("ascii") + b"\n")
-    return "sha256:" + hasher.hexdigest()
-
-
-def compute_trusted_signing_fingerprint(
-    signing_workflow_sha: str,
-    signer_source_sha: str,
-    public_key_id: str,
-    policy_version: str = "v3",
-) -> str:
-    """Compute trusted signing authority fingerprint measured at signing time (non-self-referential)."""
-    hasher = hashlib.sha256()
-    hasher.update(b"VERIFYCI-SIGNING-AUTHORITY-V1\n")
-    for val in (
-        signing_workflow_sha.lower(),
-        signer_source_sha.lower(),
-        public_key_id,
-        policy_version,
-    ):
-        hasher.update(val.encode("utf-8") + b"\n")
-    return "sha256:" + hasher.hexdigest()
-
-
 def build_evidence_bundle(
     *,
     candidate_tree: dict[str, str],

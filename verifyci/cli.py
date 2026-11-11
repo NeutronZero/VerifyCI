@@ -50,17 +50,9 @@ def _validate_cache(
     repo: Path,
     cache_dir: str | None,
     no_cache: bool,
-    *,
-    allow_local_cache: bool,
-    cache_mode: str,
 ) -> tuple[str, str] | None:
     if no_cache or cache_dir is None:
         return None
-    if cache_mode == "local" and not allow_local_cache:
-        return (
-            "invalid_cache_location",
-            "local cache requires --allow-local-cache",
-        )
     resolved = Path(cache_dir).expanduser().resolve(strict=False)
     root = repo.resolve(strict=False)
     try:
@@ -139,8 +131,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo,
         args.cache_dir,
         args.no_cache,
-        allow_local_cache=args.allow_local_cache,
-        cache_mode=cache_mode,
     )
     if cache_error:
         code, detail = cache_error
