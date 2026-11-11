@@ -54,6 +54,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Validate Image Tag Input
+        run: |
+          set -euo pipefail
+          python scripts/verifyci_workflow_guards.py --image-tag "${{ inputs.image_tag || 'latest' }}"
+
       - name: Build and Push Worker Image
         id: build-push
         uses: docker/build-push-action@4f58ea79222b3b150c895db3559223071855e562 # v6

@@ -34,10 +34,14 @@ jobs:
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: |
           set -euo pipefail
-          case "$CANDIDATE_SHA" in
-            (*[!0-9a-f]*|"") echo "invalid candidate SHA: $CANDIDATE_SHA" >&2; exit 1 ;;
-          esac
-          test "${#CANDIDATE_SHA}" -eq 40
+          python scripts/verifyci_workflow_guards.py --rev "$CANDIDATE_SHA"
+
+      - name: Validate Signing Run ID
+        env:
+          SIGNING_RUN_ID: ${{ inputs.signing_run_id }}
+        run: |
+          set -euo pipefail
+          python scripts/verifyci_workflow_guards.py --run-id "$SIGNING_RUN_ID"
 
       - name: Checkout Trusted Authority
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -54,12 +58,21 @@ jobs:
           mkdir -p evidence/release
           gh run download "$SIGNING_RUN_ID" -n evidence-bundle --dir evidence/release
 
+      - name: Validate Authority Public Key
+        run: |
+          set -euo pipefail
+          EMBEDDED=$(python -c "import json; print(json.load(open('evidence/release/release_validation.json'))['attestation']['public_key'])")
+          python scripts/verifyci_workflow_guards.py --verify-pubkey "$EMBEDDED" "${{ vars.RELEASE_AUTHORITY_PUBLIC_KEY_HEX }}"
+
       - name: Cryptographic Pre-Publish Verification
+        env:
+          RELEASE_AUTHORITY_PUBLIC_KEY_HEX: ${{ vars.RELEASE_AUTHORITY_PUBLIC_KEY_HEX }}
         run: |
           set -euo pipefail
           python - <<'PY'
           import json
           import hashlib
+          import os
           from pathlib import Path
           from cryptography.hazmat.primitives.asymmetric import ed25519
 
@@ -73,6 +86,11 @@ jobs:
           assert data.get("schema") in ("verifyci.release_validation/v1", "verifyci.release_validation/v3")
           assert data.get("status") == "VALIDATED"
           att = data["attestation"]
+          pinned = (os.environ.get("RELEASE_AUTHORITY_PUBLIC_KEY_HEX") or "").strip()
+          if not pinned:
+              raise SystemExit("pinned authority public key is empty (vars.RELEASE_AUTHORITY_PUBLIC_KEY_HEX)")
+          if str(att.get("public_key", "")).casefold() != pinned.casefold():
+              raise SystemExit("attestation public key does not match pinned authority key")
           pub = ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(att["public_key"]))
           sig = bytes.fromhex(att["signature"])
 
@@ -97,6 +115,7 @@ jobs:
         run: |
           set -euo pipefail
           BRANCH="${CUSTOM_BRANCH:-evidence/${CANDIDATE_SHA}}"
+          python scripts/verifyci_workflow_guards.py --branch "$BRANCH"
           git config user.name "VerifyCI Release Authority"
           git config user.email "release-authority@verifyci.local"
           git checkout -B "$BRANCH" "$CANDIDATE_SHA"

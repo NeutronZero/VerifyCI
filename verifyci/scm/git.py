@@ -93,6 +93,7 @@ class GitRepo:
             }
         )
         self.env = env
+        self.parse_warnings: list[dict[str, str]] = []
 
     def close(self) -> None:
         """Release adapter state.
@@ -187,6 +188,8 @@ class GitRepo:
         return self._object_format_cached
 
     def merge_base(self, base: str, head: str, explicit: str | None = None) -> str:
+        if not base or not head or base.startswith("-") or head.startswith("-"):
+            raise GitError("invalid_revision", f"unsafe revision {base!r}/{head!r}")
         if explicit:
             mb = self.resolve_commit(explicit)
             if not self.is_ancestor(mb, base) or not self.is_ancestor(mb, head):
@@ -203,6 +206,8 @@ class GitRepo:
         return lines[0]
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
+        if not ancestor or not descendant or ancestor.startswith("-") or descendant.startswith("-"):
+            raise GitError("invalid_revision", f"unsafe revision {ancestor!r}/{descendant!r}")
         result = self.run(["merge-base", "--is-ancestor", ancestor, descendant])
         return result.returncode == 0
 
@@ -346,6 +351,8 @@ class GitRepo:
         raise GitError("missing_git_object", f"blob {object_id!r} not found")
 
     def read_path_at(self, rev: str, path: str) -> bytes | None:
+        if not rev or rev.startswith("-"):
+            raise GitError("invalid_revision", f"unsafe revision {rev!r}")
         path = normalize_repo_path(path)
         if not is_safe_repo_path(path):
             return None
@@ -380,6 +387,8 @@ class GitRepo:
 
     def list_tree(self, rev: str, path: str = "") -> list[tuple[str, str, str, str]]:
         """Return (mode, object_type, object_id, path) for a tree."""
+        if not rev or rev.startswith("-"):
+            raise GitError("invalid_revision", f"unsafe revision {rev!r}")
         args = ["ls-tree", "-r", "-z", rev]
         if path:
             args.extend(["--", path])
@@ -408,6 +417,8 @@ class GitRepo:
     # Diff
     # ------------------------------------------------------------------
     def diff_entries(self, merge_base: str, head: str) -> tuple[list[DiffEntry], bool]:
+        if not merge_base or not head or merge_base.startswith("-") or head.startswith("-"):
+            raise GitError("invalid_revision", f"unsafe revision {merge_base!r}/{head!r}")
         combined = self.run(
             [
                 "diff-tree",
@@ -436,8 +447,10 @@ class GitRepo:
             raw_bytes = combined.stdout
             patch_bytes = b""
 
-        hunks_by_path = _parse_patch_hunks(patch_bytes)
-        records = _parse_raw(raw_bytes)
+        hunks_by_path, patch_warnings = _parse_patch_hunks(patch_bytes)
+        records, raw_warnings = _parse_raw(raw_bytes)
+        self.parse_warnings.extend(patch_warnings)
+        self.parse_warnings.extend(raw_warnings)
         add_candidates = sum(1 for r in records if r[6].startswith("A") or not r[4])
         del_candidates = sum(1 for r in records if r[6].startswith("D") or not r[5])
         stderr_text = combined.stderr.decode("utf-8", "replace").lower()
@@ -501,17 +514,20 @@ class GitRepo:
         return entries, rename_limit_exceeded
 
 
-def _parse_raw(data: bytes) -> list[tuple[str, str, str | None, str | None, str | None, str | None, str]]:
+def _parse_raw(data: bytes) -> tuple[list[tuple[str, str, str | None, str | None, str | None, str | None, str]], list[dict[str, str]]]:
     tokens = [t for t in data.split(b"\0") if t]
     out: list[tuple[str, str, str | None, str | None, str | None, str | None, str]] = []
+    warnings: list[dict[str, str]] = []
     i = 0
     while i < len(tokens):
         header = tokens[i].decode("ascii", "replace")
         i += 1
         if not header.startswith(":"):
+            warnings.append({"kind": "malformed_header", "detail": header[:120]})
             continue
         parts = header[1:].split(" ")
         if len(parts) < 5:
+            warnings.append({"kind": "short_header", "detail": header[:120]})
             continue
         old_mode, new_mode, old_sha, new_sha, status_raw = parts[:5]
         status = status_raw[:1]
@@ -519,12 +535,14 @@ def _parse_raw(data: bytes) -> list[tuple[str, str, str | None, str | None, str 
         new_sha = None if set(new_sha) == {"0"} else new_sha
         if status in ("R", "C"):
             if i + 1 >= len(tokens):
+                warnings.append({"kind": "truncated_rename", "detail": header[:120]})
                 break
             old_path = tokens[i].decode("utf-8", "replace")
             new_path = tokens[i + 1].decode("utf-8", "replace")
             i += 2
         else:
             if i >= len(tokens):
+                warnings.append({"kind": "truncated_entry", "detail": header[:120]})
                 break
             path = tokens[i].decode("utf-8", "replace")
             i += 1
@@ -535,12 +553,13 @@ def _parse_raw(data: bytes) -> list[tuple[str, str, str | None, str | None, str 
             else:
                 old_path = new_path = path
         out.append((old_path, new_path, old_mode, new_mode, old_sha, new_sha, status))
-    return out
+    return out, warnings
 
 
-def _parse_patch_hunks(data: bytes) -> dict[str, tuple[Hunk, ...]]:
+def _parse_patch_hunks(data: bytes) -> tuple[dict[str, tuple[Hunk, ...]], list[dict[str, str]]]:
     text = data.decode("utf-8", "replace")
     out: dict[str, list[Hunk]] = {}
+    warnings: list[dict[str, str]] = []
     old_path = ""
     new_path = ""
     current_key = ""
@@ -559,9 +578,11 @@ def _parse_patch_hunks(data: bytes) -> dict[str, tuple[Hunk, ...]]:
         if line.startswith("@@"):
             m = _HUNK_RE.match(line)
             if not m:
+                warnings.append({"kind": "unparsable_hunk", "detail": line[:120]})
                 continue
             key = new_path or old_path or current_key
             if not key:
+                warnings.append({"kind": "orphan_hunk", "detail": line[:120]})
                 continue
             out.setdefault(key, []).append(
                 Hunk(
@@ -571,7 +592,7 @@ def _parse_patch_hunks(data: bytes) -> dict[str, tuple[Hunk, ...]]:
                     new_count=int(m.group(4) or 1),
                 )
             )
-    return {k: tuple(v) for k, v in out.items()}
+    return {k: tuple(v) for k, v in out.items()}, warnings
 
 
 def _patch_path(value: str, prefix: str | Sequence[str] | None = None) -> str:

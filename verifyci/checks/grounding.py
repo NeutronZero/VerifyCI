@@ -26,6 +26,15 @@ from verifyci.contracts.names import path_matches_any, symbol_matches_any
 def run(context: CheckContext) -> CheckResult:
     if context.deadline is not None and time.monotonic() > context.deadline:
         return budget_exhausted_result(context, "grounding", "cold_deadline_seconds exceeded")
+    from verifyci.checks.base import entity_budget_exceeded
+
+    exceeded, enumerated = entity_budget_exceeded(context)
+    if exceeded:
+        budget = getattr(context, "budget", None)
+        max_entities = getattr(budget, "max_entities", 0) if budget is not None else 0
+        return budget_exhausted_result(
+            context, "grounding", f"max_entities limit exceeded ({enumerated} > {max_entities})"
+        )
     rules = context.policy.deny_changes
     changed_paths = sorted(
         {p for entry in context.entries for p in entry.changed_paths}

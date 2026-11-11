@@ -16,3 +16,4 @@ freebuff-chat-*.md
 *.sarif
 
 .agents/
+.superpowers/

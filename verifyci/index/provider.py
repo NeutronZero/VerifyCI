@@ -37,7 +37,11 @@ class FactProvider:
                 self.stats["misses"] += 1
             return compute()
 
-        value, hit = self.cache_store.get(object_type, components)
+        try:
+            value, hit = self.cache_store.get(object_type, components)
+        except ValueError as exc:
+            key = self.cache_store.entry_key(object_type, components)
+            raise CacheIntegrityMismatch(key) from exc
         if not hit:
             value = compute()
             written = self.cache_store.put(object_type, components, value)
