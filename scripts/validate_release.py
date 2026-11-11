@@ -80,12 +80,9 @@ def verify_corpus_cases(root: Path) -> list[str]:
             errors.append(f"malformed JSON in cases.jsonl: {exc}")
     if len(seen_ids) < 22:
         errors.append(f"expected at least 22 security cases, found {len(seen_ids)}")
-    required_defects = {
-        "SEC-SECRET",
-        "SEC-SECRET-TO-SINK",
-        "SEC-TAINT-TO-SINK",
-        "SEC-DANGEROUS-CALL",
-    }
+    from verifyci_release_trust.evaluator import REQUIRED_DEFECT_FAMILIES
+
+    required_defects = set(REQUIRED_DEFECT_FAMILIES)
     missing_defects = required_defects - defect_families
     if missing_defects:
         errors.append(f"security corpus missing defect families: {missing_defects}")
@@ -120,19 +117,16 @@ def _run_benchmark_cases(root: Path) -> tuple[dict[str, Any] | None, list[str]]:
     if len(cases) < 22:
         return None, [f"expected 22 security benchmark cases, got {len(cases)}"]
 
-    defects = [
-        "SEC-SECRET",
-        "SEC-SECRET-TO-SINK",
-        "SEC-DANGEROUS-CALL",
-        "SEC-TAINT-TO-SINK",
-    ]
-    confusion = {d: {"TP": 0, "FP": 0, "FN": 0, "TN": 0} for d in defects}
+    from verifyci_release_trust.evaluator import (
+        REQUIRED_DEFECT_FAMILIES,
+        aggregate_benchmark_metrics,
+        grade_case_result,
+    )
+
     outcome_matches = 0
-    coverage_matches = 0
     reason_matches = 0
     findings_matches = 0
-    zero_false_blocking = True
-    strict_redaction = True
+    case_records: list[dict[str, Any]] = []
 
     for case in cases:
         cid = case["case_id"]
@@ -143,50 +137,23 @@ def _run_benchmark_cases(root: Path) -> tuple[dict[str, Any] | None, list[str]]:
             errors.append(f"{cid}: execution failed with exception: {exc}")
             continue
 
+        cand_payload = {
+            "outcome": res.outcome.value,
+            "coverage": res.coverage.value,
+            "reason_codes": list(res.reason_codes),
+            "findings": [{"defect_id": f.defect_id, "message": f.message} for f in res.findings],
+        }
+        _, case_errors, case_metrics = grade_case_result(case, cand_payload)
+        errors.extend(case_errors)
+
         if res.outcome.value == exp["outcome"]:
             outcome_matches += 1
-        else:
-            errors.append(f"{cid}: outcome {res.outcome.value} != {exp['outcome']}")
-
-        if res.coverage.value == exp["coverage"]:
-            coverage_matches += 1
-        else:
-            errors.append(f"{cid}: coverage {res.coverage.value} != {exp['coverage']}")
-
-        got_rc = sorted(res.reason_codes)
-        exp_rc = sorted(exp.get("reason_codes", []))
-        if got_rc == exp_rc:
+        if sorted(res.reason_codes) == sorted(exp.get("reason_codes", [])):
             reason_matches += 1
-        else:
-            errors.append(f"{cid}: reason codes {got_rc} != {exp_rc}")
-
-        got_findings = sorted(f.defect_id for f in res.findings)
-        exp_findings = sorted(f["defect_id"] for f in exp.get("findings", []))
-        if got_findings == exp_findings:
+        if sorted(f.defect_id for f in res.findings) == sorted(f["defect_id"] for f in exp.get("findings", [])):
             findings_matches += 1
-        else:
-            errors.append(f"{cid}: findings {got_findings} != {exp_findings}")
 
-        # Check for false blocking on clean control cases
-        if exp["outcome"] != "FAIL" and res.outcome.value == "FAIL":
-            zero_false_blocking = False
-            errors.append(f"{cid}: unexpected blocking failure on non-defective control case")
-
-        got_def_set = set(got_findings)
-        exp_def_set = set(exp_findings)
-        for did in defects:
-            in_got = did in got_def_set
-            in_exp = did in exp_def_set
-            if in_got and in_exp:
-                confusion[did]["TP"] += 1
-            elif in_got and not in_exp:
-                confusion[did]["FP"] += 1
-            elif not in_got and in_exp:
-                confusion[did]["FN"] += 1
-            else:
-                confusion[did]["TN"] += 1
-
-        # Redaction verification on real engine findings
+        # Also verify redacted evidence payload fields and sample secrets
         for finding in res.findings:
             if finding.defect_id in ("SEC-SECRET", "SEC-SECRET-TO-SINK"):
                 payload = finding.evidence.payload
@@ -195,51 +162,34 @@ def _run_benchmark_cases(root: Path) -> tuple[dict[str, Any] | None, list[str]]:
                     or payload.get("source", {}).get("redacted", "")
                 )
                 if "…" not in redacted and "***" not in redacted:
-                    strict_redaction = False
+                    case_metrics["strict_redaction"] = False
                     errors.append(f"{cid}: missing redacted token representation in evidence payload")
-                for secret_sample in [
+                for secret_sample in (
                     "AKIA1234567890ABCDEF",
                     "ghp_123456789012345678901234",
                     "xoxb-1234567890-1234567890123",
-                ]:
+                ):
                     if secret_sample in finding.message or secret_sample in json.dumps(payload):
-                        strict_redaction = False
+                        case_metrics["strict_redaction"] = False
                         errors.append(f"{cid}: unredacted secret leaked in finding output")
+        case_records.append(case_metrics)
 
-    defect_metrics: dict[str, Any] = {}
-    for did in defects:
-        c = confusion[did]
-        tp, fp, fn = c["TP"], c["FP"], c["FN"]
-        prec = tp / (tp + fp) if (tp + fp) > 0 else 1.0
-        rec = tp / (tp + fn) if (tp + fn) > 0 else 1.0
-        defect_metrics[did] = {
-            "precision": prec,
-            "recall": rec,
-            "true_positives": tp,
-            "false_positives": fp,
-            "false_negatives": fn,
-            "true_negatives": c["TN"],
-        }
-        if prec < 1.0:
-            errors.append(f"defect {did} precision {prec:.2f} < 1.0")
-        if rec < 0.90:
-            errors.append(f"defect {did} recall {rec:.2f} < 0.90")
+    benchmark_data = aggregate_benchmark_metrics(case_records)
+    for did in REQUIRED_DEFECT_FAMILIES:
+        d_m = benchmark_data["defects"][did]
+        if d_m["precision"] < 1.0:
+            errors.append(f"defect {did} precision {d_m['precision']:.2f} < 1.0")
+        if d_m["recall"] < 0.90:
+            errors.append(f"defect {did} recall {d_m['recall']:.2f} < 0.90")
 
-    if not zero_false_blocking:
+    if not benchmark_data["zero_false_blocking"]:
         errors.append("benchmark violated zero_false_blocking requirement")
-    if not strict_redaction:
+    if not benchmark_data["strict_redaction"]:
         errors.append("benchmark violated strict_redaction requirement")
 
-    benchmark_data = {
-        "cases_evaluated": len(cases),
-        "outcome_matches": outcome_matches,
-        "coverage_matches": coverage_matches,
-        "reason_code_matches": reason_matches,
-        "findings_matches": findings_matches,
-        "defects": defect_metrics,
-        "zero_false_blocking": zero_false_blocking,
-        "strict_redaction": strict_redaction,
-    }
+    benchmark_data["outcome_matches"] = outcome_matches
+    benchmark_data["reason_code_matches"] = reason_matches
+    benchmark_data["findings_matches"] = findings_matches
     return benchmark_data, errors
 
 
@@ -435,7 +385,7 @@ def generate_measurement_attestation(
     measurements_file: Path | None = None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     """Generate authenticated measurement attestation binding execution context."""
-    from verifyci.evidence.canonical import canonical_json_bytes
+    from verifyci.contracts.canonical import canonical_json_bytes
     from verifyci.contracts.release_validation import get_commit_sha
     import datetime
 
@@ -472,7 +422,6 @@ def generate_measurement_attestation(
     id_req_token = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
     if id_url and id_req_token:
         try:
-            import urllib.parse
             import urllib.request
             sep = "&" if "?" in id_url else "?"
             full_url = f"{id_url}{sep}audience=verifyci-release-authority"
@@ -621,21 +570,23 @@ def main(argv: list[str] | None = None) -> int:
         if CHECK_SPECS[check_id].maturity == Maturity.SHADOW
     ]
 
-    # --- Mode 1: Measure Only ---
-    if args.measure_only:
+    def _emit_failure(errors: list[str], stderr_msg: str = "") -> int:
+        report = {
+            "manifest_errors": errors,
+            "measurement_pipeline": "failed",
+            "release_ready": False,
+            "schema": "verifyci.release_preflight/v1",
+            "shadow_checks": shadow,
+        }
+        print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+        if stderr_msg:
+            print(stderr_msg, file=sys.stderr)
+        return 1
+
+    def _run_measure() -> tuple[dict[str, Any] | None, int]:
         measurement_record, errors = collect_measurements(ROOT)
         if errors or not measurement_record:
-            report = {
-                "manifest_errors": errors,
-                "measurement_pipeline": "failed",
-                "release_ready": False,
-                "schema": "verifyci.release_preflight/v1",
-                "shadow_checks": shadow,
-            }
-            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
-            print("Release blocked: measurement pipeline failed.", file=sys.stderr)
-            return 1
-
+            return None, _emit_failure(errors, "Release blocked: measurement pipeline failed.")
         args.output_measurements.parent.mkdir(parents=True, exist_ok=True)
         temp_file = args.output_measurements.with_name(f"{args.output_measurements.name}.tmp.{os.getpid()}")
         try:
@@ -645,7 +596,6 @@ def main(argv: list[str] | None = None) -> int:
             if temp_file.is_file():
                 temp_file.unlink(missing_ok=True)
             raise
-
         att_record, att_errors = generate_measurement_attestation(
             ROOT,
             measurement_record,
@@ -653,58 +603,13 @@ def main(argv: list[str] | None = None) -> int:
             measurements_file=args.output_measurements,
         )
         if att_errors or not att_record:
-            report = {
-                "manifest_errors": att_errors,
-                "measurement_pipeline": "failed",
-                "release_ready": False,
-                "schema": "verifyci.release_preflight/v1",
-                "shadow_checks": shadow,
-            }
-            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
-            print("Release blocked: failed to generate measurement attestation.", file=sys.stderr)
-            return 1
+            return None, _emit_failure(att_errors, "Release blocked: failed to generate measurement attestation.")
+        return measurement_record, 0
 
-        report = {
-            "commit_sha": measurement_record["commit_sha"],
-            "manifest_errors": [],
-            "measurement_pipeline": "verified",
-            "measurements_file": str(args.output_measurements.as_posix()),
-            "attestation_file": str(args.output_attestation.as_posix()),
-            "release_ready": True,
-            "schema": "verifyci.release_preflight/v1",
-            "shadow_checks": shadow,
-        }
-        print(json.dumps(report, sort_keys=True, separators=(",", ":")))
-        return 0
-
-    # --- Mode 2: Sign Only ---
-    if args.sign_only:
-        signing_key = os.environ.get("VERIFYCI_RELEASE_SIGNING_KEY")
-        if not signing_key:
-            report = {
-                "manifest_errors": ["VERIFYCI_RELEASE_SIGNING_KEY environment variable is missing"],
-                "measurement_pipeline": "failed",
-                "release_ready": False,
-                "schema": "verifyci.release_preflight/v1",
-                "shadow_checks": shadow,
-            }
-            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
-            print("Release blocked: signing authority key is missing.", file=sys.stderr)
-            return 1
-
-        record, errors = sign_measurements(ROOT, args.input_measurements, args.input_attestation, signing_key)
+    def _run_sign(measurements_path: Path, attestation_path: Path, signing_key: str) -> int:
+        record, errors = sign_measurements(ROOT, measurements_path, attestation_path, signing_key)
         if errors or not record:
-            report = {
-                "manifest_errors": errors,
-                "measurement_pipeline": "failed",
-                "release_ready": False,
-                "schema": "verifyci.release_preflight/v1",
-                "shadow_checks": shadow,
-            }
-            print(json.dumps(report, sort_keys=True, separators=(",", ":")))
-            print("Release blocked: signing failed validation.", file=sys.stderr)
-            return 1
-
+            return _emit_failure(errors, "Release blocked: signing failed validation.")
         report = {
             "attestation_digest": record["attestation"]["digest"],
             "commit_sha": record["commit_sha"],
@@ -719,82 +624,37 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, sort_keys=True, separators=(",", ":")))
         return 0
 
-    # --- Mode 3: Combined (Measure then Sign) ---
+    if args.measure_only:
+        measurement_record, status = _run_measure()
+        if status != 0 or not measurement_record:
+            return status
+        report = {
+            "commit_sha": measurement_record["commit_sha"],
+            "manifest_errors": [],
+            "measurement_pipeline": "verified",
+            "measurements_file": str(args.output_measurements.as_posix()),
+            "attestation_file": str(args.output_attestation.as_posix()),
+            "release_ready": True,
+            "schema": "verifyci.release_preflight/v1",
+            "shadow_checks": shadow,
+        }
+        print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+        return 0
+
     signing_key = os.environ.get("VERIFYCI_RELEASE_SIGNING_KEY")
     if not signing_key:
-        report = {
-            "manifest_errors": ["VERIFYCI_RELEASE_SIGNING_KEY environment variable is missing; release attestation cannot be signed"],
-            "measurement_pipeline": "failed",
-            "release_ready": False,
-            "schema": "verifyci.release_preflight/v1",
-            "shadow_checks": shadow,
-        }
-        print(json.dumps(report, sort_keys=True, separators=(",", ":")))
-        print("Release blocked: signing authority key is missing.", file=sys.stderr)
-        return 1
+        return _emit_failure(
+            ["VERIFYCI_RELEASE_SIGNING_KEY environment variable is missing"],
+            "Release blocked: signing authority key is missing.",
+        )
 
-    measurement_record, errors = collect_measurements(ROOT)
-    if errors or not measurement_record:
-        report = {
-            "manifest_errors": errors,
-            "measurement_pipeline": "failed",
-            "release_ready": False,
-            "schema": "verifyci.release_preflight/v1",
-            "shadow_checks": shadow,
-        }
-        print(json.dumps(report, sort_keys=True, separators=(",", ":")))
-        print("Release blocked: independent test or benchmark measurements failed.", file=sys.stderr)
-        return 1
+    if args.sign_only:
+        return _run_sign(args.input_measurements, args.input_attestation, signing_key)
 
-    # Write measurements and attestation
-    args.output_measurements.parent.mkdir(parents=True, exist_ok=True)
-    temp_file = args.output_measurements.with_name(f"{args.output_measurements.name}.tmp.{os.getpid()}")
-    try:
-        temp_file.write_text(json.dumps(measurement_record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        os.replace(temp_file, args.output_measurements)
-    except Exception:
-        if temp_file.is_file():
-            temp_file.unlink(missing_ok=True)
-        raise
-
-    att_record, att_errors = generate_measurement_attestation(ROOT, measurement_record, args.output_attestation)
-    if att_errors or not att_record:
-        report = {
-            "manifest_errors": att_errors,
-            "measurement_pipeline": "failed",
-            "release_ready": False,
-            "schema": "verifyci.release_preflight/v1",
-            "shadow_checks": shadow,
-        }
-        print(json.dumps(report, sort_keys=True, separators=(",", ":")))
-        return 1
-
-    record, errors = sign_measurements(ROOT, args.output_measurements, args.output_attestation, signing_key)
-    if errors or not record:
-        report = {
-            "manifest_errors": errors,
-            "measurement_pipeline": "failed",
-            "release_ready": False,
-            "schema": "verifyci.release_preflight/v1",
-            "shadow_checks": shadow,
-        }
-        print(json.dumps(report, sort_keys=True, separators=(",", ":")))
-        print("Release blocked: signing failed validation.", file=sys.stderr)
-        return 1
-
-    report = {
-        "attestation_digest": record["attestation"]["digest"],
-        "commit_sha": record["commit_sha"],
-        "manifest_errors": [],
-        "measurement_pipeline": "verified",
-        "provenance_verified": True,
-        "release_ready": True,
-        "schema": "verifyci.release_preflight/v1",
-        "shadow_checks": shadow,
-        "validation_evidence": "evidence/release/release_validation.json",
-    }
-    print(json.dumps(report, sort_keys=True, separators=(",", ":")))
-    return 0
+    _, status = _run_measure()
+    if status != 0:
+        return status
+    return _run_sign(args.output_measurements, args.output_attestation, signing_key)
 
 
 if __name__ == "__main__":

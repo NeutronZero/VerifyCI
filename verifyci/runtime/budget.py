@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-import json
 from typing import Any
+
+from verifyci.contracts.canonical import canonical_json_bytes
 
 
 @dataclass(frozen=True)
@@ -39,8 +40,7 @@ class WorkBudget:
         }
 
     def digest(self) -> str:
-        canonical_bytes = json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":")).encode("utf-8")
-        return hashlib.sha256(canonical_bytes).hexdigest()
+        return hashlib.sha256(canonical_json_bytes(self.to_dict())).hexdigest()
 
 
 DEFAULT_BUDGET = WorkBudget()

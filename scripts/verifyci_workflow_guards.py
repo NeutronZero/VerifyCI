@@ -24,7 +24,6 @@ RUN_ID_RE = re.compile(r"^[0-9]{1,20}$")
 IMAGE_TAG_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 WORKER_IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9/_.-]{0,100}@sha256:[0-9a-f]{64}$")
 REV_HEX_RE = re.compile(r"^[0-9a-f]{7,64}$")
-REV_TAG_RE = re.compile(r"^v[0-9][A-Za-z0-9._-]{0,60}$")
 TAG_RE = re.compile(r"^v[0-9][A-Za-z0-9._-]{0,60}$")
 COMMIT40_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
@@ -66,7 +65,7 @@ def validate_worker_image(value: str) -> str:
 
 
 def validate_rev(value: str) -> str:
-    if REV_HEX_RE.fullmatch(value) or REV_TAG_RE.fullmatch(value):
+    if REV_HEX_RE.fullmatch(value) or TAG_RE.fullmatch(value):
         return value
     raise InvalidInput(
         f"invalid rev: {value[:120]!r} is neither 7-64 lowercase hex nor a v-tag"

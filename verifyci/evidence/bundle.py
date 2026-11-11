@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from hashlib import sha256
 import platform
 from typing import Any, Mapping, Sequence
 
+from verifyci.contracts.canonical import canonical_json_bytes, payload_hash
 from verifyci.contracts.manifest import TOOL_VERSION, manifest_hash, manifest_payload
 from verifyci.contracts.model import CheckResult, EvidenceBundle, VerdictResult
-from verifyci.evidence.canonical import canonical_json_bytes, payload_hash
 
 
 BUNDLE_SCHEMA = "verifyci.evidence/v3.1"
@@ -31,7 +30,7 @@ def toolchain_fingerprint(*, git_version: str = "", object_format: str = "") -> 
         "object_format": object_format,
         "manifest": manifest_hash(),
     }
-    return "sha256:" + sha256(canonical_json_bytes(identity)).hexdigest()
+    return payload_hash(identity)
 
 
 def _dedup_mappings(items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from hashlib import sha256
 import threading
 from typing import Any
+from verifyci.contracts.canonical import canonical_json_bytes, payload_hash
+from verifyci.contracts.manifest import CACHE_SCHEMA_VERSION
 from verifyci.index.cache import CacheStore
-from verifyci.evidence.canonical import canonical_json_bytes
 
 
 class CacheIntegrityMismatch(RuntimeError):
@@ -74,11 +74,7 @@ class FactProvider:
         frontend_version: str,
         source_roots: tuple[str, ...],
     ) -> dict[str, Any]:
-        from verifyci.index.cache import CACHE_SCHEMA_VERSION
-
-        policy_digest = "sha256:" + sha256(
-            canonical_json_bytes({"source_roots": list(source_roots)})
-        ).hexdigest()
+        policy_digest = payload_hash({"source_roots": list(source_roots)})
         return {
             "csv": CACHE_SCHEMA_VERSION,
             "tc": toolchain_fingerprint,

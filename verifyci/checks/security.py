@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 import base64
 import collections
-from functools import lru_cache
 import json
 import math
 import re
@@ -14,7 +13,10 @@ from typing import Any, Mapping, Sequence
 
 from verifyci.checks.base import (
     CheckContext,
+    ParsedHeadCache,
     budget_exhausted_result,
+    changed_head_lines,
+    check_deadline,
     gap,
     make_finding,
     make_result,
@@ -29,6 +31,7 @@ from verifyci.contracts.model import (
     Outcome,
 )
 from verifyci.contracts.names import glob_match, path_matches_any
+from verifyci.scope.parsers import SUPPORTED_CODE_EXTENSIONS, path_suffix
 
 
 _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -117,7 +120,6 @@ def _assignment_var_name(line: str) -> str:
     return name if name.isidentifier() else ""
 
 
-@lru_cache(maxsize=4096)
 def _entropy(value: str) -> float:
     if not value:
         return 0.0
@@ -174,22 +176,6 @@ def _valid_secret(kind: str, token: str) -> tuple[bool, str]:
     return len(token) >= 12, "generic_length_charset"
 
 
-def _changed_head_lines(context: CheckContext) -> dict[str, set[int]]:
-    out: dict[str, set[int]] = {}
-    for entry in context.entries:
-        if not entry.head_path or entry.is_binary or entry.is_submodule or entry.is_symlink:
-            continue
-        if entry.is_added:
-            count = len(entry.head_source.splitlines())
-            out.setdefault(entry.head_path, set()).update(range(1, count + 1))
-            continue
-        lines = out.setdefault(entry.head_path, set())
-        for hunk in entry.hunks:
-            for line in range(hunk.new_start, hunk.new_end() + 1):
-                lines.add(line)
-    return out
-
-
 def _sub_result(
     context: CheckContext,
     *,
@@ -227,42 +213,12 @@ def _sub_result(
     )
 
 
-def _get_lines(entry: Any, cache: dict[int, list[str]] | None) -> list[str]:
-    if cache is not None:
-        lines = cache.get(id(entry))
-        if lines is None:
-            lines = entry.head_source.splitlines() if entry.head_source else []
-            cache[id(entry)] = lines
-        return lines
-    return entry.head_source.splitlines() if entry.head_source else []
-
-
-def _get_ast(entry: Any, cache: dict[int, ast.Module | None] | None) -> ast.Module | None:
-    if cache is not None:
-        if id(entry) in cache:
-            return cache[id(entry)]
-        tree = None
-        if entry.head_source:
-            try:
-                tree = ast.parse(entry.head_source)
-            except SyntaxError:
-                tree = None
-        cache[id(entry)] = tree
-        return tree
-    if entry.head_source:
-        try:
-            return ast.parse(entry.head_source)
-        except SyntaxError:
-            return None
-    return None
-
-
 def _secret_sub(
     context: CheckContext,
-    lines_cache: dict[int, list[str]] | None = None,
-    ast_cache: dict[int, ast.Module | None] | None = None,
+    head_cache: ParsedHeadCache | None = None,
 ) -> CheckResult:
-    changed = _changed_head_lines(context)
+    cache = head_cache or ParsedHeadCache()
+    changed = changed_head_lines(context)
     text_entries = [
         entry for entry in context.entries
         if (entry.head_path or entry.base_path)
@@ -300,7 +256,7 @@ def _secret_sub(
         assigned_secrets: dict[str, tuple[int, str, str]] = {}
         sink_aliases: dict[str, str] = {}
         if path.endswith(".py"):
-            tree = _get_ast(entry, ast_cache)
+            tree = cache.ast_tree(entry)
             if tree is not None:
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Import):
@@ -313,7 +269,7 @@ def _secret_sub(
                             target = f"{mod}.{name.name}" if mod else name.name
                             sink_aliases[name.asname or name.name] = target
 
-        entry_lines = _get_lines(entry, lines_cache)
+        entry_lines = cache.lines(entry)
         for line_number, line in enumerate(entry_lines, start=1):
             if line_number not in line_numbers:
                 continue
@@ -566,10 +522,10 @@ def _secret_sub(
 
 def _dangerous_sub(
     context: CheckContext,
-    lines_cache: dict[int, list[str]] | None = None,
-    ast_cache: dict[int, ast.Module | None] | None = None,
+    head_cache: ParsedHeadCache | None = None,
 ) -> CheckResult:
-    changed = _changed_head_lines(context)
+    cache = head_cache or ParsedHeadCache()
+    changed = changed_head_lines(context)
     findings = []
     gaps: list[CoverageGap] = []
     checked = 0
@@ -594,11 +550,11 @@ def _dangerous_sub(
         if not path_changed:
             continue
 
-        entry_lines = _get_lines(entry, lines_cache)
+        entry_lines = cache.lines(entry)
 
         # AST syntax-aware analysis for Python files
         if path.endswith(".py"):
-            tree = _get_ast(entry, ast_cache)
+            tree = cache.ast_tree(entry)
             if tree is not None:
                 aliases: dict[str, str] = {}
                 calls: list[ast.Call] = []
@@ -836,8 +792,9 @@ def _taint_budget_exhausted(context: CheckContext, detail: str) -> CheckResult:
 
 def _taint_sub(
     context: CheckContext,
-    lines_cache: dict[int, list[str]] | None = None,
+    head_cache: ParsedHeadCache | None = None,
 ) -> CheckResult:
+    cache = head_cache or ParsedHeadCache()
     if not context.policy.taint_sources or not context.policy.taint_sinks:
         return _sub_result(
             context,
@@ -859,7 +816,7 @@ def _taint_sub(
             context,
             f"max_taint_depth limit exceeded (required {required_depth} > {budget.max_taint_depth})",
         )
-    changed = _changed_head_lines(context)
+    changed = changed_head_lines(context)
     findings = []
     gaps = unsupported_scope_gaps(
         context,
@@ -875,11 +832,11 @@ def _taint_sub(
         path = entry.head_path
         if not path or entry.is_binary or entry.is_submodule or entry.is_symlink:
             continue
-        if path.rsplit(".", 1)[-1].lower() not in ("py", "ts", "tsx", "js", "jsx"):
+        if path_suffix(path) not in SUPPORTED_CODE_EXTENSIONS:
             continue
         if _taint_excluded(context.policy, path):
             continue
-        entry_lines = _get_lines(entry, lines_cache)
+        entry_lines = cache.lines(entry)
         for line_number, line in enumerate(entry_lines, start=1):
             if line_number not in changed.get(path, set()):
                 continue
@@ -969,15 +926,14 @@ _COVERAGE_ORDER = {Coverage.UNKNOWN: 3, Coverage.PARTIAL: 2, Coverage.COMPLETE: 
 
 
 def run(context: CheckContext) -> CheckResult:
-    if context.deadline is not None and time.monotonic() > context.deadline:
-        return budget_exhausted_result(context, "security", "cold_deadline_seconds exceeded")
-    lines_cache: dict[int, list[str]] = {}
-    ast_cache: dict[int, ast.Module | None] = {}
+    if expired := check_deadline(context, "security"):
+        return expired
+    head_cache = ParsedHeadCache()
     try:
         subs = [
-            _secret_sub(context, lines_cache=lines_cache, ast_cache=ast_cache),
-            _dangerous_sub(context, lines_cache=lines_cache, ast_cache=ast_cache),
-            _taint_sub(context, lines_cache=lines_cache),
+            _secret_sub(context, head_cache=head_cache),
+            _dangerous_sub(context, head_cache=head_cache),
+            _taint_sub(context, head_cache=head_cache),
         ]
     except TimeoutError as exc:
         return budget_exhausted_result(context, "security", str(exc))

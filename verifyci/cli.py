@@ -46,22 +46,6 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _validate_cache(
-    repo: Path,
-    cache_dir: str | None,
-    no_cache: bool,
-) -> tuple[str, str] | None:
-    if no_cache or cache_dir is None:
-        return None
-    resolved = Path(cache_dir).expanduser().resolve(strict=False)
-    root = repo.resolve(strict=False)
-    try:
-        resolved.relative_to(root)
-    except ValueError:
-        return None
-    return ("invalid_cache_location", "cache directory must be outside the working tree")
-
-
 def _write_output(text: str, output: str | None) -> None:
     if output:
         path = Path(output)
@@ -114,8 +98,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stderr.write("jobs must be >= 1\n")
         return 2
 
+    from verifyci.contracts.canonical import is_valid_hex64
     from verifyci.evidence.sarif import bundle_to_sarif
-    from verifyci.gate.orchestrator import GateRequest, run_gate
+    from verifyci.gate.orchestrator import GateRequest, run_gate, validate_cache_location
 
     repo = Path(args.repo)
     cache_mode = args.cache_mode or ("local" if args.cache_dir else "none")
@@ -127,11 +112,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if cache_mode == "local" and not args.allow_local_cache:
         sys.stderr.write("local cache requires --allow-local-cache\n")
         return 3
-    cache_error = _validate_cache(
-        repo,
-        args.cache_dir,
-        args.no_cache,
-    )
+    cache_error = None if args.no_cache else validate_cache_location(repo, args.cache_dir)
     if cache_error:
         code, detail = cache_error
         sys.stderr.write(json.dumps({"error": code, "detail": detail}) + "\n")
@@ -139,7 +120,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     cache_key: bytes | None = None
     if cache_mode == "authenticated":
         raw_key = os.environ.pop("VERIFYCI_CACHE_KEY", "")
-        if len(raw_key) == 64 and all(c in "0123456789abcdef" for c in raw_key):
+        if is_valid_hex64(raw_key):
             cache_key = bytes.fromhex(raw_key)
         # Never downgrade to an unauthenticated cache silently: a trusted CI job
         # that forgot the secret must notice that its cache is not authoritative.

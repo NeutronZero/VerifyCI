@@ -3,24 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from hashlib import sha256
 from typing import Any, Mapping
 
+from verifyci.contracts.canonical import (
+    canonical_json_bytes,
+    payload_hash,
+    sha256_prefixed,
+)
 from verifyci.contracts.capabilities import Capability, validate_capabilities
 from verifyci.contracts.model import Maturity, Tier
 from verifyci.contracts.reason_codes import DEFECT_REASON_CODES
 from verifyci.contracts.promotion import validate_promotion_chain
-from verifyci.evidence.canonical import canonical_json_bytes
-from verifyci.index.cache import (
-    CACHE_SAMPLE_RATE_DENOMINATOR,
-    CACHE_SAMPLE_RATE_NUMERATOR,
-    CACHE_SAMPLE_VERSION,
-    CACHE_SCHEMA_VERSION,
-)
 
 
 from verifyci import __version__ as TOOL_VERSION  # single source of truth
 MANIFEST_SCHEMA = "verifyci.manifest/v3.1"
+CACHE_SCHEMA_VERSION = 1
+VALID_CACHE_MODES = frozenset({"none", "local", "authenticated"})
+CACHE_SAMPLE_VERSION = "verifyci-cache-sample-v1"
+CACHE_SAMPLE_RATE_NUMERATOR = 5
+CACHE_SAMPLE_RATE_DENOMINATOR = 100
 # The implementation is an M0 candidate.  Release validation artifacts are
 # produced separately; this flag deliberately prevents the CLI from presenting
 # a development build as a release-validated gate.
@@ -80,7 +82,7 @@ class CheckSpec:
 
     @property
     def spec_core_hash(self) -> str:
-        return "sha256:" + sha256(canonical_json_bytes(self._spec_core())).hexdigest()
+        return payload_hash(self._spec_core())
 
     def to_dict(self, *, include_spec_core_hash: bool = True) -> dict[str, Any]:
         data = {
@@ -342,7 +344,7 @@ def manifest_bytes() -> bytes:
 
 
 def manifest_hash() -> str:
-    return "sha256:" + sha256(manifest_bytes()).hexdigest()
+    return sha256_prefixed(manifest_bytes())
 
 
 def validate_manifest() -> list[str]:

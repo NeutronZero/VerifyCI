@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import time
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from verifyci.checks.base import (
     CheckContext,
     budget_exhausted_result,
+    check_deadline,
+    entity_budget_exceeded,
     gap,
     make_finding,
     make_result,
@@ -17,16 +18,67 @@ from verifyci.contracts.model import (
     CheckResult,
     Coverage,
     EvidenceKind,
+    Finding,
     Outcome,
     WitnessLevel,
 )
 from verifyci.contracts.names import path_matches_any, symbol_matches_any
 
 
+def _make_grounding_finding(
+    context: CheckContext,
+    *,
+    rule_ids: Sequence[str],
+    rules: Mapping[str, Mapping[str, Any]],
+    file_path: str,
+    symbol: str,
+    kind: str,
+    entry: Any,
+    witness_level: WitnessLevel,
+    message: str,
+    extra_payload: Mapping[str, Any] = (),
+) -> Finding:
+    ordered_rules = sorted(rule_ids)
+    primary_rule_id = ordered_rules[0]
+    payload: dict[str, Any] = {
+        "primary_rule_id": primary_rule_id,
+        "matched_rule_ids": ordered_rules,
+        "rule_ids": ordered_rules,
+        "matched_subject": symbol if kind == "symbol" else file_path,
+        "matched_kind": kind,
+        "base_blob": entry.base_blob if entry else None,
+        "head_blob": entry.head_blob if entry else None,
+        **dict(extra_payload),
+    }
+    return make_finding(
+        context=context,
+        check_id="grounding",
+        defect_id="GRD-UNGROUNDED-EDIT",
+        subject={
+            "file": file_path,
+            "path": file_path,
+            "kind": kind,
+            "symbol": symbol,
+            "entity": symbol,
+        },
+        premises={
+            "rule_ids": ordered_rules,
+            "rule_reasons": {rule_id: rules[rule_id].get("reason", "") for rule_id in ordered_rules},
+        },
+        evidence_kind=EvidenceKind.PROVENANCE,
+        evidence_payload=payload,
+        witness_level=witness_level,
+        message=message,
+        remediation=(
+            "Remove this change, or obtain code-owner review and update the "
+            "policy through a separate target-branch policy change."
+        ),
+    )
+
+
 def run(context: CheckContext) -> CheckResult:
-    if context.deadline is not None and time.monotonic() > context.deadline:
-        return budget_exhausted_result(context, "grounding", "cold_deadline_seconds exceeded")
-    from verifyci.checks.base import entity_budget_exceeded
+    if expired := check_deadline(context, "grounding"):
+        return expired
 
     exceeded, enumerated = entity_budget_exceeded(context)
     if exceeded:
@@ -58,22 +110,13 @@ def run(context: CheckContext) -> CheckResult:
     }
     findings = []
     for path, rule_ids in sorted(path_matches.items()):
-        if context.deadline is not None and time.monotonic() > context.deadline:
-            return budget_exhausted_result(context, "grounding")
+        if expired := check_deadline(context, "grounding"):
+            return expired
         entry = entries_by_changed_path.get(path)
-        ordered_rules = sorted(rule_ids)
-        primary_rule_id = ordered_rules[0]
+        primary_rule_id = min(rule_ids)
         is_binary = entry.is_binary if entry else False
         witness_level = WitnessLevel.NONE if is_binary else WitnessLevel.SOURCE
-        payload = {
-            "primary_rule_id": primary_rule_id,
-            "matched_rule_ids": ordered_rules,
-            "rule_ids": ordered_rules,
-            "matched_subject": path,
-            "matched_kind": "path",
-            "base_blob": entry.base_blob if entry else None,
-            "head_blob": entry.head_blob if entry else None,
-        }
+        extra_payload: dict[str, Any] = {}
         if is_binary:
             content = b""
             if entry is not None:
@@ -92,79 +135,44 @@ def run(context: CheckContext) -> CheckResult:
                         content = entry.head_source.encode("utf-8")
                     elif entry.base_source:
                         content = entry.base_source.encode("utf-8")
-            payload["content_sha256"] = hashlib.sha256(content).hexdigest()
+            extra_payload["content_sha256"] = hashlib.sha256(content).hexdigest()
         message = (
             f"Changed binary path {path} matches active deny_changes rule {primary_rule_id}"
             if is_binary
             else f"Changed path {path} matches active deny_changes rule {primary_rule_id}"
         )
         findings.append(
-            make_finding(
-                context=context,
-                check_id="grounding",
-                defect_id="GRD-UNGROUNDED-EDIT",
-                subject={
-                    "file": path,
-                    "path": path,
-                    "kind": "path",
-                    "symbol": "",
-                    "entity": "",
-                },
-                premises={
-                    "rule_ids": ordered_rules,
-                    "rule_reasons": {rule_id: rules[rule_id].get("reason", "") for rule_id in ordered_rules},
-                },
-                evidence_kind=EvidenceKind.PROVENANCE,
-                evidence_payload=payload,
+            _make_grounding_finding(
+                context,
+                rule_ids=tuple(rule_ids),
+                rules=rules,
+                file_path=path,
+                symbol="",
+                kind="path",
+                entry=entry,
                 witness_level=witness_level,
                 message=message,
-                remediation=(
-                    "Remove this change, or obtain code-owner review and update the "
-                    "policy through a separate target-branch policy change."
-                ),
+                extra_payload=extra_payload,
             )
         )
     for symbol, rule_ids in sorted(symbol_matches.items()):
-        if context.deadline is not None and time.monotonic() > context.deadline:
-            return budget_exhausted_result(context, "grounding")
+        if expired := check_deadline(context, "grounding"):
+            return expired
         entity = context.scope.entity(symbol)
         file_path = entity.file_path if entity else ""
         entry = entries_by_changed_path.get(file_path)
-        ordered_rules = sorted(rule_ids)
-        primary_rule_id = ordered_rules[0]
-        payload = {
-            "primary_rule_id": primary_rule_id,
-            "matched_rule_ids": ordered_rules,
-            "rule_ids": ordered_rules,
-            "matched_subject": symbol,
-            "matched_kind": "symbol",
-            "base_blob": entry.base_blob if entry else None,
-            "head_blob": entry.head_blob if entry else None,
-        }
+        primary_rule_id = min(rule_ids)
         findings.append(
-            make_finding(
-                context=context,
-                check_id="grounding",
-                defect_id="GRD-UNGROUNDED-EDIT",
-                subject={
-                    "file": file_path,
-                    "path": file_path,
-                    "kind": "symbol",
-                    "symbol": symbol,
-                    "entity": symbol,
-                },
-                premises={
-                    "rule_ids": ordered_rules,
-                    "rule_reasons": {rule_id: rules[rule_id].get("reason", "") for rule_id in ordered_rules},
-                },
-                evidence_kind=EvidenceKind.PROVENANCE,
-                evidence_payload=payload,
+            _make_grounding_finding(
+                context,
+                rule_ids=tuple(rule_ids),
+                rules=rules,
+                file_path=file_path,
+                symbol=symbol,
+                kind="symbol",
+                entry=entry,
                 witness_level=WitnessLevel.SOURCE,
                 message=f"Changed entity {symbol} matches active deny_changes rule {primary_rule_id}",
-                remediation=(
-                    "Remove this change, or obtain code-owner review and update the "
-                    "policy through a separate target-branch policy change."
-                ),
             )
         )
 

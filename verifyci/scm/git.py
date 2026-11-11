@@ -17,6 +17,7 @@ from typing import Sequence
 
 from verifyci.contracts.model import DiffEntry, Hunk
 from verifyci.contracts.names import is_safe_repo_path, normalize_repo_path
+from verifyci.scm.env import hardened_git_command, scrubbed_git_env
 
 
 class GitError(RuntimeError):
@@ -31,26 +32,6 @@ _LFS_POINTER = b"version https://git-lfs.github.com/spec/v1"
 _MAX_BLOB_BYTES = 64 * 1024 * 1024
 _BATCH_TIMEOUT_SECONDS = 120
 _MAX_CACHE_SIZE = 5000
-
-_SCRUB_EXACT = frozenset(
-    {
-        "VERIFYCI_RELEASE_SIGNING_KEY",
-        "VERIFYCI_RELEASE_VALIDATION_PATH",
-        "GITHUB_TOKEN",
-        "GH_TOKEN",
-        "GIT_ASKPASS",
-        "SSH_AUTH_SOCK",
-    }
-)
-_SCRUB_PATTERNS = (
-    "TOKEN",
-    "SECRET",
-    "PASSWORD",
-    "PASSWD",
-    "CREDENTIAL",
-    "SIGNING_KEY",
-    "PRIVATE_KEY",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,30 +50,7 @@ class GitRepo:
         self._blob_cache: OrderedDict[str, bytes] = OrderedDict()
         self._tree_cache: OrderedDict[str, dict[str, tuple[str, str, str, str]]] = OrderedDict()
         self._object_format_cached: str | None = None
-        env = os.environ.copy()
-        for k in list(env.keys()):
-            k_upper = k.upper()
-            if (
-                k in _SCRUB_EXACT
-                or k_upper.endswith(("_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_PASSWD", "_CREDENTIAL"))
-                or any(part in k_upper for part in _SCRUB_PATTERNS)
-            ):
-                env.pop(k, None)
-        env.update(
-            {
-                "GIT_NO_REPLACE_OBJECTS": "1",
-                "GIT_NO_LAZY_FETCH": "1",
-                "GIT_CONFIG_NOSYSTEM": "1",
-                "GIT_CONFIG_GLOBAL": self._empty_config,
-                "GIT_CONFIG_SYSTEM": self._empty_config,
-                "GIT_ATTR_NOSYSTEM": "1",
-                "GIT_TERMINAL_PROMPT": "0",
-                "GIT_OPTIONAL_LOCKS": "0",
-                "GIT_PAGER": "cat",
-                "LC_ALL": "C",
-            }
-        )
-        self.env = env
+        self.env = scrubbed_git_env()
         self.parse_warnings: list[dict[str, str]] = []
 
     def close(self) -> None:
@@ -118,25 +76,7 @@ class GitRepo:
     # Plumbing
     # ------------------------------------------------------------------
     def run(self, args: Sequence[str], *, check: bool = False) -> GitResult:
-        command = [
-            "git",
-            "-C",
-            str(self.repo),
-            "--no-pager",
-            "-c",
-            "core.quotepath=false",
-            "-c",
-            "core.autocrlf=false",
-            "-c",
-            "core.safecrlf=false",
-            "-c",
-            "core.hooksPath=",
-            "-c",
-            "core.fsmonitor=false",
-            "-c",
-            f"core.attributesFile={self._empty_config}",
-            *args,
-        ]
+        command = hardened_git_command(self.repo, args)
         try:
             proc = subprocess.run(
                 command,
@@ -151,10 +91,10 @@ class GitRepo:
             raise GitError("internal_fault", "git command timed out") from exc
         result = GitResult(proc.stdout, proc.stderr, proc.returncode)
         if check and result.returncode != 0:
-            raise self._classify(result)
+            raise self.classify_failure(result)
         return result
 
-    def _classify(self, result: GitResult) -> GitError:
+    def classify_failure(self, result: GitResult) -> GitError:
         text = (result.stderr or result.stdout).decode("utf-8", "replace").strip()
         lower = text.lower()
         if "shallow" in lower:
@@ -174,7 +114,7 @@ class GitRepo:
             raise GitError("missing_git_object", f"invalid revision {rev!r}")
         result = self.run(["rev-parse", "--verify", f"{rev}^{{commit}}"])
         if result.returncode != 0:
-            raise self._classify(result)
+            raise self.classify_failure(result)
         return result.stdout.decode("ascii", "replace").strip()
 
     def object_format(self) -> str:
@@ -182,7 +122,7 @@ class GitRepo:
             return self._object_format_cached
         result = self.run(["rev-parse", "--show-object-format"])
         if result.returncode != 0:
-            raise self._classify(result)
+            raise self.classify_failure(result)
         value = result.stdout.decode("ascii", "replace").strip()
         self._object_format_cached = value if value in ("sha1", "sha256") else "sha1"
         return self._object_format_cached
@@ -197,7 +137,7 @@ class GitRepo:
             return mb
         result = self.run(["merge-base", "--all", base, head])
         if result.returncode != 0:
-            raise self._classify(result)
+            raise self.classify_failure(result)
         lines = [line.strip() for line in result.stdout.decode("ascii", "replace").splitlines() if line.strip()]
         if not lines:
             raise GitError("shallow_history", "no merge base could be established")
@@ -230,26 +170,7 @@ class GitRepo:
                 raise GitError("missing_git_object", f"invalid blob id {oid!r}")
 
         input_data = b"".join(f"{oid}\n".encode("utf-8") for oid in needed)
-        command = [
-            "git",
-            "-C",
-            str(self.repo),
-            "--no-pager",
-            "-c",
-            "core.quotepath=false",
-            "-c",
-            "core.autocrlf=false",
-            "-c",
-            "core.safecrlf=false",
-            "-c",
-            "core.hooksPath=",
-            "-c",
-            "core.fsmonitor=false",
-            "-c",
-            f"core.attributesFile={self._empty_config}",
-            "cat-file",
-            "--batch",
-        ]
+        command = hardened_git_command(self.repo, ["cat-file", "--batch"])
         # One request/response per call: the process is fully drained and then
         # reaped, so concurrent readers can never interleave reads on a shared
         # pipe.  The timeout bounds a hung or blocked git process and kills it.
@@ -394,7 +315,7 @@ class GitRepo:
             args.extend(["--", path])
         result = self.run(args)
         if result.returncode != 0:
-            raise self._classify(result)
+            raise self.classify_failure(result)
         records: list[tuple[str, str, str, str]] = []
         for raw in result.stdout.split(b"\0"):
             if not raw:
@@ -439,7 +360,7 @@ class GitRepo:
             ]
         )
         if combined.returncode != 0:
-            raise self._classify(combined)
+            raise self.classify_failure(combined)
 
         if b"\0\0" in combined.stdout:
             raw_bytes, patch_bytes = combined.stdout.split(b"\0\0", 1)

@@ -8,6 +8,7 @@ from typing import Any, Sequence
 
 from verifyci.contracts.model import DiffEntry
 from verifyci.contracts.names import normalize_repo_path
+from verifyci.gate.policy import POLICY_PATH
 from verifyci.scm.git import GitRepo
 
 
@@ -26,7 +27,6 @@ CODEOWNERS_LOOKUP: tuple[str, ...] = (
     "CODEOWNERS",
     "docs/CODEOWNERS",
 )
-POLICY_PATH = ".verifyci/policy.toml"
 MAX_CODEOWNERS_BYTES = 3 * 1024 * 1024
 
 

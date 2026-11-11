@@ -10,9 +10,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 import functools
 import hmac
-import re
 from typing import Any, Mapping
 
+from verifyci.contracts.canonical import payload_hash
+from verifyci.contracts.names import glob_match, path_matches_any
 from verifyci.contracts.reason_codes import (
     DEFECT_REASON_CODES,
     EVIDENCE_KINDS_BY_DEFECT,
@@ -524,9 +525,7 @@ class Policy:
                 continue
             if acceptance.reason_code != gap.reason_code:
                 continue
-            path_match = bool(path) and any(
-                glob_match(pattern, path, kind="path") for pattern in acceptance.paths
-            )
+            path_match = bool(path) and path_matches_any(acceptance.paths, path)
             symbol_match = bool(symbol) and symbol in acceptance.symbols
             if path_match or symbol_match:
                 return acceptance
@@ -563,11 +562,8 @@ class EvidenceBundle:
         """Recompute the canonical payload digest and compare it to the envelope.
 
         The envelope's ``payload_hash`` (see evidence.bundle) binds the payload
-        bytes; verifying it catches post-emission tampering.  ``evidence.canonical``
-        is imported lazily to avoid an import cycle during module bootstrap.
+        bytes; verifying it catches post-emission tampering.
         """
-        from verifyci.evidence.canonical import payload_hash
-
         recorded = self.envelope.get("payload_hash") if isinstance(self.envelope, Mapping) else None
         if not isinstance(recorded, str) or not recorded:
             return False
@@ -600,43 +596,6 @@ class EvidenceBundle:
             return int(verdict_obj["exit_code"])
         except (ValueError, TypeError):
             return VERDICT_EXIT_CODES.get(self.verdict, 3)
-
-
-@functools.lru_cache(maxsize=2048)
-def _compile_glob(pattern: str, kind: str) -> re.Pattern[str] | None:
-    sep = r"/" if kind == "path" else r"/:\."
-    out: list[str] = ["^"]
-    i = 0
-    while i < len(pattern):
-        ch = pattern[i]
-        if ch == "*":
-            if i + 1 < len(pattern) and pattern[i + 1] == "*":
-                out.append(".*")
-                i += 2
-                continue
-            out.append(f"[^{sep}]*")
-        elif ch == "?":
-            out.append(f"[^{sep}]")
-        else:
-            out.append(re.escape(ch))
-        i += 1
-    out.append("$")
-    try:
-        return re.compile("".join(out))
-    except re.error:
-        return None
-
-
-def glob_match(pattern: str, value: str, *, kind: str = "path") -> bool:
-    """Match a policy glob without ever treating it as a user regex.
-
-    ``*`` stays within a path segment (or a qualified-name component); ``**``
-    crosses separators.  This is intentionally small and deterministic.
-    """
-    regex = _compile_glob(pattern, kind)
-    if regex is None:
-        return False
-    return regex.match(value) is not None
 
 
 __all__ = [

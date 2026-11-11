@@ -12,13 +12,14 @@ import threading
 import time
 from typing import Any
 
-from verifyci.evidence.canonical import canonical_json_bytes
-
-CACHE_SCHEMA_VERSION = 1
-VALID_CACHE_MODES = frozenset({"none", "local", "authenticated"})
-CACHE_SAMPLE_VERSION = "verifyci-cache-sample-v1"
-CACHE_SAMPLE_RATE_NUMERATOR = 5
-CACHE_SAMPLE_RATE_DENOMINATOR = 100
+from verifyci.contracts.canonical import canonical_json_bytes, is_valid_hex64
+from verifyci.contracts.manifest import (
+    CACHE_SAMPLE_RATE_DENOMINATOR,
+    CACHE_SAMPLE_RATE_NUMERATOR,
+    CACHE_SAMPLE_VERSION,
+    CACHE_SCHEMA_VERSION,
+    VALID_CACHE_MODES,
+)
 
 _TIER1_KEYS = frozenset(
     {"csv", "tc", "blob_hash", "repo_relative_path", "language_id", "frontend_version", "pd_paths"}
@@ -64,7 +65,7 @@ def validate_key_schema(object_type: str, components: dict[str, Any]) -> None:
 
 def should_sample(key_hex: str) -> bool:
     """Apply the release-pinned, entry-key-based 5/100 sampler (§14.3)."""
-    if len(key_hex) != 64 or any(ch not in "0123456789abcdef" for ch in key_hex):
+    if not is_valid_hex64(key_hex):
         raise ValueError("cache entry key must be 64 lowercase hexadecimal characters")
     sample = hashlib.sha256(
         CACHE_SAMPLE_VERSION.encode("utf-8") + b"\x00" + key_hex.encode("ascii")
@@ -129,7 +130,6 @@ class CacheStore:
         self.read_only = read_only
         self._lock = threading.Lock()
         self._created_shards: set[str] = set()
-        self._shards = self._created_shards
         if self.mode != "none":
             if not self.read_only:
                 self.cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)

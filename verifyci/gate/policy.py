@@ -14,6 +14,8 @@ import re
 import tomllib
 from typing import Any, Mapping
 
+from verifyci.contracts.canonical import is_valid_sha256
+from verifyci.contracts.manifest import CHECK_ORDER
 from verifyci.contracts.model import (
     AcceptanceRecord,
     Policy,
@@ -31,8 +33,7 @@ from verifyci.scm.git import GitRepo
 POLICY_PATH = ".verifyci/policy.toml"
 _BUILTIN_POLICY_ID = "builtin_bootstrap_v1"
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_FINGERPRINT_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-_CHECK_IDS = {"grounding", "deletion", "contract", "semantic", "security"}
+_CHECK_IDS = frozenset(CHECK_ORDER)
 _SINK_KINDS = {"sql", "log", "network", "file", "exec", "serialize", "html"}
 _TOP_LEVEL = {
     "gate",
@@ -315,7 +316,7 @@ def _validate_waivers(waivers: Mapping[str, Any]) -> None:
         if defect_id not in DEFECT_REASON_CODES:
             raise PolicyError("invalid_policy", f"waivers.{record_id}.defect_id is unknown")
         fingerprint = _nonempty_str(raw.get("fingerprint"), "fingerprint", f"waivers.{record_id}")
-        if not _FINGERPRINT_RE.match(fingerprint):
+        if not is_valid_sha256(fingerprint):
             raise PolicyError("invalid_policy", f"waivers.{record_id}.fingerprint must be sha256:<64 hex>")
         _nonempty_str(raw.get("reason"), "reason", f"waivers.{record_id}")
         _nonempty_str(raw.get("approved_by"), "approved_by", f"waivers.{record_id}")

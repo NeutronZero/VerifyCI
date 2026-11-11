@@ -12,6 +12,8 @@ from pathlib import Path
 import subprocess
 from typing import NamedTuple, Sequence
 
+from verifyci.scm.env import hardened_git_command, is_hex40, scrubbed_git_env
+
 
 class TreeEntry(NamedTuple):
     mode: str
@@ -30,7 +32,7 @@ class MaterializedManifest(NamedTuple):
 
 def _validate_commit_sha(sha: str) -> str:
     s = sha.strip().lower()
-    if len(s) != 40 or any(c not in "0123456789abcdef" for c in s):
+    if not is_hex40(s):
         raise ValueError(f"invalid candidate commit SHA: {sha!r}")
     return s
 
@@ -38,21 +40,24 @@ def _validate_commit_sha(sha: str) -> str:
 def resolve_commit_tree(repo_root: Path, commit_sha: str) -> tuple[str, str]:
     """Verify commit exists and return (commit_sha, tree_sha)."""
     valid_sha = _validate_commit_sha(commit_sha)
+    git_env = scrubbed_git_env()
     proc = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "--verify", f"{valid_sha}^{{commit}}"],
+        hardened_git_command(repo_root, ["rev-parse", "--verify", f"{valid_sha}^{{commit}}"]),
         capture_output=True,
         text=True,
         check=False,
+        env=git_env,
     )
     if proc.returncode != 0:
         raise ValueError(f"commit {valid_sha} does not exist in repository: {proc.stderr.strip()}")
     commit_resolved = proc.stdout.strip().lower()
 
     proc_tree = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", f"{valid_sha}^{{tree}}"],
+        hardened_git_command(repo_root, ["rev-parse", f"{valid_sha}^{{tree}}"]),
         capture_output=True,
         text=True,
         check=False,
+        env=git_env,
     )
     if proc_tree.returncode != 0:
         raise ValueError(f"failed to resolve tree for commit {valid_sha}: {proc_tree.stderr.strip()}")
@@ -63,9 +68,10 @@ def resolve_commit_tree(repo_root: Path, commit_sha: str) -> tuple[str, str]:
 def enumerate_tree(repo_root: Path, tree_sha: str) -> list[TreeEntry]:
     """Read all tree entries using Git plumbing (ls-tree -r -z)."""
     proc = subprocess.run(
-        ["git", "-C", str(repo_root), "ls-tree", "-r", "-z", "--full-name", tree_sha],
+        hardened_git_command(repo_root, ["ls-tree", "-r", "-z", "--full-name", tree_sha]),
         capture_output=True,
         check=False,
+        env=scrubbed_git_env(),
     )
     if proc.returncode != 0:
         raise RuntimeError(f"git ls-tree failed for tree {tree_sha}")
@@ -128,10 +134,11 @@ def _read_blobs_batch(repo_root: Path, shas: Sequence[str]) -> dict[str, bytes]:
     input_data = "".join(f"{s}\n" for s in unique_shas).encode("ascii")
     try:
         proc = subprocess.Popen(
-            ["git", "-C", str(repo_root), "cat-file", "--batch"],
+            hardened_git_command(repo_root, ["cat-file", "--batch"]),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=scrubbed_git_env(),
         )
         stdout, stderr = proc.communicate(input_data)
         if proc.returncode != 0:

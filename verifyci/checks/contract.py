@@ -4,17 +4,22 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-import posixpath
-import time
 from typing import Any
 
+from verifyci.checks._modules import (
+    normalize_module_path as _normalize_mod,
+    resolve_import_module as _resolve_import_module,
+)
 from verifyci.checks.base import (
     CheckContext,
     budget_exhausted_result,
+    changed_head_lines,
+    check_deadline,
     entity_budget_exceeded,
     gap,
     make_finding,
     make_result,
+    simple_symbol_name as _simple,
     unsupported_scope_gaps,
 )
 from verifyci.contracts.manifest import CODE_EXTENSIONS
@@ -116,64 +121,6 @@ def _sig(entity: Entity) -> _Sig:
         required_kwonly=required_kwonly,
         is_ts=is_ts,
     )
-
-
-def _simple(qname: str) -> str:
-    return qname.split(":", 1)[-1].rsplit(".", 1)[-1]
-
-
-def _normalize_mod(path: str) -> str:
-    p = path.replace("\\", "/").strip()
-    for ext in (
-        ".py",
-        ".pyi",
-        ".ts",
-        ".tsx",
-        ".js",
-        ".jsx",
-        ".mjs",
-        ".cjs",
-        ".mts",
-        ".cts",
-        ".go",
-        ".rs",
-    ):
-        if p.endswith(ext):
-            p = p[: -len(ext)]
-            break
-    if p.endswith("/__init__"):
-        p = p[: -len("/__init__")]
-    elif p.endswith(".__init__"):
-        p = p[: -len(".__init__")]
-    return p.replace(".", "/")
-
-
-def _resolve_import_module(imp_module: str, importing_path: str, level: int = 0) -> str:
-    importing_dir = posixpath.dirname(importing_path.replace("\\", "/"))
-    imp_module = (imp_module or "").strip()
-    if imp_module.startswith("./") or imp_module.startswith("../"):
-        norm = posixpath.normpath(posixpath.join(importing_dir, imp_module))
-        return _normalize_mod(norm)
-    if imp_module.startswith("."):
-        dots = len(imp_module) - len(imp_module.lstrip("."))
-        level = level or dots
-        imp_module = imp_module.lstrip(".")
-    if level and level > 0:
-        base_mod = _normalize_mod(importing_path)
-        parts = base_mod.split("/") if base_mod else []
-        if not importing_path.endswith("__init__.py") and parts:
-            parts = parts[:-1]
-        if level > 1:
-            if level - 1 >= len(parts):
-                parts = []
-            else:
-                parts = parts[: len(parts) - (level - 1)]
-        pkg = "/".join(parts)
-        if imp_module:
-            rel = imp_module.replace(".", "/")
-            return f"{pkg}/{rel}" if pkg else rel
-        return pkg
-    return _normalize_mod(imp_module)
 
 
 def _match_callee_to_entity(
@@ -306,17 +253,6 @@ def _call_problem(call: CallSite, sig: _Sig) -> str:
     return ""
 
 
-def _changed_new_lines(context: CheckContext) -> dict[str, set[int]]:
-    out: dict[str, set[int]] = {}
-    for entry in context.entries:
-        if not entry.head_path:
-            continue
-        lines = out.setdefault(entry.head_path, set())
-        for hunk in entry.hunks:
-            lines.update(range(hunk.new_start, hunk.new_end() + 1))
-    return out
-
-
 def _public_api(context: CheckContext, entity: Entity) -> bool:
     patterns = context.policy.public_api.get("symbols", ())
     return bool(patterns and symbol_matches_any(patterns, entity.qname))
@@ -379,8 +315,8 @@ def _finding_call(
 
 
 def run(context: CheckContext) -> CheckResult:
-    if context.deadline is not None and time.monotonic() > context.deadline:
-        return budget_exhausted_result(context, "contract", "cold_deadline_seconds exceeded")
+    if expired := check_deadline(context, "contract"):
+        return expired
     entities_over_budget, enumerated_entities = entity_budget_exceeded(context)
     if entities_over_budget:
         return budget_exhausted_result(
@@ -395,7 +331,7 @@ def run(context: CheckContext) -> CheckResult:
     for facts in context.scope.head_facts.values():
         head_entities.update({e.qname: e for e in facts.entities})
 
-    changed_lines = _changed_new_lines(context)
+    changed_lines = changed_head_lines(context)
     all_head_calls: list[tuple[str, SourceFacts, CallSite]] = []
     head_calls_by_simple: dict[str, list[tuple[str, SourceFacts, CallSite]]] = defaultdict(list)
     for path, facts in context.scope.head_facts.items():
@@ -425,8 +361,8 @@ def run(context: CheckContext) -> CheckResult:
 
     changed_qnames = set(context.scope.changed_entities)
     for qname in sorted(changed_qnames):
-        if context.deadline is not None and time.monotonic() > context.deadline:
-            return budget_exhausted_result(context, "contract", "cold_deadline_seconds exceeded")
+        if expired := check_deadline(context, "contract"):
+            return expired
         base = base_entities.get(qname)
         head = head_entities.get(qname)
         if base is None and head is None:
@@ -594,8 +530,8 @@ def run(context: CheckContext) -> CheckResult:
             base_by_simple[_simple(entity.qname)].append(entity)
 
     for path, facts, call in all_head_calls:
-        if context.deadline is not None and time.monotonic() > context.deadline:
-            return budget_exhausted_result(context, "contract", "cold_deadline_seconds exceeded")
+        if expired := check_deadline(context, "contract"):
+            return expired
         if call.line not in changed_lines.get(path, set()):
             continue
         if call.has_starargs or call.has_kwargs:

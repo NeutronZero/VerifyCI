@@ -3,27 +3,28 @@
 from __future__ import annotations
 
 from collections import defaultdict
-import posixpath
 import re
-import time
 from typing import Any, Mapping
 
+from verifyci.checks._modules import (
+    module_candidates as _module_candidates,
+    normalize_module_path as _normalized_module_path,
+    python_module_name as _module_name,
+    resolve_dotted_module as _resolve_module,
+)
 from verifyci.checks.base import (
     CheckContext,
     budget_exhausted_result,
+    check_deadline,
     entity_budget_exceeded,
     gap,
     make_finding,
     make_result,
+    simple_symbol_name as _simple_name,
     unsupported_scope_gaps,
 )
 from verifyci.contracts.model import CheckResult, Coverage, EvidenceKind, Outcome
 from verifyci.contracts.names import path_matches_any, symbol_matches_any
-
-
-def _simple_name(qname: str) -> str:
-    qual = qname.split(":", 1)[-1]
-    return qual.rsplit(".", 1)[-1]
 
 
 def _public_policy_match(context: CheckContext, entity) -> bool:
@@ -33,85 +34,6 @@ def _public_policy_match(context: CheckContext, entity) -> bool:
         (patterns and symbol_matches_any(patterns, entity.qname))
         or (entry_patterns and symbol_matches_any(entry_patterns, entity.qname))
     )
-
-
-def _module_name(path: str) -> str:
-    mod = path.rsplit(".", 1)[0].replace("/", ".").replace("\\", ".")
-    # Normalize package __init__ modules to their package name.
-    if mod.endswith(".__init__"):
-        mod = mod[: -len(".__init__")]
-    return mod
-
-
-_MODULE_SUFFIXES = (
-    ".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs", ".py",
-)
-
-
-def _normalized_module_path(path: str) -> str:
-    """Return the path form used to match relative TS/JS import specifiers."""
-    p = (path or "").replace("\\", "/")
-    for suffix in _MODULE_SUFFIXES:
-        if p.endswith(suffix):
-            p = p[: -len(suffix)]
-            break
-    if p.endswith("/index"):
-        p = p[: -len("/index")]
-    elif p.endswith("/__init__"):
-        p = p[: -len("/__init__")]
-    return p
-
-
-def _module_candidates(imp_module: str, importing_path: str, level: int = 0) -> set[str]:
-    """Return every module identity an import specifier could name.
-
-    Python imports resolve to dotted modules; TypeScript/JavaScript imports use
-    repository-relative specifiers that must be normalised the same way the
-    entity's file path is, or cross-file references are never discovered.
-    """
-    spec = (imp_module or "").strip()
-    candidates: set[str] = set()
-    resolved = _resolve_module(spec, importing_path, level)
-    if resolved:
-        candidates.add(resolved)
-    if spec.startswith((".", "/")):
-        base = posixpath.dirname((importing_path or "").replace("\\", "/"))
-        joined = posixpath.normpath(posixpath.join(base, spec))
-        candidates.add(_normalized_module_path(joined))
-    elif spec:
-        candidates.add(_normalized_module_path(spec))
-    return candidates
-
-
-def _resolve_module(imp_module: str, importing_path: str, level: int = 0) -> str | None:
-    imp_module = (imp_module or "").strip()
-    # Legacy/relative-dot form.  Relative specifiers in TypeScript/JavaScript
-    # are repository paths, not Python package levels; ``_module_candidates``
-    # normalises those separately.
-    if imp_module.startswith("."):
-        if not importing_path.endswith(".py"):
-            return None
-        dots = len(imp_module) - len(imp_module.lstrip("."))
-        level = level or dots
-        imp_module = imp_module.lstrip(".")
-    if level and level > 0:
-        base_mod = _module_name(importing_path)
-        if importing_path.endswith("__init__.py"):
-            pkg = base_mod
-        else:
-            pkg = base_mod.rsplit(".", 1)[0] if "." in base_mod else ""
-        parts = pkg.split(".") if pkg else []
-        if level > 1:
-            if level - 1 >= len(parts):
-                return None
-            parts = parts[: len(parts) - (level - 1)]
-            pkg = ".".join(parts)
-        if imp_module:
-            return f"{pkg}.{imp_module}" if pkg else imp_module
-        return pkg or None
-    if not imp_module:
-        return None
-    return imp_module
 
 
 def _head_references(
@@ -239,8 +161,8 @@ def _dynamic_references(
 
 
 def run(context: CheckContext) -> CheckResult:
-    if context.deadline is not None and time.monotonic() > context.deadline:
-        return budget_exhausted_result(context, "deletion", "cold_deadline_seconds exceeded")
+    if expired := check_deadline(context, "deletion"):
+        return expired
     entities_over_budget, enumerated_entities = entity_budget_exceeded(context)
     if entities_over_budget:
         return budget_exhausted_result(
@@ -284,8 +206,8 @@ def run(context: CheckContext) -> CheckResult:
 
     dynamic_lines_cache: dict[str, list[str]] = {}
     for entity in removed:
-        if context.deadline is not None and time.monotonic() > context.deadline:
-            return budget_exhausted_result(context, "deletion", "cold_deadline_seconds exceeded")
+        if expired := check_deadline(context, "deletion"):
+            return expired
         simple = _simple_name(entity.qname)
         refs = _head_references(context, entity, importers_by_symbol=importers_by_symbol)
         dynamic_refs = _dynamic_references(
@@ -409,8 +331,8 @@ def run(context: CheckContext) -> CheckResult:
     head_modules: set[str] = {_module_name(p) for p in context.scope.head_facts}
 
     for path, facts in context.scope.head_facts.items():
-        if context.deadline is not None and time.monotonic() > context.deadline:
-            return budget_exhausted_result(context, "deletion", "cold_deadline_seconds exceeded")
+        if expired := check_deadline(context, "deletion"):
+            return expired
         if path.endswith("__init__.py"):
             continue
         # TypeScript/JavaScript specifiers are repository paths, not module
@@ -559,8 +481,8 @@ def run(context: CheckContext) -> CheckResult:
     # dangling references, including calls to private helpers.
     removed_by_path_and_simple = {(e.file_path, _simple_name(e.qname)) for e in removed}
     for path, facts in context.scope.head_facts.items():
-        if context.deadline is not None and time.monotonic() > context.deadline:
-            return budget_exhausted_result(context, "deletion", "cold_deadline_seconds exceeded")
+        if expired := check_deadline(context, "deletion"):
+            return expired
         if path.endswith("__init__.py"):
             continue
         for call in facts.calls:

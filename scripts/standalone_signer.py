@@ -138,7 +138,6 @@ PINNED_CORPORA_HASHES = {
 
 PINNED_REPOSITORY = "NeutronZero/VerifyCI"
 PINNED_WORKFLOW_PATH = ".github/workflows/ci.yml"
-PINNED_WORKFLOW_NAME = "ci"
 PINNED_MEASUREMENT_JOB = "verifyci-measurements"
 # Reusable workflow jobs may be reported as the called job name alone or with the
 # caller job prefix. Both exact forms are accepted; any additional match is a
@@ -167,12 +166,20 @@ _CRITICAL_IMPLEMENTATION_FILES = (
     Path("docker/worker/requirements.lock"),
     Path("pyproject.toml"),
     Path("uv.lock"),
+    Path("verifyci/checks/_modules.py"),
+    Path("verifyci/checks/_semantic_replay.py"),
+    Path("verifyci/checks/_semantic_symbolic.py"),
+    Path("verifyci/checks/_semantic_ts.py"),
+    Path("verifyci/checks/base.py"),
     Path("verifyci/checks/security.py"),
     Path("verifyci/checks/semantic.py"),
     Path("verifyci/checks/contract.py"),
     Path("verifyci/checks/deletion.py"),
     Path("verifyci/checks/grounding.py"),
+    Path("verifyci/contracts/canonical.py"),
     Path("verifyci/contracts/manifest.py"),
+    Path("verifyci/contracts/model.py"),
+    Path("verifyci/contracts/names.py"),
     Path("verifyci/contracts/promotion.py"),
     Path("verifyci/contracts/release_validation.py"),
     Path("verifyci/evidence/__init__.py"),
@@ -182,12 +189,22 @@ _CRITICAL_IMPLEMENTATION_FILES = (
     Path("verifyci/gate/integrity.py"),
     Path("verifyci/gate/orchestrator.py"),
     Path("verifyci/gate/policy.py"),
+    Path("verifyci/gate/verdict.py"),
     Path("verifyci/index/__init__.py"),
     Path("verifyci/index/cache.py"),
     Path("verifyci/index/facts.py"),
     Path("verifyci/index/provider.py"),
     Path("verifyci/index/symbol_index.py"),
+    Path("verifyci/runtime/budget.py"),
+    Path("verifyci/runtime/scheduler.py"),
+    Path("verifyci/scm/env.py"),
+    Path("verifyci/scm/git.py"),
     Path("verifyci/scope/entities.py"),
+    Path("verifyci/scope/models.py"),
+    Path("verifyci/scope/parsers.py"),
+    Path("verifyci/scope/python_scope.py"),
+    Path("verifyci/scope/repository.py"),
+    Path("verifyci/scope/ts_scope.py"),
     Path("verifyci/cli.py"),
     Path("scripts/validate_release.py"),
     Path("scripts/standalone_signer.py"),
@@ -583,21 +600,6 @@ def verify_github_oidc_token(
         return None, [f"OIDC sub claim ref does not match ref claim: {sub_claim}"]
 
     return claims, []
-
-
-def parse_jwt_claims_unverified(token: str) -> dict[str, Any] | None:
-    """Parse JWT claims without third-party dependencies."""
-    try:
-        import base64
-        parts = token.strip().split(".")
-        if len(parts) != 3:
-            return None
-        payload = parts[1]
-        padded = payload + "=" * (-len(payload) % 4)
-        raw_bytes = base64.urlsafe_b64decode(padded.encode("ascii"))
-        return json.loads(raw_bytes.decode("utf-8"))
-    except Exception:
-        return None
 
 
 # -----------------------------------------------------------------------------

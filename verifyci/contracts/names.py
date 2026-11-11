@@ -9,12 +9,11 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from hashlib import sha256
-import json
+import functools
 import re
 from typing import Any, Iterable, Mapping, Sequence
 
-from verifyci.contracts.model import glob_match
+from verifyci.contracts.canonical import payload_hash
 
 
 class NameError(ValueError):
@@ -125,10 +124,7 @@ def stable_finding_fingerprint(
         "symbol": symbol,
         "evidence_identity": normalize_evidence_identity(evidence_identity),
     }
-    raw = json.dumps(
-        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
-    ).encode("utf-8")
-    return "sha256:" + sha256(raw).hexdigest()
+    return payload_hash(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +257,43 @@ def glob_union_is_universal(patterns: Sequence[str]) -> bool:
     return True
 
 
+@functools.lru_cache(maxsize=2048)
+def _compile_glob(pattern: str, kind: str) -> re.Pattern[str] | None:
+    sep = r"/" if kind == "path" else r"/:\."
+    out: list[str] = ["^"]
+    i = 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "*":
+            if i + 1 < len(pattern) and pattern[i + 1] == "*":
+                out.append(".*")
+                i += 2
+                continue
+            out.append(f"[^{sep}]*")
+        elif ch == "?":
+            out.append(f"[^{sep}]")
+        else:
+            out.append(re.escape(ch))
+        i += 1
+    out.append("$")
+    try:
+        return re.compile("".join(out))
+    except re.error:
+        return None
+
+
+def glob_match(pattern: str, value: str, *, kind: str = "path") -> bool:
+    """Match a policy glob without ever treating it as a user regex.
+
+    ``*`` stays within a path segment (or a qualified-name component); ``**``
+    crosses separators.  This is intentionally small and deterministic.
+    """
+    regex = _compile_glob(pattern, kind)
+    if regex is None:
+        return False
+    return regex.match(value) is not None
+
+
 def path_matches_any(patterns: Sequence[str], value: str) -> bool:
     return any(glob_match(p, value, kind="path") for p in patterns)
 
@@ -271,6 +304,7 @@ def symbol_matches_any(patterns: Sequence[str], value: str) -> bool:
 
 __all__ = [
     "NameError",
+    "glob_match",
     "glob_union_is_universal",
     "normalize_repo_path",
     "parse_qualified_name",

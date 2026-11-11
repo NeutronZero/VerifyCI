@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from datetime import date
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
+from verifyci.contracts.canonical import is_valid_sha256 as _valid_sha256
+from verifyci.contracts.canonical import sha256_prefixed as _sha256
 from verifyci.contracts.model import Maturity
 
 
@@ -54,19 +55,6 @@ def _read_json(path: Path) -> tuple[bytes, dict[str, Any]]:
     if not isinstance(value, dict):
         raise ValueError(f"artifact root must be an object: {path}")
     return raw, value
-
-
-def _sha256(raw: bytes) -> str:
-    return "sha256:" + hashlib.sha256(raw).hexdigest()
-
-
-def _valid_sha256(value: Any) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 71
-        and value.startswith("sha256:")
-        and all(ch in "0123456789abcdef" for ch in value[7:])
-    )
 
 
 def _unique_ids(value: Any) -> set[str] | None:

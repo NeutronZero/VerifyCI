@@ -13,55 +13,21 @@ import json
 import os
 from pathlib import Path
 import platform
-import re
 import subprocess
 import sys
 from typing import Any
 
+from verifyci.contracts.canonical import (
+    is_hex40,
+    is_valid_sha256,
+    payload_hash,
+)
 from verifyci.contracts.manifest import (
     CHECK_ORDER,
     CHECK_SPECS,
     TOOL_VERSION,
     manifest_hash,
 )
-from verifyci.evidence.canonical import canonical_json_bytes
-
-_SCRUB_EXACT = {
-    "TOKEN",
-    "SECRET",
-    "PASSWORD",
-    "PASSWD",
-    "CREDENTIAL",
-    "SIGNING_KEY",
-    "PRIVATE_KEY",
-}
-
-
-def _scrubbed_git_env() -> dict[str, str]:
-    env = os.environ.copy()
-    for key in list(env.keys()):
-        upper = key.upper()
-        if (
-            key in _SCRUB_EXACT
-            or upper.endswith(("_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_PASSWD", "_CREDENTIAL"))
-            or any(part in upper for part in ("TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "SIGNING_KEY", "PRIVATE_KEY"))
-        ):
-            env.pop(key, None)
-    env.update(
-        {
-            "GIT_NO_REPLACE_OBJECTS": "1",
-            "GIT_NO_LAZY_FETCH": "1",
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_CONFIG_GLOBAL": os.devnull,
-            "GIT_CONFIG_SYSTEM": os.devnull,
-            "GIT_ATTR_NOSYSTEM": "1",
-            "GIT_TERMINAL_PROMPT": "0",
-            "GIT_OPTIONAL_LOCKS": "0",
-            "GIT_PAGER": "cat",
-            "LC_ALL": "C",
-        }
-    )
-    return env
 
 
 VALIDATION_SCHEMA = "verifyci.release_validation/v1"
@@ -90,11 +56,16 @@ _CRITICAL_IMPLEMENTATION_FILES = (
     Path("docker/worker/requirements.lock"),
     Path("pyproject.toml"),
     Path("uv.lock"),
+    Path("verifyci/checks/_modules.py"),
+    Path("verifyci/checks/_semantic_replay.py"),
+    Path("verifyci/checks/_semantic_symbolic.py"),
+    Path("verifyci/checks/_semantic_ts.py"),
     Path("verifyci/checks/security.py"),
     Path("verifyci/checks/semantic.py"),
     Path("verifyci/checks/contract.py"),
     Path("verifyci/checks/deletion.py"),
     Path("verifyci/checks/grounding.py"),
+    Path("verifyci/contracts/canonical.py"),
     Path("verifyci/contracts/manifest.py"),
     Path("verifyci/contracts/promotion.py"),
     Path("verifyci/contracts/release_validation.py"),
@@ -116,8 +87,14 @@ _CRITICAL_IMPLEMENTATION_FILES = (
     Path("verifyci/index/symbol_index.py"),
     Path("verifyci/runtime/budget.py"),
     Path("verifyci/runtime/scheduler.py"),
+    Path("verifyci/scm/env.py"),
     Path("verifyci/scm/git.py"),
     Path("verifyci/scope/entities.py"),
+    Path("verifyci/scope/models.py"),
+    Path("verifyci/scope/parsers.py"),
+    Path("verifyci/scope/python_scope.py"),
+    Path("verifyci/scope/repository.py"),
+    Path("verifyci/scope/ts_scope.py"),
     Path("verifyci/cli.py"),
     Path("scripts/validate_release.py"),
     Path("scripts/standalone_signer.py"),
@@ -156,72 +133,56 @@ def get_verifyci_root() -> Path:
     return candidate
 
 
-def get_commit_sha(repo_root: Path) -> str | None:
-    """Resolve HEAD commit SHA of the repository."""
+def _scrubbed_git_env() -> dict[str, str]:
+    from verifyci.scm.env import scrubbed_git_env
+
+    return scrubbed_git_env()
+
+
+def _run_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str] | None:
+    from verifyci.scm.env import hardened_git_command
+
     try:
-        proc = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=str(repo_root),
+        return subprocess.run(
+            hardened_git_command(repo_root, args),
             capture_output=True,
             text=True,
             check=False,
             env=_scrubbed_git_env(),
         )
-        if proc.returncode == 0:
-            commit = proc.stdout.strip()
-            if len(commit) == 40 and all(c in "0123456789abcdef" for c in commit.lower()):
-                return commit.lower()
     except Exception:
-        pass
+        return None
+
+
+def get_commit_sha(repo_root: Path) -> str | None:
+    """Resolve HEAD commit SHA of the repository."""
+    proc = _run_git(repo_root, ["rev-parse", "HEAD"])
+    if proc is not None and proc.returncode == 0:
+        commit = proc.stdout.strip()
+        if is_hex40(commit):
+            return commit.lower()
     return None
 
 
 def get_parent_commit(repo_root: Path, commit_sha: str) -> str | None:
     """Resolve parent commit SHA."""
-    if not (isinstance(commit_sha, str) and len(commit_sha) == 40 and all(c in "0123456789abcdef" for c in commit_sha.lower())):
+    if not is_hex40(commit_sha):
         return None
-    try:
-        proc = subprocess.run(
-            ["git", "rev-parse", f"{commit_sha}^"],
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            check=False,
-            env=_scrubbed_git_env(),
-        )
-        if proc.returncode == 0:
-            parent = proc.stdout.strip()
-            if len(parent) == 40 and all(c in "0123456789abcdef" for c in parent.lower()):
-                return parent.lower()
-    except Exception:
-        pass
+    proc = _run_git(repo_root, ["rev-parse", f"{commit_sha}^"])
+    if proc is not None and proc.returncode == 0:
+        parent = proc.stdout.strip()
+        if is_hex40(parent):
+            return parent.lower()
     return None
 
 
 def get_changed_files_between(repo_root: Path, base_commit: str, head_commit: str) -> list[str]:
     """Return list of relative file paths changed between base_commit and head_commit."""
-    if not (
-        isinstance(base_commit, str)
-        and isinstance(head_commit, str)
-        and len(base_commit) == 40
-        and len(head_commit) == 40
-        and all(c in "0123456789abcdef" for c in base_commit.lower())
-        and all(c in "0123456789abcdef" for c in head_commit.lower())
-    ):
+    if not (is_hex40(base_commit) and is_hex40(head_commit)):
         return []
-    try:
-        proc = subprocess.run(
-            ["git", "diff", "--name-only", base_commit, head_commit],
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            check=False,
-            env=_scrubbed_git_env(),
-        )
-        if proc.returncode == 0:
-            return [line.strip().replace("\\", "/") for line in proc.stdout.splitlines() if line.strip()]
-    except Exception:
-        pass
+    proc = _run_git(repo_root, ["diff", "--name-only", base_commit, head_commit])
+    if proc is not None and proc.returncode == 0:
+        return [line.strip().replace("\\", "/") for line in proc.stdout.splitlines() if line.strip()]
     return ["<error: git diff failed>"]
 
 
@@ -320,7 +281,7 @@ def verify_release_validation_evidence(
 
     # Recompute digest over the canonical measurement payload (all keys except attestation itself)
     payload_body = {k: v for k, v in record.items() if k != "attestation"}
-    computed_digest = "sha256:" + hashlib.sha256(canonical_json_bytes(payload_body)).hexdigest()
+    computed_digest = payload_hash(payload_body)
     if not hmac.compare_digest(recorded_digest, computed_digest):
         return False, "release-validation attestation digest mismatch (evidence payload was modified)"
 
@@ -424,8 +385,7 @@ def verify_release_validation_evidence(
         return False, "benchmark measurements failed zero_false_blocking or strict_redaction invariant"
 
     defect_metrics = bench_metrics.get("defects", {})
-    required_defects = ("SEC-SECRET", "SEC-SECRET-TO-SINK", "SEC-DANGEROUS-CALL", "SEC-TAINT-TO-SINK")
-    for did in required_defects:
+    for did in CHECK_SPECS["security"].defect_ids:
         d_data = defect_metrics.get(did, {})
         if d_data.get("precision", 0.0) < 1.0 or d_data.get("recall", 0.0) < 0.90:
             return False, f"benchmark defect metric threshold not met for {did}: {d_data}"
@@ -476,7 +436,7 @@ def verify_release_validation_evidence(
             return False, "release validation provenance requires cryptographic OIDC verification (oidc_verified must be true)"
         prov_sha = (provenance.get("commit_sha") or "").lower()
         rec_sha = (record.get("commit_sha") or "").lower()
-        if not prov_sha or not re.fullmatch(r"[0-9a-f]{40}", prov_sha):
+        if not is_hex40(prov_sha):
             return False, "release validation provenance commit_sha is missing or malformed"
         if prov_sha != rec_sha:
             return False, f"provenance commit_sha '{prov_sha}' does not match record commit_sha '{rec_sha}'"
@@ -484,7 +444,7 @@ def verify_release_validation_evidence(
             return False, f"unexpected measurement artifact name: {provenance.get('artifact_name')!r}"
         artifact_digest = str(provenance.get("artifact_digest") or "")
         artifact_zip_digest = str(provenance.get("artifact_zip_sha256") or "")
-        if not re.fullmatch(r"sha256:[0-9a-f]{64}", artifact_digest):
+        if not is_valid_sha256(artifact_digest):
             return False, "release validation provenance artifact_digest is malformed"
         if not hmac.compare_digest(artifact_digest, artifact_zip_digest):
             return False, "release validation provenance artifact digest does not match downloaded archive digest"
@@ -500,7 +460,7 @@ def verify_release_validation_evidence(
         if measurement_path != f"{PINNED_REPOSITORY}/{PINNED_MEASUREMENT_WORKFLOW_PATH}":
             return False, f"unexpected measurement workflow identity: {measurement_ref!r}"
         measurement_sha = str(provenance.get("measurement_workflow_sha") or "").lower()
-        if not re.fullmatch(r"[0-9a-f]{40}", measurement_sha):
+        if not is_hex40(measurement_sha):
             return False, "release validation provenance measurement_workflow_sha is missing or malformed"
         if measurement_rev != PINNED_TRUSTED_REF and measurement_rev.lower() != measurement_sha:
             return False, f"measurement workflow revision is not trusted: {measurement_rev!r}"
@@ -509,7 +469,7 @@ def verify_release_validation_evidence(
         if signing_path != f"{PINNED_REPOSITORY}/{PINNED_SIGNING_WORKFLOW_PATH}" or signing_rev != PINNED_TRUSTED_REF:
             return False, f"untrusted signing workflow identity: {signing_ref!r}"
         signing_sha = str(provenance.get("trusted_signing_workflow_sha") or "").lower()
-        if not re.fullmatch(r"[0-9a-f]{40}", signing_sha):
+        if not is_hex40(signing_sha):
             return False, "release validation provenance trusted_signing_workflow_sha is missing or malformed"
         if provenance.get("trusted_signing_ref") != PINNED_TRUSTED_REF:
             return False, f"untrusted signing ref: {provenance.get('trusted_signing_ref')!r}"

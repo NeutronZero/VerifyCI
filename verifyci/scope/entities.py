@@ -1,951 +1,31 @@
-"""Entity extraction and changed-scope mapping for Python and TS/JS.
-
-Python uses the standard-library AST.  TS/JS uses tree-sitter when the pinned
-grammar is available; otherwise the file is honestly reported as unsupported
-rather than mapped by guesswork.
-"""
+"""Entity extraction, source caching, and changed-scope mapping for Python and TS/JS."""
 
 from __future__ import annotations
 
 import ast
-import collections
-from dataclasses import asdict, dataclass, field
-from hashlib import sha1, sha256
-import re
-import threading
-from typing import Any, Callable, Mapping, Sequence
+from dataclasses import asdict
+from typing import Any, Mapping, Sequence
 
 from verifyci.contracts.model import DiffEntry, Entity
-from verifyci.contracts.names import normalize_repo_path, qualify
+from verifyci.contracts.names import normalize_repo_path
 from verifyci.runtime.budget import DEFAULT_BUDGET, WorkBudget
-
-
-@dataclass(frozen=True, slots=True)
-class Param:
-    name: str
-    kind: str
-    has_default: bool
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"name": self.name, "kind": self.kind, "has_default": self.has_default}
-
-
-@dataclass(frozen=True, slots=True)
-class CallSite:
-    callee: str
-    line: int
-    positional: int
-    keywords: tuple[str, ...]
-    has_starargs: bool = False
-    has_kwargs: bool = False
-    is_shadowed: bool = False
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "callee": self.callee,
-            "line": self.line,
-            "positional": self.positional,
-            "keywords": list(self.keywords),
-            "has_starargs": self.has_starargs,
-            "has_kwargs": self.has_kwargs,
-            "is_shadowed": self.is_shadowed,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class ImportFact:
-    module: str
-    names: tuple[str, ...]
-    line: int
-    level: int = 0
-    aliases: tuple[tuple[str, str], ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class SourceFacts:
-    path: str
-    language: str
-    supported: bool
-    entities: tuple[Entity, ...] = ()
-    calls: tuple[CallSite, ...] = ()
-    imports: tuple[ImportFact, ...] = ()
-    name_loads: frozenset[str] = frozenset()
-    exports: frozenset[str] = frozenset()
-    parse_error: str = ""
-    has_dynamic_dispatch: bool = False
-    has_unknown_decorator: bool = False
-    _names: set[str] | None = field(
-        default=None, init=False, repr=False, compare=False, hash=False
-    )
-
-    def names(self) -> set[str]:
-        nms = self._names
-        if nms is None:
-            nms = {e.qname.rsplit(".", 1)[-1] for e in self.entities}
-            object.__setattr__(self, "_names", nms)
-        return nms
-
-
-def _digest(value: str) -> str:
-    return "sha256:" + sha256(value.encode("utf-8")).hexdigest()
-
-
-def git_blob_id(data: bytes) -> str:
-    h = sha1()
-    h.update(f"blob {len(data)}\0".encode("utf-8") + data)
-    return h.hexdigest()
-
-
-_PY_LANG_OBJECT: Any = None
-_PY_LANG_INITIALIZED: bool = False
-_LANG_LOCK = threading.Lock()
-
-
-def _make_parser(lang_obj: Any) -> Any:
-    """Build a fresh tree-sitter parser for one parse.
-
-    Parsers are never cached or shared: a `Parser` may only be used by the
-    thread that owns it, and the gate parses entries on a worker pool.  Parsed
-    trees and `Language` objects are immutable, so those are shared freely.
-    """
-    from tree_sitter import Parser
-
-    try:
-        return Parser(lang_obj)
-    except TypeError:
-        parser = Parser()
-        parser.set_language(lang_obj)
-        return parser
-
-
-def _py_language() -> Any:
-    """Return the cached Python `Language` object, or None when unavailable."""
-    global _PY_LANG_OBJECT, _PY_LANG_INITIALIZED
-    if not _PY_LANG_INITIALIZED:
-        with _LANG_LOCK:
-            if not _PY_LANG_INITIALIZED:
-                try:
-                    import tree_sitter_python as tp
-                    from tree_sitter import Language
-
-                    fn: Callable[[], Any] | None = getattr(tp, "language", None) or getattr(tp, "language_python", None)
-                    if fn is not None:
-                        _PY_LANG_OBJECT = Language(fn())  # ty: ignore[deprecated]
-                except Exception:
-                    _PY_LANG_OBJECT = None
-                finally:
-                    _PY_LANG_INITIALIZED = True
-    return _PY_LANG_OBJECT
-
-
-def _annotation(node: ast.AST | None) -> str:
-    if node is None:
-        return ""
-    try:
-        return ast.unparse(node)
-    except Exception:
-        return ""
-
-
-def _function_params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[Param, ...]:
-    args = node.args
-    params: list[Param] = []
-    positional = list(args.posonlyargs) + list(args.args)
-    defaults_start = len(positional) - len(args.defaults)
-    for index, arg in enumerate(positional):
-        kind = "posonly" if arg in args.posonlyargs else "positional"
-        params.append(Param(arg.arg, kind, index >= defaults_start))
-    if args.vararg:
-        params.append(Param(args.vararg.arg, "vararg", False))
-    for index, arg in enumerate(args.kwonlyargs):
-        default = args.kw_defaults[index] if index < len(args.kw_defaults) else None
-        params.append(Param(arg.arg, "kwonly", default is not None))
-    if args.kwarg:
-        params.append(Param(args.kwarg.arg, "kwarg", False))
-    return tuple(params)
-
-
-class _CallVisitor(ast.NodeVisitor):
-    def __init__(self) -> None:
-        self.calls: list[CallSite] = []
-        self.imports: list[ImportFact] = []
-        self.loads: set[str] = set()
-        self.dynamic = False
-        self.has_decorators = False
-        self.scope_stack: list[set[str]] = []
-
-    def _collect_local_bindings(
-        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda
-    ) -> set[str]:
-        locals_found: set[str] = set()
-        if hasattr(node, "args"):
-            for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
-                locals_found.add(arg.arg)
-            if node.args.vararg:
-                locals_found.add(node.args.vararg.arg)
-            if node.args.kwarg:
-                locals_found.add(node.args.kwarg.arg)
-        globals_declared: set[str] = set()
-        todo = collections.deque(ast.iter_child_nodes(node))
-        while todo:
-            child = todo.popleft()
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                locals_found.add(child.name)
-                continue
-            elif isinstance(child, ast.Global):
-                globals_declared.update(child.names)
-            elif isinstance(child, ast.Assign):
-                for target in child.targets:
-                    for t in ast.walk(target):
-                        if isinstance(t, ast.Name):
-                            locals_found.add(t.id)
-            elif isinstance(child, (ast.AnnAssign, ast.AugAssign)):
-                for t in ast.walk(child.target):
-                    if isinstance(t, ast.Name):
-                        locals_found.add(t.id)
-            elif isinstance(child, (ast.For, ast.AsyncFor)):
-                for t in ast.walk(child.target):
-                    if isinstance(t, ast.Name):
-                        locals_found.add(t.id)
-            elif isinstance(child, (ast.With, ast.AsyncWith)):
-                for item in child.items:
-                    if item.optional_vars:
-                        for t in ast.walk(item.optional_vars):
-                            if isinstance(t, ast.Name):
-                                locals_found.add(t.id)
-            elif isinstance(child, ast.ExceptHandler):
-                if child.name:
-                    locals_found.add(child.name)
-            elif isinstance(child, ast.NamedExpr):
-                if isinstance(child.target, ast.Name):
-                    locals_found.add(child.target.id)
-            todo.extend(ast.iter_child_nodes(child))
-        return locals_found - globals_declared
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        if not self.has_decorators and _decorator_names(node):
-            self.has_decorators = True
-        self.scope_stack.append(self._collect_local_bindings(node))
-        self.generic_visit(node)
-        self.scope_stack.pop()
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        if not self.has_decorators and _decorator_names(node):
-            self.has_decorators = True
-        self.scope_stack.append(self._collect_local_bindings(node))
-        self.generic_visit(node)
-        self.scope_stack.pop()
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        if not self.has_decorators and _decorator_names(node):
-            self.has_decorators = True
-        self.generic_visit(node)
-
-    def visit_Import(self, node: ast.Import) -> None:
-        for alias in node.names:
-            local = alias.asname or alias.name
-            self.imports.append(
-                ImportFact(
-                    module=alias.name,
-                    names=(local,),
-                    line=node.lineno,
-                    level=0,
-                    aliases=((alias.name, local),),
-                )
-            )
-
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        aliases = tuple((alias.name, alias.asname or alias.name) for alias in node.names)
-        self.imports.append(
-            ImportFact(
-                module=node.module or "",
-                names=tuple(alias.name for alias in node.names),
-                line=node.lineno,
-                level=node.level,
-                aliases=aliases,
-            )
-        )
-
-    def visit_Lambda(self, node: ast.Lambda) -> None:
-        self.scope_stack.append(self._collect_local_bindings(node))
-        self.generic_visit(node)
-        self.scope_stack.pop()
-
-    def visit_Call(self, node: ast.Call) -> None:
-        callee = _callee_name(node.func)
-        if isinstance(node.func, ast.Subscript):
-            self.dynamic = True
-        if callee:
-            if callee in {"getattr", "setattr", "eval", "exec", "__import__", "compile"}:
-                self.dynamic = True
-            is_shadowed = False
-            if "." not in callee:
-                is_shadowed = any(callee in scope for scope in self.scope_stack)
-            self.calls.append(
-                CallSite(
-                    callee=callee,
-                    line=getattr(node, "lineno", 1),
-                    positional=len(node.args),
-                    keywords=tuple(
-                        kw.arg for kw in node.keywords if kw.arg is not None
-                    ),
-                    has_starargs=any(isinstance(a, ast.Starred) for a in node.args),
-                    has_kwargs=any(kw.arg is None for kw in node.keywords),
-                    is_shadowed=is_shadowed,
-                )
-            )
-        self.generic_visit(node)
-
-    def visit_Name(self, node: ast.Name) -> None:
-        if isinstance(node.ctx, ast.Load):
-            self.loads.add(node.id)
-
-    def visit_Attribute(self, node: ast.Attribute) -> None:
-        if isinstance(node.ctx, ast.Load):
-            self.loads.add(node.attr)
-        self.generic_visit(node)
-
-
-def _callee_name(node: ast.AST) -> str:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        base = _callee_name(node.value)
-        return f"{base}.{node.attr}" if base else node.attr
-    return ""
-
-
-def _collect_all(node: ast.Module) -> set[str]:
-    out: set[str] = set()
-    for stmt in node.body:
-        if isinstance(stmt, ast.Assign):
-            for target in stmt.targets:
-                if isinstance(target, ast.Name) and target.id == "__all__":
-                    if isinstance(stmt.value, (ast.List, ast.Tuple)):
-                        for elt in stmt.value.elts:
-                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
-                                out.add(elt.value)
-        elif isinstance(stmt, ast.AnnAssign):
-            if isinstance(stmt.target, ast.Name) and stmt.target.id == "__all__":
-                if isinstance(stmt.value, (ast.List, ast.Tuple)):
-                    for elt in stmt.value.elts:
-                        if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
-                            out.add(elt.value)
-    return out
-
-
-def _decorator_names(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> tuple[str, ...]:
-    out: list[str] = []
-    for dec in node.decorator_list:
-        if isinstance(dec, ast.Name):
-            out.append(dec.id)
-        elif isinstance(dec, ast.Attribute):
-            out.append(_callee_name(dec))
-        elif isinstance(dec, ast.Call):
-            out.append(_callee_name(dec.func))
-    return tuple(out)
-
-
-def _python_entities_via_tree_sitter(
-    ts_parser: Any,
-    path: str,
-    module: str,
-    exports: frozenset[str] | set[str] | None,
-    blob_id: str,
-    tree: ast.Module,
-    source_bytes: bytes,
-) -> tuple[Entity, ...]:
-    """Extract Python entity spans from a tree-sitter parse.
-
-    Runs on the calling thread with a parser owned by that thread; see
-    `_make_parser`.
-    """
-    ts_tree = ts_parser.parse(source_bytes)
-    ast_nodes: dict[str, Any] = {}
-
-    def map_ast(node: ast.AST, parent_qual: str) -> None:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            qname = f"{parent_qual}.{node.name}" if parent_qual else node.name
-            ast_nodes[qname] = node
-            for child in ast.iter_child_nodes(node):
-                map_ast(child, qname)
-            return
-        for child in ast.iter_child_nodes(node):
-            map_ast(child, parent_qual)
-
-    map_ast(tree, "")
-    entities: list[Entity] = []
-
-    def walk_ts(node: Any, parent_qual: str) -> None:
-        name = ""
-        kind = ""
-        if node.type in ("function_definition", "class_definition"):
-            name_node = next((c for c in node.children if c.type == "identifier"), None)
-            if name_node:
-                name = name_node.text.decode("utf-8")
-                kind = "class" if node.type == "class_definition" else "function"
-        if name and kind:
-            qname = f"{parent_qual}.{name}" if parent_qual else name
-            span_node = node.parent if (node.parent and node.parent.type == "decorated_definition") else node
-            ast_node = ast_nodes.get(qname)
-            params = _function_params(ast_node) if ast_node and isinstance(ast_node, (ast.FunctionDef, ast.AsyncFunctionDef)) else ()
-            is_async = any(c.type == "async" for c in node.children) or bool(ast_node and isinstance(ast_node, ast.AsyncFunctionDef))
-            top_level = "." not in qname
-            is_export = bool(
-                (top_level and not name.startswith("_"))
-                or name in exports
-                or (top_level and name in exports)
-            )
-            body = ast.dump(ast_node, annotate_fields=False, include_attributes=False) if ast_node else ""
-            signature = {
-                "params": [p.to_dict() for p in params],
-                "returns": _annotation(ast_node.returns) if ast_node and not isinstance(ast_node, ast.ClassDef) else "",
-                "async": is_async,
-                "decorators": list(_decorator_names(ast_node)) if ast_node else [],
-            }
-            entities.append(
-                Entity(
-                    file_path=path,
-                    qname=qualify(module, qname),
-                    kind=kind,
-                    start_line=span_node.start_point.row + 1,
-                    end_line=span_node.end_point.row + 1,
-                    start_col=span_node.start_point.column,
-                    end_col=span_node.end_point.column,
-                    start_byte=span_node.start_byte,
-                    end_byte=span_node.end_byte,
-                    blob_id=blob_id,
-                    body_digest=_digest(body),
-                    is_export=is_export,
-                    is_async=is_async,
-                    signature_digest=_digest(repr(signature)),
-                    parameters=tuple((p.name, p.kind, p.has_default) for p in params),
-                    returns=_annotation(ast_node.returns) if ast_node and not isinstance(ast_node, ast.ClassDef) else "",
-                )
-            )
-            for child in node.children:
-                walk_ts(child, qname)
-            return
-        for child in node.children:
-            walk_ts(child, parent_qual)
-
-    walk_ts(ts_tree.root_node, "")
-    return tuple(entities)
-
-
-def _python_entities(
-    path: str,
-    source: str,
-    tree: ast.Module,
-    exports: frozenset[str] | set[str] | None = None,
-    blob_hash: str = "",
-) -> tuple[Entity, ...]:
-    source_bytes = source.encode("utf-8")
-    if blob_hash:
-        blob_id = blob_hash.split(":", 1)[1] if ":" in blob_hash else blob_hash
-    else:
-        blob_id = git_blob_id(source_bytes)
-    module = normalize_repo_path(path).rsplit(".", 1)[0]
-    if exports is None:
-        exports = _collect_all(tree)
-
-    ts_lang = _py_language()
-    if ts_lang is not None:
-        try:
-            return _python_entities_via_tree_sitter(
-                _make_parser(ts_lang), path, module, exports, blob_id, tree, source_bytes
-            )
-        except Exception:
-            pass
-
-    entities = []
-
-    line_byte_offsets = [0]
-    pos = 0
-    while True:
-        pos = source_bytes.find(b"\n", pos)
-        if pos == -1:
-            break
-        pos += 1
-        line_byte_offsets.append(pos)
-
-    def _byte_offset(lineno: int, col: int) -> int:
-        idx = lineno - 1
-        if idx < 0:
-            idx = 0
-        elif idx >= len(line_byte_offsets):
-            idx = len(line_byte_offsets) - 1
-        return line_byte_offsets[idx] + col
-
-    def walk(node: ast.AST, parent_qual: str) -> None:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            name = node.name
-            qname = f"{parent_qual}.{name}" if parent_qual else name
-            params = _function_params(node) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else ()
-            kind = "function" if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else "class"
-            body = ast.dump(node, annotate_fields=False, include_attributes=False)
-            signature = {
-                "params": [p.to_dict() for p in params],
-                "returns": _annotation(node.returns) if not isinstance(node, ast.ClassDef) else "",
-                "async": isinstance(node, ast.AsyncFunctionDef),
-                "decorators": list(_decorator_names(node)),
-            }
-            top_level = "." not in qname
-            is_export = bool(
-                (top_level and not name.startswith("_"))
-                or name in exports
-                or (top_level and name in exports)
-            )
-            if node.decorator_list:
-                first_dec = node.decorator_list[0]
-                s_line = first_dec.lineno
-                line_offset = line_byte_offsets[s_line - 1] if s_line - 1 < len(line_byte_offsets) else 0
-                next_line_offset = line_byte_offsets[s_line] if s_line < len(line_byte_offsets) else len(source_bytes)
-                at_pos = source_bytes.find(b"@", line_offset, next_line_offset)
-                s_col = at_pos - line_offset if at_pos != -1 else getattr(first_dec, "col_offset", 0)
-                s_byte = at_pos if at_pos != -1 else _byte_offset(s_line, s_col)
-            else:
-                s_line = getattr(node, "lineno", 1)
-                s_col = getattr(node, "col_offset", 0)
-                s_byte = _byte_offset(s_line, s_col)
-
-            e_line = getattr(node, "end_lineno", s_line)
-            e_col = getattr(node, "end_col_offset", 0)
-            e_byte = _byte_offset(e_line, e_col)
-
-            entities.append(
-                Entity(
-                    file_path=path,
-                    qname=qualify(module, qname),
-                    kind=kind,
-                    start_line=s_line,
-                    end_line=e_line,
-                    start_col=s_col,
-                    end_col=e_col,
-                    start_byte=s_byte,
-                    end_byte=e_byte,
-                    blob_id=blob_id,
-                    body_digest=_digest(body),
-                    is_export=is_export,
-                    is_async=isinstance(node, ast.AsyncFunctionDef),
-                    signature_digest=_digest(repr(signature)),
-                    parameters=tuple((p.name, p.kind, p.has_default) for p in params),
-                    returns=_annotation(node.returns) if not isinstance(node, ast.ClassDef) else "",
-                )
-            )
-            for child in ast.iter_child_nodes(node):
-                walk(child, qname)
-            return
-        for child in ast.iter_child_nodes(node):
-            walk(child, parent_qual)
-
-    walk(tree, "")
-    return tuple(entities)
-
-
-def _python_shape(tree: ast.AST) -> tuple[int, int]:
-    """Return (node count, maximum nesting depth) in one iterative pass.
-
-    Depth is the number of `ast.iter_child_nodes` edges from the module node
-    down to the deepest node (the module itself is depth 1).  The traversal is
-    explicit rather than recursive so a pathological input cannot exhaust the
-    interpreter stack before the depth budget is checked.
-    """
-    node_count = 0
-    max_depth = 0
-    stack: list[tuple[ast.AST, int]] = [(tree, 1)]
-    while stack:
-        node, depth = stack.pop()
-        node_count += 1
-        if depth > max_depth:
-            max_depth = depth
-        for child in ast.iter_child_nodes(node):
-            stack.append((child, depth + 1))
-    return node_count, max_depth
-
-
-def analyze_python(
-    path: str,
-    source: str,
-    source_roots: Sequence[str] = (),
-    blob_hash: str = "",
-    budget: WorkBudget = DEFAULT_BUDGET,
-) -> SourceFacts:
-    encoded = source.encode("utf-8")
-    if len(encoded) > budget.max_file_bytes:
-        return SourceFacts(
-            path=path,
-            language="python",
-            supported=False,
-            parse_error=f"parse_resource_limit: file size {len(encoded)} exceeds max_file_bytes {budget.max_file_bytes}",
-        )
-    try:
-        tree = ast.parse(source, filename=path)
-    except SyntaxError as exc:
-        return SourceFacts(
-            path=path,
-            language="python",
-            supported=False,
-            parse_error=f"line {exc.lineno}: {exc.msg}",
-        )
-    node_count, max_depth = _python_shape(tree)
-    if node_count > budget.max_ast_nodes:
-        return SourceFacts(
-            path=path,
-            language="python",
-            supported=False,
-            parse_error=f"parse_resource_limit: AST node count {node_count} exceeds max_ast_nodes {budget.max_ast_nodes}",
-        )
-    if max_depth > budget.max_ast_depth:
-        return SourceFacts(
-            path=path,
-            language="python",
-            supported=False,
-            parse_error=f"parse_resource_limit: AST depth {max_depth} exceeds max_ast_depth {budget.max_ast_depth}",
-        )
-    visitor = _CallVisitor()
-    visitor.visit(tree)
-    exports_set = frozenset(_collect_all(tree))
-    entities = _python_entities(
-        path, source, tree, exports=exports_set, blob_hash=blob_hash
-    )
-    return SourceFacts(
-        path=path,
-        language="python",
-        supported=True,
-        entities=entities,
-        calls=tuple(visitor.calls),
-        imports=tuple(visitor.imports),
-        name_loads=frozenset(visitor.loads),
-        exports=exports_set,
-        has_dynamic_dispatch=visitor.dynamic,
-        has_unknown_decorator=visitor.has_decorators,
-    )
-
-
-# ---------------------------------------------------------------------------
-# TS / JS
-# ---------------------------------------------------------------------------
-
-_TS_LANG_OBJECTS: dict[str, Any] = {}
-
-
-def _ts_language(language: str) -> Any:
-    """Return the cached TS/JS `Language` object for `language`, or None."""
-    if language not in _TS_LANG_OBJECTS:
-        with _LANG_LOCK:
-            if language not in _TS_LANG_OBJECTS:
-                try:
-                    if language == "typescript":
-                        import tree_sitter_typescript as ts
-
-                        fn: Callable[[], Any] | None = getattr(ts, "language_typescript", None) or getattr(ts, "language", None)
-                        if fn is None:
-                            raise RuntimeError("tree-sitter typescript language unavailable")
-                        capsule = fn()
-                    elif language == "tsx":
-                        import tree_sitter_typescript as ts
-
-                        fn: Callable[[], Any] | None = getattr(ts, "language_tsx", None) or getattr(ts, "language", None)
-                        if fn is None:
-                            raise RuntimeError("tree-sitter typescript language unavailable")
-                        capsule = fn()
-                    else:
-                        import tree_sitter_javascript as js
-
-                        fn: Callable[[], Any] | None = getattr(js, "language", None)
-                        if fn is None:
-                            raise RuntimeError("tree-sitter javascript language unavailable")
-                        capsule = fn()
-                    from tree_sitter import Language
-
-                    _TS_LANG_OBJECTS[language] = Language(capsule)  # ty: ignore[deprecated]
-                except Exception:
-                    _TS_LANG_OBJECTS[language] = None
-
-    return _TS_LANG_OBJECTS.get(language)
-
-
-def _node_text(node: Any) -> str:
-    return node.text.decode("utf-8", "replace")
-
-
-def _ts_name(node: Any) -> str:
-    for child in node.children:
-        if child.type in ("identifier", "property_identifier", "type_identifier", "name"):
-            return _node_text(child)
-    for child in node.children:
-        if "name" in child.type:
-            return _node_text(child)
-    return ""
-
-
-def _ts_signature(node: Any) -> tuple[tuple[str, str, bool], ...]:
-    params = None
-    for child in node.children:
-        if child.type in ("formal_parameters", "parameters"):
-            params = child
-            break
-    if params is None:
-        return ()
-    out: list[tuple[str, str, bool]] = []
-    for child in params.children:
-        if child.type in ("identifier", "required_parameter", "optional_parameter", "rest_pattern"):
-            text = _node_text(child).strip()
-            if not text or text in (",",):
-                continue
-            name = text.split(":", 1)[0].split("=", 1)[0].strip()
-            if name.startswith("..."):
-                name = name[3:]
-            has_default = "=" in text
-            kind = "vararg" if text.startswith("...") else "positional"
-            if text.endswith("?") or "?" in text.split(":", 1)[0]:
-                has_default = True
-            out.append((name, kind, has_default))
-    return tuple(out)
-
-
-def _ts_entities(
-    path: str, source: str, blob_hash: str = "", tree: Any = None
-) -> tuple[Entity, ...] | None:
-    suffix = path.rsplit(".", 1)[-1].lower()
-    language = "tsx" if suffix == "tsx" else ("typescript" if suffix in ("ts", "mts", "cts") else "javascript")
-    if tree is None:
-        lang_obj = _ts_language(language)
-        if lang_obj is None:
-            return None
-        source_bytes = source.encode("utf-8")
-        try:
-            tree = _make_parser(lang_obj).parse(source_bytes)
-        except Exception:
-            return None
-    else:
-        source_bytes = source.encode("utf-8")
-    module = normalize_repo_path(path).rsplit(".", 1)[0]
-    if blob_hash:
-        blob_id = blob_hash.split(":", 1)[1] if ":" in blob_hash else blob_hash
-    else:
-        blob_id = git_blob_id(source_bytes)
-    entities: list[Entity] = []
-
-    def walk(node: Any, parent_class: str = "") -> None:
-        name = ""
-        kind = ""
-        if node.type in ("function_declaration", "class_declaration", "interface_declaration", "method_definition"):
-            name = _ts_name(node)
-            kind = "class" if node.type == "class_declaration" else ("interface" if node.type == "interface_declaration" else ("method" if node.type == "method_definition" else "function"))
-        elif node.type in ("lexical_declaration", "variable_declaration"):
-            # Find the first declarator with a function/arrow initializer.
-            for child in node.children:
-                if child.type == "variable_declarator":
-                    init = next((c for c in child.children if c.type in ("arrow_function", "function_expression", "function")), None)
-                    if init is not None:
-                        name = _ts_name(child)
-                        kind = "function"
-                        break
-        if name and kind:
-            qname = f"{parent_class}.{name}" if parent_class else name
-            is_export = (node.parent and node.parent.type == "export_statement") or name == "default"
-            span_node = node.parent if (node.parent and node.parent.type == "export_statement") else node
-            start = span_node.start_point.row + 1
-            end = span_node.end_point.row + 1
-            start_col = span_node.start_point.column
-            end_col = span_node.end_point.column
-            start_byte = span_node.start_byte
-            end_byte = span_node.end_byte
-            text = _node_text(span_node)
-            params = _ts_signature(node)
-            is_async = "async" in text.split("{", 1)[0] if "{" in text else "async" in text
-            entities.append(
-                Entity(
-                    file_path=path,
-                    qname=qualify(module, qname),
-                    kind=kind,
-                    start_line=start,
-                    end_line=end,
-                    start_col=start_col,
-                    end_col=end_col,
-                    start_byte=start_byte,
-                    end_byte=end_byte,
-                    blob_id=blob_id,
-                    body_digest=_digest(text),
-                    is_export=is_export,
-                    is_async=is_async,
-                    signature_digest=_digest(repr(params)),
-                    parameters=params,
-                )
-            )
-            if kind == "class":
-                for child in node.children:
-                    walk(child, qname)
-                return
-        for child in node.children:
-            walk(child, parent_class)
-
-    walk(tree.root_node)
-    return tuple(entities)
-
-
-def analyze_typescript(
-    path: str,
-    source: str,
-    blob_hash: str = "",
-    budget: WorkBudget = DEFAULT_BUDGET,
-) -> SourceFacts:
-    """Analyze a TS/JS file with a parser owned by the calling thread."""
-    suffix = path.rsplit(".", 1)[-1].lower()
-    language = "tsx" if suffix == "tsx" else ("typescript" if suffix in ("ts", "mts", "cts") else "javascript")
-    lang_obj = _ts_language(language)
-    if lang_obj is None:
-        return SourceFacts(
-            path=path,
-            language=language,
-            supported=False,
-            parse_error="tree-sitter TypeScript/JavaScript grammar unavailable",
-        )
-    parser = _make_parser(lang_obj)
-    source_bytes = source.encode("utf-8")
-    if len(source_bytes) > budget.max_file_bytes:
-        return SourceFacts(
-            path=path,
-            language=language,
-            supported=False,
-            parse_error=f"parse_resource_limit: file size {len(source_bytes)} exceeds max_file_bytes {budget.max_file_bytes}",
-        )
-    try:
-        tree = parser.parse(source_bytes)
-    except Exception as exc:
-        return SourceFacts(
-            path=path,
-            language=language,
-            supported=False,
-            parse_error=f"line 1: {exc}",
-        )
-    node_count = 0
-    max_depth = 0
-    stack: list[tuple[Any, int]] = [(tree.root_node, 1)]
-    while stack:
-        cur, depth = stack.pop()
-        node_count += 1
-        if depth > max_depth:
-            max_depth = depth
-        for child in cur.children:
-            stack.append((child, depth + 1))
-    if node_count > budget.max_ast_nodes:
-        return SourceFacts(
-            path=path,
-            language=language,
-            supported=False,
-            parse_error=f"parse_resource_limit: AST node count {node_count} exceeds max_ast_nodes {budget.max_ast_nodes}",
-        )
-    if max_depth > budget.max_ast_depth:
-        return SourceFacts(
-            path=path,
-            language=language,
-            supported=False,
-            parse_error=f"parse_resource_limit: AST depth {max_depth} exceeds max_ast_depth {budget.max_ast_depth}",
-        )
-    entities = _ts_entities(path, source, blob_hash=blob_hash, tree=tree)
-    if entities is None:
-        return SourceFacts(
-            path=path,
-            language=language,
-            supported=False,
-            parse_error="tree-sitter TypeScript/JavaScript grammar unavailable",
-        )
-    calls: list[CallSite] = []
-    imports: list[ImportFact] = []
-    loads: set[str] = set()
-    dynamic = False
-    def walk(node: Any) -> None:
-        nonlocal dynamic
-        if node.type == "call_expression":
-            callee = _node_text(node.children[0]).strip() if node.children else ""
-            args_node = next((c for c in node.children if c.type == "arguments"), None)
-            positional = 0
-            keywords: list[str] = []
-            if args_node is not None:
-                for arg in args_node.children:
-                    if arg.type in (",", "(", ")"):
-                        continue
-                    if arg.type == "object":
-                        positional += 1
-                        for pair in arg.children:
-                            if pair.type == "pair" and pair.children:
-                                keywords.append(_node_text(pair.children[0]).strip().strip("\"'"))
-                    elif arg.type == "spread_element":
-                        dynamic = True
-                    else:
-                        positional += 1
-            if callee:
-                calls.append(CallSite(callee, node.start_point.row + 1, positional, tuple(keywords)))
-                if callee in ("eval", "Function", "require"):
-                    dynamic = True
-        elif node.type in ("import_statement", "import_declaration"):
-            text = _node_text(node)
-            m = re.search(r"from\s+['\"]([^'\"]+)['\"]", text)
-            if m:
-                mod = m.group(1)
-                names: list[str] = []
-                aliases: list[tuple[str, str]] = []
-                clause = text.split("from", 1)[0].replace("import", "").strip()
-                if "{" in clause and "}" in clause:
-                    specifiers = clause[clause.find("{") + 1 : clause.rfind("}")].split(",")
-                    for spec in specifiers:
-                        spec = spec.strip()
-                        if not spec:
-                            continue
-                        if " as " in spec:
-                            orig, local = spec.split(" as ", 1)
-                            orig, local = orig.strip(), local.strip()
-                            names.append(orig)
-                            aliases.append((orig, local))
-                        else:
-                            names.append(spec)
-                            aliases.append((spec, spec))
-                elif "* as " in clause:
-                    local = clause.split("* as ", 1)[1].strip()
-                    names.append(local)
-                    aliases.append(("*", local))
-                elif clause:
-                    local = clause.strip()
-                    names.append(local)
-                    aliases.append(("default", local))
-                imports.append(
-                    ImportFact(
-                        module=mod,
-                        # ``names`` feeds cross-file reference discovery; leaving it
-                        # empty made every TypeScript import opaque, so a deleted
-                        # export with a live importer produced no reference evidence.
-                        names=tuple(names),
-                        line=node.start_point.row + 1,
-                        level=0,
-                        aliases=tuple(aliases),
-                    )
-                )
-        elif node.type in ("identifier", "property_identifier"):
-            loads.add(_node_text(node))
-        for child in node.children:
-            walk(child)
-    walk(tree.root_node)
-    return SourceFacts(
-        path=path,
-        language="typescript",
-        supported=True,
-        entities=entities,
-        calls=tuple(calls),
-        imports=tuple(imports),
-        name_loads=frozenset(loads),
-        has_dynamic_dispatch=dynamic,
-    )
-
-
-_TEXT_SUFFIXES = {
-    "md", "markdown", "txt", "rst", "toml", "yaml", "yml", "json", "json5",
-    "ini", "cfg", "conf", "env", "lock", "csv", "tsv", "xml", "html", "htm",
-    "css", "scss", "less", "svg", "sql", "proto", "graphql", "gql", "sh",
-    "bash", "zsh", "ps1", "bat", "cmd",
-}
+from verifyci.scope.models import (
+    CallSite,
+    ChangedScope,
+    ImportFact,
+    Param,
+    SourceFacts,
+    git_blob_id,
+)
+from verifyci.scope.parsers import (
+    SUPPORTED_CODE_EXTENSIONS,
+    TEXT_SUFFIXES,
+    TS_JS_EXTENSIONS,
+    frontend_identity,
+    path_suffix,
+)
+from verifyci.scope.python_scope import analyze_python, is_safe_module_construct
+from verifyci.scope.ts_scope import analyze_typescript
 
 
 def _analyze_source_uncached(
@@ -959,20 +39,20 @@ def _analyze_source_uncached(
     if len(encoded) > budget.max_file_bytes:
         return SourceFacts(
             path=path,
-            language=path.rsplit(".", 1)[-1].lower() if "." in path else "unknown",
+            language=path_suffix(path) or "unknown",
             supported=False,
             parse_error=f"parse_resource_limit: file size {len(encoded)} exceeds max_file_bytes {budget.max_file_bytes}",
         )
-    suffix = path.rsplit(".", 1)[-1].lower()
+    suffix = path_suffix(path)
     if suffix == "py":
         return analyze_python(
             path, source, source_roots, blob_hash=blob_hash, budget=budget
         )
-    if suffix in ("ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"):
+    if suffix in TS_JS_EXTENSIONS:
         return analyze_typescript(
             path, source, blob_hash=blob_hash, budget=budget
         )
-    if suffix in _TEXT_SUFFIXES or "/" not in path and "." not in path:
+    if suffix in TEXT_SUFFIXES or ("/" not in path and "." not in path):
         return SourceFacts(path=path, language="text", supported=True)
     return SourceFacts(
         path=path,
@@ -1033,19 +113,6 @@ def _facts_from_cache(value: Mapping[str, Any]) -> SourceFacts:
     )
 
 
-def _frontend_identity(path: str) -> tuple[str, str]:
-    suffix = path.rsplit(".", 1)[-1].lower()
-    if suffix == "py":
-        import sys
-
-        return "python", f"python-ast-{sys.version_info.major}.{sys.version_info.minor}"
-    if suffix in {"ts", "tsx", "mts", "cts"}:
-        return "typescript", "tree-sitter-typescript-0.23"
-    if suffix in {"js", "jsx", "mjs", "cjs"}:
-        return "javascript", "tree-sitter-javascript-0.23"
-    return "text", "other-text-v1"
-
-
 def analyze_source(
     path: str,
     source: str,
@@ -1062,7 +129,7 @@ def analyze_source(
         )
     from verifyci.index.provider import FactProvider
 
-    language_id, frontend_version = _frontend_identity(path)
+    language_id, frontend_version = frontend_identity(path)
     components = FactProvider.tier1_components(
         toolchain_fingerprint=toolchain_fingerprint,
         blob_hash=blob_hash,
@@ -1091,98 +158,10 @@ def analyze_source(
         return facts
 
 
-def _is_safe_constant_value(node: ast.AST) -> bool:
-    if isinstance(node, ast.Constant):
-        return True
-    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-        return all(_is_safe_constant_value(elt) for elt in node.elts)
-    if isinstance(node, ast.Dict):
-        return all(
-            (k is None or _is_safe_constant_value(k)) and _is_safe_constant_value(v)
-            for k, v in zip(node.keys, node.values)
-        )
-    if isinstance(node, ast.Call):
-        callee = _callee_name(node.func)
-        if callee in {"Path", "pathlib.Path", "int", "float", "str", "bool", "tuple", "list", "dict", "set", "frozenset"}:
-            return all(_is_safe_constant_value(arg) for arg in node.args)
-        return False
-    if isinstance(node, ast.UnaryOp):
-        return _is_safe_constant_value(node.operand)
-    if isinstance(node, ast.BinOp):
-        return _is_safe_constant_value(node.left) and _is_safe_constant_value(node.right)
-    return False
-
-
-def _is_safe_range_tree(tree: ast.Module, start_line: int, end_line: int) -> bool:
-    for stmt in tree.body:
-        s_start = getattr(stmt, "lineno", 1)
-        if s_start > end_line:
-            break
-        s_end = getattr(stmt, "end_lineno", s_start)
-        if s_end < start_line:
-            continue
-        if isinstance(stmt, (ast.Import, ast.ImportFrom)):
-            continue
-        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
-        if isinstance(stmt, ast.Assign) and _is_safe_constant_value(stmt.value):
-            continue
-        if isinstance(stmt, ast.AnnAssign) and (stmt.value is None or _is_safe_constant_value(stmt.value)):
-            continue
-        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
-            continue
-        return False
-    return True
-
-
-def is_safe_module_construct(
-    base_source: str,
-    old_start: int,
-    old_count: int,
-    head_source: str,
-    new_start: int,
-    new_count: int,
-    base_tree: ast.Module | None = None,
-    head_tree: ast.Module | None = None,
-) -> bool:
-    """Validate that changes outside entities only touch safe module declarations.
-
-    For additions, validates changed head-side statements.
-    For deletions, validates changed base-side statements.
-    For replacements, validates both sides.
-    An empty side must not pass safety validation vacuously if the other side touched unsafe code.
-    """
-    if old_count > 0 and (base_source or base_tree is not None):
-        if base_tree is None:
-            try:
-                base_tree = ast.parse(base_source)
-            except SyntaxError:
-                return False
-        if not _is_safe_range_tree(base_tree, old_start, old_start + old_count - 1):
-            return False
-    if new_count > 0 and (head_source or head_tree is not None):
-        if head_tree is None:
-            try:
-                head_tree = ast.parse(head_source)
-            except SyntaxError:
-                return False
-        if not _is_safe_range_tree(head_tree, new_start, new_start + new_count - 1):
-            return False
-    if old_count == 0 and new_count == 0:
-        return False
-    return True
-
-
 def find_matching_entity_detailed(
     entities: Sequence[Entity], start_line: int, count: int
 ) -> tuple[Entity | None, bool]:
-    """Find the matching entity and report whether boundary conflict occurred.
-
-    Returns:
-        (entity, False): unique entity or innermost in strict nesting chain
-        (None, False): no entity overlapping (module-level)
-        (None, True): ambiguous boundary crossing across sibling or disjoint entities
-    """
+    """Find the matching entity and report whether boundary conflict occurred."""
     if count <= 0:
         return None, False
     end_line = start_line + count - 1
@@ -1192,26 +171,12 @@ def find_matching_entity_detailed(
     ]
     if not overlapping:
         return None, False
-    if len(overlapping) == 1:
-        return overlapping[0], False
-    if len(overlapping) == 2:
-        e0, e1 = overlapping[0], overlapping[1]
-        len0 = e0.end_line - e0.start_line
-        len1 = e1.end_line - e1.start_line
-        outer, inner = (e0, e1) if len0 >= len1 else (e1, e0)
-        if outer.start_line <= inner.start_line and inner.end_line <= outer.end_line:
-            return inner, False
-        return None, True
-
-    # Multiple entities overlap. Verify if they form a strict nesting chain.
     overlapping.sort(key=lambda e: (e.end_line - e.start_line), reverse=True)
     for i in range(len(overlapping) - 1):
         outer = overlapping[i]
         inner = overlapping[i + 1]
         if not (outer.start_line <= inner.start_line and inner.end_line <= outer.end_line):
-            # Sibling or boundary crossing!
             return None, True
-
     return overlapping[-1], False
 
 
@@ -1228,46 +193,29 @@ def extract_entities(source: bytes | str, path: str, source_roots: Sequence[str]
     return facts.entities
 
 
-@dataclass(frozen=True, slots=True)
-class ChangedScope:
-    base_facts: Mapping[str, SourceFacts]
-    head_facts: Mapping[str, SourceFacts]
-    changed_entities: frozenset[str]
-    base_entities: frozenset[str]
-    head_entities: frozenset[str]
-    unmapped_hunks: tuple[Mapping[str, Any], ...] = ()
-    rename_limit_exceeded: bool = False
-    mapped_hunks: tuple[Mapping[str, Any], ...] = ()
-    mapped_entities: tuple[Mapping[str, Any], ...] = ()
-    renames: tuple[Mapping[str, Any], ...] = ()
-    _entity_index: dict[str, Entity] | None = field(
-        default=None, repr=False, compare=False, hash=False
-    )
+def _mapped_hunk(path: str, hunk: Any, mapped_entity: str | None) -> dict[str, Any]:
+    return {
+        "file": path,
+        "old_start": hunk.old_start,
+        "old_count": hunk.old_count,
+        "new_start": hunk.new_start,
+        "new_count": hunk.new_count,
+        "mapped_entity": mapped_entity,
+    }
 
-    def __post_init__(self) -> None:
-        if self._entity_index is not None:
-            return
-        idx: dict[str, Entity] = {}
-        for facts in self.base_facts.values():
-            for e in facts.entities:
-                idx[e.qname] = e
-        for facts in self.head_facts.values():
-            for e in facts.entities:
-                idx[e.qname] = e
-        object.__setattr__(self, "_entity_index", idx)
 
-    def entity(self, qname: str) -> Entity | None:
-        if self._entity_index is not None:
-            return self._entity_index.get(qname)
-        for facts in self.head_facts.values():
-            for entity in facts.entities:
-                if entity.qname == qname:
-                    return entity
-        for facts in self.base_facts.values():
-            for entity in facts.entities:
-                if entity.qname == qname:
-                    return entity
-        return None
+def _get_cached_tree(
+    cache: dict[str, ast.Module | None], side: str, source_text: str
+) -> ast.Module | None:
+    if side not in cache:
+        tree: ast.Module | None = None
+        if source_text:
+            try:
+                tree = ast.parse(source_text)
+            except SyntaxError:
+                tree = None
+        cache[side] = tree
+    return cache[side]
 
 
 def build_changed_scope(
@@ -1289,6 +237,10 @@ def build_changed_scope(
     mapped_hunks: list[dict[str, Any]] = []
     entity_changes: dict[str, dict[str, Any]] = {}
     renames: list[dict[str, Any]] = []
+
+    def _record_unmapped(path: str, hunk: Any, reason_code: str) -> None:
+        unmapped.append({"path": path, "hunk": hunk.to_dict(), "reason_code": reason_code})
+        mapped_hunks.append(_mapped_hunk(path, hunk, None))
 
     for entry in entries:
         if entry.base_path and not entry.is_binary and not entry.is_submodule:
@@ -1346,10 +298,6 @@ def build_changed_scope(
         bf = base_facts.get(entry.base_path)
         hf = head_facts.get(entry.head_path)
 
-        # Check for parse errors.  A file outside the frontends is reported as
-        # "parse_error: unsupported language frontend"; that is an acceptable
-        # scope exclusion, not a parser failure, so it must be classified as
-        # ``unsupported_language`` below.
         parse_err = (bf and bf.parse_error) or (hf and hf.parse_error)
         if parse_err and not str(parse_err).startswith("unsupported language"):
             reason_code = (
@@ -1358,61 +306,18 @@ def build_changed_scope(
                 else "parse_error"
             )
             for hunk in entry.hunks:
-                unmapped.append(
-                    {
-                        "path": path,
-                        "hunk": hunk.to_dict(),
-                        "reason_code": reason_code,
-                    }
-                )
-                mapped_hunks.append(
-                    {
-                        "file": path,
-                        "old_start": hunk.old_start,
-                        "old_count": hunk.old_count,
-                        "new_start": hunk.new_start,
-                        "new_count": hunk.new_count,
-                        "mapped_entity": None,
-                    }
-                )
+                _record_unmapped(path, hunk, reason_code)
             continue
 
-        # Check for unsupported languages
-        unsupported = (bf and not bf.supported) or (hf and not hf.supported)
-        if unsupported:
+        if (bf and not bf.supported) or (hf and not hf.supported):
             for hunk in entry.hunks:
-                unmapped.append(
-                    {
-                        "path": path,
-                        "hunk": hunk.to_dict(),
-                        "reason_code": "unsupported_language",
-                    }
-                )
-                mapped_hunks.append(
-                    {
-                        "file": path,
-                        "old_start": hunk.old_start,
-                        "old_count": hunk.old_count,
-                        "new_start": hunk.new_start,
-                        "new_count": hunk.new_count,
-                        "mapped_entity": None,
-                    }
-                )
+                _record_unmapped(path, hunk, "unsupported_language")
             continue
 
-        sfx = path.rsplit(".", 1)[-1].lower()
-        if sfx not in ("py", "ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"):
+        sfx = path_suffix(path)
+        if sfx not in SUPPORTED_CODE_EXTENSIONS:
             for hunk in entry.hunks:
-                mapped_hunks.append(
-                    {
-                        "file": path,
-                        "old_start": hunk.old_start,
-                        "old_count": hunk.old_count,
-                        "new_start": hunk.new_start,
-                        "new_count": hunk.new_count,
-                        "mapped_entity": path,
-                    }
-                )
+                mapped_hunks.append(_mapped_hunk(path, hunk, path))
             continue
 
         b_ents = bf.entities if bf else ()
@@ -1420,71 +325,21 @@ def build_changed_scope(
         b_by_qname = {e.qname: e for e in b_ents}
         h_by_qname = {e.qname: e for e in h_ents}
 
-        b_tree: ast.Module | None = None
-        h_tree: ast.Module | None = None
-        b_tree_parsed = False
-        h_tree_parsed = False
-
-        def _get_b_tree(cur_entry: DiffEntry = entry) -> ast.Module | None:
-            nonlocal b_tree, b_tree_parsed
-            if not b_tree_parsed:
-                b_tree_parsed = True
-                if cur_entry.base_source:
-                    try:
-                        b_tree = ast.parse(cur_entry.base_source)
-                    except SyntaxError:
-                        b_tree = None
-            return b_tree
-
-        def _get_h_tree(cur_entry: DiffEntry = entry) -> ast.Module | None:
-            nonlocal h_tree, h_tree_parsed
-            if not h_tree_parsed:
-                h_tree_parsed = True
-                if cur_entry.head_source:
-                    try:
-                        h_tree = ast.parse(cur_entry.head_source)
-                    except SyntaxError:
-                        h_tree = None
-            return h_tree
+        parsed_trees: dict[str, ast.Module | None] = {}
 
         for hunk in entry.hunks:
             m_base, base_conflict = find_matching_entity_detailed(b_ents, hunk.old_start, hunk.old_count)
             m_head, head_conflict = find_matching_entity_detailed(h_ents, hunk.new_start, hunk.new_count)
 
             if base_conflict or head_conflict:
-                unmapped.append(
-                    {
-                        "path": path,
-                        "hunk": hunk.to_dict(),
-                        "reason_code": "mapping_unresolved",
-                    }
-                )
-                mapped_hunks.append(
-                    {
-                        "file": path,
-                        "old_start": hunk.old_start,
-                        "old_count": hunk.old_count,
-                        "new_start": hunk.new_start,
-                        "new_count": hunk.new_count,
-                        "mapped_entity": None,
-                    }
-                )
+                _record_unmapped(path, hunk, "mapping_unresolved")
                 continue
 
             if m_base is not None and m_head is not None and m_base.qname == m_head.qname:
                 qname = m_head.qname
                 changed.add(qname)
                 entity_changes[qname] = {"change": "modified", "base_e": m_base, "head_e": m_head}
-                mapped_hunks.append(
-                    {
-                        "file": path,
-                        "old_start": hunk.old_start,
-                        "old_count": hunk.old_count,
-                        "new_start": hunk.new_start,
-                        "new_count": hunk.new_count,
-                        "mapped_entity": qname,
-                    }
-                )
+                mapped_hunks.append(_mapped_hunk(path, hunk, qname))
             elif m_base is None and m_head is not None:
                 qname = m_head.qname
                 changed.add(qname)
@@ -1492,47 +347,18 @@ def build_changed_scope(
                     entity_changes[qname] = {"change": "modified", "base_e": b_by_qname[qname], "head_e": m_head}
                 else:
                     entity_changes[qname] = {"change": "added", "base_e": None, "head_e": m_head}
-                mapped_hunks.append(
-                    {
-                        "file": path,
-                        "old_start": hunk.old_start,
-                        "old_count": hunk.old_count,
-                        "new_start": hunk.new_start,
-                        "new_count": hunk.new_count,
-                        "mapped_entity": qname,
-                    }
-                )
+                mapped_hunks.append(_mapped_hunk(path, hunk, qname))
             elif m_base is not None and m_head is None:
                 head_e = h_by_qname.get(m_base.qname) if hunk.new_count == 0 else None
-
                 if head_e is not None:
                     qname = head_e.qname
                     changed.add(qname)
                     entity_changes[qname] = {"change": "modified", "base_e": m_base, "head_e": head_e}
-                    mapped_hunks.append(
-                        {
-                            "file": path,
-                            "old_start": hunk.old_start,
-                            "old_count": hunk.old_count,
-                            "new_start": hunk.new_start,
-                            "new_count": hunk.new_count,
-                            "mapped_entity": qname,
-                        }
-                    )
                 else:
                     qname = m_base.qname
                     changed.add(qname)
                     entity_changes[qname] = {"change": "removed", "base_e": m_base, "head_e": None}
-                    mapped_hunks.append(
-                        {
-                            "file": path,
-                            "old_start": hunk.old_start,
-                            "old_count": hunk.old_count,
-                            "new_start": hunk.new_start,
-                            "new_count": hunk.new_count,
-                            "mapped_entity": qname,
-                        }
-                    )
+                mapped_hunks.append(_mapped_hunk(path, hunk, qname))
             elif m_base is None and m_head is None:
                 if (
                     sfx == "py"
@@ -1543,56 +369,15 @@ def build_changed_scope(
                         entry.head_source,
                         hunk.new_start,
                         hunk.new_count,
-                        base_tree=_get_b_tree(),
-                        head_tree=_get_h_tree(),
+                        base_tree=_get_cached_tree(parsed_trees, "base", entry.base_source),
+                        head_tree=_get_cached_tree(parsed_trees, "head", entry.head_source),
                     )
                 ):
-                    mapped_hunks.append(
-                        {
-                            "file": path,
-                            "old_start": hunk.old_start,
-                            "old_count": hunk.old_count,
-                            "new_start": hunk.new_start,
-                            "new_count": hunk.new_count,
-                            "mapped_entity": "other_text",
-                        }
-                    )
+                    mapped_hunks.append(_mapped_hunk(path, hunk, "other_text"))
                 else:
-                    unmapped.append(
-                        {
-                            "path": path,
-                            "hunk": hunk.to_dict(),
-                            "reason_code": "mapping_unresolved",
-                        }
-                    )
-                    mapped_hunks.append(
-                        {
-                            "file": path,
-                            "old_start": hunk.old_start,
-                            "old_count": hunk.old_count,
-                            "new_start": hunk.new_start,
-                            "new_count": hunk.new_count,
-                            "mapped_entity": None,
-                        }
-                    )
+                    _record_unmapped(path, hunk, "mapping_unresolved")
             else:
-                unmapped.append(
-                    {
-                        "path": path,
-                        "hunk": hunk.to_dict(),
-                        "reason_code": "mapping_unresolved",
-                    }
-                )
-                mapped_hunks.append(
-                    {
-                        "file": path,
-                        "old_start": hunk.old_start,
-                        "old_count": hunk.old_count,
-                        "new_start": hunk.new_start,
-                        "new_count": hunk.new_count,
-                        "mapped_entity": None,
-                    }
-                )
+                _record_unmapped(path, hunk, "mapping_unresolved")
 
     entities_out = []
     for qname, info in sorted(entity_changes.items()):
@@ -1614,14 +399,6 @@ def build_changed_scope(
             item["is_export"] = True
         entities_out.append(item)
 
-    idx: dict[str, Entity] = {}
-    for facts in base_facts.values():
-        for e in facts.entities:
-            idx[e.qname] = e
-    for facts in head_facts.values():
-        for e in facts.entities:
-            idx[e.qname] = e
-
     return ChangedScope(
         base_facts=base_facts,
         head_facts=head_facts,
@@ -1633,7 +410,6 @@ def build_changed_scope(
         mapped_hunks=tuple(mapped_hunks),
         mapped_entities=tuple(entities_out),
         renames=tuple(renames),
-        _entity_index=idx,
     )
 
 
@@ -1649,6 +425,7 @@ __all__ = [
     "build_changed_scope",
     "extract_entities",
     "find_matching_entity",
+    "find_matching_entity_detailed",
     "git_blob_id",
     "is_safe_module_construct",
 ]

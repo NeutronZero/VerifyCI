@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass, field
+import time
 from typing import Any, Callable, Mapping, Sequence
 
 from verifyci.contracts.manifest import CHECK_SPECS
@@ -365,13 +367,82 @@ def budget_exhausted_result(
     )
 
 
+def check_deadline(
+    context: CheckContext,
+    check_id: str,
+    detail: str = "cold_deadline_seconds exceeded",
+) -> CheckResult | None:
+    """Return a budget-exhausted CheckResult when ``context.deadline`` has elapsed."""
+    if context.deadline is not None and time.monotonic() > context.deadline:
+        return budget_exhausted_result(context, check_id, detail)
+    return None
+
+
+def simple_symbol_name(qname: str) -> str:
+    """Return the innermost symbol name from a qualified ``module:Class.member`` name."""
+    return qname.split(":", 1)[-1].rsplit(".", 1)[-1]
+
+
+def changed_head_lines(context: CheckContext) -> dict[str, set[int]]:
+    """Return 1-based changed head line numbers per non-binary, non-special path."""
+    out: dict[str, set[int]] = {}
+    for entry in context.entries:
+        if not entry.head_path or entry.is_binary or entry.is_submodule or entry.is_symlink:
+            continue
+        if entry.is_added:
+            count = len(entry.head_source.splitlines())
+            out.setdefault(entry.head_path, set()).update(range(1, count + 1))
+            continue
+        lines = out.setdefault(entry.head_path, set())
+        for hunk in entry.hunks:
+            lines.update(range(hunk.new_start, hunk.new_end() + 1))
+    return out
+
+
+class ParsedHeadCache:
+    """Per-check cache of head line splits and Python ASTs keyed by blob/path identity."""
+
+    def __init__(self) -> None:
+        self._lines: dict[tuple[str, str], list[str]] = {}
+        self._asts: dict[tuple[str, str], ast.Module | None] = {}
+
+    @staticmethod
+    def _key(entry: DiffEntry) -> tuple[str, str]:
+        return (entry.head_blob or "", entry.head_path or entry.base_path or "")
+
+    def lines(self, entry: DiffEntry) -> list[str]:
+        key = self._key(entry)
+        cached = self._lines.get(key)
+        if cached is None:
+            cached = entry.head_source.splitlines() if entry.head_source else []
+            self._lines[key] = cached
+        return cached
+
+    def ast_tree(self, entry: DiffEntry) -> ast.Module | None:
+        key = self._key(entry)
+        if key in self._asts:
+            return self._asts[key]
+        tree: ast.Module | None = None
+        if entry.head_source:
+            try:
+                tree = ast.parse(entry.head_source)
+            except SyntaxError:
+                tree = None
+        self._asts[key] = tree
+        return tree
+
+
 __all__ = [
     "CheckContext",
+    "ParsedHeadCache",
     "budget_exhausted_result",
+    "changed_head_lines",
+    "check_deadline",
     "entity_budget_exceeded",
     "error_result",
     "gap",
     "inconclusive_gap_result",
     "make_finding",
     "make_result",
+    "simple_symbol_name",
 ]

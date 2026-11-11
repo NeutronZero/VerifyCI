@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from hashlib import sha256
 import os
 import platform
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -23,6 +24,7 @@ from verifyci.runtime.scheduler import run_deterministic_batch
 from verifyci.contracts.manifest import (
     CHECK_ORDER,
     CHECK_SPECS,
+    CACHE_SCHEMA_VERSION,
     CODE_EXTENSIONS,
     manifest_hash,
     release_summary,
@@ -32,7 +34,6 @@ from verifyci.contracts.release_validation import verify_release_validation_evid
 from verifyci.contracts.model import (
     CheckResult,
     DiffEntry,
-    Entity,
     EvidenceBundle,
     Policy,
     Tier,
@@ -40,8 +41,8 @@ from verifyci.contracts.model import (
 )
 from verifyci.contracts.names import normalize_repo_path
 from verifyci.contracts.reason_codes import GAPS, is_fault_code
-from verifyci.evidence.bundle import build_bundle, toolchain_fingerprint
-from verifyci.evidence.canonical import canonical_json_bytes
+from verifyci.evidence.bundle import build_bundle, build_payload, toolchain_fingerprint
+from verifyci.contracts.canonical import canonical_json_bytes
 from verifyci.gate.integrity import (
     CodeownersCoverage,
     gate_integrity,
@@ -58,10 +59,11 @@ from verifyci.gate.policy import (
     review_proposed_policy,
 )
 from verifyci.gate.verdict import aggregate, apply_acceptances, apply_waivers
-from verifyci.index.cache import CACHE_SCHEMA_VERSION, CacheStore
+from verifyci.index.cache import CacheStore
 from verifyci.index.provider import CacheIntegrityMismatch, FactProvider
 from verifyci.scm.git import GitError, GitRepo
-from verifyci.scope.entities import ChangedScope, SourceFacts, analyze_source, build_changed_scope
+from verifyci.scope.entities import ChangedScope, build_changed_scope
+from verifyci.scope.repository import augment_scope_with_repository as _augment_scope_with_repository
 
 
 _CHECK_RUNNERS: dict[str, Callable[[CheckContext], CheckResult]] = {
@@ -107,38 +109,68 @@ def _scope_empty() -> ChangedScope:
     )
 
 
-def _context(
+def validate_cache_location(repo: Path, cache_dir: str | None) -> tuple[str, str] | None:
+    """Return an error tuple if an explicit cache_dir resides inside the repository working tree."""
+    if cache_dir is None:
+        return None
+    resolved = Path(cache_dir).expanduser().resolve(strict=False)
+    root = repo.resolve(strict=False)
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        return None
+    return ("invalid_cache_location", "cache directory must be outside the working tree")
+
+
+@dataclass
+class _GateState:
+    request: GateRequest
+    started: float
+    as_of_date: str
+    git: GitRepo | None = None
+    toolchain: str = ""
+    object_format: str = ""
+    target_base: str = ""
+    merge_base: str = ""
+    head: str = ""
+    entries: list[DiffEntry] = field(default_factory=list)
+    integrity_paths: tuple[str, ...] = ()
+    policy: Policy | None = None
+    proposed: ProposedReview | None = None
+    review_reasons: set[str] = field(default_factory=set)
+    extra_faults: set[str] = field(default_factory=set)
+    invalid_policy_detail: str = ""
+    codeowners: CodeownersCoverage = field(
+        default_factory=lambda: CodeownersCoverage(proven=False, reasons=("not_evaluated",))
+    )
+    target_drift: bool = False
+
+
+def _fatal_from_state(
+    state: _GateState,
     *,
-    git: GitRepo | None,
-    policy: Policy,
-    entries: Sequence[DiffEntry],
-    scope: ChangedScope,
-    as_of_date: str,
-    object_format: str,
-    target_base: str,
-    merge_base: str,
-    head: str,
-    toolchain: str,
-    source_roots: Sequence[str],
-    rename_limit_exceeded: bool,
-    budget: WorkBudget = DEFAULT_BUDGET,
-    deadline: float | None = None,
-) -> CheckContext:
-    return CheckContext(
-        git=git,
-        policy=policy,
-        entries=tuple(entries),
-        scope=scope,
-        as_of_date=as_of_date,
-        object_format=object_format,
-        target_base_commit=target_base,
-        merge_base_commit=merge_base,
-        head_commit=head,
-        toolchain_fingerprint=toolchain,
-        source_roots=tuple(source_roots),
-        rename_limit_exceeded=rename_limit_exceeded,
-        budget=budget,
-        deadline=deadline,
+    code: str,
+    detail: str,
+    policy: Policy | None = None,
+    review_reasons: Iterable[str] | None = None,
+) -> EvidenceBundle:
+    return _fatal_bundle(
+        request=state.request,
+        git=state.git,
+        code=code,
+        detail=detail,
+        toolchain=state.toolchain,
+        object_format=state.object_format,
+        as_of_date=state.as_of_date,
+        review_reasons=state.review_reasons if review_reasons is None else review_reasons,
+        policy=state.policy if policy is None else policy,
+        entries=state.entries,
+        target_base=state.target_base,
+        merge_base=state.merge_base,
+        head=state.head,
+        started=state.started,
+        integrity_paths=state.integrity_paths,
+        target_drift=state.target_drift,
     )
 
 
@@ -213,17 +245,17 @@ def _fatal_bundle(
     target_drift: bool = False,
 ) -> EvidenceBundle:
     effective_policy = policy or builtin_bootstrap_policy()
-    context = _context(
+    context = CheckContext(
         git=git,
         policy=effective_policy,
-        entries=entries,
+        entries=tuple(entries),
         scope=_scope_empty(),
         as_of_date=as_of_date or request.as_of_date or _today(),
         object_format=object_format,
-        target_base=target_base,
-        merge_base=merge_base,
-        head=head,
-        toolchain=toolchain,
+        target_base_commit=target_base,
+        merge_base_commit=merge_base,
+        head_commit=head,
+        toolchain_fingerprint=toolchain,
         source_roots=(),
         rename_limit_exceeded=False,
     )
@@ -244,7 +276,7 @@ def _fatal_bundle(
         review_reasons=review_reasons,
         extra_faults=(code,) if is_fault_code(code) else (),
     )
-    payload = _payload(
+    payload = _build_gate_payload(
         request=request,
         context=context,
         results=results,
@@ -281,7 +313,7 @@ def _fatal_bundle(
     )
 
 
-def _payload(
+def _build_gate_payload(
     *,
     request: GateRequest,
     context: CheckContext,
@@ -388,53 +420,7 @@ def _payload(
                 "subject": item.get("subject"),
             }
         )
-    return _payload_build(
-        context=context,
-        results=results,
-        verdict=verdict,
-        findings=findings,
-        waivers=waivers,
-        accepted_gaps=accepted_gaps,
-        diagnostics=diagnostics,
-        review_reasons=review_reasons,
-        policy_payload=policy_payload,
-        inputs=inputs,
-        scope=scope,
-        excluded=excluded,
-        integrity_paths=integrity_paths,
-        codeowners=codeowners,
-        entries=entries,
-        proposed=proposed,
-        review_cleared=review_cleared,
-        extra_faults=extra_faults,
-        is_release_validated=is_release_validated,
-    )
-
-
-def _payload_build(
-    *,
-    context: CheckContext,
-    results: Sequence[CheckResult],
-    verdict,
-    findings: Sequence[Mapping[str, Any]],
-    waivers: Sequence[Mapping[str, Any]],
-    accepted_gaps: Sequence[Mapping[str, Any]],
-    diagnostics: Sequence[Mapping[str, Any]],
-    review_reasons: Sequence[str],
-    policy_payload: Mapping[str, Any],
-    inputs: Mapping[str, Any],
-    scope: Mapping[str, Any],
-    excluded: Sequence[Mapping[str, Any]],
-    integrity_paths: Sequence[str],
-    codeowners: CodeownersCoverage,
-    entries: Sequence[DiffEntry],
-    proposed: ProposedReview | None,
-    review_cleared: bool,
-    extra_faults: Sequence[str],
-    is_release_validated: bool = False,
-) -> dict[str, Any]:
-    assumptions = _assumptions(codeowners=codeowners, policy=context.policy)
-    return _build_payload(
+    return build_payload(
         inputs=inputs,
         scope=scope,
         check_results=results,
@@ -446,14 +432,14 @@ def _payload_build(
             {"code": "review_reason", "reason_code": code}
             for code in review_reasons
         ],
-        assumptions=assumptions,
+        assumptions=_assumptions(codeowners=codeowners, policy=context.policy),
         excluded_scope=excluded,
         verdict=verdict,
         toolchain=context.toolchain_fingerprint,
         policy=policy_payload,
         gate_integrity={
             "changed_paths": list(integrity_paths),
-            "policy_changed": POLICY_PATH in {p for e in entries for p in e.changed_paths},
+            "policy_changed": pr_policy_changed,
             "codeowners": codeowners.to_dict(),
             "review_cleared": review_cleared,
             "proposed_policy_review": (
@@ -476,150 +462,16 @@ def _payload_build(
     )
 
 
-# A small indirection keeps _payload readable while avoiding duplicate payload
-# construction in the fatal path.
-def _build_payload(**kwargs: Any) -> dict[str, Any]:
-    from verifyci.evidence.bundle import build_payload
-
-    return build_payload(**kwargs)
-
-
 _CODE_SUFFIXES = CODE_EXTENSIONS
-
-
-def _augment_scope_with_repository(
-    scope: ChangedScope,
-    *,
-    git: GitRepo,
-    base_rev: str,
-    head_rev: str,
-    source_roots: Sequence[str],
-    fact_provider: FactProvider | None = None,
-    toolchain_fingerprint: str = "",
-    object_format: str = "",
-    budget: WorkBudget = DEFAULT_BUDGET,
-    jobs: int = 1,
-) -> ChangedScope:
-    """Add repository-local facts for reference and caller discovery.
-
-    The changed-scope map is intentionally small.  Deletion and contract
-    checks also need live references and callers in unchanged files, so the
-    gate materializes facts for repository code files at both endpoints.
-    """
-    base_facts = dict(scope.base_facts)
-    head_facts = dict(scope.head_facts)
-    base_blobs: dict[str, str] = {}
-    base_tree_entries: list[tuple[str, str, str, str]] = []
-    for mode, obj_type, object_id, path in git.list_tree(base_rev):
-        if mode == "160000" or mode == "120000" or obj_type != "blob":
-            continue
-        suffix = path.rsplit(".", 1)[-1].lower()
-        if suffix not in _CODE_SUFFIXES:
-            continue
-        base_blobs[path] = object_id
-        base_tree_entries.append((mode, obj_type, object_id, path))
-
-    head_tree_entries: list[tuple[str, str, str, str]] = []
-    for mode, obj_type, object_id, path in git.list_tree(head_rev):
-        if mode == "160000" or mode == "120000" or obj_type != "blob":
-            continue
-        suffix = path.rsplit(".", 1)[-1].lower()
-        if suffix not in _CODE_SUFFIXES or path in head_facts:
-            continue
-        head_tree_entries.append((mode, obj_type, object_id, path))
-
-    needed_blobs: list[str] = []
-    for _, _, object_id, path in base_tree_entries:
-        if path not in base_facts:
-            needed_blobs.append(object_id)
-    for _, _, object_id, path in head_tree_entries:
-        if base_blobs.get(path) != object_id or path not in base_facts:
-            needed_blobs.append(object_id)
-
-    fetched_blobs = git.read_blobs(needed_blobs) if needed_blobs else {}
-
-    def _parse_entry(item: tuple[str, str]) -> tuple[str, SourceFacts | None]:
-        object_id, path = item
-        raw = fetched_blobs.get(object_id)
-        if raw is None:
-            raw = git.read_blob(object_id)
-        if b"\0" in raw:
-            return path, None
-        facts = analyze_source(
-            path,
-            raw.decode("utf-8", "replace"),
-            source_roots,
-            fact_provider=fact_provider,
-            toolchain_fingerprint=toolchain_fingerprint,
-            blob_hash=f"{object_format}:{object_id}" if object_format else object_id,
-            budget=budget,
-        )
-        return path, facts
-
-    base_to_parse = [
-        (object_id, path)
-        for _, _, object_id, path in base_tree_entries
-        if path not in base_facts
-    ]
-    parsed_base = run_deterministic_batch(
-        base_to_parse, _parse_entry, max_workers=jobs
-    )
-    for path, facts in parsed_base:
-        if facts is not None:
-            base_facts[path] = facts
-
-    head_to_parse = []
-    for _, _, object_id, path in head_tree_entries:
-        if base_blobs.get(path) == object_id and path in base_facts:
-            head_facts[path] = base_facts[path]
-        elif path not in head_facts:
-            head_to_parse.append((object_id, path))
-    parsed_head = run_deterministic_batch(
-        head_to_parse, _parse_entry, max_workers=jobs
-    )
-    for path, facts in parsed_head:
-        if facts is not None:
-            head_facts[path] = facts
-
-    base_entities_set: set[str] = set()
-    head_entities_set: set[str] = set()
-    idx: dict[str, Entity] = {}
-    for facts in base_facts.values():
-        for e in facts.entities:
-            base_entities_set.add(e.qname)
-            idx[e.qname] = e
-    for facts in head_facts.values():
-        for e in facts.entities:
-            head_entities_set.add(e.qname)
-            idx[e.qname] = e
-
-    return ChangedScope(
-        base_facts=base_facts,
-        head_facts=head_facts,
-        changed_entities=scope.changed_entities,
-        base_entities=frozenset(base_entities_set),
-        head_entities=frozenset(head_entities_set),
-        unmapped_hunks=scope.unmapped_hunks,
-        rename_limit_exceeded=scope.rename_limit_exceeded,
-        mapped_hunks=scope.mapped_hunks,
-        mapped_entities=scope.mapped_entities,
-        renames=scope.renames,
-        _entity_index=idx,
-    )
 
 
 def _safe_detail(exc: BaseException) -> str:
     """Scrub a caught exception into a safe diagnostic detail string."""
-    import re as _re
-
     message = str(exc)
-    # Replace absolute filesystem paths with a placeholder.
-    message = _re.sub(r"[A-Za-z]:\\[^\s\"']+", "<path>", message)
-    message = _re.sub(r"(?<![\w])/[^\s\"']{8,}", "<path>", message)
-    # Strip control characters.
+    message = re.sub(r"[A-Za-z]:\\[^\s\"']+", "<path>", message)
+    message = re.sub(r"(?<![\w])/[^\s\"']{8,}", "<path>", message)
     message = "".join(ch for ch in message if ch.isprintable() or ch in " \t")
-    detail = f"{type(exc).__name__}: {message}".strip()
-    return detail[:200]
+    return f"{type(exc).__name__}: {message}".strip()[:200]
 
 
 def _run_checks(
@@ -666,19 +518,7 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             started=started,
             as_of_date=as_of,
         )
-    git: GitRepo | None = None
-    toolchain = ""
-    object_format = ""
-    target_base = merge_base = head = ""
-    entries: list[DiffEntry] = []
-    integrity_paths: tuple[str, ...] = ()
-    policy: Policy | None = None
-    proposed: ProposedReview | None = None
-    review_reasons: set[str] = set()
-    extra_faults: set[str] = set()
-    invalid_policy_detail = ""
-    codeowners = CodeownersCoverage(proven=False, reasons=("not_evaluated",))
-    target_drift = False
+    state = _GateState(request=request, started=started, as_of_date=as_of)
     try:
         try:
             repo_path = Path(request.repo)
@@ -687,10 +527,10 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
                     "invalid_repository",
                     f"repository path does not exist or is not a directory: {request.repo!r}",
                 )
-            git = GitRepo(repo_path)
-            git_dir_check = git.run(["rev-parse", "--git-dir"])
+            state.git = GitRepo(repo_path)
+            git_dir_check = state.git.run(["rev-parse", "--git-dir"])
             if git_dir_check.returncode != 0:
-                classified = git._classify(git_dir_check)
+                classified = state.git.classify_failure(git_dir_check)
                 if classified.code == "invalid_repository":
                     raise classified
                 raise GitError("invalid_repository", classified.detail or f"not a git repository: {request.repo!r}")
@@ -701,56 +541,55 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
                 "invalid_repository",
                 f"failed to initialize git repository {request.repo!r}: {exc}",
             ) from exc
+        git = state.git
         git_version_result = git.run(["version"])
         git_version = git_version_result.stdout.decode("utf-8", "replace").strip() if git_version_result.returncode == 0 else ""
-        object_format = git.object_format()
-        toolchain = toolchain_fingerprint(git_version=git_version, object_format=object_format)
-        target_base = git.resolve_commit(request.base)
-        head = git.resolve_commit(request.head)
-        merge_base = git.merge_base(target_base, head, request.merge_base)
-        target_drift = merge_base != target_base
-        entries, rename_limit_exceeded = git.diff_entries(merge_base, head)
-        integrity_paths, _policy_changed = gate_integrity(entries)
-        if integrity_paths:
-            review_reasons.add("gate_integrity_review")
+        state.object_format = git.object_format()
+        state.toolchain = toolchain_fingerprint(git_version=git_version, object_format=state.object_format)
+        state.target_base = git.resolve_commit(request.base)
+        state.head = git.resolve_commit(request.head)
+        state.merge_base = git.merge_base(state.target_base, state.head, request.merge_base)
+        state.target_drift = state.merge_base != state.target_base
+        state.entries, rename_limit_exceeded = git.diff_entries(state.merge_base, state.head)
+        state.integrity_paths, _policy_changed = gate_integrity(state.entries)
+        if state.integrity_paths:
+            state.review_reasons.add("gate_integrity_review")
         if _policy_changed:
-            review_reasons.add("policy_change_review")
-        codeowners = load_codeowners(git, target_base)[2]
+            state.review_reasons.add("policy_change_review")
+        state.codeowners = load_codeowners(git, state.target_base)[2]
 
-        authoritative = load_policy_at(git, target_base)
-        head_policy = git.read_path_at(head, POLICY_PATH)
+        authoritative = load_policy_at(git, state.target_base)
+        head_policy = git.read_path_at(state.head, POLICY_PATH)
         if authoritative is None:
             if head_policy is None:
                 raise PolicyError("invalid_policy", "target base has no .verifyci/policy.toml and the PR does not add one")
-            try:
-                proposed = review_proposed_policy(
-                    builtin_bootstrap_policy(),
-                    head_policy,
-                    as_of_date=as_of,
-                )
-                policy = builtin_bootstrap_policy()
-                review_reasons.update(proposed.review_reasons)
-                review_reasons.add("policy_change_review")
-            except PolicyError:
-                raise
+            state.proposed = review_proposed_policy(
+                builtin_bootstrap_policy(),
+                head_policy,
+                as_of_date=as_of,
+            )
+            state.policy = builtin_bootstrap_policy()
+            state.review_reasons.update(state.proposed.review_reasons)
+            state.review_reasons.add("policy_change_review")
         else:
-            policy = authoritative
+            state.policy = authoritative
             if _policy_changed:
                 if head_policy is None:
-                    review_reasons.add("policy_change_review")
+                    state.review_reasons.add("policy_change_review")
                 else:
                     try:
-                        proposed = review_proposed_policy(
+                        state.proposed = review_proposed_policy(
                             authoritative,
                             head_policy,
                             as_of_date=as_of,
                         )
-                        review_reasons.update(proposed.review_reasons)
+                        state.review_reasons.update(state.proposed.review_reasons)
                     except PolicyError as exc:
-                        extra_faults.add("invalid_policy")
-                        review_reasons.update({"policy_change_review", "gate_integrity_review"})
-                        proposed = None
-                        invalid_policy_detail = exc.detail
+                        state.extra_faults.add("invalid_policy")
+                        state.review_reasons.update({"policy_change_review", "gate_integrity_review"})
+                        state.proposed = None
+                        state.invalid_policy_detail = exc.detail
+        policy = state.policy
         source_roots = tuple(policy.path_classes.get("source_roots", ())) or (".",)
         effective_cache_mode = request.cache_mode
         cache_reason: str | None = None
@@ -769,12 +608,8 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             cache_dir = git.repo / cache_dir
         cache_dir = cache_dir.resolve(strict=False)
         if request.cache_dir:
-            try:
-                cache_dir.relative_to(git.repo.resolve(strict=False))
-            except ValueError:
-                pass
-            else:
-                raise GitError("invalid_cache_location", "cache directory must be outside the working tree")
+            if loc_err := validate_cache_location(git.repo, str(cache_dir)):
+                raise GitError(loc_err[0], loc_err[1])
         remote_result = git.run(["config", "--get", "remote.origin.url"])
         remote_identity = remote_result.stdout.decode("utf-8", "replace").strip()
         repository_identity = os.environ.get("GITHUB_REPOSITORY") or remote_identity or str(common_dir.resolve(strict=False))
@@ -783,7 +618,7 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
                 {
                     "repository": repository_identity,
                     "key_id": request.cache_key_id,
-                    "toolchain_fingerprint": toolchain,
+                    "toolchain_fingerprint": state.toolchain,
                     "cache_schema_version": CACHE_SCHEMA_VERSION,
                 }
             )
@@ -798,12 +633,12 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
         )
         fact_provider = FactProvider(cache_store)
         scope = build_changed_scope(
-            entries,
+            state.entries,
             source_roots=source_roots,
             rename_limit_exceeded=rename_limit_exceeded,
             fact_provider=fact_provider,
-            toolchain_fingerprint=toolchain,
-            object_format=object_format,
+            toolchain_fingerprint=state.toolchain,
+            object_format=state.object_format,
             budget=request.budget,
         )
         cold = policy.gate.get("cold_deadline_seconds")
@@ -815,26 +650,26 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
         scope = _augment_scope_with_repository(
             scope,
             git=git,
-            base_rev=target_base,
-            head_rev=head,
+            base_rev=state.target_base,
+            head_rev=state.head,
             source_roots=source_roots,
             fact_provider=fact_provider,
-            toolchain_fingerprint=toolchain,
-            object_format=object_format,
+            toolchain_fingerprint=state.toolchain,
+            object_format=state.object_format,
             budget=request.budget,
             jobs=request.jobs,
         )
-        context = _context(
+        context = CheckContext(
             git=git,
             policy=policy,
-            entries=entries,
+            entries=tuple(state.entries),
             scope=scope,
             as_of_date=as_of,
-            object_format=object_format,
-            target_base=target_base,
-            merge_base=merge_base,
-            head=head,
-            toolchain=toolchain,
+            object_format=state.object_format,
+            target_base_commit=state.target_base,
+            merge_base_commit=state.merge_base,
+            head_commit=state.head,
+            toolchain_fingerprint=state.toolchain,
             source_roots=source_roots,
             rename_limit_exceeded=rename_limit_exceeded,
             budget=request.budget,
@@ -845,73 +680,67 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
         results, applied_waivers, waiver_reviews, waiver_diagnostics = apply_waivers(
             results, policy, as_of_date=as_of
         )
-        review_reasons.update(waiver_reviews)
+        state.review_reasons.update(waiver_reviews)
         results, accepted_gaps, acceptance_reviews, acceptance_diagnostics = apply_acceptances(
             results, policy, as_of_date=as_of
         )
-        review_reasons.update(acceptance_reviews)
+        state.review_reasons.update(acceptance_reviews)
 
-        # Release validation is a property of the tool build, never of the
-        # repository under review: a target tree that happens to contain signed
-        # evidence must not be able to clear this fault for a different build.
         is_release_validated, val_diag = verify_release_validation_evidence()
         is_candidate_unvalidated = request.candidate_build and not is_release_validated
         if is_candidate_unvalidated:
-            review_reasons.add("candidate_build_unvalidated")
+            state.review_reasons.add("candidate_build_unvalidated")
 
         release_faults = set()
         if not is_release_validated and not request.candidate_build:
             release_faults.add("check_not_validated")
 
         inconclusive_reasons = {"candidate_build_unvalidated"} if is_candidate_unvalidated else set()
+        drift_mode = str(policy.gate.get("target_drift", "record"))
 
         verdict = aggregate(
             results,
-            review_reasons=review_reasons,
-            target_drift=target_drift,
-            target_drift_mode=str(policy.gate.get("target_drift", "record")),
-            extra_faults=extra_faults | release_faults,
+            review_reasons=state.review_reasons,
+            target_drift=state.target_drift,
+            target_drift_mode=drift_mode,
+            extra_faults=state.extra_faults | release_faults,
             inconclusive_reasons=inconclusive_reasons,
         )
 
         # Policy remediation boundary: a valid proposed policy can supersede an
         # inactive record only when the run has no unwaived finding and no
         # unaccepted coverage gap.  The proposal never suppresses here.
-        if proposed is not None and proposed.superseded_entries:
-            open_findings = [
-                f
+        if state.proposed is not None and state.proposed.superseded_entries:
+            open_findings = any(
+                f.disposition.value == "OPEN"
                 for r in results
                 if r.tier == Tier.BLOCKING
                 for f in r.findings
-                if f.disposition.value == "OPEN"
-            ]
-            open_gaps = [
-                g
+            )
+            open_gaps = any(
+                not g.accepted
                 for r in results
                 if r.tier == Tier.BLOCKING
                 for g in r.coverage_gaps
-                if not g.accepted
-            ]
+            )
             if not open_findings and not open_gaps:
-                # If the proposed policy still contains stale records, keep
-                # their review reasons.  Otherwise the renewal/removal wins.
-                if proposed.review_reasons:
-                    review_reasons.update(proposed.review_reasons)
+                if state.proposed.review_reasons:
+                    state.review_reasons.update(state.proposed.review_reasons)
                 else:
-                    review_reasons.discard("waiver_review")
-                    review_reasons.discard("coverage_acceptance_review")
+                    state.review_reasons.discard("waiver_review")
+                    state.review_reasons.discard("coverage_acceptance_review")
                 verdict = aggregate(
                     results,
-                    review_reasons=review_reasons,
-                    target_drift=target_drift,
-                    target_drift_mode=str(policy.gate.get("target_drift", "record")),
-                    extra_faults=extra_faults | release_faults,
+                    review_reasons=state.review_reasons,
+                    target_drift=state.target_drift,
+                    target_drift_mode=drift_mode,
+                    extra_faults=state.extra_faults | release_faults,
                     inconclusive_reasons=inconclusive_reasons,
                 )
 
         review_cleared = bool(
             verdict.status == Verdict.REVIEW
-            and codeowners.proven
+            and state.codeowners.proven
             and request.review_mode == "codeowners"
             and set(verdict.reason_codes) <= {"policy_change_review", "gate_integrity_review"}
         )
@@ -924,15 +753,14 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
                     seen.add(key)
                     all_findings.append(finding.to_dict())
         diagnostics = list(waiver_diagnostics) + list(acceptance_diagnostics)
-        parse_warnings = getattr(git, "parse_warnings", None) or []
-        if parse_warnings:
-            diagnostics = diagnostics + [
+        if git.parse_warnings:
+            diagnostics.append(
                 {
                     "code": "diff_parse_warning",
-                    "count": len(parse_warnings),
-                    "kinds": sorted({w.get("kind", "unknown") for w in parse_warnings}),
+                    "count": len(git.parse_warnings),
+                    "kinds": sorted({w.get("kind", "unknown") for w in git.parse_warnings}),
                 }
-            ]
+            )
         if not is_release_validated:
             if request.candidate_build:
                 diagnostics.append(
@@ -954,17 +782,17 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
                         ),
                     }
                 )
-        if extra_faults:
+        if state.extra_faults:
             diagnostics.append(
                 {
                     "code": "invalid_policy",
                     "detail": (
-                        invalid_policy_detail
+                        state.invalid_policy_detail
                         or "the proposed policy is invalid; authoritative policy remains in force"
                     ),
                 }
             )
-        payload = _payload(
+        payload = _build_gate_payload(
             request=request,
             context=context,
             results=results,
@@ -973,19 +801,19 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             waivers=applied_waivers,
             accepted_gaps=accepted_gaps,
             diagnostics=diagnostics,
-            review_reasons=tuple(sorted(review_reasons)),
+            review_reasons=tuple(sorted(state.review_reasons)),
             policy=policy,
-            entries=entries,
-            target_base=target_base,
-            merge_base=merge_base,
-            head=head,
-            object_format=object_format,
-            integrity_paths=integrity_paths,
-            codeowners=codeowners,
-            proposed=proposed,
-            target_drift=target_drift,
+            entries=state.entries,
+            target_base=state.target_base,
+            merge_base=state.merge_base,
+            head=state.head,
+            object_format=state.object_format,
+            integrity_paths=state.integrity_paths,
+            codeowners=state.codeowners,
+            proposed=state.proposed,
+            target_drift=state.target_drift,
             review_cleared=review_cleared,
-            extra_faults=tuple(sorted(extra_faults)),
+            extra_faults=tuple(sorted(state.extra_faults)),
             is_release_validated=is_release_validated,
         )
         duration_ms = int((time.monotonic() - started) * 1000)
@@ -1003,95 +831,39 @@ def run_gate(request: GateRequest) -> EvidenceBundle:
             environment={"python": platform.python_version(), "platform": platform.system()},
         )
     except CacheIntegrityMismatch as exc:
-        return _fatal_bundle(
-            request=request,
-            git=git,
+        return _fatal_from_state(
+            state,
             code="cache_integrity_mismatch",
             detail=f"sampled cache entry disagreed with Git-derived recomputation: {exc.entry_key}",
-            toolchain=toolchain,
-            object_format=object_format,
-            as_of_date=as_of,
-            review_reasons=review_reasons,
-            policy=policy,
-            entries=entries,
-            target_base=target_base,
-            merge_base=merge_base,
-            head=head,
-            started=started,
-            integrity_paths=integrity_paths,
-            target_drift=target_drift,
         )
     except ValueError as exc:
-        return _fatal_bundle(
-            request=request,
-            git=git,
+        return _fatal_from_state(
+            state,
             code="cache_key_invalid",
             detail=f"cache key validation failed: {type(exc).__name__}",
-            toolchain=toolchain,
-            object_format=object_format,
-            as_of_date=as_of,
-            review_reasons=review_reasons,
-            policy=policy,
-            entries=entries,
-            target_base=target_base,
-            merge_base=merge_base,
-            head=head,
-            started=started,
-            integrity_paths=integrity_paths,
-            target_drift=target_drift,
         )
     except PolicyError as exc:
-        reporting_policy = policy
+        reporting_policy = state.policy
         if reporting_policy is None and exc.source:
-            # The authoritative blob existed but failed to parse; name it so the
-            # bundle does not claim the builtin bootstrap policy was in force.
             reporting_policy = Policy(
                 raw={},
                 blob_hash=exc.blob_hash,
                 source=exc.source,
                 effective_hash=exc.blob_hash or "",
             )
-        return _fatal_bundle(
-            request=request,
-            git=git,
+        return _fatal_from_state(
+            state,
             code=exc.code,
             detail=exc.detail,
-            toolchain=toolchain,
-            object_format=object_format,
-            as_of_date=as_of,
-            review_reasons=(
-                review_reasons | {"policy_change_review", "gate_integrity_review"}
-                if policy_changed(entries)
-                else review_reasons
-            ),
             policy=reporting_policy,
-            entries=entries,
-            target_base=target_base,
-            merge_base=merge_base,
-            head=head,
-            started=started,
-            integrity_paths=integrity_paths,
-            target_drift=target_drift,
+            review_reasons=(
+                state.review_reasons | {"policy_change_review", "gate_integrity_review"}
+                if policy_changed(state.entries)
+                else state.review_reasons
+            ),
         )
     except GitError as exc:
-        return _fatal_bundle(
-            request=request,
-            git=git,
-            code=exc.code,
-            detail=exc.detail,
-            toolchain=toolchain,
-            object_format=object_format,
-            as_of_date=as_of,
-            review_reasons=review_reasons,
-            policy=policy,
-            entries=entries,
-            target_base=target_base,
-            merge_base=merge_base,
-            head=head,
-            started=started,
-            integrity_paths=integrity_paths,
-            target_drift=target_drift,
-        )
+        return _fatal_from_state(state, code=exc.code, detail=exc.detail)
 
 
 __all__ = ["GateRequest", "run_gate"]

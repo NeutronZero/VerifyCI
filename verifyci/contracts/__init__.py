@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from verifyci.contracts.capabilities import (
     Capability,
-    CapabilityDeclaration,
-    ExecutionStatus,
     ProviderClass,
     provider_for_capability,
     validate_capabilities,
@@ -30,7 +28,6 @@ __all__ = [
     "CHECK_ORDER",
     "CHECK_SPECS",
     "Capability",
-    "CapabilityDeclaration",
     "CheckResult",
     "CheckSpec",
     "Coverage",
@@ -38,7 +35,6 @@ __all__ = [
     "DEFECT_REASON_CODES",
     "DiffEntry",
     "EvidenceBundle",
-    "ExecutionStatus",
     "Finding",
     "Maturity",
     "Outcome",

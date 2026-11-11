@@ -33,7 +33,7 @@ from verifyci_trusted_harness.pytest_plugin import TrustedWorkerPlugin  # noqa: 
 import pytest  # noqa: E402
 
 pytest_args = [
-    "-c", str(trusted_root / "pytest_trusted.ini") if (trusted_root / "pytest_trusted.ini").is_file() else "/dev/null",
+    "-c", str(trusted_root / "pytest_trusted.ini") if (trusted_root / "pytest_trusted.ini").is_file() else os.devnull,
     "--confcutdir", str(trusted_root / "tests"),
     "--import-mode=importlib",
     f"--candidate-worker-image={worker_image}",
