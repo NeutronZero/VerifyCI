@@ -81,7 +81,6 @@ def bundle_to_sarif(bundle: EvidenceBundle) -> dict[str, Any]:
             ev_payload = {}
         line, defaulted = _finding_line(finding, ev_payload)
         if defaulted:
-            defaulted_lines += 1
             notifications.append(
                 {
                     "level": "note",

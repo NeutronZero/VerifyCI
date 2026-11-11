@@ -279,7 +279,6 @@ def _match_callee_to_entity(
                         return "MATCH"
                     return "NO_MATCH"
 
-        rec_mod = _normalize_mod(receiver)
         # Textual module-name equality alone is not import evidence: a local
         # variable/parameter named like the target module would otherwise
         # falsely match. Fail closed (AMBIGUOUS) when no import resolved.

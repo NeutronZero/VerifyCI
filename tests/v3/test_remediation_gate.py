@@ -12,7 +12,6 @@ import pytest
 from verifyci.checks.base import (
     CheckContext,
     error_result,
-    gap,
     inconclusive_gap_result,
     make_finding,
     unsupported_scope_gaps,
@@ -235,7 +234,6 @@ def _check_result(reason_codes=(), coverage_gaps=()):
 
 
 def test_a5_validate_rejects_unknown_reason_codes():
-    from verifyci.contracts.model import CoverageGap
     from verifyci.contracts.reason_codes import FAULTS, GAPS
 
     synchronous = FAULTS.keys() | GAPS.keys()

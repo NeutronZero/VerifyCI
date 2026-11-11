@@ -1136,7 +1136,7 @@ def _analyze_typescript_guard(
     h_src: str,
     eff: str,
     solver_rlimit: int = 100000,
-) -> tuple[str, str, z3.ExprRef, z3.ExprRef, dict[str, Any], int, str] | None:
+) -> tuple[str, str, z3.ExprRef, z3.ExprRef, dict[str, Any], int, str] | tuple[str, str, int] | None:
     """Analyze TypeScript file using tree-sitter AST to extract function, guard condition, and Z3 model."""
     try:
         import tree_sitter_typescript as ts
@@ -1217,7 +1217,7 @@ def _analyze_typescript_guard(
                 break
 
         if op_text and op_text not in ("==", "==="):
-            return ("unsupported_operator", op_text)
+            return ("unsupported_operator", op_text, b_call_line)
 
         z3_var = z3.String(var_name)
         phi_base = (z3_var == val_str)
@@ -1506,19 +1506,32 @@ def run(context: CheckContext) -> CheckResult:
                                 ],
                             )
                         if analysis is not None:
-                            if isinstance(analysis, tuple) and len(analysis) == 2 and analysis[0] == "unsupported_operator":
-                                gaps.append(
-                                    gap(
-                                        "semantic_alignment_unresolved",
-                                        {
-                                            "check_id": "semantic",
-                                            "path": path,
-                                            "line": b_call_line,
-                                            "detail": f"unsupported_ts_guard_operator:{analysis[1]}",
-                                        },
-                                    )
+                            if isinstance(analysis, tuple) and len(analysis) == 3 and analysis[0] == "unsupported_operator":
+                                return make_result(
+                                    context=context,
+                                    check_id="semantic",
+                                    outcome=Outcome.INCONCLUSIVE,
+                                    coverage=Coverage.PARTIAL,
+                                    evaluated_scope={"path": path, "line": analysis[2]},
+                                    scope_enumeration={"complete": True},
+                                    candidate_discovery={"complete": True},
+                                    applicability_evidence={
+                                        "unsupported_ts_guard_operator": analysis[1],
+                                    },
+                                    reason_codes=("semantic_alignment_unresolved",),
+                                    coverage_gaps=[
+                                        gap(
+                                            "semantic_alignment_unresolved",
+                                            {
+                                                "check_id": "semantic",
+                                                "path": path,
+                                                "line": analysis[2],
+                                                "detail": f"unsupported_ts_guard_operator:{analysis[1]}",
+                                                "reason_code": "semantic_alignment_unresolved",
+                                            },
+                                        )
+                                    ],
                                 )
-                                continue
                             b_fn_name, h_fn_name, phi_base, phi_head, model_values, line_num, guard_desc = analysis
                             fn_name = h_fn_name or b_fn_name
                             symbol = f"{mod_name}:{fn_name}"
